@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use xtask::{arch, backlog, deaddeps, genipc, migrations, todos, workspace};
+use xtask::{arch, backlog, deaddeps, genipc, migrations, theme, todos, workspace};
 
 fn main() -> ExitCode {
     match run() {
@@ -81,6 +81,7 @@ fn run() -> Result<bool> {
         }
         "backlog-stats" => backlog::run(&root),
         "check-dead-deps" => deaddeps::run(&root),
+        "check-theme" => theme::run(&root),
         "gen-ipc" => {
             let mode = if update {
                 genipc::Mode::Update
@@ -107,6 +108,7 @@ cargo xtask — repository gates
   check-migrations --update  record new migrations (never rewrites an existing entry)
   check-todos                every deferral marker names a task or an issue
   check-dead-deps            no manifest declares a dependency its sources never use
+  check-theme                every shipped theme clears the DESIGN_SYSTEM §2.2 contrast matrix
   gen-ipc                    the committed TS bindings match a fresh export
   gen-ipc --check            the same, stated explicitly
   gen-ipc --update           rewrite the TS bindings from the Rust command surface

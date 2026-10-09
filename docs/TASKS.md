@@ -527,7 +527,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E21-01 | Token pipeline: OKLCH palettes, semantic roles, contrast validator | Every shipped theme passes WCAG AA for text and controls | PG-E0-02 | L | doing |
+| PG-E21-01 | Token pipeline: OKLCH palettes, semantic roles, contrast validator | Every shipped theme passes WCAG AA for text and controls | PG-E0-02 | L | done |
 | PG-E21-02 | Theme runtime: light, dark, system, custom, per-OS accent integration | Switching is instant with no re-render or flash | PG-E21-01, PG-E22-02 | M | todo |
 | PG-E21-03 | Primitive components: button, input, select, checkbox, radio, slider, tabs, tooltip, popover, dialog, sheet, toast, menu, table, skeleton | Each has states, keyboard behaviour, and a visual snapshot | PG-E21-01 | L | todo |
 | PG-E21-04 | Domain components: title card, rail, hero, episode row, device row, progress ring, job row, filter bar | Reused across at least two screens each | PG-E21-03 | L | todo |

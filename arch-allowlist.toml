@@ -366,6 +366,9 @@ may_depend_on = []
 runtime = [
   "anyhow",
   "serde",
+  # The theme files are JSON, so `check-theme` reads them with a JSON parser
+  # rather than teaching a TOML parser to read another language.
+  "serde_json",
   "sha2",
   "toml",
 ]

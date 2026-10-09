@@ -15,5 +15,6 @@ pub mod deaddeps;
 pub mod genipc;
 pub mod migrations;
 pub mod report;
+pub mod theme;
 pub mod todos;
 pub mod workspace;
