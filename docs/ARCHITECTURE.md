@@ -343,7 +343,7 @@ A feature never imports another feature's internals. Cross-feature reuse is prom
 
 ## 7. IPC contract
 
-Rust types are the single source of truth. `specta` + `tauri-specta` generate `packages/ipc-client/src/bindings.ts`; the UI never hand-writes a DTO.
+Rust types are the single source of truth. `specta` + `tauri-specta` generate `packages/ipc-client/src/generated/bindings.ts`; the UI never hand-writes a DTO.
 
 ```mermaid
 graph LR
