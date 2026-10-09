@@ -62,14 +62,14 @@ graph LR
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
 | PG-E0-01 | Cargo workspace with one crate per module map entry | `cargo build --workspace` succeeds; arch allowlist file committed | — | S | done |
-| PG-E0-02 | pnpm workspace: `apps/desktop`, `packages/{ui,theme,ipc-client,player-ui,i18n}` | `pnpm -r build` succeeds with placeholder exports | — | S | todo |
-| PG-E0-03 | Tauri v2 scaffold with dev/build scripts and per-OS bundle identifiers | `pnpm tauri dev` opens a window on all three OSes | PG-E0-02 | S | todo |
+| PG-E0-02 | pnpm workspace: `apps/desktop`, `packages/{ui,theme,ipc-client,player-ui,i18n}` | `pnpm -r build` succeeds with placeholder exports | — | S | done |
+| PG-E0-03 | Tauri v2 scaffold with dev/build scripts and per-OS bundle identifiers | `pnpm tauri dev` opens a window on all three OSes | PG-E0-02 | S | review |
 | PG-E0-04 | `xtask check-arch` parses crate edges | Fails on a fixture violation, passes on the real tree | PG-E0-01 | M | done |
 | PG-E0-05 | `xtask check-migrations` hashes against the base branch | Fails when a merged migration is edited | PG-E0-01 | S | done |
 | PG-E0-06 | `xtask gen-ipc` regenerates TS bindings, CI diff gate | Committed bindings match regeneration byte-for-byte | PG-E2-01 | M | todo |
 | PG-E0-07 | `xtask check-todos` requires an issue reference on every TODO | Fails on a bare TODO fixture | — | XS | done |
 | PG-E0-08 | Rust formatting and lint policy | `cargo clippy -- -D warnings` clean; pedantic lints configured | PG-E0-01 | XS | done |
-| PG-E0-09 | TypeScript strict config and lint stack | `tsc --noEmit` clean with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` | PG-E0-02 | S | todo |
+| PG-E0-09 | TypeScript strict config and lint stack | `tsc --noEmit` clean with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` | PG-E0-02 | S | done |
 | PG-E0-10 | Pre-commit hooks: format, lint staged files, arch check | A commit with a formatting error is rejected locally | PG-E0-08, PG-E0-09 | S | done |
 | PG-E0-11 | Commit convention, PR template with perf and security checklists, CODEOWNERS | Template rendered on a test PR | — | XS | review |
 | PG-E0-12 | Issue templates and label taxonomy, milestones mapped to phases | Templates produce labelled issues | — | XS | review |
