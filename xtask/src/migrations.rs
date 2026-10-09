@@ -13,6 +13,15 @@
 //! `--update` adds entries for migrations that are not yet recorded. It never
 //! rewrites an existing entry: a changed hash means an already-merged migration
 //! was edited, and the fix is a new migration, not a refreshed hash.
+//!
+//! Scope: this gate understands the `NNNN_name.sql` form that `DATA_MODEL.md` §5
+//! specifies — simple, up-only migrations. sqlx expresses a down migration as an
+//! `NNNN_name.up.sql` / `NNNN_name.down.sql` pair, and both files carry the same
+//! number, so a pair collides with the gapless-sequence rule below and is reported
+//! as out of sequence. Adopting down migrations is therefore a deliberate change to
+//! this gate, not just two new files. The rollback path the plan actually relies on
+//! is the pre-migration backup in `PG-E3-13`, which is why this has not been a
+//! problem in practice.
 
 use crate::report::{Report, Violation};
 use anyhow::{Context, Result, bail};
