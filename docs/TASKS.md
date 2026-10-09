@@ -157,7 +157,7 @@ graph LR
 | PG-E4-02 | `ExternalId` with provider prefixes and parsing | Round-trip property test over generated ID shapes | PG-E4-01 | S | done |
 | PG-E4-03 | `ReleaseName` parser: resolution, source, codec, HDR, audio, group, repack, season pack, multi-episode | ≥ 95% correct on a 200-name corpus; no panics on fuzz input | PG-E4-01 | L | done |
 | PG-E4-04 | `NameParser` for library filenames and folders | Same corpus requirement as PG-E4-03 plus anime absolute and `1x01` forms | PG-E4-03 | L | todo |
-| PG-E4-05 | `Qualityaccount` model with rules, caps, and cut-off rank | Serialization round-trip and validation of contradictory rules | PG-E4-01 | M | todo |
+| PG-E4-05 | `QualityProfile` model with rules, caps, and cut-off rank | Serialization round-trip and validation of contradictory rules | PG-E4-01 | M | todo |
 | PG-E4-06 | `ReleaseRanker` pure scoring with per-rule reason output | Monotonicity, determinism, and totality property tests | PG-E4-05, PG-E4-03 | L | todo |
 | PG-E4-07 | `TorrentInspector` rules: extension allowlist, traversal, reserved names, caps, unicode spoofing | Each hostile fixture classified correctly, with reason strings | PG-E4-01 | L | todo |
 | PG-E4-08 | `PathGuard` policy model, pure containment logic | Escape attempts rejected; property test over generated paths | PG-E4-01 | M | todo |

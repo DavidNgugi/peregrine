@@ -234,7 +234,7 @@ graph TD
 
 | Crate | Responsibility | May depend on | Hard rules |
 | --- | --- | --- | --- |
-| `peregrine-domain` | Entities, value objects, invariants, quality-account scoring, release-name parsing, subtitle-timing math, state machines, domain events. | `serde`, `jiff`, `ulid`, `thiserror` only | No IO, no async, no clock, no randomness. All time and IDs are injected. |
+| `peregrine-domain` | Entities, value objects, invariants, quality-profile scoring, release-name parsing, subtitle-timing math, state machines, domain events. | `serde`, `jiff`, `ulid`, `thiserror` only | No IO, no async, no clock, no randomness. All time and IDs are injected. |
 | `peregrine-storage` | Migrations, **account-scoped** repositories (ports from `app`), FTS5 search, KV settings, job journal, cache tables. | `domain`, `sqlx` | Repositories never contain business rules. Every catalogue and library read takes an `AccountScope`. All writes go through a single writer connection. |
 | `peregrine-providers` | `MetadataProvider`, `SubtitleProvider` adapters; response normalization; matching/scoring; rate limiting; conditional requests. | `domain`, `reqwest`, `governor` | No provider type escapes the adapter module. Every response passes through a size-capped, validating decode. |
 | `peregrine-sync` | Job scheduler, priority queues, resource token buckets, incremental change sync, IMDb dataset ingestion, image cache manager, blurhash generation. | `domain`, `storage`, `providers`, `image` | Cooperative cancellation on every job; no job may hold a write transaction across a network call. |
