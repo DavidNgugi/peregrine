@@ -38,12 +38,54 @@ mod tests {
     use sqlx::Connection;
     use tempfile::TempDir;
 
-    /// The five tables migration 0001 creates, per `DATA_MODEL` §2.1 and §2.8.
-    const DOCUMENTED_TABLES: [&str; 5] = ["account", "event_log", "job", "secret_ref", "settings"];
+    /// The forty tables the seven migrations create, per `DATA_MODEL` §2.1–§2.8.
+    const DOCUMENTED_TABLES: [&str; 40] = [
+        "account",
+        "cast_session",
+        "company",
+        "credit",
+        "dataset_state",
+        "device",
+        "download_file",
+        "download_job",
+        "episode",
+        "episode_ordering",
+        "event_log",
+        "external_id",
+        "genre",
+        "image_cache",
+        "image_ref",
+        "indexer",
+        "job",
+        "keyword",
+        "library_root",
+        "media_file",
+        "media_item",
+        "notification",
+        "person",
+        "provider_cache",
+        "quality_profile",
+        "release_decision",
+        "season",
+        "secret_ref",
+        "settings",
+        "smart_collection",
+        "subtitle_download",
+        "subtitle_track",
+        "title",
+        "title_alias",
+        "title_company",
+        "title_genre",
+        "title_keyword",
+        "unmatched_file",
+        "watch_progress",
+        "watchlist_entry",
+    ];
 
     /// `(name, declared type, notnull, default, pk)`, exactly as `PRAGMA table_info` reports it.
     type ColumnShape = (&'static str, &'static str, i64, Option<&'static str>, i64);
 
+    // Migration 0001.
     const ACCOUNT: &[ColumnShape] = &[
         ("id", "INTEGER", 0, None, 1),
         ("name", "TEXT", 1, None, 0),
@@ -69,7 +111,6 @@ mod tests {
     ];
 
     const SETTINGS: &[ColumnShape] = &[
-        // A non-INTEGER primary key is nullable in SQLite, so the driver reports 0 here.
         ("key", "TEXT", 0, None, 1),
         ("value_json", "TEXT", 1, None, 0),
         ("updated_at", "INTEGER", 1, None, 0),
@@ -110,7 +151,803 @@ mod tests {
         ("detail_json", "TEXT", 0, None, 0),
     ];
 
-    /// A connection with migration 0001 applied, plus the resources it needs to live.
+    // Migration 0002.
+    const TITLE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("kind", "TEXT", 1, None, 0),
+        ("subtype", "TEXT", 1, Some("'standard'"), 0),
+        ("name", "TEXT", 1, None, 0),
+        ("original_name", "TEXT", 0, None, 0),
+        ("sort_name", "TEXT", 1, None, 0),
+        ("overview", "TEXT", 0, None, 0),
+        ("tagline", "TEXT", 0, None, 0),
+        ("status", "TEXT", 0, None, 0),
+        ("release_date", "TEXT", 0, None, 0),
+        ("first_air_date", "TEXT", 0, None, 0),
+        ("last_air_date", "TEXT", 0, None, 0),
+        ("runtime_minutes", "INTEGER", 0, None, 0),
+        ("episode_runtime_minutes", "INTEGER", 0, None, 0),
+        ("original_language", "TEXT", 0, None, 0),
+        ("origin_country", "TEXT", 0, None, 0),
+        ("content_rating", "TEXT", 0, None, 0),
+        ("imdb_rating", "REAL", 0, None, 0),
+        ("imdb_votes", "INTEGER", 0, None, 0),
+        ("tmdb_rating", "REAL", 0, None, 0),
+        ("tmdb_votes", "INTEGER", 0, None, 0),
+        ("popularity", "REAL", 0, None, 0),
+        ("adult", "INTEGER", 1, Some("0"), 0),
+        ("in_production", "INTEGER", 1, Some("0"), 0),
+        ("season_count", "INTEGER", 0, None, 0),
+        ("episode_count", "INTEGER", 0, None, 0),
+        ("poster_provider", "TEXT", 0, None, 0),
+        ("poster_path", "TEXT", 0, None, 0),
+        ("poster_blurhash", "TEXT", 0, None, 0),
+        ("backdrop_provider", "TEXT", 0, None, 0),
+        ("backdrop_path", "TEXT", 0, None, 0),
+        ("backdrop_blurhash", "TEXT", 0, None, 0),
+        ("logo_path", "TEXT", 0, None, 0),
+        ("trailer_site", "TEXT", 0, None, 0),
+        ("trailer_key", "TEXT", 0, None, 0),
+        ("trailer_language", "TEXT", 0, None, 0),
+        ("trailer_published_at", "TEXT", 0, None, 0),
+        ("homepage", "TEXT", 0, None, 0),
+        ("metadata_state", "TEXT", 1, Some("'stub'"), 0),
+        ("last_synced_at", "INTEGER", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
+    const TITLE_ALIAS: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("alias", "TEXT", 1, None, 0),
+        ("region", "TEXT", 0, None, 0),
+        ("kind", "TEXT", 1, Some("'alternative'"), 0),
+    ];
+
+    const EXTERNAL_ID: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("title_id", "INTEGER", 0, None, 0),
+        ("person_id", "INTEGER", 0, None, 0),
+        ("season_id", "INTEGER", 0, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("provider", "TEXT", 1, None, 0),
+        ("value", "TEXT", 1, None, 0),
+        ("is_primary", "INTEGER", 1, Some("0"), 0),
+        ("fetched_at", "INTEGER", 1, None, 0),
+    ];
+
+    const GENRE: &[ColumnShape] = &[("id", "INTEGER", 0, None, 1), ("name", "TEXT", 1, None, 0)];
+
+    const TITLE_GENRE: &[ColumnShape] = &[
+        ("title_id", "INTEGER", 1, None, 1),
+        ("genre_id", "INTEGER", 1, None, 2),
+    ];
+
+    const KEYWORD: &[ColumnShape] = &[("id", "INTEGER", 0, None, 1), ("name", "TEXT", 1, None, 0)];
+
+    const TITLE_KEYWORD: &[ColumnShape] = &[
+        ("title_id", "INTEGER", 1, None, 1),
+        ("keyword_id", "INTEGER", 1, None, 2),
+    ];
+
+    const COMPANY: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("name", "TEXT", 1, None, 0),
+        ("logo_path", "TEXT", 0, None, 0),
+        ("provider", "TEXT", 0, None, 0),
+        ("external_id", "TEXT", 0, None, 0),
+    ];
+
+    const TITLE_COMPANY: &[ColumnShape] = &[
+        ("title_id", "INTEGER", 1, None, 1),
+        ("company_id", "INTEGER", 1, None, 2),
+        ("role", "TEXT", 1, None, 3),
+    ];
+
+    const PERSON: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("name", "TEXT", 1, None, 0),
+        ("sort_name", "TEXT", 1, None, 0),
+        ("known_for_department", "TEXT", 0, None, 0),
+        ("profile_provider", "TEXT", 0, None, 0),
+        ("profile_path", "TEXT", 0, None, 0),
+        ("profile_blurhash", "TEXT", 0, None, 0),
+        ("updated_at", "INTEGER", 0, None, 0),
+    ];
+
+    const CREDIT: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("person_id", "INTEGER", 1, None, 0),
+        ("kind", "TEXT", 1, None, 0),
+        ("character", "TEXT", 0, None, 0),
+        ("job", "TEXT", 0, None, 0),
+        ("department", "TEXT", 0, None, 0),
+        ("order_index", "INTEGER", 0, None, 0),
+        ("episode_count", "INTEGER", 0, None, 0),
+    ];
+
+    // Migration 0003.
+    const SEASON: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("season_number", "INTEGER", 1, None, 0),
+        ("name", "TEXT", 0, None, 0),
+        ("overview", "TEXT", 0, None, 0),
+        ("air_date", "TEXT", 0, None, 0),
+        ("poster_provider", "TEXT", 0, None, 0),
+        ("poster_path", "TEXT", 0, None, 0),
+        ("poster_blurhash", "TEXT", 0, None, 0),
+        ("episode_count", "INTEGER", 0, None, 0),
+        ("is_specials", "INTEGER", 1, Some("0"), 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
+    const EPISODE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("season_id", "INTEGER", 1, None, 0),
+        ("season_number", "INTEGER", 1, None, 0),
+        ("episode_number", "INTEGER", 1, None, 0),
+        ("absolute_number", "INTEGER", 0, None, 0),
+        ("name", "TEXT", 0, None, 0),
+        ("overview", "TEXT", 0, None, 0),
+        ("air_date", "TEXT", 0, None, 0),
+        ("runtime_minutes", "INTEGER", 0, None, 0),
+        ("still_provider", "TEXT", 0, None, 0),
+        ("still_path", "TEXT", 0, None, 0),
+        ("still_blurhash", "TEXT", 0, None, 0),
+        ("vote_average", "REAL", 0, None, 0),
+        ("vote_count", "INTEGER", 0, None, 0),
+        ("episode_type", "TEXT", 0, None, 0),
+        ("production_code", "TEXT", 0, None, 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
+    const EPISODE_ORDERING: &[ColumnShape] = &[
+        ("episode_id", "INTEGER", 1, None, 1),
+        ("scheme", "TEXT", 1, None, 2),
+        ("season_number", "INTEGER", 1, None, 0),
+        ("episode_number", "INTEGER", 1, None, 0),
+    ];
+
+    // Migration 0004.
+    const MEDIA_ITEM: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("state", "TEXT", 1, None, 0),
+        ("origin", "TEXT", 1, None, 0),
+        ("preferred_file_id", "INTEGER", 0, None, 0),
+        ("quality_label", "TEXT", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
+    const MEDIA_FILE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("media_item_id", "INTEGER", 1, None, 0),
+        ("path", "TEXT", 1, None, 0),
+        ("root_id", "INTEGER", 0, None, 0),
+        ("size_bytes", "INTEGER", 1, None, 0),
+        ("mtime_ms", "INTEGER", 1, None, 0),
+        ("added_at", "INTEGER", 1, None, 0),
+        ("missing_since", "INTEGER", 0, None, 0),
+        ("container", "TEXT", 0, None, 0),
+        ("duration_ms", "INTEGER", 0, None, 0),
+        ("video_codec", "TEXT", 0, None, 0),
+        ("video_account", "TEXT", 0, None, 0),
+        ("width", "INTEGER", 0, None, 0),
+        ("height", "INTEGER", 0, None, 0),
+        ("bit_depth", "INTEGER", 0, None, 0),
+        ("hdr_format", "TEXT", 0, None, 0),
+        ("frame_rate", "REAL", 0, None, 0),
+        ("bitrate_kbps", "INTEGER", 0, None, 0),
+        ("audio_codec", "TEXT", 0, None, 0),
+        ("audio_channels", "INTEGER", 0, None, 0),
+        ("audio_layout", "TEXT", 0, None, 0),
+        ("audio_languages", "TEXT", 0, None, 0),
+        ("subtitle_format", "TEXT", 0, None, 0),
+        ("probe_version", "INTEGER", 0, None, 0),
+        ("probe_json", "TEXT", 0, None, 0),
+        ("quality_label", "TEXT", 0, None, 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
+    const LIBRARY_ROOT: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("path", "TEXT", 1, None, 0),
+        ("kind", "TEXT", 1, None, 0),
+        ("scan_mode", "TEXT", 1, Some("'incremental'"), 0),
+        ("last_scan_at", "INTEGER", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+    ];
+
+    const UNMATCHED_FILE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("path", "TEXT", 1, None, 0),
+        ("size_bytes", "INTEGER", 1, None, 0),
+        ("mtime_ms", "INTEGER", 1, None, 0),
+        ("parsed_title", "TEXT", 0, None, 0),
+        ("parsed_year", "INTEGER", 0, None, 0),
+        ("parsed_season", "INTEGER", 0, None, 0),
+        ("parsed_episode", "INTEGER", 0, None, 0),
+        ("confidence", "REAL", 0, None, 0),
+        ("reason", "TEXT", 0, None, 0),
+        ("suggested_title_id", "INTEGER", 0, None, 0),
+        ("suggested_episode_id", "INTEGER", 0, None, 0),
+        ("first_seen_at", "INTEGER", 1, None, 0),
+    ];
+
+    // Migration 0005.
+    const SUBTITLE_TRACK: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("media_file_id", "INTEGER", 0, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("origin", "TEXT", 1, None, 0),
+        ("format", "TEXT", 1, None, 0),
+        ("language", "TEXT", 1, None, 0),
+        ("label", "TEXT", 0, None, 0),
+        ("is_forced", "INTEGER", 1, Some("0"), 0),
+        ("is_sdh", "INTEGER", 1, Some("0"), 0),
+        ("is_default", "INTEGER", 1, Some("0"), 0),
+        ("stream_index", "INTEGER", 0, None, 0),
+        ("path", "TEXT", 0, None, 0),
+        ("provider", "TEXT", 0, None, 0),
+        ("provider_subtitle_id", "TEXT", 0, None, 0),
+        ("provider_url", "TEXT", 0, None, 0),
+        ("release_name", "TEXT", 0, None, 0),
+        ("encoding", "TEXT", 0, None, 0),
+        ("offset_ms", "INTEGER", 1, Some("0"), 0),
+        ("hash_matched", "INTEGER", 1, Some("0"), 0),
+        ("downloaded_at", "INTEGER", 0, None, 0),
+        ("last_used_at", "INTEGER", 0, None, 0),
+    ];
+
+    const SUBTITLE_DOWNLOAD: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("media_file_id", "INTEGER", 0, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("provider", "TEXT", 1, None, 0),
+        ("provider_subtitle_id", "TEXT", 1, None, 0),
+        ("language", "TEXT", 1, None, 0),
+        ("score", "REAL", 1, None, 0),
+        ("score_reasons", "TEXT", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+    ];
+
+    const WATCH_PROGRESS: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("account_id", "INTEGER", 1, None, 0),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("position_ms", "INTEGER", 1, Some("0"), 0),
+        ("duration_ms", "INTEGER", 0, None, 0),
+        ("percent", "REAL", 1, Some("0"), 0),
+        ("watched", "INTEGER", 1, Some("0"), 0),
+        ("watched_at", "INTEGER", 0, None, 0),
+        ("play_count", "INTEGER", 1, Some("0"), 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+        ("source", "TEXT", 1, Some("'local'"), 0),
+        ("device_label", "TEXT", 0, None, 0),
+    ];
+
+    const WATCHLIST_ENTRY: &[ColumnShape] = &[
+        ("account_id", "INTEGER", 1, None, 1),
+        ("title_id", "INTEGER", 1, None, 2),
+        ("added_at", "INTEGER", 1, None, 0),
+        ("position", "INTEGER", 0, None, 0),
+        ("note", "TEXT", 0, None, 0),
+        ("auto_acquire", "INTEGER", 1, Some("0"), 0),
+    ];
+
+    const SMART_COLLECTION: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("name", "TEXT", 1, None, 0),
+        ("icon", "TEXT", 0, None, 0),
+        ("query_json", "TEXT", 1, None, 0),
+        ("sort", "TEXT", 1, None, 0),
+        ("pinned", "INTEGER", 1, Some("0"), 0),
+        ("created_at", "INTEGER", 1, None, 0),
+    ];
+
+    // Migration 0006.
+    const QUALITY_PROFILE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("name", "TEXT", 1, None, 0),
+        ("is_default", "INTEGER", 1, Some("0"), 0),
+        ("rules_json", "TEXT", 1, None, 0),
+        ("cutoff_rank", "INTEGER", 1, None, 0),
+        ("upgrade_allowed", "INTEGER", 1, Some("1"), 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
+    const INDEXER: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("kind", "TEXT", 1, None, 0),
+        ("name", "TEXT", 1, None, 0),
+        ("base_url", "TEXT", 0, None, 0),
+        ("api_key_ref", "TEXT", 0, None, 0),
+        ("enabled", "INTEGER", 1, Some("0"), 0),
+        ("priority", "INTEGER", 1, Some("100"), 0),
+        ("categories", "TEXT", 0, None, 0),
+        ("rate_limit_json", "TEXT", 0, None, 0),
+        ("health_state", "TEXT", 1, Some("'unknown'"), 0),
+        ("last_check_at", "INTEGER", 0, None, 0),
+    ];
+
+    const DOWNLOAD_JOB: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("job_id", "INTEGER", 0, None, 0),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("media_item_id", "INTEGER", 0, None, 0),
+        ("quality_profile_id", "INTEGER", 0, None, 0),
+        ("indexer_id", "INTEGER", 0, None, 0),
+        ("state", "TEXT", 1, None, 0),
+        ("priority", "INTEGER", 1, Some("100"), 0),
+        ("is_upgrade", "INTEGER", 1, Some("0"), 0),
+        ("release_title", "TEXT", 1, None, 0),
+        ("release_source", "TEXT", 0, None, 0),
+        ("release_group", "TEXT", 0, None, 0),
+        ("resolution", "TEXT", 0, None, 0),
+        ("video_codec", "TEXT", 0, None, 0),
+        ("hdr_format", "TEXT", 0, None, 0),
+        ("audio_summary", "TEXT", 0, None, 0),
+        ("reported_size_bytes", "INTEGER", 0, None, 0),
+        ("info_hash", "TEXT", 0, None, 0),
+        ("magnet_uri", "TEXT", 0, None, 0),
+        ("torrent_file_path", "TEXT", 0, None, 0),
+        ("save_path", "TEXT", 1, None, 0),
+        ("downloaded_bytes", "INTEGER", 1, Some("0"), 0),
+        ("uploaded_bytes", "INTEGER", 1, Some("0"), 0),
+        ("progress_permille", "INTEGER", 1, Some("0"), 0),
+        ("download_rate_bps", "INTEGER", 1, Some("0"), 0),
+        ("upload_rate_bps", "INTEGER", 1, Some("0"), 0),
+        ("peers_connected", "INTEGER", 1, Some("0"), 0),
+        ("peers_swarm", "INTEGER", 1, Some("0"), 0),
+        ("eta_seconds", "INTEGER", 0, None, 0),
+        ("ratio", "REAL", 0, None, 0),
+        ("safety_report_json", "TEXT", 0, None, 0),
+        ("engine_state_json", "TEXT", 0, None, 0),
+        ("error_code", "TEXT", 0, None, 0),
+        ("error_message", "TEXT", 0, None, 0),
+        ("added_by", "TEXT", 1, Some("'user'"), 0),
+        ("added_at", "INTEGER", 1, None, 0),
+        ("started_at", "INTEGER", 0, None, 0),
+        ("completed_at", "INTEGER", 0, None, 0),
+        ("seeding_until", "INTEGER", 0, None, 0),
+        ("removed_at", "INTEGER", 0, None, 0),
+    ];
+
+    const DOWNLOAD_FILE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("download_job_id", "INTEGER", 1, None, 0),
+        ("torrent_file_index", "INTEGER", 1, None, 0),
+        ("path", "TEXT", 1, None, 0),
+        ("size_bytes", "INTEGER", 1, None, 0),
+        ("selected", "INTEGER", 1, Some("1"), 0),
+        ("is_media", "INTEGER", 1, Some("0"), 0),
+        ("blocked_reason", "TEXT", 0, None, 0),
+    ];
+
+    const RELEASE_DECISION: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("download_job_id", "INTEGER", 0, None, 0),
+        ("title_id", "INTEGER", 1, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("release_title", "TEXT", 1, None, 0),
+        ("indexer", "TEXT", 0, None, 0),
+        ("score", "REAL", 1, None, 0),
+        ("rank_position", "INTEGER", 1, None, 0),
+        ("chosen", "INTEGER", 1, Some("0"), 0),
+        ("reasons_json", "TEXT", 1, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+    ];
+
+    // Migration 0007.
+    const PROVIDER_CACHE: &[ColumnShape] = &[
+        ("key", "TEXT", 0, None, 1),
+        ("provider", "TEXT", 1, None, 0),
+        ("resource", "TEXT", 1, None, 0),
+        ("etag", "TEXT", 0, None, 0),
+        ("last_modified", "TEXT", 0, None, 0),
+        ("fetched_at", "INTEGER", 1, None, 0),
+        ("expires_at", "INTEGER", 1, None, 0),
+        ("schema_version", "INTEGER", 1, None, 0),
+        ("body", "BLOB", 1, None, 0),
+        ("size_bytes", "INTEGER", 1, None, 0),
+    ];
+
+    const IMAGE_CACHE: &[ColumnShape] = &[
+        ("key", "TEXT", 0, None, 1),
+        ("provider", "TEXT", 1, None, 0),
+        ("path", "TEXT", 1, None, 0),
+        ("variant", "TEXT", 1, None, 0),
+        ("disk_path", "TEXT", 1, None, 0),
+        ("bytes", "INTEGER", 1, None, 0),
+        ("width", "INTEGER", 0, None, 0),
+        ("height", "INTEGER", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+        ("last_used_at", "INTEGER", 1, None, 0),
+        ("hits", "INTEGER", 1, Some("0"), 0),
+    ];
+
+    const IMAGE_REF: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("owner_kind", "TEXT", 1, None, 0),
+        ("owner_id", "INTEGER", 1, None, 0),
+        ("role", "TEXT", 1, None, 0),
+        ("provider", "TEXT", 1, None, 0),
+        ("path", "TEXT", 1, None, 0),
+        ("language", "TEXT", 0, None, 0),
+        ("width", "INTEGER", 0, None, 0),
+        ("height", "INTEGER", 0, None, 0),
+        ("vote_average", "REAL", 0, None, 0),
+        ("is_primary", "INTEGER", 1, Some("0"), 0),
+        ("blurhash", "TEXT", 0, None, 0),
+    ];
+
+    const DATASET_STATE: &[ColumnShape] = &[
+        ("name", "TEXT", 0, None, 1),
+        ("version", "TEXT", 0, None, 0),
+        ("etag", "TEXT", 0, None, 0),
+        ("last_modified", "TEXT", 0, None, 0),
+        ("rows", "INTEGER", 0, None, 0),
+        ("size_bytes", "INTEGER", 0, None, 0),
+        ("last_checked_at", "INTEGER", 0, None, 0),
+        ("last_updated_at", "INTEGER", 0, None, 0),
+        ("error", "TEXT", 0, None, 0),
+    ];
+
+    const NOTIFICATION: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("event", "TEXT", 1, None, 0),
+        ("severity", "TEXT", 1, Some("'normal'"), 0),
+        ("title", "TEXT", 1, None, 0),
+        ("body", "TEXT", 0, None, 0),
+        ("deep_link", "TEXT", 0, None, 0),
+        ("subject_kind", "TEXT", 0, None, 0),
+        ("subject_id", "INTEGER", 0, None, 0),
+        ("dedupe_key", "TEXT", 0, None, 0),
+        ("group_key", "TEXT", 0, None, 0),
+        ("sound", "TEXT", 0, None, 0),
+        ("delivery_state", "TEXT", 1, Some("'pending'"), 0),
+        ("suppressed_reason", "TEXT", 0, None, 0),
+        ("native_id", "INTEGER", 0, None, 0),
+        ("delivered_at", "INTEGER", 0, None, 0),
+        ("delivery_error", "TEXT", 0, None, 0),
+        ("clicked_at", "INTEGER", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+        ("read_at", "INTEGER", 0, None, 0),
+        ("dismissed_at", "INTEGER", 0, None, 0),
+    ];
+
+    const DEVICE: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("protocol", "TEXT", 1, None, 0),
+        ("device_uid", "TEXT", 1, None, 0),
+        ("name", "TEXT", 1, None, 0),
+        ("model", "TEXT", 0, None, 0),
+        ("address", "TEXT", 0, None, 0),
+        ("port", "INTEGER", 0, None, 0),
+        ("capabilities_json", "TEXT", 0, None, 0),
+        ("trusted", "INTEGER", 1, Some("0"), 0),
+        ("last_seen_at", "INTEGER", 1, None, 0),
+    ];
+
+    const CAST_SESSION: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("device_id", "INTEGER", 1, None, 0),
+        ("media_file_id", "INTEGER", 0, None, 0),
+        ("episode_id", "INTEGER", 0, None, 0),
+        ("state", "TEXT", 1, None, 0),
+        ("stream_url", "TEXT", 0, None, 0),
+        ("delivery", "TEXT", 1, None, 0),
+        ("ffmpeg_args", "TEXT", 0, None, 0),
+        ("position_ms", "INTEGER", 1, Some("0"), 0),
+        ("started_at", "INTEGER", 1, None, 0),
+        ("ended_at", "INTEGER", 0, None, 0),
+        ("error_message", "TEXT", 0, None, 0),
+    ];
+
+    /// Every documented table with the column shape its migration must produce.
+    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 40] = [
+        ("account", ACCOUNT),
+        ("cast_session", CAST_SESSION),
+        ("company", COMPANY),
+        ("credit", CREDIT),
+        ("dataset_state", DATASET_STATE),
+        ("device", DEVICE),
+        ("download_file", DOWNLOAD_FILE),
+        ("download_job", DOWNLOAD_JOB),
+        ("episode", EPISODE),
+        ("episode_ordering", EPISODE_ORDERING),
+        ("event_log", EVENT_LOG),
+        ("external_id", EXTERNAL_ID),
+        ("genre", GENRE),
+        ("image_cache", IMAGE_CACHE),
+        ("image_ref", IMAGE_REF),
+        ("indexer", INDEXER),
+        ("job", JOB),
+        ("keyword", KEYWORD),
+        ("library_root", LIBRARY_ROOT),
+        ("media_file", MEDIA_FILE),
+        ("media_item", MEDIA_ITEM),
+        ("notification", NOTIFICATION),
+        ("person", PERSON),
+        ("provider_cache", PROVIDER_CACHE),
+        ("quality_profile", QUALITY_PROFILE),
+        ("release_decision", RELEASE_DECISION),
+        ("season", SEASON),
+        ("secret_ref", SECRET_REF),
+        ("settings", SETTINGS),
+        ("smart_collection", SMART_COLLECTION),
+        ("subtitle_download", SUBTITLE_DOWNLOAD),
+        ("subtitle_track", SUBTITLE_TRACK),
+        ("title", TITLE),
+        ("title_alias", TITLE_ALIAS),
+        ("title_company", TITLE_COMPANY),
+        ("title_genre", TITLE_GENRE),
+        ("title_keyword", TITLE_KEYWORD),
+        ("unmatched_file", UNMATCHED_FILE),
+        ("watch_progress", WATCH_PROGRESS),
+        ("watchlist_entry", WATCHLIST_ENTRY),
+    ];
+
+    /// `(child, parent, child column, parent column, ON DELETE)`, per `DATA_MODEL` §2.
+    const DOCUMENTED_FOREIGN_KEYS: &[(&str, &str, &str, &str, &str)] = &[
+        ("cast_session", "device", "device_id", "id", "CASCADE"),
+        ("cast_session", "episode", "episode_id", "id", "SET NULL"),
+        (
+            "cast_session",
+            "media_file",
+            "media_file_id",
+            "id",
+            "SET NULL",
+        ),
+        ("credit", "episode", "episode_id", "id", "CASCADE"),
+        ("credit", "person", "person_id", "id", "CASCADE"),
+        ("credit", "title", "title_id", "id", "CASCADE"),
+        (
+            "download_file",
+            "download_job",
+            "download_job_id",
+            "id",
+            "CASCADE",
+        ),
+        ("download_job", "episode", "episode_id", "id", "CASCADE"),
+        ("download_job", "indexer", "indexer_id", "id", "SET NULL"),
+        ("download_job", "job", "job_id", "id", "SET NULL"),
+        (
+            "download_job",
+            "media_item",
+            "media_item_id",
+            "id",
+            "SET NULL",
+        ),
+        (
+            "download_job",
+            "quality_profile",
+            "quality_profile_id",
+            "id",
+            "SET NULL",
+        ),
+        ("download_job", "title", "title_id", "id", "CASCADE"),
+        ("episode", "season", "season_id", "id", "CASCADE"),
+        ("episode", "title", "title_id", "id", "CASCADE"),
+        ("episode_ordering", "episode", "episode_id", "id", "CASCADE"),
+        ("external_id", "episode", "episode_id", "id", "CASCADE"),
+        ("external_id", "person", "person_id", "id", "CASCADE"),
+        ("external_id", "season", "season_id", "id", "CASCADE"),
+        ("external_id", "title", "title_id", "id", "CASCADE"),
+        ("indexer", "secret_ref", "api_key_ref", "key", "SET NULL"),
+        ("media_file", "library_root", "root_id", "id", "NO ACTION"),
+        ("media_file", "media_item", "media_item_id", "id", "CASCADE"),
+        ("media_item", "episode", "episode_id", "id", "CASCADE"),
+        ("media_item", "title", "title_id", "id", "CASCADE"),
+        (
+            "release_decision",
+            "download_job",
+            "download_job_id",
+            "id",
+            "CASCADE",
+        ),
+        ("release_decision", "episode", "episode_id", "id", "CASCADE"),
+        ("release_decision", "title", "title_id", "id", "CASCADE"),
+        ("season", "title", "title_id", "id", "CASCADE"),
+        (
+            "subtitle_download",
+            "episode",
+            "episode_id",
+            "id",
+            "CASCADE",
+        ),
+        (
+            "subtitle_download",
+            "media_file",
+            "media_file_id",
+            "id",
+            "CASCADE",
+        ),
+        ("subtitle_track", "episode", "episode_id", "id", "CASCADE"),
+        (
+            "subtitle_track",
+            "media_file",
+            "media_file_id",
+            "id",
+            "CASCADE",
+        ),
+        ("title_alias", "title", "title_id", "id", "CASCADE"),
+        ("title_company", "company", "company_id", "id", "CASCADE"),
+        ("title_company", "title", "title_id", "id", "CASCADE"),
+        ("title_genre", "genre", "genre_id", "id", "CASCADE"),
+        ("title_genre", "title", "title_id", "id", "CASCADE"),
+        ("title_keyword", "keyword", "keyword_id", "id", "CASCADE"),
+        ("title_keyword", "title", "title_id", "id", "CASCADE"),
+        (
+            "unmatched_file",
+            "episode",
+            "suggested_episode_id",
+            "id",
+            "NO ACTION",
+        ),
+        (
+            "unmatched_file",
+            "title",
+            "suggested_title_id",
+            "id",
+            "NO ACTION",
+        ),
+        ("watch_progress", "account", "account_id", "id", "CASCADE"),
+        ("watch_progress", "episode", "episode_id", "id", "CASCADE"),
+        ("watch_progress", "title", "title_id", "id", "CASCADE"),
+        ("watchlist_entry", "account", "account_id", "id", "CASCADE"),
+        ("watchlist_entry", "title", "title_id", "id", "CASCADE"),
+    ];
+
+    /// Every named index the seven migrations create.
+    const DOCUMENTED_INDICES: [&str; 37] = [
+        "credit_person_idx",
+        "credit_title_order_idx",
+        "download_job_active_idx",
+        "download_job_hash_uq",
+        "download_job_title_idx",
+        "episode_absolute_idx",
+        "episode_air_date_idx",
+        "episode_ordering_lookup_idx",
+        "event_log_at_idx",
+        "external_id_episode_idx",
+        "external_id_title_idx",
+        "image_cache_lru_idx",
+        "job_dedupe_uq",
+        "job_ready_idx",
+        "media_file_item_idx",
+        "media_file_missing_idx",
+        "media_item_episode_uq",
+        "media_item_movie_uq",
+        "notification_centre_idx",
+        "notification_dedupe_idx",
+        "notification_pending_idx",
+        "notification_unread_idx",
+        "person_name_idx",
+        "provider_cache_expiry_idx",
+        "provider_cache_resource_idx",
+        "release_decision_title_idx",
+        "subtitle_download_uq",
+        "subtitle_track_episode_idx",
+        "subtitle_track_file_idx",
+        "title_alias_alias_idx",
+        "title_imdb_rating_idx",
+        "title_kind_popularity_idx",
+        "title_kind_release_idx",
+        "title_sort_name_idx",
+        "title_sync_idx",
+        "watch_progress_continue_idx",
+        "watchlist_added_idx",
+    ];
+
+    /// The part of each named index's `CREATE` statement that makes it correct: the
+    /// columns and ordering, and for a partial index the `WHERE` clause. Split from
+    /// [`DOCUMENTED_INDICES`] so a regression in the predicate is not hidden by the name.
+    const DOCUMENTED_INDEX_FRAGMENTS: &[(&str, &str)] = &[
+        (
+            "job_dedupe_uq",
+            "UNIQUE INDEX job_dedupe_uq ON job (kind, dedupe_key)",
+        ),
+        (
+            "job_dedupe_uq",
+            "WHERE dedupe_key IS NOT NULL AND state IN ('queued','running','deferred')",
+        ),
+        ("job_ready_idx", "(state, priority, next_attempt_at)"),
+        ("event_log_at_idx", "(at DESC)"),
+        ("title_kind_popularity_idx", "(kind, popularity DESC)"),
+        (
+            "title_kind_release_idx",
+            "(kind, release_date DESC, first_air_date DESC)",
+        ),
+        (
+            "title_imdb_rating_idx",
+            "(imdb_rating DESC) WHERE imdb_rating IS NOT NULL",
+        ),
+        ("title_sort_name_idx", "(sort_name)"),
+        ("title_sync_idx", "(metadata_state, last_synced_at)"),
+        ("title_alias_alias_idx", "(alias)"),
+        ("external_id_title_idx", "(title_id)"),
+        ("external_id_episode_idx", "(episode_id)"),
+        ("person_name_idx", "(name)"),
+        ("credit_title_order_idx", "(title_id, kind, order_index)"),
+        ("credit_person_idx", "(person_id)"),
+        ("episode_air_date_idx", "(title_id, air_date)"),
+        ("episode_absolute_idx", "(title_id, absolute_number)"),
+        (
+            "episode_ordering_lookup_idx",
+            "(scheme, season_number, episode_number)",
+        ),
+        ("media_item_movie_uq", "UNIQUE INDEX media_item_movie_uq"),
+        ("media_item_movie_uq", "(title_id) WHERE episode_id IS NULL"),
+        (
+            "media_item_episode_uq",
+            "UNIQUE INDEX media_item_episode_uq",
+        ),
+        (
+            "media_item_episode_uq",
+            "(episode_id) WHERE episode_id IS NOT NULL",
+        ),
+        ("media_file_item_idx", "(media_item_id)"),
+        (
+            "media_file_missing_idx",
+            "(missing_since) WHERE missing_since IS NOT NULL",
+        ),
+        ("subtitle_track_file_idx", "(media_file_id, language)"),
+        ("subtitle_track_episode_idx", "(episode_id, language)"),
+        ("subtitle_download_uq", "UNIQUE INDEX subtitle_download_uq"),
+        (
+            "subtitle_download_uq",
+            "COALESCE(media_file_id, -1), COALESCE(episode_id, -1)",
+        ),
+        (
+            "watch_progress_continue_idx",
+            "(account_id, updated_at DESC)",
+        ),
+        (
+            "watch_progress_continue_idx",
+            "WHERE watched = 0 AND percent BETWEEN 0.02 AND 0.95",
+        ),
+        ("watchlist_added_idx", "(account_id, added_at DESC)"),
+        ("download_job_active_idx", "(state, priority)"),
+        (
+            "download_job_active_idx",
+            "WHERE state IN ('queued','inspecting','metadata','downloading','paused')",
+        ),
+        ("download_job_title_idx", "(title_id, episode_id)"),
+        (
+            "download_job_hash_uq",
+            "(info_hash) WHERE info_hash IS NOT NULL",
+        ),
+        ("release_decision_title_idx", "(title_id, created_at DESC)"),
+        ("provider_cache_expiry_idx", "(expires_at)"),
+        ("provider_cache_resource_idx", "(provider, resource)"),
+        ("image_cache_lru_idx", "(last_used_at)"),
+        (
+            "notification_centre_idx",
+            "(created_at DESC) WHERE dismissed_at IS NULL",
+        ),
+        (
+            "notification_unread_idx",
+            "(created_at DESC) WHERE read_at IS NULL",
+        ),
+        ("notification_dedupe_idx", "(dedupe_key, created_at DESC)"),
+        ("notification_dedupe_idx", "WHERE dedupe_key IS NOT NULL"),
+        (
+            "notification_pending_idx",
+            "(delivery_state) WHERE delivery_state = 'pending'",
+        ),
+    ];
+
+    /// A connection with every embedded migration applied, plus the resources it needs to live.
     async fn migrated(directory: &TempDir) -> SqliteConnection {
         let mut connection = open_writer_connection(&directory.path().join("peregrine.sqlite"))
             .await
@@ -185,6 +1022,77 @@ mod tests {
         .map(|_| ())
     }
 
+    /// Runs one statement that needs no binds, which is all the fixture lists use.
+    ///
+    /// The statement is `&'static str` because `sqlx` refuses a query string it cannot see
+    /// as a literal: interpolating an identifier into SQL is how injection starts, and the
+    /// fixture lists are consts of literals so the guard costs nothing here.
+    async fn statement(
+        connection: &mut SqliteConnection,
+        sql: &'static str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(sql).execute(&mut *connection).await.map(|_| ())
+    }
+
+    /// Writes every statement, failing the test on the first refused one.
+    async fn write_all(connection: &mut SqliteConnection, statements: &[&'static str]) {
+        for sql in statements {
+            statement(connection, sql)
+                .await
+                .unwrap_or_else(|error| panic!("fixture must be accepted: {sql}: {error}"));
+        }
+    }
+
+    /// Asserts that every statement in `rejects` fails a `CHECK` constraint while every one
+    /// in `accepts` is stored. The error has to name a `CHECK`, so a unique-constraint
+    /// failure caused by a careless fixture cannot masquerade as the constraint working.
+    async fn assert_check_behaviour(
+        connection: &mut SqliteConnection,
+        rejects: &[&'static str],
+        accepts: &[&'static str],
+    ) {
+        write_all(connection, accepts).await;
+        for sql in rejects {
+            let error = statement(connection, sql)
+                .await
+                .expect_err(&format!("must be rejected: {sql}"));
+            assert!(
+                error.to_string().contains("CHECK"),
+                "expected a CHECK failure, got {error} for {sql}"
+            );
+        }
+    }
+
+    /// `(parent table, child column, parent column, ON DELETE)` for one table's FKs.
+    async fn foreign_keys(
+        connection: &mut SqliteConnection,
+        table: &str,
+    ) -> Vec<(String, String, String, String)> {
+        sqlx::query_as(
+            "SELECT \"table\", \"from\", \"to\", on_delete \
+             FROM pragma_foreign_key_list(?1) ORDER BY id, seq",
+        )
+        .bind(table)
+        .fetch_all(&mut *connection)
+        .await
+        .unwrap()
+    }
+
+    /// The whole schema except the disposable cache tier, so a test can prove the tier's
+    /// removal changed nothing else.
+    async fn schema_without_cache(
+        connection: &mut SqliteConnection,
+    ) -> Vec<(String, String, String)> {
+        sqlx::query_as(
+            "SELECT type, name, COALESCE(sql, '') FROM sqlite_master \
+             WHERE name NOT LIKE 'sqlite_%' \
+             AND tbl_name NOT IN ('provider_cache','image_cache') ORDER BY type, name",
+        )
+        .fetch_all(&mut *connection)
+        .await
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn migration_applies_to_an_empty_database() {
         let directory = TempDir::new().unwrap();
@@ -198,8 +1106,8 @@ mod tests {
         let applied = apply(&mut connection).await.unwrap();
 
         assert_eq!(
-            applied, 1,
-            "migration 0001 is the only migration in the set"
+            applied, 7,
+            "the embedded set is 0001–0007, one migration per file"
         );
         assert_eq!(
             names(
@@ -212,8 +1120,8 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            vec![1],
-            "the applied migration must be recorded"
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "every applied migration must be recorded, in order"
         );
     }
 
@@ -222,13 +1130,7 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let mut connection = migrated(&directory).await;
 
-        for (table, shape) in [
-            ("account", ACCOUNT),
-            ("settings", SETTINGS),
-            ("secret_ref", SECRET_REF),
-            ("job", JOB),
-            ("event_log", EVENT_LOG),
-        ] {
+        for (table, shape) in DOCUMENTED_COLUMNS {
             assert_eq!(
                 columns(&mut connection, table).await,
                 rendered(shape),
@@ -249,24 +1151,43 @@ mod tests {
                  ORDER BY name",
             )
             .await,
-            vec!["event_log_at_idx", "job_dedupe_uq", "job_ready_idx"]
+            DOCUMENTED_INDICES.to_vec()
         );
 
-        let dedupe: String = sqlx::query_scalar(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'job_dedupe_uq'",
+        let index_sql: Vec<(String, String)> = sqlx::query_as(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL \
+             ORDER BY name",
         )
-        .fetch_one(&mut connection)
+        .fetch_all(&mut connection)
         .await
         .unwrap();
+
+        // Each documented index is checked for the columns, ordering, and `WHERE` clause
+        // that make it correct. An index that lost its predicate or a `DESC` would still
+        // be listed here and would still satisfy the name check above.
+        for (index, fragment) in DOCUMENTED_INDEX_FRAGMENTS.iter().copied() {
+            let sql = &index_sql
+                .iter()
+                .find(|(name, _)| name == index)
+                .unwrap_or_else(|| panic!("`{index}` is not in sqlite_master"))
+                .1;
+            assert!(
+                sql.contains(fragment),
+                "`{index}` must contain {fragment:?}: {sql}"
+            );
+        }
+
+        // `download_job_hash_uq` is documented as a plain `CREATE INDEX` even though its
+        // name says `_uq`. Transcribing it faithfully means asserting it is NOT unique;
+        // a later migration may make it unique, but that decision is not this one.
+        let hash = &index_sql
+            .iter()
+            .find(|(name, _)| name == "download_job_hash_uq")
+            .unwrap()
+            .1;
         assert!(
-            dedupe.contains("UNIQUE INDEX job_dedupe_uq ON job (kind, dedupe_key)"),
-            "the dedupe index must cover (kind, dedupe_key): {dedupe}"
-        );
-        assert!(
-            dedupe.contains(
-                "WHERE dedupe_key IS NOT NULL AND state IN ('queued','running','deferred')"
-            ),
-            "the dedupe index must be partial over non-terminal states (I12): {dedupe}"
+            !hash.to_uppercase().contains("UNIQUE"),
+            "`download_job_hash_uq` is documented as non-unique: {hash}"
         );
     }
 
@@ -300,45 +1221,188 @@ mod tests {
         assert!(error.to_string().contains("CHECK"), "got {error}");
     }
 
+    /// The parent rows every constraint test may rely on, with explicit ids so an assertion
+    /// can name them: one adult account, a movie and a show, one season and episode, a
+    /// person and a company, a library root, one movie media item, and one cast device.
+    const BASE_FIXTURES: &[&str] = &[
+        "INSERT INTO account (id, name, kind, created_at) VALUES (1, 'Ada', 'adult', 0)",
+        "INSERT INTO title (id, kind, name, sort_name, created_at, updated_at) \
+         VALUES (1, 'movie', 'Alien', 'alien', 0, 0)",
+        "INSERT INTO title (id, kind, name, sort_name, created_at, updated_at) \
+         VALUES (2, 'show', 'The Wire', 'wire', 0, 0)",
+        "INSERT INTO season (id, title_id, season_number, updated_at) VALUES (1, 1, 1, 0)",
+        "INSERT INTO episode (id, title_id, season_id, season_number, episode_number, updated_at) \
+         VALUES (1, 1, 1, 1, 1, 0)",
+        "INSERT INTO person (id, name, sort_name) VALUES (1, 'Sigourney Weaver', 'weaver')",
+        "INSERT INTO company (id, name, provider) VALUES (1, 'Brandywine', 'tmdb')",
+        "INSERT INTO library_root (id, path, kind, created_at) \
+         VALUES (1, '/media/movies', 'movies', 0)",
+        "INSERT INTO media_item (id, title_id, state, origin, created_at, updated_at) \
+         VALUES (1, 1, 'available', 'scan', 0, 0)",
+        "INSERT INTO device (id, protocol, device_uid, name, last_seen_at) \
+         VALUES (1, 'dlna', 'uuid:1', 'Living room TV', 0)",
+    ];
+
+    /// One unknown value per documented enumeration `CHECK`. Every row would otherwise be
+    /// valid, so the only thing that can refuse it is the `CHECK`.
+    const ENUM_REJECTS: &[&str] = &[
+        "INSERT INTO account (name, kind, created_at) VALUES ('Teen', 'teen', 0)",
+        "INSERT INTO job (kind, state, payload_json, created_at) \
+         VALUES ('metadata.refresh', 'halfway', '{}', 0)",
+        "INSERT INTO title (id, kind, name, sort_name, created_at, updated_at) \
+         VALUES (3, 'trailer', 'X', 'x', 0, 0)",
+        "INSERT INTO title (id, kind, name, sort_name, metadata_state, created_at, updated_at) \
+         VALUES (4, 'movie', 'X', 'x', 'unknown', 0, 0)",
+        "INSERT INTO title_alias (title_id, alias, region, kind) VALUES (1, 'Alien', 'US', 'variant')",
+        "INSERT INTO external_id (title_id, provider, value, fetched_at) \
+         VALUES (1, 'letterboxd', 'x', 0)",
+        "INSERT INTO external_id (provider, value, fetched_at) VALUES ('imdb', 'x', 0)",
+        "INSERT INTO credit (title_id, person_id, kind, job, character) \
+         VALUES (1, 1, 'writer', 'writer', 'x')",
+        "INSERT INTO title_company (title_id, company_id, role) VALUES (1, 1, 'label')",
+        "INSERT INTO episode (title_id, season_id, season_number, episode_number, episode_type, updated_at) \
+         VALUES (1, 1, 1, 2, 'filler', 0)",
+        "INSERT INTO library_root (path, kind, created_at) VALUES ('/media/music', 'music', 0)",
+        "INSERT INTO library_root (path, kind, scan_mode, created_at) \
+         VALUES ('/media/other', 'mixed', 'eager', 0)",
+        "INSERT INTO media_item (title_id, state, origin, created_at, updated_at) \
+         VALUES (2, 'done', 'scan', 0, 0)",
+        "INSERT INTO media_item (title_id, state, origin, created_at, updated_at) \
+         VALUES (2, 'wanted', 'import', 0, 0)",
+        "INSERT INTO media_file (media_item_id, path, size_bytes, mtime_ms, added_at, hdr_format, updated_at) \
+         VALUES (1, '/media/bad.mkv', 1, 0, 0, 'hdr12', 0)",
+        "INSERT INTO subtitle_track (episode_id, origin, format, language) \
+         VALUES (1, 'ocr', 'srt', 'en')",
+        "INSERT INTO subtitle_track (episode_id, origin, format, language) \
+         VALUES (1, 'external', 'txt', 'en')",
+        "INSERT INTO subtitle_track (origin, format, language) VALUES ('external', 'srt', 'en')",
+        "INSERT INTO watch_progress (account_id, title_id, position_ms, updated_at, source) \
+         VALUES (1, 2, 0, 0, 'plex')",
+        "INSERT INTO indexer (kind, name) VALUES ('sabnzbd', 'Indexer')",
+        "INSERT INTO indexer (kind, name, health_state) VALUES ('rss', 'Other', 'sick')",
+        "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, language) \
+         VALUES ('collection', 1, 'poster', 'tmdb', '/a.jpg', 'en')",
+        "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, language) \
+         VALUES ('title', 1, 'thumbnail', 'tmdb', '/b.jpg', 'en')",
+        "INSERT INTO notification (event, severity, title, created_at) \
+         VALUES ('disk.low', 'urgent', 'Disk low', 0)",
+        "INSERT INTO notification (event, title, delivery_state, created_at) \
+         VALUES ('disk.low', 'Disk low', 'dropped', 0)",
+        "INSERT INTO notification (event, title, suppressed_reason, created_at) \
+         VALUES ('disk.low', 'Disk low', 'because', 0)",
+        "INSERT INTO notification (event, title, subject_kind, created_at) \
+         VALUES ('disk.low', 'Disk low', 'movie', 0)",
+        "INSERT INTO device (protocol, device_uid, name, last_seen_at) \
+         VALUES ('airplay', 'x', 'X', 0)",
+        "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
+         VALUES (1, 'zombie', 'Alien', '/downloads', 0)",
+        "INSERT INTO cast_session (device_id, state, delivery, started_at) \
+         VALUES (1, 'zapping', 'direct', 0)",
+        "INSERT INTO cast_session (device_id, state, delivery, started_at) \
+         VALUES (1, 'playing', 'dash', 0)",
+    ];
+
+    /// One row per enumeration whose recorded values must be accepted.
+    const ENUM_ACCEPTS: &[&str] = &[
+        "INSERT INTO account (name, kind, created_at) VALUES ('Adult', 'adult', 0)",
+        "INSERT INTO title_alias (title_id, alias, region, kind) \
+         VALUES (1, 'Alien (working)', 'US', 'working')",
+        "INSERT INTO external_id (title_id, provider, value, fetched_at) \
+         VALUES (1, 'imdb', 'tt0078748', 0)",
+        "INSERT INTO credit (title_id, person_id, kind, job, character) \
+         VALUES (1, 1, 'cast', 'Actor', 'Ripley')",
+        "INSERT INTO title_company (title_id, company_id, role) VALUES (1, 1, 'network')",
+        "INSERT INTO episode (title_id, season_id, season_number, episode_number, episode_type, updated_at) \
+         VALUES (1, 1, 1, 3, 'finale', 0)",
+        "INSERT INTO media_item (title_id, episode_id, state, origin, created_at, updated_at) \
+         VALUES (1, 1, 'available', 'scan', 0, 0)",
+        "INSERT INTO media_file (media_item_id, path, size_bytes, mtime_ms, added_at, hdr_format, updated_at) \
+         VALUES (1, '/media/alien.mkv', 1, 0, 0, 'hdr10', 0)",
+        "INSERT INTO subtitle_track (episode_id, origin, format, language) \
+         VALUES (1, 'external', 'srt', 'en')",
+        "INSERT INTO watch_progress (account_id, title_id, position_ms, updated_at, source) \
+         VALUES (1, 1, 0, 0, 'manual')",
+        "INSERT INTO indexer (kind, name, health_state) VALUES ('torznab', 'Indexer', 'ok')",
+        "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, language) \
+         VALUES ('title', 1, 'poster', 'tmdb', '/poster.jpg', 'en')",
+        "INSERT INTO notification (event, severity, title, delivery_state, created_at) \
+         VALUES ('disk.low', 'critical', 'Disk low', 'delivered', 0)",
+        "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
+         VALUES (1, 'downloading', 'Alien 1979 1080p', '/downloads', 0)",
+        "INSERT INTO cast_session (device_id, state, delivery, started_at) \
+         VALUES (1, 'playing', 'direct', 0)",
+    ];
+
+    /// `(column, statement)`: each statement sets a documented boolean to 2.
+    const BOOLEAN_REJECTS: &[(&str, &str)] = &[
+        (
+            "account.can_cast",
+            "INSERT INTO account (name, kind, can_cast, created_at) VALUES ('B', 'adult', 2, 0)",
+        ),
+        (
+            "season.is_specials",
+            "INSERT INTO season (title_id, season_number, is_specials, updated_at) VALUES (1, 9, 2, 0)",
+        ),
+        (
+            "subtitle_track.is_forced",
+            "INSERT INTO subtitle_track (episode_id, origin, format, language, is_forced) \
+             VALUES (1, 'external', 'srt', 'en', 2)",
+        ),
+        (
+            "watch_progress.watched",
+            "INSERT INTO watch_progress (account_id, title_id, position_ms, updated_at, watched) \
+             VALUES (1, 1, 0, 0, 2)",
+        ),
+        (
+            "quality_profile.is_default",
+            "INSERT INTO quality_profile (name, rules_json, cutoff_rank, updated_at, is_default) \
+             VALUES ('Any', '{}', 0, 0, 2)",
+        ),
+        (
+            "indexer.enabled",
+            "INSERT INTO indexer (kind, name, enabled) VALUES ('rss', 'R', 2)",
+        ),
+        (
+            "download_job.is_upgrade",
+            "INSERT INTO download_job (title_id, state, release_title, save_path, added_at, is_upgrade) \
+             VALUES (1, 'queued', 'Alien', '/downloads', 0, 2)",
+        ),
+        (
+            "image_ref.is_primary",
+            "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, is_primary) \
+             VALUES ('title', 1, 'poster', 'tmdb', '/p.jpg', 2)",
+        ),
+        (
+            "device.trusted",
+            "INSERT INTO device (protocol, device_uid, name, last_seen_at, trusted) \
+             VALUES ('dlna', 'u', 'T', 0, 2)",
+        ),
+    ];
+
+    /// The disposable tier, exactly as invariant I9 names it.
+    const CACHE_TIER: [&str; 2] = ["provider_cache", "image_cache"];
+
     #[tokio::test]
     async fn unknown_enumeration_values_are_rejected() {
         let directory = TempDir::new().unwrap();
         let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
 
-        insert_account(&mut connection, "adult", None, 0, 1)
-            .await
-            .expect("an adult account is unrestricted");
-        assert!(
-            insert_account(&mut connection, "teen", None, 0, 1)
-                .await
-                .is_err(),
-            "`kind` accepts only the recorded values"
-        );
-        assert!(
-            sqlx::query(
-                "INSERT INTO job (kind, state, payload_json, created_at) \
-                         VALUES ('metadata.refresh', 'halfway', '{}', 0)"
-            )
-            .execute(&mut connection)
-            .await
-            .is_err(),
-            "`job.state` accepts only the recorded values"
-        );
+        assert_check_behaviour(&mut connection, ENUM_REJECTS, ENUM_ACCEPTS).await;
     }
 
     #[tokio::test]
     async fn boolean_columns_reject_values_other_than_zero_or_one() {
         let directory = TempDir::new().unwrap();
         let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
 
-        let error = sqlx::query(
-            "INSERT INTO account (name, kind, can_cast, created_at) VALUES ('Test', 'adult', 2, 0)",
-        )
-        .execute(&mut connection)
-        .await
-        .expect_err("booleans are INTEGER NOT NULL CHECK (x IN (0,1))");
-
-        assert!(error.to_string().contains("CHECK"), "got {error}");
+        for (column, sql) in BOOLEAN_REJECTS.iter().copied() {
+            let error = statement(&mut connection, sql)
+                .await
+                .expect_err(&format!("`{column}` must reject 2"));
+            assert!(error.to_string().contains("CHECK"), "{column}: got {error}");
+        }
     }
 
     async fn insert_job(
@@ -357,7 +1421,10 @@ mod tests {
         .map(|_| ())
     }
 
-    /// I12: a terminal job row is never used for dedupe, so it must not occupy the key.
+    /// I12 and PG-E3-08: the dedupe index is partial over the non-terminal states, so the
+    /// key is occupied while the work is live and released the moment the job reaches a
+    /// terminal state. `job_dedupe_uq` is defined by migration 0001; 0006 is the migration
+    /// PG-E3-08 owns and this is the acceptance it is gated on.
     #[tokio::test]
     async fn the_dedupe_index_excludes_terminal_jobs_and_null_keys() {
         let directory = TempDir::new().unwrap();
@@ -372,9 +1439,27 @@ mod tests {
                 .is_err(),
             "two non-terminal jobs must not share a dedupe key"
         );
-        insert_job(&mut connection, "succeeded", Some("tmdb:1"))
+
+        // The key stays occupied while the live row moves between non-terminal states and
+        // is released only by a terminal one.
+        sqlx::query("UPDATE job SET state = 'running' WHERE dedupe_key = 'tmdb:1'")
+            .execute(&mut connection)
             .await
-            .expect("a terminal job frees the key");
+            .unwrap();
+        assert!(
+            insert_job(&mut connection, "deferred", Some("tmdb:1"))
+                .await
+                .is_err(),
+            "a running job still occupies the key"
+        );
+        sqlx::query("UPDATE job SET state = 'failed' WHERE dedupe_key = 'tmdb:1'")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        insert_job(&mut connection, "queued", Some("tmdb:1"))
+            .await
+            .expect("a terminal job frees the key for a retry");
+
         insert_job(&mut connection, "succeeded", Some("tmdb:1"))
             .await
             .expect("terminal jobs are not deduplicated at all");
@@ -415,11 +1500,11 @@ mod tests {
         let mut second = open_writer_connection(&path).await.unwrap();
         let applied = apply(&mut second).await.unwrap();
 
-        assert_eq!(applied, 1);
+        assert_eq!(applied, 7);
         assert_eq!(
             versions(&mut second).await,
-            vec![1],
-            "a second run must not record the migration twice"
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "a second run must not record the migrations twice"
         );
     }
 
@@ -488,6 +1573,589 @@ mod tests {
         .fetch_all(&mut *connection)
         .await
         .unwrap()
+    }
+
+    /// Every foreign key the seven migrations declare, with the delete behaviour that
+    /// `pragma_foreign_key_list` reports. A dropped `ON DELETE` clause is invisible to
+    /// `pragma_table_info`, so it gets its own test.
+    #[tokio::test]
+    async fn the_documented_foreign_keys_carry_their_delete_behaviour() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+
+        let mut actual = Vec::new();
+        for table in DOCUMENTED_TABLES {
+            for (parent, from, to, on_delete) in foreign_keys(&mut connection, table).await {
+                actual.push((table.to_owned(), parent, from, to, on_delete));
+            }
+        }
+
+        let mut expected: Vec<(String, String, String, String, String)> = DOCUMENTED_FOREIGN_KEYS
+            .iter()
+            .map(|(child, parent, from, to, on_delete)| {
+                (
+                    (*child).to_owned(),
+                    (*parent).to_owned(),
+                    (*from).to_owned(),
+                    (*to).to_owned(),
+                    (*on_delete).to_owned(),
+                )
+            })
+            .collect();
+        actual.sort();
+        expected.sort();
+
+        assert_eq!(actual, expected);
+    }
+
+    /// I1: exactly one `external_id` row per `(provider, value)`, and exactly one owner
+    /// column set on any row.
+    #[tokio::test]
+    async fn an_external_id_has_one_owner_and_is_unique_per_provider() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        statement(
+            &mut connection,
+            "INSERT INTO external_id (title_id, provider, value, fetched_at) \
+             VALUES (1, 'imdb', 'tt0078748', 0)",
+        )
+        .await
+        .unwrap();
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO external_id (title_id, provider, value, fetched_at) \
+                 VALUES (1, 'imdb', 'tt0078748', 0)",
+            )
+            .await
+            .is_err(),
+            "I1: a second row for the same (provider, value) must be rejected"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO external_id (title_id, provider, value, fetched_at) \
+             VALUES (1, 'tmdb', 'tt0078748', 0)",
+        )
+        .await
+        .expect("the same value from another provider is a different identifier");
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO external_id (title_id, person_id, provider, value, fetched_at) \
+                 VALUES (1, 1, 'tvdb', 'x', 0)",
+            )
+            .await
+            .is_err(),
+            "exactly one owner column may be set"
+        );
+    }
+
+    /// PG-E3-05: every catalogue `UNIQUE` constraint, each proven by a refused duplicate.
+    #[tokio::test]
+    async fn the_catalogue_unique_constraints_reject_duplicates() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        for (label, sql) in [
+            (
+                "title_alias (title_id, alias, region)",
+                "INSERT INTO title_alias (title_id, alias, region) VALUES (1, 'Alien', 'US')",
+            ),
+            (
+                "genre.name",
+                "INSERT INTO genre (name) VALUES ('Science Fiction')",
+            ),
+            (
+                "keyword.name",
+                "INSERT INTO keyword (name) VALUES ('space')",
+            ),
+            (
+                "company (name, provider)",
+                "INSERT INTO company (name, provider) VALUES ('Weyland-Yutani', 'tmdb')",
+            ),
+            (
+                "credit (title_id, person_id, kind, job, character)",
+                "INSERT INTO credit (title_id, person_id, kind, job, character) \
+                 VALUES (1, 1, 'cast', 'Actor', 'Ripley')",
+            ),
+        ] {
+            statement(&mut connection, sql)
+                .await
+                .unwrap_or_else(|error| panic!("the first row of {label} is free: {error}"));
+            assert!(
+                statement(&mut connection, sql).await.is_err(),
+                "{label} must reject a duplicate"
+            );
+        }
+
+        statement(
+            &mut connection,
+            "INSERT INTO company (name, provider) VALUES ('Weyland-Yutani', 'imdb')",
+        )
+        .await
+        .expect("the same name from another provider is a different company");
+    }
+
+    /// I7 and PG-E3-05: a season number is unique within its title, and an episode number
+    /// within its title and season.
+    #[tokio::test]
+    async fn an_episode_is_unique_within_its_title_and_season() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO season (title_id, season_number, updated_at) VALUES (1, 1, 0)",
+            )
+            .await
+            .is_err(),
+            "I7: a season number is unique within its title"
+        );
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO episode (title_id, season_id, season_number, episode_number, updated_at) \
+                 VALUES (1, 1, 1, 1, 0)",
+            )
+            .await
+            .is_err(),
+            "I7: an episode number is unique within its title and season"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO episode (title_id, season_id, season_number, episode_number, updated_at) \
+             VALUES (1, 1, 1, 2, 0)",
+        )
+        .await
+        .expect("the next episode number is free");
+        statement(
+            &mut connection,
+            "INSERT INTO season (id, title_id, season_number, updated_at) VALUES (2, 1, 2, 0)",
+        )
+        .await
+        .expect("a second season is free");
+        statement(
+            &mut connection,
+            "INSERT INTO episode (title_id, season_id, season_number, episode_number, updated_at) \
+             VALUES (1, 2, 2, 1, 0)",
+        )
+        .await
+        .expect("season 2 episode 1 is a different key");
+    }
+
+    /// I2 and PG-E3-06: `media_item_movie_uq` and `media_item_episode_uq` are partial, so a
+    /// movie item and an episode item for the same title coexist while a second item for
+    /// either target is refused.
+    #[tokio::test]
+    async fn one_media_item_per_movie_and_one_per_episode() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO media_item (title_id, state, origin, created_at, updated_at) \
+                 VALUES (1, 'wanted', 'scan', 0, 0)",
+            )
+            .await
+            .is_err(),
+            "I2: a movie item exists at most once per title"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO media_item (title_id, episode_id, state, origin, created_at, updated_at) \
+             VALUES (1, 1, 'wanted', 'scan', 0, 0)",
+        )
+        .await
+        .expect("an episode item may coexist with the movie item");
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO media_item (title_id, episode_id, state, origin, created_at, updated_at) \
+                 VALUES (1, 1, 'wanted', 'scan', 0, 0)",
+            )
+            .await
+            .is_err(),
+            "I2: an episode item exists at most once per episode"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO episode (id, title_id, season_id, season_number, episode_number, updated_at) \
+             VALUES (2, 1, 1, 1, 2, 0)",
+        )
+        .await
+        .unwrap();
+        statement(
+            &mut connection,
+            "INSERT INTO media_item (title_id, episode_id, state, origin, created_at, updated_at) \
+             VALUES (1, 2, 'wanted', 'scan', 0, 0)",
+        )
+        .await
+        .expect("another episode is a different key");
+        statement(
+            &mut connection,
+            "INSERT INTO media_item (title_id, state, origin, created_at, updated_at) \
+             VALUES (2, 'wanted', 'scan', 0, 0)",
+        )
+        .await
+        .expect("another title's movie is a different key");
+    }
+
+    /// I3: two items never claim one file.
+    #[tokio::test]
+    async fn a_media_file_path_is_unique() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        let first = "INSERT INTO media_file (media_item_id, path, size_bytes, mtime_ms, added_at, updated_at) \
+                     VALUES (1, '/media/alien.mkv', 1, 0, 0, 0)";
+        statement(&mut connection, first).await.unwrap();
+        assert!(
+            statement(&mut connection, first).await.is_err(),
+            "I3: a path belongs to at most one media_file row"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO media_file (media_item_id, path, size_bytes, mtime_ms, added_at, updated_at) \
+             VALUES (1, '/media/alien.1080p.mkv', 1, 0, 0, 0)",
+        )
+        .await
+        .expect("a different path is a different file");
+    }
+
+    /// PG-E3-07: `entity_key` is generated from the target, which is what the unique
+    /// constraint and the Continue Watching partial index (asserted above) are built on.
+    #[tokio::test]
+    async fn watch_progress_entity_key_is_generated_from_the_target() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        statement(
+            &mut connection,
+            "INSERT INTO watch_progress (account_id, title_id, position_ms, updated_at) \
+             VALUES (1, 1, 0, 0)",
+        )
+        .await
+        .unwrap();
+        statement(
+            &mut connection,
+            "INSERT INTO watch_progress (account_id, title_id, episode_id, position_ms, updated_at) \
+             VALUES (1, 1, 1, 0, 0)",
+        )
+        .await
+        .unwrap();
+
+        let keys: Vec<String> =
+            sqlx::query_scalar("SELECT entity_key FROM watch_progress ORDER BY entity_key")
+                .fetch_all(&mut connection)
+                .await
+                .unwrap();
+        assert_eq!(
+            keys,
+            vec!["e1", "t1"],
+            "a movie is 't<title_id>' and an episode is 'e<episode_id>'"
+        );
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO watch_progress (account_id, title_id, position_ms, updated_at) \
+                 VALUES (1, 1, 0, 0)",
+            )
+            .await
+            .is_err(),
+            "the generated key is part of UNIQUE (account_id, entity_key)"
+        );
+    }
+
+    /// The expression index wraps both targets in `COALESCE`, so a re-download is refused
+    /// even when the two target columns are NULL rather than only when they are set.
+    #[tokio::test]
+    async fn a_subtitle_download_is_idempotent_for_the_same_target() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        let null_target = "INSERT INTO subtitle_download \
+            (media_file_id, episode_id, provider, provider_subtitle_id, language, score, created_at) \
+            VALUES (NULL, NULL, 'opensubtitles', '123', 'en', 1.0, 0)";
+        statement(&mut connection, null_target).await.unwrap();
+        assert!(
+            statement(&mut connection, null_target).await.is_err(),
+            "two NULL targets must still collide through COALESCE"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO subtitle_download \
+             (media_file_id, episode_id, provider, provider_subtitle_id, language, score, created_at) \
+             VALUES (NULL, 1, 'opensubtitles', '123', 'en', 1.0, 0)",
+        )
+        .await
+        .expect("a different target is a different download");
+    }
+
+    /// I13: a suppressed notification always records why; nothing is dropped silently.
+    #[tokio::test]
+    async fn a_suppressed_notification_must_record_its_reason() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+
+        assert!(
+            statement(
+                &mut connection,
+                "INSERT INTO notification (event, title, delivery_state, created_at) \
+                 VALUES ('download.completed', 'Done', 'suppressed', 0)",
+            )
+            .await
+            .is_err(),
+            "I13: a suppressed notification without a reason must be rejected"
+        );
+        statement(
+            &mut connection,
+            "INSERT INTO notification (event, title, delivery_state, suppressed_reason, created_at) \
+             VALUES ('download.completed', 'Done', 'suppressed', 'quiet_hours', 0)",
+        )
+        .await
+        .expect("a suppressed notification that records its reason is stored");
+        statement(
+            &mut connection,
+            "INSERT INTO notification (event, title, delivery_state, created_at) \
+             VALUES ('download.completed', 'Done', 'delivered', 0)",
+        )
+        .await
+        .expect("only suppression requires a reason");
+    }
+
+    /// One row in every user-data table, so the I9 test can show that the cache tier's
+    /// removal changes none of them. The two cache tables get a row in the test itself.
+    const USER_DATA_FIXTURES: &[&str] = &[
+        "INSERT INTO settings (key, value_json, updated_at) VALUES ('theme', '\"dark\"', 0)",
+        "INSERT INTO secret_ref (key, keyring_service, keyring_account, created_at) \
+         VALUES ('tmdb.api_key', 'peregrine', 'tmdb', 0)",
+        "INSERT INTO job (kind, state, payload_json, created_at) VALUES ('library.scan', 'queued', '{}', 0)",
+        "INSERT INTO event_log (at, kind) VALUES (0, 'media.added')",
+        "INSERT INTO title_alias (title_id, alias, region) VALUES (1, 'Alien', 'US')",
+        "INSERT INTO external_id (title_id, provider, value, fetched_at) VALUES (1, 'imdb', 'tt0078748', 0)",
+        "INSERT INTO genre (id, name) VALUES (1, 'Science Fiction')",
+        "INSERT INTO title_genre (title_id, genre_id) VALUES (1, 1)",
+        "INSERT INTO keyword (id, name) VALUES (1, 'space')",
+        "INSERT INTO title_keyword (title_id, keyword_id) VALUES (1, 1)",
+        "INSERT INTO title_company (title_id, company_id, role) VALUES (1, 1, 'production')",
+        "INSERT INTO credit (title_id, person_id, kind, job, character) \
+         VALUES (1, 1, 'cast', 'Actor', 'Ripley')",
+        "INSERT INTO episode_ordering (episode_id, scheme, season_number, episode_number) \
+         VALUES (1, 'dvd', 1, 1)",
+        "INSERT INTO media_file (media_item_id, path, size_bytes, mtime_ms, added_at, updated_at) \
+         VALUES (1, '/media/alien.mkv', 1, 0, 0, 0)",
+        "INSERT INTO unmatched_file (path, size_bytes, mtime_ms, first_seen_at) \
+         VALUES ('/media/unknown.mkv', 1, 0, 0)",
+        "INSERT INTO subtitle_track (episode_id, origin, format, language) \
+         VALUES (1, 'external', 'srt', 'en')",
+        "INSERT INTO subtitle_download \
+         (episode_id, provider, provider_subtitle_id, language, score, created_at) \
+         VALUES (1, 'opensubtitles', '123', 'en', 1.0, 0)",
+        "INSERT INTO watch_progress (account_id, title_id, position_ms, updated_at) VALUES (1, 1, 0, 0)",
+        "INSERT INTO watchlist_entry (account_id, title_id, added_at) VALUES (1, 1, 0)",
+        "INSERT INTO smart_collection (name, query_json, sort, created_at) \
+         VALUES ('Recently added', '{}', 'created_at DESC', 0)",
+        "INSERT INTO quality_profile (name, rules_json, cutoff_rank, updated_at) \
+         VALUES ('Any', '{}', 0, 0)",
+        "INSERT INTO indexer (kind, name) VALUES ('builtin', 'Local')",
+        "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
+         VALUES (1, 'queued', 'Alien 1979 1080p', '/downloads', 0)",
+        "INSERT INTO download_file (download_job_id, torrent_file_index, path, size_bytes) \
+         VALUES (1, 0, 'alien.mkv', 1)",
+        "INSERT INTO release_decision \
+         (download_job_id, title_id, release_title, score, rank_position, reasons_json, created_at) \
+         VALUES (1, 1, 'Alien 1979 1080p', 1.0, 1, '{}', 0)",
+        "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, language) \
+         VALUES ('title', 1, 'poster', 'tmdb', '/poster.jpg', 'en')",
+        "INSERT INTO dataset_state (name) VALUES ('imdb.ratings')",
+        "INSERT INTO notification (event, title, created_at) \
+         VALUES ('download.completed', 'Download complete', 0)",
+        "INSERT INTO cast_session (device_id, state, delivery, started_at) \
+         VALUES (1, 'playing', 'direct', 0)",
+        "INSERT INTO provider_cache \
+         (key, provider, resource, fetched_at, expires_at, schema_version, body, size_bytes) \
+         VALUES ('sha256:provider', 'tmdb', 'movie', 0, 0, 1, X'00', 1)",
+        "INSERT INTO image_cache \
+         (key, provider, path, variant, disk_path, bytes, created_at, last_used_at) \
+         VALUES ('sha256:image', 'tmdb', '/poster.jpg', 'w342', '/cache/ab.webp', 1, 0, 0)",
+    ];
+
+    /// One `COUNT(*)` per user-data table, as a single static query. A dynamic
+    /// `SELECT COUNT(*) FROM {table}` would be refused by `sqlx`'s injection guard,
+    /// correctly, so the table list is a literal and the comparison is in Rust.
+    const USER_DATA_COUNTS: &str = "
+        SELECT 'account' AS table_name, COUNT(*) AS n FROM account
+        UNION ALL
+        SELECT 'cast_session' AS table_name, COUNT(*) AS n FROM cast_session
+        UNION ALL
+        SELECT 'company' AS table_name, COUNT(*) AS n FROM company
+        UNION ALL
+        SELECT 'credit' AS table_name, COUNT(*) AS n FROM credit
+        UNION ALL
+        SELECT 'dataset_state' AS table_name, COUNT(*) AS n FROM dataset_state
+        UNION ALL
+        SELECT 'device' AS table_name, COUNT(*) AS n FROM device
+        UNION ALL
+        SELECT 'download_file' AS table_name, COUNT(*) AS n FROM download_file
+        UNION ALL
+        SELECT 'download_job' AS table_name, COUNT(*) AS n FROM download_job
+        UNION ALL
+        SELECT 'episode' AS table_name, COUNT(*) AS n FROM episode
+        UNION ALL
+        SELECT 'episode_ordering' AS table_name, COUNT(*) AS n FROM episode_ordering
+        UNION ALL
+        SELECT 'event_log' AS table_name, COUNT(*) AS n FROM event_log
+        UNION ALL
+        SELECT 'external_id' AS table_name, COUNT(*) AS n FROM external_id
+        UNION ALL
+        SELECT 'genre' AS table_name, COUNT(*) AS n FROM genre
+        UNION ALL
+        SELECT 'image_ref' AS table_name, COUNT(*) AS n FROM image_ref
+        UNION ALL
+        SELECT 'indexer' AS table_name, COUNT(*) AS n FROM indexer
+        UNION ALL
+        SELECT 'job' AS table_name, COUNT(*) AS n FROM job
+        UNION ALL
+        SELECT 'keyword' AS table_name, COUNT(*) AS n FROM keyword
+        UNION ALL
+        SELECT 'library_root' AS table_name, COUNT(*) AS n FROM library_root
+        UNION ALL
+        SELECT 'media_file' AS table_name, COUNT(*) AS n FROM media_file
+        UNION ALL
+        SELECT 'media_item' AS table_name, COUNT(*) AS n FROM media_item
+        UNION ALL
+        SELECT 'notification' AS table_name, COUNT(*) AS n FROM notification
+        UNION ALL
+        SELECT 'person' AS table_name, COUNT(*) AS n FROM person
+        UNION ALL
+        SELECT 'quality_profile' AS table_name, COUNT(*) AS n FROM quality_profile
+        UNION ALL
+        SELECT 'release_decision' AS table_name, COUNT(*) AS n FROM release_decision
+        UNION ALL
+        SELECT 'season' AS table_name, COUNT(*) AS n FROM season
+        UNION ALL
+        SELECT 'secret_ref' AS table_name, COUNT(*) AS n FROM secret_ref
+        UNION ALL
+        SELECT 'settings' AS table_name, COUNT(*) AS n FROM settings
+        UNION ALL
+        SELECT 'smart_collection' AS table_name, COUNT(*) AS n FROM smart_collection
+        UNION ALL
+        SELECT 'subtitle_download' AS table_name, COUNT(*) AS n FROM subtitle_download
+        UNION ALL
+        SELECT 'subtitle_track' AS table_name, COUNT(*) AS n FROM subtitle_track
+        UNION ALL
+        SELECT 'title' AS table_name, COUNT(*) AS n FROM title
+        UNION ALL
+        SELECT 'title_alias' AS table_name, COUNT(*) AS n FROM title_alias
+        UNION ALL
+        SELECT 'title_company' AS table_name, COUNT(*) AS n FROM title_company
+        UNION ALL
+        SELECT 'title_genre' AS table_name, COUNT(*) AS n FROM title_genre
+        UNION ALL
+        SELECT 'title_keyword' AS table_name, COUNT(*) AS n FROM title_keyword
+        UNION ALL
+        SELECT 'unmatched_file' AS table_name, COUNT(*) AS n FROM unmatched_file
+        UNION ALL
+        SELECT 'watch_progress' AS table_name, COUNT(*) AS n FROM watch_progress
+        UNION ALL
+        SELECT 'watchlist_entry' AS table_name, COUNT(*) AS n FROM watchlist_entry
+    ";
+
+    /// The two disposable tables, counted before they are dropped.
+    const CACHE_COUNTS: &str = "
+        SELECT 'image_cache' AS table_name, COUNT(*) AS n FROM image_cache
+        UNION ALL
+        SELECT 'provider_cache' AS table_name, COUNT(*) AS n FROM provider_cache
+    ";
+
+    /// I9 and PG-E3-09: `provider_cache` and `image_cache` are always droppable without
+    /// loss of user data. Nothing may reference them, and dropping both must leave every
+    /// other table, and every row in it, exactly as it was.
+    #[tokio::test]
+    async fn dropping_the_cache_tables_loses_no_user_data() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+        write_all(&mut connection, USER_DATA_FIXTURES).await;
+
+        // Nothing depends on the cache tier; that is what makes it disposable.
+        for table in DOCUMENTED_TABLES {
+            for (parent, from, ..) in foreign_keys(&mut connection, table).await {
+                assert!(
+                    !CACHE_TIER.contains(&parent.as_str()),
+                    "{table}.{from} depends on the cache tier, so I9 does not hold"
+                );
+            }
+        }
+
+        // `UNION ALL` does not promise a row order, so every comparison is on a sorted
+        // `Vec` rather than on the order the planner happened to return.
+        let mut before: Vec<(String, i64)> = sqlx::query_as(USER_DATA_COUNTS)
+            .fetch_all(&mut connection)
+            .await
+            .unwrap();
+        before.sort();
+        let schema_before = schema_without_cache(&mut connection).await;
+        assert_eq!(
+            before.len(),
+            DOCUMENTED_TABLES.len() - CACHE_TIER.len(),
+            "one count per user-data table: {before:?}"
+        );
+        assert!(
+            before.iter().all(|(_, count)| *count > 0),
+            "the fixture must hold a row in every user-data table: {before:?}"
+        );
+        let mut cache_rows: Vec<(String, i64)> = sqlx::query_as(CACHE_COUNTS)
+            .fetch_all(&mut connection)
+            .await
+            .unwrap();
+        cache_rows.sort();
+        assert_eq!(
+            cache_rows,
+            vec![
+                ("image_cache".to_owned(), 1),
+                ("provider_cache".to_owned(), 1)
+            ],
+            "each cache table holds a representative row"
+        );
+
+        for drop in ["DROP TABLE provider_cache", "DROP TABLE image_cache"] {
+            sqlx::query(drop).execute(&mut connection).await.unwrap();
+        }
+
+        let mut after: Vec<(String, i64)> = sqlx::query_as(USER_DATA_COUNTS)
+            .fetch_all(&mut connection)
+            .await
+            .unwrap();
+        after.sort();
+        assert_eq!(
+            after, before,
+            "I9: dropping the cache tier must not remove or change a user-data row"
+        );
+        assert_eq!(
+            schema_without_cache(&mut connection).await,
+            schema_before,
+            "I9: the rest of the schema must be unchanged"
+        );
+
+        // The catalogue still renders: the artwork reference it reads survived the drop.
+        let poster: String = sqlx::query_scalar(
+            "SELECT path FROM image_ref WHERE owner_kind = 'title' AND owner_id = 1",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+        assert_eq!(poster, "/poster.jpg");
     }
 
     /// The database handle must expose the same schema the raw connection does.

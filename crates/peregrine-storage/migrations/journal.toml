@@ -6,3 +6,27 @@
 [[migration]]
 file = "0001_init.sql"
 sha256 = "120b6ac64841d152d4061cbf354972b9785a37077f44ba3bd571d5e719fb26f8"
+
+[[migration]]
+file = "0002_catalogue.sql"
+sha256 = "0ce3808ff66aae366c1220c1e0f2999e0aff097fcb6533bc23cf11c26827f0d9"
+
+[[migration]]
+file = "0003_seasons_and_episodes.sql"
+sha256 = "28526f16fbdde936845a49e8eaa8eb2258577736d0d9ba8799d7c15668868934"
+
+[[migration]]
+file = "0004_library.sql"
+sha256 = "d1d63465fecfa072c691e7f3b3150b1dcb65cf5f4c8dc3292aa7fda4f274f2ef"
+
+[[migration]]
+file = "0005_subtitles_and_watch_state.sql"
+sha256 = "e84672d51ebc1e87e3c7a34eae07e5d2a74330ab9199ae545e3703ea07ee605d"
+
+[[migration]]
+file = "0006_acquisition.sql"
+sha256 = "0252cbe707df28a3f4acb6be697169aafde4d5d99aab435cb93d4b40c78317e0"
+
+[[migration]]
+file = "0007_cache_and_platform.sql"
+sha256 = "a52dcc88a432333925644c962b1eb7e35a387e2d27c0ec5bc5cddd4033273955"
