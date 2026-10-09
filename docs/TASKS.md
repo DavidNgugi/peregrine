@@ -133,12 +133,12 @@ graph LR
 | PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | done |
 | PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | done |
 | PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | done |
-| PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | todo |
-| PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | todo |
-| PG-E3-06 | Migration 0004: library tables including partial unique indices | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M | todo |
-| PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | todo |
-| PG-E3-08 | Migration 0006: acquisition tables including `release_decision` | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M | todo |
-| PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S | todo |
+| PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | done |
+| PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | done |
+| PG-E3-06 | Migration 0004: library tables including partial unique indices | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M | done |
+| PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | done |
+| PG-E3-08 | Migration 0006: acquisition tables including `release_decision` | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M | done |
+| PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S | done |
 | PG-E3-10 | Type-safe repositories per aggregate with row mappers | Round-trip property test for every entity | PG-E3-04 | L | todo |
 | PG-E3-11 | Keyset pagination helper used by every list query | `OFFSET` is absent from the codebase, enforced by grep gate | PG-E3-10 | S | todo |
 | PG-E3-12 | FTS5 contentless table with explicit maintenance and rebuild command | Rebuild reproduces identical search results | PG-E3-04 | M | todo |
