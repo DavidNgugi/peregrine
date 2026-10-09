@@ -527,7 +527,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E21-01 | Token pipeline: OKLCH palettes, semantic roles, contrast validator | Every shipped theme passes WCAG AA for text and controls | PG-E0-02 | L | todo |
+| PG-E21-01 | Token pipeline: OKLCH palettes, semantic roles, contrast validator | Every shipped theme passes WCAG AA for text and controls | PG-E0-02 | L | doing |
 | PG-E21-02 | Theme runtime: light, dark, system, custom, per-OS accent integration | Switching is instant with no re-render or flash | PG-E21-01, PG-E22-02 | M | todo |
 | PG-E21-03 | Primitive components: button, input, select, checkbox, radio, slider, tabs, tooltip, popover, dialog, sheet, toast, menu, table, skeleton | Each has states, keyboard behaviour, and a visual snapshot | PG-E21-01 | L | todo |
 | PG-E21-04 | Domain components: title card, rail, hero, episode row, device row, progress ring, job row, filter bar | Reused across at least two screens each | PG-E21-03 | L | todo |
@@ -555,7 +555,7 @@ graph LR
 | --- | --- | --- | --- | --- |
 | PG-E22-01 | Logo and wordmark: primary, mono, and small-size variants | Legible at 16 px; ships as SVG with a single currentColor path set | — | M | todo |
 | PG-E22-02 | App icon per OS: macOS squircle with safe margins, Windows multi-size `.ico`, Linux PNG set | Passes each platform's iconography guidelines | PG-E22-01 | M | todo |
-| PG-E22-03 | Shipped themes: Default Dark, Default Light, Midnight, plus one high-contrast | Each passes contrast validation and visual snapshots | PG-E21-01 | M | todo |
+| PG-E22-03 | Shipped themes: Default Dark, Default Light, Midnight, plus one high-contrast | Each passes contrast validation and visual snapshots | PG-E21-01 | M | doing |
 | PG-E22-04 | Theme file format and a documented authoring guide | A community theme can be added without a rebuild | PG-E21-02 | M | todo |
 | PG-E22-05 | Theme import and export with validation | Invalid theme rejected with a clear reason | PG-E22-04 | S | todo |
 | PG-E22-06 | Wallpaper and backdrop treatment per theme, including a blur and dim policy | Text remains legible over any backdrop | PG-E22-03 | S | todo |
