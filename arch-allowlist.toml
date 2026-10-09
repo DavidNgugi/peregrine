@@ -315,15 +315,8 @@ may_depend_on = [
   "peregrine-storage",
 ]
 runtime = [
-  "backon",
-  "blurhash",
-  "dashmap",
-  "fast_image_resize",
   "futures",
-  "image",
   "jiff",
-  "moka",
-  "serde",
   "thiserror",
   "tokio",
   "tokio-util",
