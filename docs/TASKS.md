@@ -51,6 +51,9 @@ graph LR
     E23[E23 A11y and i18n] --> E26[E26 Packaging]
     E25[E25 Observability] --> E26
     E27[E27 Test and perf infra] --> E26
+    E13 --> E36[E36 Homelab deployment]
+    E20 --> E36
+    E32[E32 Sharing and DLNA] --> E36
 ```
 
 ---
@@ -827,6 +830,45 @@ Specified in [adr/0019](./adr/0019-local-accounts-and-parental-gating.md). All l
 
 ---
 
+# Phase 9 — Roadmap (post-1.0): homelab deployment
+
+Specified in [adr/0020](./adr/0020-homelab-deployment.md). Homelab support is the headless `peregrine-server` from Phase 7 v1.4 made installable on a machine with no display: one container image, one state directory, and packaging generated for umbrelOS, Unraid, and NixOS from a single metadata source. **The browser console is not here** — it is E37 below, scoped but not broken down, and the umbrelOS App Store submission waits for it because the store's published standard requires a browser-first page after install.
+
+| Sub-phase | Content | Epics | Est |
+| --- | --- | --- | --- |
+| `v2.0.0` | Deployment configuration and secret backends, the container image, generated umbrelOS/Unraid/CasaOS/NixOS packaging, GPU transcode pass-through, desktop-as-a-client, and the deployment guide | E36 | ~56 d |
+| `v2.1.0` | Browser console served by the daemon: HTTP and WebSocket API, paired-device authentication, `AccountScope` enforcement, and browser playback. Requires its own record before implementation | E37 | not yet broken down |
+
+## E36 · Homelab deployment
+
+| ID | Task | Acceptance | Deps | Est | State |
+| --- | --- | --- | --- | --- | --- |
+| PG-E36-01 | Deployment configuration model: one config file plus the documented environment overlay for state root, media and download roots, port, bind interfaces, `PUID`/`PGID`, and log level, with file → environment → flag precedence | A malformed or unknown value fails startup naming the key and the source it came from; the same effective configuration produces identical behaviour through the file route and the environment route | PG-E20-02 | M | todo |
+| PG-E36-02 | Headless state-root layout and single-directory invariant: config, database and WAL, image cache, torrent session state, and logs all resolve under one declared path, created with owner-only permissions on first start | Moving the state root to a fresh volume and restarting reproduces the library with nothing written outside it; the pre-flight check refuses a state root inside a media root | PG-E36-01, PG-E3-09 | M | todo |
+| PG-E36-03 | Secret backend selection — keyring, owner-only file under the state root, or injected environment — with no silent fallback and a startup error naming the missing backend | With no keyring present the daemon does not start in keyring mode and says what to configure instead; the file backend writes mode `0600` and no secret reaches a log or a diagnostics bundle | PG-E36-01, PG-E24-05 | M | todo |
+| PG-E36-04 | Sidecar and runtime resolution on a server host: locate or vendor `ffmpeg`, `ffprobe`, and `mpv` with no desktop session, verify their checksums, and report a missing sidecar as a named capability loss rather than a crash | The daemon starts on a host with no `mpv` and states which features are unavailable; a tampered sidecar is refused and never executed | PG-E36-01, PG-E14-06 | M | todo |
+| PG-E36-05 | Container image: glibc-based, `linux/amd64` and `linux/arm64`, non-root with `PUID`/`PGID` applied at startup, one state directory, one injected `PORT`, all capabilities dropped, no writable root filesystem required, and an unauthenticated health endpoint returning liveness and version only. Docker **and Podman**, including rootless Podman, with no assumption of a Docker socket or the Docker CLI | The image starts as a non-root user with the requested `PUID`/`PGID` under Docker, rootful Podman, and rootless Podman, and writes only under the state root in all three; the health endpoint returns no library data, no path, and no token; a scan confirms no secret is baked into any layer | PG-E36-02, PG-E36-03, PG-E36-04 | XL | todo |
+| PG-E36-06 | Graceful shutdown under a platform stop timeout: drain or park active jobs, checkpoint the torrent session, flush and close SQLite, and exit cleanly on `SIGTERM`, with a forced-exit path that still leaves the database consistent | A download in flight and a job mid-write both survive a `SIGTERM` inside the timeout with no `SQLITE_BUSY`, no truncated WAL, and no orphaned lock; a second `SIGTERM` forces exit without corrupting state | PG-E36-05, PG-E3-06 | M | todo |
+| PG-E36-07 | Server-side networking: bind the configured interfaces rather than a blind `0.0.0.0`, honour the injected port, identify container bridge and VPN interfaces by name and range, and expose the listen port and discovery status in Diagnostics | Only configured interfaces are bound and advertised; a bridge address is never advertised by default; the UI states when mDNS is unavailable and offers QR and short-URL pairing instead | PG-E36-05, PG-E32-09 | M | todo |
+| PG-E36-08 | BitTorrent reachability on a homelab host: a documented host-networking path, a configurable listen port, and a reachability report that distinguishes outbound-works from inbound-blocked | Seeding works under host networking; under a bridge the diagnostics say plainly that inbound peers are blocked and name the port to forward, with no UPnP or NAT-PMP port mapping attempted anywhere | PG-E36-07, PG-E10-06 | M | todo |
+| PG-E36-09 | Read-only media-root support: detect write capability per configured root at configuration time, disable and label deletion, import, and export against a read-only root, and state each root's capability in Settings before any job depends on it | A read-only media root serves, scans, and plays with no failed job; every unavailable action is named before it is attempted; a refused write leaves no partial operation behind | PG-E36-02, PG-E14-19 | M | todo |
+| PG-E36-10 | GPU transcode pass-through for a container host: `/dev/dri` and render-group access when present, hardware encoder detection reported per host, and an honest software or direct-play fallback when neither exists | With no device passed the daemon reports software-only capability rather than failing; with a device passed the encoder is used and named in the session; the fallback never silently ships a different ffmpeg build ([adr/0014](./adr/0014-ffmpeg-build-and-transcode.md)) | PG-E36-05, PG-E19-03 | M | todo |
+| PG-E36-11 | Generated deployment metadata from one source: the image labels, the Compose file, the Quadlet/systemd unit, the umbrelOS app package (`umbrel-app.yml` plus `docker-compose.yml`, with its folder mounts and `GPU` permission declared), the Unraid Community Applications template, the CasaOS descriptor, and the NixOS module defaults | Regenerating from the metadata source is a no-op when nothing changed; a port or mount changed in one place appears in every generated surface or the gate fails; a host with no store still gets the Compose file and the unit | PG-E36-05, PG-E0-05 | L | todo |
+| PG-E36-12 | NixOS support: a derivation building the daemon from source plus a NixOS module creating the user and group, the state directory, a hardened systemd unit, and a firewall rule for the configured port only, with `nix-ld` and `appimage-run` documented for the desktop build | The module starts the daemon on a clean NixOS host with the state directory created and exactly one port opened; disabling it leaves no unit, no user, and no firewall rule behind; the desktop AppImage path is documented as unsupported and is not tested | PG-E36-05, PG-E36-11 | L | todo |
+| PG-E36-13 | Desktop app as a client of a remote daemon: a "connect to a server" mode bridging the existing IPC surface over the LAN, with paired tokens, reconnect and offline states, and a clear indication of which machine is being browsed | The full interface works against a remote daemon with no local library; losing the connection shows an offline state rather than an empty library; local-only features are named as unavailable on a remote source | PG-E36-05, PG-E32-10, PG-E2-04 | L | todo |
+| PG-E36-14 | Homelab deployment guide: Compose on Debian and Ubuntu Server, the umbrelOS community-store route, the Unraid template, the CasaOS descriptor, the Podman and Quadlet path on Fedora Server, and the NixOS module, with the state-root contract, the secret-backend choice, read-only roots, GPU pass-through, the port-forwarding caveat, and what is deliberately absent (no tray, no per-OS notifications, no trash-based delete) | A homelab user reaches a running daemon and a first library scan by following the guide on a host with no display and no desktop session, without reading source | PG-E36-17, PG-E36-12, PG-E28-07 | M | todo |
+| PG-E36-15 | Homelab test suite: `PUID`/`PGID` ownership, read-only root, missing keyring, bridge networking, injected port, rootless-Podman start, `SIGTERM` inside the platform timeout, state-root relocation across an update, sidecar absence, and four-way configuration equivalence, plus the licence and notice check against the image contents | Every listed condition injects cleanly in CI with no network; `xtask check-notices` passes against the image contents including the ffmpeg and mpv source offer; the equivalence test is permanent | PG-E36-05, PG-E36-06, PG-E36-09, PG-E36-11 | L | todo |
+| PG-E36-17 | Per-host deployment notes: Proxmox VE as an unprivileged LXC container or a VM with the media root bind-mounted and `PUID`/`PGID` matched into the host UID/GID map, XCP-ng as a Debian or Ubuntu guest, TrueNAS SCALE datasets and ACLs for the app user, and OpenMediaVault's Compose plugin path — each with an explicit statement that the container runtime does not go on a hypervisor host | Following a note on a real host of each kind reaches a running daemon with a working library; the Proxmox note shows the unprivileged mapping rather than a privileged container; the warning against installing the runtime on the Proxmox host itself is present and tested by review | PG-E36-05, PG-E36-07 | M | todo |
+| PG-E36-18 | `SPIKE-19`: install the image on a real umbrelOS host and a real Unraid host through the platform's own UI, and on a Proxmox unprivileged LXC and a TrueNAS SCALE host, recording volume ownership, ZFS ACL behaviour, GPU transcode reality, state across an update, the no-keyring case, and stop-timeout behaviour | Written findings appended to [adr/0020](./adr/0020-homelab-deployment.md); the E37 scope and the generated metadata defaults are decided by the findings rather than assumed | PG-E36-05, PG-E36-14, PG-E36-17 | M | todo |
+
+## E37 · Browser console (scoped, not broken down)
+
+A homelab user's expectation, and the umbrelOS App Store's published standard, is a page they open in a browser. That is a second client of the same core: an HTTP and WebSocket API, paired-device authentication, `AccountScope` enforcement on every read, and a decision about what playback means without mpv. It is deliberately not smuggled into E36. The App Store submission waits for it.
+
+E37 stays unwritten until E36 lands and `SPIKE-19` has reported, for the same reason E33–E34 stay unwritten in Phase 7: the first real homelab install changes the shape. It needs its own record for the API and session model before implementation starts.
+
+---
+
 ## Task count and effort roll-up
 
 Counted from this file programmatically (`xtask backlog-stats` will own this once the repo exists), not estimated by hand.
@@ -842,6 +884,7 @@ Counted from this file programmatically (`xtask backlog-stats` will own this onc
 | 6 Roadmap: monitoring and agent access | E30–E31 | 22 | 66 |
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
+| 9 Roadmap: homelab deployment | E36 written; E37 pending | 17 written | 56 |
 | **Full backlog (phases 0–5)** | | **472** | **1 115** |
 
 Two numbers matter, and they are different by design.
@@ -851,7 +894,7 @@ Two numbers matter, and they are different by design.
 | **Core 1.0** | Working discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, plus signed installers and updates | 225 | 577 (+30% contingency ≈ **750**) | This is a genuinely usable, shippable app |
 | **Full quality bar** | Everything in this file: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 472 | **1 115** | This is what "no known defects, every platform, every edge case" costs |
 
-Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down.
+Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
 
 The gap is the 1.x roadmap, not waste. Cutting the full bar to ship 1.0 sooner is a deliberate trade, not a shortcut, and [PLAN.md](./PLAN.md) §7 records what is deferred and why.
 

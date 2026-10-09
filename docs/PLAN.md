@@ -23,6 +23,8 @@ graph LR
     P5 --> P6["Phase 6 (post-1.0)<br/>monitoring + agent access"]
     P6 --> P7["Phase 7 (post-1.0)<br/>media server"]
     P7 --> P8["Phase 8 (post-1.0)<br/>accounts + parental gating"]
+    P7 --> P9["Phase 9 (post-1.0)<br/>homelab deployment"]
+    P8 --> P9
     P0 -.->|"SPIKE-1, SPIKE-3"| P3
     P0 -.->|"SPIKE-6, SPIKE-4"| P4
     P2 -.->|"SPIKE-7"| P1
@@ -203,6 +205,26 @@ Committed roadmap, excluded from the 1.0 figures, specified in [adr/0019](./adr/
 
 **Exit criteria:** `SPIKE-17` confirms each OS mechanism on real hardware, including the case where none exists; `SPIKE-18`'s leak suite passes with every indirect path covered and is permanent; a child account cannot create a download job through any route; and a denied switch leaves the child account active with no hint about what was behind the gate.
 
+### Phase 9 — Roadmap: homelab deployment · 56 ideal days written (E36) · `v2.0.0`
+
+Committed roadmap, excluded from the 1.0 figures, specified in [adr/0020](./adr/0020-homelab-deployment.md). Homelab support is the headless daemon that Phase 7 v1.4 already requires, made installable and operable on a machine with no display. The target is the four deployment patterns in that record rather than a list of distributions: **OCI with Compose** (Debian, Ubuntu Server, OpenMediaVault, TrueNAS SCALE, Unraid, umbrelOS, CasaOS), **Podman under systemd** (Fedora Server and CoreOS), **a guest on a hypervisor** (Proxmox VE, XCP-ng), and **Nix** (NixOS). **v2.0 is the active sub-phase and is broken down as E36 (17 tasks, 56 ideal days). E37 (browser console) and the App Store submission are scoped but not yet broken down.**
+
+`v2.0.0` — Deployment (~56 ideal days) · E36, active
+
+| Deliverable | Detail |
+| --- | --- |
+| Deployment configuration | One config file plus a documented environment overlay: state root, media and download roots, port, bind interfaces, `PUID`/`PGID`, and log level. Precedence stated once and validated at startup, with every failure naming the value that is wrong |
+| Secrets without a keyring | An explicit backend selection — keyring, owner-only file, or environment — with no silent fallback to the weakest option, and plain wording about what a file-backed store does and does not protect |
+| Container image | glibc-based, `amd64` and `arm64`, non-root with `PUID`/`PGID`, one state directory, one injected port, an unauthenticated health endpoint, and grace-period shutdown that drains jobs and closes the torrent session |
+| Platform packaging | Generated from one metadata source rather than hand-written per host: the image labels, the Compose file, the Quadlet/systemd unit, the umbrelOS package, the Unraid template, the CasaOS descriptor, and the NixOS module defaults |
+| GPU transcode | `/dev/dri` and the render group passed through when present, the capability detected and shown per host, and an honest fallback when a host has no usable encoder ([adr/0018](./adr/0018-media-server.md) §5) |
+| Desktop as a client | A "connect to a server" mode in the existing GUI, bridging the same IPC surface to a remote daemon over the LAN instead of inventing a second client |
+| NixOS | A derivation plus a NixOS module: user and group, state directory, hardened systemd unit, and a firewall rule for the configured port only. `nix-ld` and `appimage-run` documented for the desktop build as a community path, not a supported artifact |
+| Hypervisors and NAS hosts | Proxmox VE as an unprivileged LXC container or a VM, XCP-ng as a guest, TrueNAS SCALE datasets and ACLs, and OpenMediaVault's Compose plugin — each with the warning that the container runtime does not belong on a hypervisor host |
+| Honesty in the UI | Read-only media roots reported before an operation depends on them, unavailable actions named rather than failing mid-job, and desktop-only features (per-OS notifications, tray, trash-based delete) stated as absent rather than silently inert |
+
+**Exit criteria:** `SPIKE-19` installs the image on a real umbrelOS host, a real Unraid host, a Proxmox unprivileged LXC container, and a TrueNAS SCALE host, through the platform's own UI where one exists, with no SSH afterwards, and records volume ownership, ZFS ACL behaviour, GPU transcode, state across an update, the no-keyring case, and a clean stop inside the platform timeout; the NixOS module starts the daemon on a clean host with the state directory created and only the configured port opened; the same state root, port, and media root behave identically through the config file, the environment overlay, Compose, and the module; `xtask check-notices` passes against the image's contents; and disabling the server leaves no listening socket on any interface.
+
 ---
 
 ## 3. Milestone dependency rationale
@@ -216,6 +238,7 @@ Committed roadmap, excluded from the 1.0 figures, specified in [adr/0019](./adr/
 | Playback after acquisition | Streaming playback needs sequential read-ahead, which needs the engine. Local-only playback could come earlier, but building the source abstraction twice is waste. |
 | Casting last among features | It depends on probe, player track selection, subtitles, and the HTTP server — all of which exist by then — and it is the feature with the highest chance of a documented limitation instead of full parity. |
 | Monitoring after 1.0 | It multiplies the notification, scheduler, and acquisition surfaces that must already be stable, and its value depends on a library that exists. Building it earlier would put long-lived persisted state on top of an unfinished schema |
+| Homelab deployment after the media server, not alongside it | A container is a delivery mechanism for a program, and the program it delivers is the headless `peregrine-server` from [adr/0018](./adr/0018-media-server.md) §3. Health checks, port injection, bind-interface selection, and a graceful stop cannot be packaged or tested before that mode exists, so the image would be guessing at an interface |
 | | Polish and motion before 1.0, not after | Motion, focus behaviour, and platform chrome change component structure. Retrofitting animation onto a finished UI is how apps end up feeling like websites. |
 
 ---
@@ -241,7 +264,7 @@ The phase figures below are the **critical-path** estimate: exactly the tasks in
 | Core 1.0 | 225 | ≈ 750 budgeted | Discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, signed installers and updates |
 | Full quality bar | 472 | ≈ 1 115 | Everything in TASKS.md, including casting, full i18n, an accessibility audit, soak and chaos programmes, per-OS package breadth, accounts, Trakt |
 
-The Phase 6 roadmap in §2 is **not** in these figures: monitoring and agent access add 22 tasks and ~66 ideal days on top, the media server adds roughly 90 more, and accounts with parental gating add 43, all tracked separately so the 1.0 numbers keep their meaning.
+The Phase 6 roadmap in §2 is **not** in these figures: monitoring and agent access add 22 tasks and ~66 ideal days on top, the media server adds roughly 90 more, accounts with parental gating add 43, and homelab deployment adds 56, all tracked separately so the 1.0 numbers keep their meaning.
 
 Calendar conversion. An "ideal day" is focused, uninterrupted work. A realistic full-time developer delivers about four effective days per week across a year once interruptions, review, debugging, and learning are counted, so budget **≈ 200 effective days per person-year**.
 
@@ -316,6 +339,7 @@ These are planning figures, not commitments. The risk register below is the hone
 | Subtitle OCR for PGS and VobSub | Niche, heavy dependency, slow | An acceptable on-device OCR story |
 | Built-in VPN management | OS-level leak safety is the user's to guarantee; a half-solution implies safety we cannot provide | — |
 | Android TV or mobile clients | Different product surface entirely | Extracting the core into a headless service |
+| A browser console for a homelab server, and the umbrelOS App Store listing that needs one | The deployment artifacts do not depend on it, and shipping a store listing whose page requires a terminal would fail the standard the store publishes. Scoped as E37 in [adr/0020](./adr/0020-homelab-deployment.md) §3 | E36, then its own record for the API and session model |
 
 ---
 
