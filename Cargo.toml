@@ -59,14 +59,23 @@ peregrine-sync = { path = "crates/peregrine-sync" }
 peregrine-testkit = { path = "crates/peregrine-testkit" }
 peregrine-torrent = { path = "crates/peregrine-torrent" }
 anyhow = { version = "1.0.104" }
+futures = { version = "0.3.34" }
 jiff = { version = "0.2.38", features = ["serde"] }
 proptest = { version = "1.11.0" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
 sha2 = { version = "0.11.0" }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "json", "macros"] }
+tauri = { version = "2.12.1" }
+tauri-build = { version = "2.7.1" }
 thiserror = { version = "2.0.21" }
 tempfile = { version = "3.27.0" }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+tokio-util = { version = "0.7.19" }
 toml = { version = "1.1.7" }
+tracing = { version = "0.1.44" }
+tracing-appender = { version = "0.2.5" }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "registry"] }
 ulid = { version = "3.0.0", features = ["serde"] }
 
 [workspace.lints.rust]
