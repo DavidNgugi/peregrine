@@ -9,8 +9,8 @@ Decisions with the alternatives they beat and the reason. Exact versions are pin
 | Layer | Choice | Rejected alternatives | Decisive reason |
 | --- | --- | --- | --- |
 | Shell | Tauri v2 | Electron, Qt, .NET MAUI, native Rust UI (egui/Iced/GPUI), Flutter | 10–15 MB installers versus 150 MB+, native webview per OS, a real Rust backend, and a genuine per-window permission model |
-| UI framework | React 19 + TypeScript 5 (strict) | Svelte 5, Solid, Vue | The animation-heavy virtualized grid is the hardest UI problem here; React's virtualizer, gesture, and query ecosystems are the most mature, and the perf cost is paid down by virtualization and composite-only animation |
-| Build | Vite 7 | Rspack, webpack, Turbopack | Fast HMR, first-class Tauri integration, no configuration tax |
+| UI framework | React 19 + TypeScript 7 (strict) | Svelte 5, Solid, Vue | The animation-heavy virtualized grid is the hardest UI problem here; React's virtualizer, gesture, and query ecosystems are the most mature, and the perf cost is paid down by virtualization and composite-only animation |
+| Build | Vite 8 | Rspack, webpack, Turbopack | Fast HMR, first-class Tauri integration, no configuration tax |
 | Styling | Tailwind CSS v4 + OKLCH CSS variables | CSS-in-JS (Emotion, styled-components), vanilla-extract, plain CSS modules | Zero runtime cost, tokens are real CSS custom properties so theme switching is an attribute swap with no re-render |
 | Component primitives | Radix primitives, styled in-repo | shadcn copies, MUI, Mantine, Chakra | All shipped presets look like a web app; we need behaviour and accessibility only, with our own visual layer |
 | Client state | TanStack Query + Zustand | Redux Toolkit, Jotai, SWR, TanStack DB | Server state and ephemeral UI state have different lifecycles; conflating them is the classic desktop-app performance bug |
