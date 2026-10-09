@@ -69,7 +69,7 @@ graph LR
 | PG-E0-03 | Tauri v2 scaffold with dev/build scripts and per-OS bundle identifiers | `pnpm tauri dev` opens a window on all three OSes | PG-E0-02 | S | review |
 | PG-E0-04 | `xtask check-arch` parses crate edges | Fails on a fixture violation, passes on the real tree | PG-E0-01 | M | done |
 | PG-E0-05 | `xtask check-migrations` hashes against the base branch | Fails when a merged migration is edited | PG-E0-01 | S | done |
-| PG-E0-06 | `xtask gen-ipc` regenerates TS bindings, CI diff gate | Committed bindings match regeneration byte-for-byte | PG-E2-01 | M | todo |
+| PG-E0-06 | `xtask gen-ipc` regenerates TS bindings, CI diff gate | Committed bindings match regeneration byte-for-byte | PG-E2-01 | M | done |
 | PG-E0-07 | `xtask check-todos` requires an issue reference on every TODO | Fails on a bare TODO fixture | — | XS | done |
 | PG-E0-08 | Rust formatting and lint policy | `cargo clippy -- -D warnings` clean; pedantic lints configured | PG-E0-01 | XS | done |
 | PG-E0-09 | TypeScript strict config and lint stack | `tsc --noEmit` clean with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` | PG-E0-02 | S | done |
@@ -113,7 +113,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E2-01 | `specta` + `tauri-specta` export pipeline and generated client, pinned to the exact `2.0.0-rc.25` RC (no stable 2.x exists) with a written fallback to hand-written DTOs | One Rust type change propagates to a compiling TS call site; the RC pin is exact | PG-E0-03 | M | todo |
+| PG-E2-01 | `specta` + `tauri-specta` export pipeline and generated client, pinned to the exact `2.0.0-rc.25` RC (no stable 2.x exists) with a written fallback to hand-written DTOs | One Rust type change propagates to a compiling TS call site; the RC pin is exact | PG-E0-03 | M | review |
 | PG-E2-02 | Structured `AppError` with stable codes and UI mapping | Every code has a message key and a retryability flag | PG-E2-01 | S | doing |
 | PG-E2-03 | Command registration with a ≤20-line rule and a lint check | A fixture command with logic fails the check | PG-E2-01 | S | todo |
 | PG-E2-04 | Event bus with namespaced, versioned topics | Topic names are declared in one manifest shared with TS | PG-E2-01 | M | todo |
@@ -589,7 +589,7 @@ graph LR
 | PG-E24-02 | Strict CSP with no remote origins in the main window | A CSP violation test page fails to load scripts | PG-E24-01 | M | todo |
 | PG-E24-03 | `PathGuard` implementation with canonicalization and root allowlist | Symlink escape and prefix-match escape attempts rejected | PG-E4-08 | M | todo |
 | PG-E24-04 | Remove or lock down every shell and opener capability | Media paths cannot be opened by the system handler | PG-E24-01, PG-E11-13 | S | todo |
-| PG-E24-05 | Secrets: keyring storage, `Secret` wrapper, redaction layer | A log-scanning test finds no key material across all log paths | PG-E20-04 | M | todo |
+| PG-E24-05 | Secrets: keyring storage, `Secret` wrapper, redaction layer | A log-scanning test finds no key material across all log paths | PG-E20-04 | M | doing |
 | PG-E24-06 | Sandboxed trailer webview with origin restrictions and no IPC access | Trailer cannot invoke any app command | PG-E7-14, PG-E24-01 | M | todo |
 | PG-E24-07 | Local HTTP hardening: token scope, no listing, no-store, session lifetime | Requests without a valid token are rejected; listing returns 404 | PG-E19-04 | M | todo |
 | PG-E24-08 | Fuzzing programme for parsers and protocol handlers with CI cadence | 24 h runs clean; corpus checked in | PG-E4-18 | M | todo |
@@ -606,7 +606,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels | Log level change applies at runtime | PG-E0-08 | M | todo |
+| PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels | Log level change applies at runtime | PG-E0-08 | M | done |
 | PG-E25-02 | Metrics registry: counters, histograms, per-provider and per-session | Exposed internally and rendered in Diagnostics | PG-E25-01 | M | todo |
 | PG-E25-03 | Log tail and export with a size cap and secret scrubbing | Exported bundle is inspectable before sending | PG-E25-01 | M | todo |
 | PG-E25-04 | Opt-in crash reporting with a self-hostable DSN, empty by default | No network call occurs when unconfigured (asserted) | PG-E24-13 | M | todo |
