@@ -11,6 +11,7 @@
 
 pub mod arch;
 pub mod backlog;
+pub mod deaddeps;
 pub mod migrations;
 pub mod report;
 pub mod todos;

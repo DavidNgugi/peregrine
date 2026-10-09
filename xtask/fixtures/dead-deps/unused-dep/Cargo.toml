@@ -1,0 +1,11 @@
+# A fixture for PG-E0-15: the dependency below is never named in the sources, so
+# the dead-dependency gate must fail here. It is a separate package, not a
+# workspace member, and it is never built — only scanned.
+[package]
+name = "unused-dep"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+definitely-never-referenced = "1.0.0"

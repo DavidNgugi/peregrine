@@ -46,6 +46,13 @@ jobs:
         run: cargo xtask check-todos
       - name: The declared backlog roll-up is not stale
         run: cargo xtask backlog-stats
+      # The gate runs its own negative fixture, so a cargo-machete upgrade that
+      # stops detecting unused dependencies fails here instead of reporting clean.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: No manifest declares a dependency its sources never use
+        run: cargo xtask check-dead-deps
 
   rust:
     name: rust (${{ matrix.os }})

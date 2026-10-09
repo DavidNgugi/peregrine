@@ -75,7 +75,7 @@ graph LR
 | PG-E0-12 | Issue templates and label taxonomy, milestones mapped to phases | Templates produce labelled issues | — | XS | review |
 | PG-E0-13 | CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 | Green on a trivial PR with cache warm | PG-E0-01 | M | review |
 | PG-E0-14 | Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit` | Build fails on an advisory fixture | PG-E0-13 | S | doing |
-| PG-E0-15 | Dead-dependency gate: `knip`, `cargo-machete` | Build fails on an unused fixture dependency | PG-E0-13 | XS | todo |
+| PG-E0-15 | Dead-dependency gate: `knip`, `cargo-machete` | Build fails on an unused fixture dependency | PG-E0-13 | XS | doing |
 | PG-E0-16 | Release workflow: bundles, SBOM, signed manifest, changelog | A tagged pre-release publishes artifacts and a manifest | PG-E0-13 | M | todo |
 | PG-E0-17 | Automated dependency updates, grouped weekly | A grouped PR opens on schedule | PG-E0-13 | XS | review |
 | PG-E0-18 | `LICENSE`, `NOTICE`, third-party attribution scaffold | Attribution file lists every runtime dependency and sidecar | — | S | doing |

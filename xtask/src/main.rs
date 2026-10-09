@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use xtask::{arch, backlog, migrations, todos, workspace};
+use xtask::{arch, backlog, deaddeps, migrations, todos, workspace};
 
 fn main() -> ExitCode {
     match run() {
@@ -72,6 +72,7 @@ fn run() -> Result<bool> {
             Ok(xtask::report::finish("check-todos", &report, checked))
         }
         "backlog-stats" => backlog::run(&root),
+        "check-dead-deps" => deaddeps::run(&root),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(true)
@@ -89,6 +90,7 @@ cargo xtask — repository gates
   check-migrations           migrations are append-only and journaled
   check-migrations --update  record new migrations (never rewrites an existing entry)
   check-todos                every deferral marker names a task or an issue
+  check-dead-deps            no manifest declares a dependency its sources never use
   backlog-stats              roll up docs/TASKS.md by phase and state
 
   --root <dir>               run against another tree, used by the fixture tests
