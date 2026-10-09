@@ -17,9 +17,10 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 
 /// The command surface, registered once.
 ///
-/// Every command in docs/ARCHITECTURE.md §7 is added to the `collect_commands!`
-/// list here and nowhere else; `cargo xtask gen-ipc` fails when the committed
-/// bindings do not match this builder.
+/// This is the only place a command is registered; the desktop shell and the
+/// binding generator both read it, so a command that is invokable is also
+/// exported. Today the surface is the `system` namespace's `build_info`;
+/// everything in docs/ARCHITECTURE.md §7 joins this list as it is built.
 #[must_use]
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
