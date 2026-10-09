@@ -10,7 +10,9 @@ description = "Peregrine component crate."
 publish = false
 
 [dependencies]
+peregrine-domain = { workspace = true }
 peregrine-secrets = { workspace = true }
+jiff = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
@@ -18,6 +20,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
