@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "moduleDetection": "force",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "useDefineForClassFields": true,
+
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    "paths": {
+      "@peregrine/i18n": ["./packages/i18n/src/index.ts"],
+      "@peregrine/ipc-client": ["./packages/ipc-client/src/index.ts"],
+      "@peregrine/player-ui": ["./packages/player-ui/src/index.ts"],
+      "@peregrine/theme": ["./packages/theme/src/index.ts"],
+      "@peregrine/ui": ["./packages/ui/src/index.ts"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# pnpm 11's release-age gate asks for an explicit exception when a pinned version
+# is younger than the delay; the pins in package.json are deliberate
+# (docs/DEPENDENCIES.md §1), so this records the one that tripped it.
+minimumReleaseAgeExclude:
+  - vite@8.3.4

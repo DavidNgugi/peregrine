@@ -1,0 +1,70 @@
+/* Design tokens. Values live here and nowhere else; the names are mirrored in
+   ./tokens.ts so a rename cannot land on one side only, and they are asserted by
+   ./tokens.test.ts and (from PG-E22-02) by `xtask check-theme`.
+   Sources: docs/DESIGN_SYSTEM.md §2.1 (colour) and §3 (typography). */
+
+:root {
+  color-scheme: dark;
+
+  --hue-brand: 250;
+
+  --surface-0: oklch(0.19 0.008 var(--hue-brand));
+  --surface-1: oklch(0.23 0.01 var(--hue-brand));
+  --surface-2: oklch(0.27 0.012 var(--hue-brand));
+  --surface-scrim: oklch(0.12 0.01 var(--hue-brand) / 0.72);
+
+  --text-primary: oklch(0.96 0.005 var(--hue-brand));
+  --text-secondary: oklch(0.78 0.01 var(--hue-brand));
+  --text-tertiary: oklch(0.62 0.01 var(--hue-brand));
+  --text-on-accent: oklch(0.99 0 0);
+
+  --border-subtle: oklch(0.32 0.01 var(--hue-brand));
+  --border-strong: oklch(0.44 0.012 var(--hue-brand));
+
+  --accent: oklch(0.68 0.16 var(--hue-brand));
+  --accent-hover: oklch(0.73 0.16 var(--hue-brand));
+  --accent-muted: oklch(0.42 0.08 var(--hue-brand));
+
+  --state-ok: oklch(0.72 0.15 150);
+  --state-warn: oklch(0.8 0.15 85);
+  --state-danger: oklch(0.68 0.19 25);
+  --state-info: oklch(0.72 0.12 240);
+
+  --focus-ring: var(--accent);
+
+  /* One stack carrying the per-OS entries of §3 in preference order: the webview
+     picks the first family it has, so this stays correct on all three platforms
+     without a per-OS stylesheet. */
+  --font-ui:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    "Adwaita Sans", Cantarell, Inter, "Noto Sans", sans-serif;
+
+  --text-display: 34px;
+  --text-display--line-height: 40px;
+  --text-title-1: 24px;
+  --text-title-1--line-height: 30px;
+  --text-title-2: 19px;
+  --text-title-2--line-height: 26px;
+  --text-body: 14px;
+  --text-body--line-height: 21px;
+  --text-body-strong: 14px;
+  --text-body-strong--line-height: 21px;
+  --text-body-strong--font-weight: 600;
+  --text-caption: 12px;
+  --text-caption--line-height: 17px;
+  --text-micro: 11px;
+  --text-micro--line-height: 15px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --surface-0: oklch(0.99 0.002 var(--hue-brand));
+  --surface-1: oklch(0.97 0.004 var(--hue-brand));
+  --surface-2: oklch(0.94 0.006 var(--hue-brand));
+  --text-primary: oklch(0.2 0.01 var(--hue-brand));
+  --text-secondary: oklch(0.45 0.01 var(--hue-brand));
+  --text-tertiary: oklch(0.58 0.01 var(--hue-brand));
+  --border-subtle: oklch(0.9 0.006 var(--hue-brand));
+  --accent: oklch(0.55 0.18 var(--hue-brand));
+}

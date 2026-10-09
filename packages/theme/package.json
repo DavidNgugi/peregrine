@@ -1,0 +1,19 @@
+{
+  "name": "@peregrine/theme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Design tokens: the three-layer colour model and the typography scale from docs/DESIGN_SYSTEM.md §2-3.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tokens.css": "./src/tokens.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

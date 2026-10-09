@@ -1,0 +1,15 @@
+# Rust and xtask are formatted by rustfmt, and the documents are hand-aligned:
+# prettier would reformat both into a diff nobody asked for.
+crates/
+xtask/
+target/
+docs/
+.github/
+assets/
+*.md
+Cargo.lock
+pnpm-lock.yaml
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+node_modules/
+dist/

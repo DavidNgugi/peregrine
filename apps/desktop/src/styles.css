@@ -1,0 +1,79 @@
+@import "@peregrine/theme/tokens.css";
+@import "tailwindcss";
+
+/* Primitives live outside the app directory, so Tailwind has to be told to scan
+   them by hand. */
+@source "../../../packages/ui/src";
+@source "../../../packages/player-ui/src";
+
+/* Tailwind's token namespaces mapped onto the semantic layer. `inline` keeps the
+   values out of the emitted `:root`, so the theme package stays the only place a
+   colour is defined. */
+@theme inline {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-scrim: var(--surface-scrim);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-on-accent: var(--text-on-accent);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-muted: var(--accent-muted);
+  --color-state-ok: var(--state-ok);
+  --color-state-warn: var(--state-warn);
+  --color-state-danger: var(--state-danger);
+  --color-state-info: var(--state-info);
+  --color-focus-ring: var(--focus-ring);
+
+  --font-ui: var(--font-ui);
+
+  --text-display: var(--text-display);
+  --text-display--line-height: var(--text-display--line-height);
+  --text-title-1: var(--text-title-1);
+  --text-title-1--line-height: var(--text-title-1--line-height);
+  --text-title-2: var(--text-title-2);
+  --text-title-2--line-height: var(--text-title-2--line-height);
+  --text-body: var(--text-body);
+  --text-body--line-height: var(--text-body--line-height);
+  --text-body-strong: var(--text-body-strong);
+  --text-body-strong--line-height: var(--text-body-strong--line-height);
+  --text-body-strong--font-weight: var(--text-body-strong--font-weight);
+  --text-caption: var(--text-caption);
+  --text-caption--line-height: var(--text-caption--line-height);
+  --text-micro: var(--text-micro);
+  --text-micro--line-height: var(--text-micro--line-height);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  background-color: var(--surface-0);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The webview is the app window, not a document: text selection and the
+   right-click menu follow the platform's native apps, not the browser's. */
+#root {
+  height: 100vh;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

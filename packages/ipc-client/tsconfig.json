@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No ambient type packages: everything this package needs is imported.
+    "types": []
+  },
+  "include": ["src"]
+}

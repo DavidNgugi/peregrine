@@ -81,7 +81,10 @@ Pinned versions, licences, and the obligations that come with redistributing the
 | Package | Version | Licence | Purpose |
 | --- | --- | --- | --- |
 | `react`, `react-dom` | 19.3.0 | MIT | UI runtime |
-| `typescript` | 7.0.2 | Apache-2.0 | Types. **New major (the native port)** — verify the whole toolchain together at Phase 0 |
+| `typescript` | 7.0.2 | Apache-2.0 | Types. **New major (the native port)** — installed as `"@typescript/native": "npm:typescript@7.0.2"` because the `typescript` name has to carry the TS 6 API the linter needs; see §7 |
+| `@typescript/typescript6` | 6.0.2 | Apache-2.0 | The TypeScript 6 Compiler API, installed under the `typescript` alias so `typescript-eslint` can parse. `tsc` still runs TypeScript 7; see §7 |
+| `@eslint/js`, `globals` | 10.0.1, 17.13.0 | MIT | ESLint flat-config base rules and per-environment globals. Dev-only, never redistributed. Added with `PG-E0-09` |
+| `@types/node`, `@types/react`, `@types/react-dom` | 24.19.1, 19.3.0, 19.3.0 | MIT | Type definitions for the Node and React APIs the build reads. Dev-only, never redistributed. Added with `PG-E0-09` |
 | `vite`, `@vitejs/plugin-react` | 8.3.4, 6.1.2 | MIT | Build and HMR |
 | `@tanstack/react-router` | 1.170.41 | MIT | Type-safe routes and search params |
 | `@tanstack/react-query` | 5.104.1 | MIT | Server-state cache, invalidation, optimistic updates |
@@ -127,7 +130,7 @@ Dropped: `framer-motion` (alias of `motion`), `suspend-react` (abandoned 2023), 
 | `vergen` | 10.0.3 | MIT OR Apache-2.0 | Git metadata in the About box and diagnostics |
 | `vitest`, `@testing-library/react`, `@testing-library/user-event`, `msw` | 5.0.3, 16.3.3, 14.6.7, 3.0.2 | MIT | Frontend unit tests with a mocked IPC bridge |
 | `@playwright/test` | 1.64.0 | Apache-2.0 | E2E flows and frame-time measurement |
-| `eslint`, `typescript-eslint`, `prettier` | 10.12.0, 8.71.1, 3.9.9 | MIT | Lint and format. Verify `typescript-eslint`'s peer range against TypeScript 7 before Phase 0 |
+| `eslint`, `typescript-eslint`, `prettier` | 10.12.0, 8.71.1, 3.9.9 | MIT | Lint and format. The `typescript-eslint` peer range against TypeScript 7 is resolved in §7 |
 | `knip`, `publint`, `size-limit` | 6.40.0, 0.3.25, 14.2.0 | ISC; MIT | Dead code, package hygiene, bundle budgets |
 
 `toml` and `sha2` were resolved and licence-checked live against crates.io on **2026-10-09** with `User-Agent: peregrine-plan`; both are dev-only and appear in no shipped binary. Every other version above was resolved on **2026-10-08**.
@@ -173,7 +176,7 @@ Obligations, checked per release by `xtask check-notices`:
 | --- | --- | --- |
 | `specta` / `tauri-specta` have no stable 2.x | **Known risk**, only `2.0.0-rc.25` | Exact pin, `SPIKE-9` confirms it end to end in Phase 0, and the fallback is hand-written DTOs with a generation check |
 | TypeScript 7, Vite 8, ESLint 10, `@tanstack/react-table` 9 are fresh majors | Known risk | Verify the whole frontend toolchain together as the first Phase 0 frontend task; pin exact versions until CI is green on all three OSes |
-| `typescript-eslint` 8.71.1 peer range against TypeScript 7 | **Unverified** | Check the manifest before adopting TypeScript 7; both are needed for `pnpm lint` |
+| `typescript-eslint` 8.71.1 peer range against TypeScript 7 | **Resolved in PG-E0-09: incompatible.** The declared peer is `typescript >=4.8.4 <6.1.0`, and the package throws `typescript-eslint does not support TS 7.0.` when `require('typescript')` reports 7.x — `typescript@7.0.2` is the native port and its `exports` carry no Compiler API (only `version` and `versionMajorMinor`) | Install both, using the alias from the TypeScript 7 announcement: `"typescript": "npm:@typescript/typescript6@6.0.2"` (the TS 6 API the parser reads) and `"@typescript/native": "npm:typescript@7.0.2"` (what `tsc` runs). Verified on pnpm 11.10.0 in PG-E0-09: `.bin/tsc` reports 7.0.2, `.bin/tsc6` reports 6.0.2, and `eslint .` exits 0. Revisit when typescript-eslint supports TS >= 7.1 |
 | SOCKS5 coverage of **UDP tracker** traffic in librqbit | **Unverified** | `SPIKE-3` must test it before the VPN-binding feature is described as leak-proof. Until then, the leak check reports rather than guarantees |
 | `rust_cast` maintenance (0.21.0, December 2025, 158 stars) | Marginal | Adapter is isolated behind the cast port; DLNA is the primary path for TVs |
 | `blurhash` (0.2.3, July 2024) quiet | Low risk | Pure algorithm crate; `SPIKE-4` compares it with thumbhash and a 16 px WebP before committing |

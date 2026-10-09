@@ -1,0 +1,18 @@
+{
+  "name": "@peregrine/ipc-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed access to the Rust core over Tauri IPC; today the error-code mapping, later the generated bindings.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

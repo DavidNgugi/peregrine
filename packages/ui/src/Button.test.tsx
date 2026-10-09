@@ -1,0 +1,54 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { Button } from "./Button.js";
+
+function classesOf(markup: string): string[] {
+  const match = /class="([^"]*)"/u.exec(markup);
+  return match?.[1]?.split(/\s+/u) ?? [];
+}
+
+describe("Button", () => {
+  it("defaults to type=button so it cannot submit a form by accident", () => {
+    expect(renderToStaticMarkup(<Button>Play</Button>)).toContain('type="button"');
+  });
+
+  it("keeps an explicit type and disabled state", () => {
+    const markup = renderToStaticMarkup(
+      <Button type="submit" disabled>
+        Save
+      </Button>,
+    );
+    expect(markup).toContain('type="submit"');
+    expect(markup).toContain("disabled");
+  });
+
+  it("renders the requested variant and size", () => {
+    const classes = classesOf(
+      renderToStaticMarkup(
+        <Button variant="primary" size="sm">
+          Play
+        </Button>,
+      ),
+    );
+    expect(classes).toContain("bg-accent");
+    expect(classes).toContain("text-caption");
+  });
+
+  it("lets the call site win a conflicting utility", () => {
+    const classes = classesOf(
+      renderToStaticMarkup(
+        <Button variant="primary" className="bg-surface-2">
+          Play
+        </Button>,
+      ),
+    );
+    expect(classes).toContain("bg-surface-2");
+    expect(classes).not.toContain("bg-accent");
+  });
+
+  it("renders the token-driven focus ring and reduced-motion branch", () => {
+    const classes = classesOf(renderToStaticMarkup(<Button>Play</Button>));
+    expect(classes).toContain("focus-visible:outline-focus-ring");
+    expect(classes).toContain("motion-reduce:transition-none");
+  });
+});

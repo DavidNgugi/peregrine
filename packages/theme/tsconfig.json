@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The token test reads tokens.css from disk, and TypeScript does not pick up
+    // the workspace root's @types folder from a nested project.
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
