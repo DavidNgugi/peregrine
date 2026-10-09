@@ -77,7 +77,7 @@ graph LR
 | PG-E0-11 | Commit convention, PR template with perf and security checklists, CODEOWNERS | Template rendered on a test PR | — | XS | review |
 | PG-E0-12 | Issue templates and label taxonomy, milestones mapped to phases | Templates produce labelled issues | — | XS | review |
 | PG-E0-13 | CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 | Green on a trivial PR with cache warm | PG-E0-01 | M | review |
-| PG-E0-14 | Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit` | Build fails on an advisory fixture | PG-E0-13 | S | doing |
+| PG-E0-14 | Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit`. **Open, and the job is red on the real graph:** 5 MPL-2.0 crates enter through Tauri's Linux stack (`cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`, `selectors`) and DEPENDENCIES §6 says no MPL-2.0 ships, so this needs a deliberate allowlist + §6 decision (and probably ADR 0009); `paste` and `proc-macro-error` are unmaintained transitively (specta/Tauri), needing a documented ignore or a dropped feature; and the `wildcards` ban false-positives on our own `{ workspace = true }` path deps in `peregrine-app` and `peregrine-desktop` | Build fails on an advisory fixture | PG-E0-13 | S | doing |
 | PG-E0-15 | Dead-dependency gate: `knip`, `cargo-machete` | Build fails on an unused fixture dependency | PG-E0-13 | XS | doing |
 | PG-E0-16 | Release workflow: bundles, SBOM, signed manifest, changelog | A tagged pre-release publishes artifacts and a manifest | PG-E0-13 | M | todo |
 | PG-E0-17 | Automated dependency updates, grouped weekly | A grouped PR opens on schedule | PG-E0-13 | XS | review |
