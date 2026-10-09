@@ -9,5 +9,11 @@ repository.workspace = true
 description = "Peregrine component crate."
 publish = false
 
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

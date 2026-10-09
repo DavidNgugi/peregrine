@@ -4,3 +4,5 @@
 //!
 //! Commands are twenty lines or fewer: parse, call one service, map the result.
 //! There is no logic here.
+
+pub mod error;
