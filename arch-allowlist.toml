@@ -28,10 +28,15 @@ unpublished = ["xtask", "peregrine-testkit"]
 # Test-only crates every member may use. Keeping one list, rather than a
 # per-crate list, is deliberate: a test dependency cannot leak into the shipped
 # graph, and diverging dev-dependency sets across crates is churn.
+#
+# `tauri` is here rather than only in the crates that ship it because
+# `peregrine-ipc`'s command test builds a mock app through `tauri::test`, which
+# the crate's `test` feature gates. The feature is enabled from a dev-dependency
+# only (crates/peregrine-ipc/Cargo.toml), so no shipped code changes.
 [dev-dependencies]
 allowed = [
   "anyhow", "criterion", "futures", "insta", "mockall", "proptest",
-  "rstest", "serde", "serde_json", "tempfile", "tokio", "tracing",
+  "rstest", "serde", "serde_json", "tauri", "tempfile", "tokio", "tracing",
   "tracing-subscriber", "wiremock",
 ]
 
@@ -75,6 +80,8 @@ runtime = [
   "tokio",
   "tokio-util",
   "tracing",
+  "tracing-appender",
+  "tracing-subscriber",
   "ulid",
 ]
 build = []
@@ -101,7 +108,12 @@ pure = false
 
 
 [crates.peregrine-desktop]
-may_depend_on = []
+# The shell owns the window and the event loop, but the command surface it
+# serves is `peregrine-ipc`'s (docs/ARCHITECTURE.md §5). Registering the
+# commands here is what makes the generated TypeScript call a real one.
+may_depend_on = [
+  "peregrine-ipc",
+]
 runtime = ["serde", "serde_json", "tauri", "thiserror", "tracing"]
 build = ["tauri-build"]
 pure = false
@@ -143,6 +155,7 @@ runtime = [
   "serde",
   "serde_json",
   "specta",
+  "specta-typescript",
   "tauri",
   "tauri-specta",
   "thiserror",
@@ -250,6 +263,7 @@ runtime = [
   "secrecy",
   "thiserror",
   "tracing",
+  "tracing-subscriber",
   "zeroize",
 ]
 build = []

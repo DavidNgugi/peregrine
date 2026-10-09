@@ -1,0 +1,55 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// The host app supplies the Tauri bridge, so the test replaces exactly that
+// module and drives the generated `commands.buildInfo()` call site in Node.
+const invoke = vi.fn();
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
+const { getBuildInfo, isSuccessful } = await import("./client.js");
+
+beforeEach(() => {
+  invoke.mockReset();
+});
+
+describe("getBuildInfo", () => {
+  it("returns the generated DTO from the bound command", async () => {
+    const info = { appName: "Peregrine", appVersion: "0.1.0", target: "macos-aarch64" };
+    invoke.mockResolvedValueOnce(info);
+
+    await expect(getBuildInfo()).resolves.toEqual(info);
+    expect(invoke).toHaveBeenCalledWith("build_info");
+  });
+
+  it("throws the shared error shape when the command answers with an error", async () => {
+    invoke.mockRejectedValueOnce({
+      code: "PERMISSION_DENIED",
+      message: "Peregrine does not have permission to do that.",
+      retryable: false,
+    });
+
+    await expect(getBuildInfo()).rejects.toEqual({
+      code: "PERMISSION_DENIED",
+      message: "Peregrine does not have permission to do that.",
+      retryable: false,
+    });
+  });
+
+  it("falls back to INTERNAL for a code this build does not know", async () => {
+    invoke.mockRejectedValueOnce({ code: "FROM_A_NEWER_CORE", message: "no", retryable: false });
+
+    await expect(getBuildInfo()).rejects.toMatchObject({ code: "INTERNAL" });
+  });
+});
+
+describe("isSuccessful", () => {
+  it("narrows the generated result union", () => {
+    const ok = { status: "ok", data: 1 } as const;
+    const error = { status: "error", error: "boom" } as const;
+
+    expect(isSuccessful(ok)).toBe(true);
+    expect(isSuccessful(error)).toBe(false);
+    if (isSuccessful(ok)) {
+      expect(ok.data).toBe(1);
+    }
+  });
+});

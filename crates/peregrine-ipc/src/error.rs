@@ -12,13 +12,19 @@
 //!   pins the strings and a rename becomes a visible, deliberate change.
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// A stable, machine-readable failure code.
 ///
 /// Each variant records the documented condition that produces it, so the
 /// taxonomy stays tied to observed behaviour instead of growing into a list of
 /// hypothetical situations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// `Type` exports the variants to TypeScript under the same `SCREAMING_SNAKE_CASE`
+/// strings the wire format uses, so the generated union and the UI cannot drift.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Type,
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     /// The caller's input failed validation before any work started.
@@ -183,7 +189,7 @@ impl ErrorCode {
 /// contain a secret or an absolute home path. Callers pass values that are
 /// already safe to show, because deciding what is safe is a property of the
 /// source error, not of this type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct AppError {
     /// The stable machine-readable code.
     pub code: ErrorCode,

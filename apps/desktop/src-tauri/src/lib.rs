@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
-//! The Tauri application shell: it creates the main window and runs the event
-//! loop, and does nothing else.
+//! The Tauri application shell: it registers the command surface, creates the
+//! main window, and runs the event loop, and does nothing else.
 //!
 //! Business logic belongs in `peregrine-app` and reaches the frontend over the
-//! IPC contract (docs/ARCHITECTURE.md §7). The crate depends on no internal
-//! crate, so there is no path by which a rule can drift in here.
+//! IPC contract (docs/ARCHITECTURE.md §7). The command surface itself is owned by
+//! `peregrine-ipc`, which is also what `cargo xtask gen-ipc` exports the
+//! TypeScript bindings from, so the shell and the generated client can never
+//! register different commands.
 
 /// Why the desktop shell could not start or had to stop.
 #[derive(Debug, thiserror::Error)]
@@ -21,7 +23,15 @@ pub enum ShellError {
 /// Returns [`ShellError::Runtime`] when the runtime cannot initialise.
 pub fn run() -> Result<(), ShellError> {
     tracing::info!(target: "peregrine_desktop", "starting the desktop shell");
+    // One builder instance: Tauri's invoke handler and the event mount both read
+    // from it, so a command cannot be invokable without also being exported.
+    let ipc = peregrine_ipc::builder();
     tauri::Builder::default()
+        .invoke_handler(ipc.invoke_handler())
+        .setup(move |app| {
+            ipc.mount_events(app);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .map_err(ShellError::Runtime)
 }

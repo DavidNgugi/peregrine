@@ -40,19 +40,32 @@ export const en = {
           title: "That item is no longer there.",
           advice: "It may have been removed or moved. Reload the screen to see the current state.",
         },
+        conflict: {
+          title: "Something else is already doing that.",
+          advice: "Wait for the current operation to finish, then try again.",
+        },
+        storage_busy: {
+          title: "The library database is busy.",
+          advice: "Another operation is writing to it. Try again in a moment.",
+        },
+        storage_corrupt: {
+          title: "The library database is damaged.",
+          advice:
+            "Peregrine has to rebuild it. Export diagnostics from Settings before you do, so the cause can be reported.",
+        },
         permission_denied: {
           title: "Peregrine is not allowed to do that.",
           advice: "Grant the permission in your system settings, then try again.",
-        },
-        unsafe_content: {
-          title: "The download was stopped by the safety check.",
-          advice: "The files inside did not match the release. Choose a different release.",
         },
         disk_full: {
           title: "There is not enough free space.",
           advice: "Free some space or choose another download folder, then resume the download.",
         },
-        rate_limited: {
+        network: {
+          title: "The network is unavailable.",
+          advice: "Check the connection. Cached titles and the local library still work.",
+        },
+        provider_rate_limited: {
           title: "The provider asked Peregrine to slow down.",
           advice: "It will retry on its own. Waiting a few minutes is enough.",
         },
@@ -60,9 +73,25 @@ export const en = {
           title: "The provider could not be reached.",
           advice: "Check the connection. Cached titles and the local library still work.",
         },
-        database_busy: {
-          title: "The library database is busy.",
-          advice: "Another operation is writing to it. Try again in a moment.",
+        unsafe_content: {
+          title: "The download was stopped by the safety check.",
+          advice: "The files inside did not match the release. Choose a different release.",
+        },
+        playback_failed: {
+          title: "Playback stopped unexpectedly.",
+          advice: "Peregrine can resume from the last watched position.",
+        },
+        device_unavailable: {
+          title: "That device is no longer reachable.",
+          advice: "Pick another device, or play here instead.",
+        },
+        cancelled: {
+          title: "That was cancelled.",
+          advice: "Start it again when you are ready.",
+        },
+        unsupported: {
+          title: "That is not available on this setup.",
+          advice: "Peregrine cannot do it on this platform or with the current configuration.",
         },
         internal: {
           title: "Something went wrong inside Peregrine.",

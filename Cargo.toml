@@ -63,12 +63,22 @@ anyhow = { version = "1.0.104" }
 futures = { version = "0.3.34" }
 jiff = { version = "0.2.38", features = ["serde"] }
 proptest = { version = "1.11.0" }
+secrecy = { version = "0.10.3" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
 sha2 = { version = "0.11.0" }
+# No stable 2.x exists, so the RC is deliberate and pinned exactly
+# (docs/DEPENDENCIES.md §1 and §7). A patch release can change the generated
+# TypeScript, which would break the `cargo xtask gen-ipc --check` gate.
+specta = { version = "=2.0.0-rc.25", features = ["derive", "function"] }
+# `tauri-specta`'s `typescript` feature already depends on this at the same
+# version; naming it directly is what lets the export entry point construct the
+# `Typescript` exporter without reaching through a re-export path.
+specta-typescript = { version = "=0.0.12" }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "json", "macros"] }
 tauri = { version = "2.12.1" }
 tauri-build = { version = "2.7.1" }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 thiserror = { version = "2.0.21" }
 tempfile = { version = "3.27.0" }
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
@@ -78,6 +88,7 @@ tracing = { version = "0.1.44" }
 tracing-appender = { version = "0.2.5" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "registry"] }
 ulid = { version = "3.0.0", features = ["serde"] }
+zeroize = { version = "1.9.1" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

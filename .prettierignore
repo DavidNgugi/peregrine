@@ -9,6 +9,10 @@ assets/
 *.md
 Cargo.lock
 pnpm-lock.yaml
+# Generated from the Rust IPC types by `cargo xtask gen-ipc`. Prettier would
+# rewrite it, and the drift gate compares the committed file byte for byte
+# against a fresh export, so formatting it here would turn every gate run red.
+packages/ipc-client/src/generated/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/target/
 node_modules/

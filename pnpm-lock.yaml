@@ -112,7 +112,11 @@ importers:
         specifier: 26.4.2
         version: 26.4.2(typescript@7.0.2)
 
-  packages/ipc-client: {}
+  packages/ipc-client:
+    devDependencies:
+      '@tauri-apps/api':
+        specifier: 2.12.1
+        version: 2.12.1
 
   packages/player-ui:
     devDependencies:

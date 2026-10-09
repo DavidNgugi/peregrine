@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use xtask::{arch, backlog, deaddeps, migrations, todos, workspace};
+use xtask::{arch, backlog, deaddeps, genipc, migrations, todos, workspace};
 
 fn main() -> ExitCode {
     match run() {
@@ -28,6 +28,7 @@ fn run() -> Result<bool> {
 
     let mut root_flag: Option<PathBuf> = None;
     let mut update = false;
+    let mut check = false;
     let mut index = 0;
     while index < rest.len() {
         match rest[index].as_str() {
@@ -42,8 +43,15 @@ fn run() -> Result<bool> {
                 update = true;
                 index += 1;
             }
+            "--check" => {
+                check = true;
+                index += 1;
+            }
             other => bail!("unrecognised argument `{other}`; run `cargo xtask help`"),
         }
+    }
+    if update && check {
+        bail!("--update and --check ask for opposite things; pass one");
     }
 
     let root = if let Some(root) = root_flag {
@@ -73,6 +81,14 @@ fn run() -> Result<bool> {
         }
         "backlog-stats" => backlog::run(&root),
         "check-dead-deps" => deaddeps::run(&root),
+        "gen-ipc" => {
+            let mode = if update {
+                genipc::Mode::Update
+            } else {
+                genipc::Mode::Check
+            };
+            genipc::run(&root, mode)
+        }
         "help" | "--help" | "-h" => {
             print_help();
             Ok(true)
@@ -91,9 +107,13 @@ cargo xtask — repository gates
   check-migrations --update  record new migrations (never rewrites an existing entry)
   check-todos                every deferral marker names a task or an issue
   check-dead-deps            no manifest declares a dependency its sources never use
+  gen-ipc                    the committed TS bindings match a fresh export
+  gen-ipc --check            the same, stated explicitly
+  gen-ipc --update           rewrite the TS bindings from the Rust command surface
   backlog-stats              roll up docs/TASKS.md by phase and state
 
   --root <dir>               run against another tree, used by the fixture tests
+  --update                   where a gate supports it, rewrite instead of check
 
 Every gate exits non-zero on a violation and prints the path, the line where it
 applies, and what to do about it."

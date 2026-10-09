@@ -18,6 +18,10 @@ export default tseslint.config(
       // build before a lint run fails the lint gate on a generated file.
       "target/**",
       "**/target/**",
+      // Generated from the Rust IPC types by `cargo xtask gen-ipc`; the
+      // generator's output uses `any` in its typed-error runtime and comes from
+      // the Rust compiler's view of the command surface, not from this config.
+      "packages/ipc-client/src/generated/**",
       "apps/desktop/src-tauri/gen/**",
       "apps/desktop/src-tauri/target/**",
     ],

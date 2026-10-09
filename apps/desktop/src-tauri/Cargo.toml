@@ -14,8 +14,10 @@ tauri-build = { workspace = true }
 
 # The shell is deliberately thin: the window, the event loop, and an error type
 # that says why a launch failed. Everything else arrives over the IPC contract
-# (docs/ARCHITECTURE.md §7), which is why no internal crate is depended on.
+# (docs/ARCHITECTURE.md §7), so the only internal crate it names is the one that
+# owns that contract.
 [dependencies]
+peregrine-ipc = { workspace = true }
 tauri = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

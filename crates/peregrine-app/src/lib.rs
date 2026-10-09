@@ -4,3 +4,7 @@
 //! and maintenance.
 //!
 //! This is the only place where multiple ports are combined.
+
+mod observability;
+
+pub use observability::{LogConfig, Observability, ObservabilityError};
