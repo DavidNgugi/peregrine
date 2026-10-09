@@ -41,7 +41,10 @@ fi
 frontend_changed=$(printf '%s\n' "$staged" | grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' || true)
 if [ -n "$frontend_changed" ]; then
   if [ -d node_modules ] && [ -f package.json ]; then
-    printf '%s\n' "$frontend_changed" | xargs pnpm exec eslint --max-warnings 0 || exit 1
+    # --no-warn-ignored: a staged file that the config deliberately ignores (the
+  # generated IPC bindings) otherwise produces a warning, and --max-warnings 0
+  # turns that warning into a failed commit for a file we chose to ignore.
+  printf '%s\n' "$frontend_changed" | xargs pnpm exec eslint --max-warnings 0 --no-warn-ignored || exit 1
   else
     echo "pre-commit: skipping frontend lint; run 'pnpm install' first" >&2
   fi

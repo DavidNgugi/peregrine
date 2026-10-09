@@ -339,7 +339,7 @@ graph LR
 | PG-E12-04 | Local `.torrent` and magnet ingest with drag-and-drop | Dropped file is inspected then queued, never auto-started | PG-E12-01, PG-E11-06 | M | todo |
 | PG-E12-05 | Built-in public provider adapters: present but disabled, with **no bundled default domain list** — the user supplies the URL — plus health reporting and a legal notice | Enabling requires an explicit confirmation naming the risk and a user-supplied base URL; no domain is hardcoded; endpoints rate-limit, so nothing polls them on a schedule | PG-E12-01 | L | todo |
 | PG-E12-06 | Result normalization and de-duplication **keyed on the info hash**, with a normalized-title heuristic used only to catch cross-indexer duplicates that carry different hashes. A parse is never the dedupe key | Duplicate fixtures collapse to one canonical release; two indexers reporting the same hash collapse deterministically | PG-E12-01 | M | todo |
-| PG-E12-07 | Quality profile editor UI with rule validation | Contradictory accounts rejected with an explanation | PG-E4-05, PG-E20-03 | M | todo |
+| PG-E12-07 | Quality profile editor UI with rule validation | Contradictory profiles rejected with an explanation | PG-E4-05, PG-E20-03 | M | todo |
 | PG-E12-08 | Auto-selection rules: minimum score, seeder floor, size caps, indexer health | Table-driven test over decision inputs | PG-E4-06 | M | todo |
 | PG-E12-09 | Upgrade policy: detect a better release, download alongside, swap on verification | Old file retained until the new one probes successfully | PG-E12-08, PG-E11-09 | L | todo |
 | PG-E12-10 | `release_decision` audit persistence and a UI "why this release" panel | Explains score contributions per rule | PG-E12-08, PG-E3-08 | M | todo |

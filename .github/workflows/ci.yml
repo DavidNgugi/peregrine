@@ -44,6 +44,17 @@ jobs:
         run: cargo xtask check-migrations
       - name: Every deferral names a task or an issue
         run: cargo xtask check-todos
+      # The binding gate builds `peregrine-ipc`'s generator binary, which pulls in
+      # the Tauri stack; on Linux that is the same WebKitGTK prerequisite list the
+      # `rust` job installs. Everything else in this job is pure text.
+      - name: Linux system dependencies (for the IPC bindings generator)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Committed IPC bindings match a fresh export
+        run: cargo xtask gen-ipc --check
       - name: The declared backlog roll-up is not stale
         run: cargo xtask backlog-stats
       # The gate runs its own negative fixture, so a cargo-machete upgrade that
