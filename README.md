@@ -4,7 +4,7 @@ A fast, native-feeling desktop app for discovering, collecting, and watching you
 
 Peregrine browses a catalogue from free metadata providers, keeps it in sync locally so it never waits on the network, downloads what you choose with a safety gate in front, manages a library you already have, and plays it back with resume, subtitles, and casting.
 
-> **Status: Phase 0 in progress.** The design documents are complete and implementation has started. What exists today: the Cargo and pnpm workspaces, the architecture allowlist with `cargo xtask check-arch`, the migration-immutability and TODO gates, the backlog roll-up, and the repository collaboration surface. What does not exist yet: the desktop app itself, storage, IPC, the scheduler, and the UI — those are the rest of Phase 0 in [docs/PLAN.md](./docs/PLAN.md). Task-level state is in [docs/TASKS.md](./docs/TASKS.md).
+> **Status: Phase 0 in progress.** The design documents are complete and implementation has started. The walking skeleton is partly in place: the Cargo and pnpm workspaces build, the repository gates and the supply-chain policy run, the SQLite foundation with migration 0001 and its single-writer design is tested, the domain core holds `ExternalId`, the release-name parser and the clock and id ports, the Tauri shell compiles against tauri 2.12.1, and the React workspace builds under a strict TypeScript and lint configuration. Still missing: the generated IPC client, the scheduler, logging with the Diagnostics surface, the theme contrast gate, and notifications. Per-task state — including which tasks are verified rather than merely written — is in [docs/TASKS.md](./docs/TASKS.md); the remaining Phase 0 work is in [docs/PLAN.md](./docs/PLAN.md).
 
 ---
 
@@ -90,7 +90,7 @@ Effort is estimated bottom-up at ~577 ideal days for the core 1.0 and ~1 115 for
 
 ## Building from source
 
-The Rust workspace and the repository gates work today. The desktop app does not build yet: the pnpm workspace and Tauri scaffold are `PG-E0-02` and `PG-E0-03`.
+The Rust workspace, the frontend workspace, and the repository gates all work today. The one thing a headless check cannot confirm is the app window itself, which `PG-E0-03` tracks platform by platform.
 
 ```bash
 cargo build --workspace        # crates, one per module map entry
@@ -98,13 +98,21 @@ cargo test --workspace
 cargo xtask check-arch         # dependency direction and pure-crate sources
 cargo xtask check-migrations   # migrations are append-only
 cargo xtask check-todos        # every deferral names a task or an issue
+cargo xtask check-dead-deps    # unused Rust dependencies (needs cargo-machete on PATH)
 cargo xtask backlog-stats      # docs/TASKS.md roll-up, recomputed
 ```
 
-Once Phase 0's frontend tasks land, the app runs with:
+The frontend workspace builds, typechecks, lints and tests on its own:
 
 ```bash
 pnpm install
+pnpm -r build
+pnpm typecheck && pnpm lint && pnpm test
+```
+
+Running the desktop app uses the same install:
+
+```bash
 pnpm tauri dev
 ```
 
