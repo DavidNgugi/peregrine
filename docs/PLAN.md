@@ -44,7 +44,7 @@ Effort is in ideal engineering days for one experienced Rust + React developer, 
 | App shell | Tauri v2 app, per-OS window chrome, single instance, window state restore, graceful shutdown, tray stub |
 | IPC | `specta` type export pipeline, command and event registration, structured `AppError`, event batcher with coalescing, generated TS client committed and CI-verified |
 | Storage | SQLite open with the PRAGMA set, migration 0001 (settings, account, job, event_log), single-writer pool, integrity check on boot, backup-on-migration |
-| Domain | Skeleton crate with `Title`, `ExternalId`, `QualityProfile`, `ReleaseName` parser and its property tests |
+| Domain | Skeleton crate with `ExternalId`, `QualityProfile`, `ReleaseName` parser, `PathGuard`, and the clock and id ports, with their property tests |
 | Observability | `tracing` with redaction filter, rotating file logs, log tail command, Diagnostics screen shell |
 | Scheduler | Job queue with priority, dedupe, backoff, cancellation tokens, and an injected-panic test that proves token release |
 | Theme | Token pipeline, three shipped themes plus system, theme runtime that swaps without re-render |
