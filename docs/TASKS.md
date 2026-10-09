@@ -209,7 +209,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E6-01 | Job scheduler: priority queues, worker pool, dedupe, backoff with jitter | Deferred jobs retry on schedule; dedupe proven | PG-E3-08, PG-E4-19 | L | todo |
+| PG-E6-01 | Job scheduler: priority queues, worker pool, dedupe, backoff with jitter | Deferred jobs retry on schedule; dedupe proven | PG-E3-08, PG-E4-19 | L | done |
 | PG-E6-02 | Resource token acquisition with panic-safe release | Injected panic releases the token (guard test) | PG-E6-01 | M | todo |
 | PG-E6-03 | Concurrency classes: metadata, image, dataset, subtitle, probe | Each class has an independent limit asserted under load | PG-E6-01 | M | todo |
 | PG-E6-04 | Incremental change sync with persisted cursors and overlapping windows | Crash between cursor advance and upsert loses nothing | PG-E6-01, PG-E5-09 | M | todo |
