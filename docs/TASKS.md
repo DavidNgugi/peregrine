@@ -608,7 +608,7 @@ graph LR
 | --- | --- | --- | --- | --- |
 | PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels | Log level change applies at runtime | PG-E0-08 | M | done |
 | PG-E25-02 | Metrics registry: counters, histograms, per-provider and per-session | Exposed internally and rendered in Diagnostics | PG-E25-01 | M | todo |
-| PG-E25-03 | Log tail and export with a size cap and secret scrubbing | Exported bundle is inspectable before sending | PG-E25-01 | M | todo |
+| PG-E25-03 | Log tail and export with a size cap and secret scrubbing, plus the two gaps PG-E25-01 flagged as unbuilt: **log retention** (ARCHITECTURE §16's 7 days / 20 MB — `tracing-appender` has no byte-cap primitive, so it belongs with log management) and **key-shape scrubbing** (SECURITY.md T13; only values registered through `Secret` are currently removed, and heuristics need their own false-positive policy) | Exported bundle is inspectable before sending | PG-E25-01 | M | todo |
 | PG-E25-04 | Opt-in crash reporting with a self-hostable DSN, empty by default | No network call occurs when unconfigured (asserted) | PG-E24-13 | M | todo |
 | PG-E25-05 | Diagnostics screen: provider health, disk budget, DB stats, slow queries, endpoint list | All values are real, none hardcoded | PG-E25-02, PG-E3-17 | M | todo |
 | PG-E25-06 | Startup and navigation timing instrumentation surfaced per screen | Budgets visible without a accountr | PG-E25-02, PG-E7-22 | M | todo |
