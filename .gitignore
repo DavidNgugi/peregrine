@@ -1,0 +1,34 @@
+# Rust
+/target/
+**/target/
+*.rs.bk
+
+# Node
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+
+# Frontend build output
+apps/desktop/dist/
+packages/*/dist/
+apps/desktop/src-tauri/gen/
+
+# Tauri bundling
+apps/desktop/src-tauri/target/
+
+# Tooling caches
+.vite/
+coverage/
+playwright-report/
+test-results/
+.eslintcache
+
+# Local runtime state (never committed)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.peregrine/
+
+# OS noise
+.DS_Store
+Thumbs.db

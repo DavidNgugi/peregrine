@@ -1,0 +1,112 @@
+# Peregrine workspace.
+#
+# One crate per entry in the module map (docs/ARCHITECTURE.md §5). The edges
+# between them are not a convention: `cargo xtask check-arch` parses every
+# manifest here and fails on an edge that arch-allowlist.toml does not permit.
+#
+# Versions are pinned exactly rather than ranged wherever the API surface is one
+# we depend on closely, per docs/DEPENDENCIES.md §1.
+
+[workspace]
+resolver = "3"
+members = [
+  "crates/peregrine-domain",
+  "crates/peregrine-storage",
+  "crates/peregrine-providers",
+  "crates/peregrine-sync",
+  "crates/peregrine-torrent",
+  "crates/peregrine-indexers",
+  "crates/peregrine-monitor",
+  "crates/peregrine-mcp",
+  "crates/peregrine-playback",
+  "crates/peregrine-stream",
+  "crates/peregrine-cast",
+  "crates/peregrine-secrets",
+  "crates/peregrine-platform",
+  "crates/peregrine-app",
+  "crates/peregrine-ipc",
+  "crates/peregrine-testkit",
+  "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Stable minus two releases, per the MSRV rule in docs/DEPENDENCIES.md §1.
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+authors = ["The Peregrine Authors"]
+repository = "https://github.com/peregrine-app/peregrine"
+homepage = "https://github.com/peregrine-app/peregrine"
+
+# Workspace-internal crates, with explicit paths. A member inherits one with
+# `{ workspace = true }`, which is what `check-arch` resolves to name the edge.
+[workspace.dependencies]
+peregrine-app = { path = "crates/peregrine-app" }
+peregrine-cast = { path = "crates/peregrine-cast" }
+peregrine-domain = { path = "crates/peregrine-domain" }
+peregrine-indexers = { path = "crates/peregrine-indexers" }
+peregrine-ipc = { path = "crates/peregrine-ipc" }
+peregrine-mcp = { path = "crates/peregrine-mcp" }
+peregrine-monitor = { path = "crates/peregrine-monitor" }
+peregrine-platform = { path = "crates/peregrine-platform" }
+peregrine-playback = { path = "crates/peregrine-playback" }
+peregrine-providers = { path = "crates/peregrine-providers" }
+peregrine-secrets = { path = "crates/peregrine-secrets" }
+peregrine-storage = { path = "crates/peregrine-storage" }
+peregrine-stream = { path = "crates/peregrine-stream" }
+peregrine-sync = { path = "crates/peregrine-sync" }
+peregrine-testkit = { path = "crates/peregrine-testkit" }
+peregrine-torrent = { path = "crates/peregrine-torrent" }
+anyhow = { version = "1.0.104" }
+jiff = { version = "0.2.38", features = ["serde"] }
+proptest = { version = "1.11.0" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151" }
+sha2 = { version = "0.11.0" }
+thiserror = { version = "2.0.21" }
+tempfile = { version = "3.27.0" }
+toml = { version = "1.1.7" }
+ulid = { version = "3.0.0", features = ["serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+# Pedantic is the baseline, not an aspiration. The allows below are the handful
+# of pedantic lints whose advice is wrong for this codebase; each has a reason.
+pedantic = { level = "warn", priority = -1 }
+# AGENTS R19 asks for one concise rustdoc line on public items and no more.
+# These three lints would demand boilerplate that R19 explicitly does not want.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# Domain language repeats across modules by design (`ReleaseName::name`,
+# `SearchQuery::query`); the struct is the namespace.
+module_name_repetitions = "allow"
+# Byte offsets, durations, and item counts are known-small at the conversion
+# sites, and the checked alternatives are less readable there.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+# `unwrap`/`expect` policy is a review rule with stated exceptions (tests,
+# startup assertions); clippy fires on those legitimate uses.
+unwrap_used = "allow"
+expect_used = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+
+# Dependencies are always built with optimisation, so a debug build is still
+# fast enough for grid and playback work.
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,29 @@
+# Peregrine review routing.
+#
+# One owner per surface so a review request reaches someone who knows the
+# constraints that surface is under. Keep this file small: an owner entry that
+# nobody honours is worse than no entry.
+
+# Default: the maintainers.
+*                                   @peregrine-app/maintainers
+
+# Architecture is a contract, not a suggestion. Changes to these files decide
+# what every other crate is allowed to do.
+/arch-allowlist.toml                @peregrine-app/architecture
+/docs/adr/                          @peregrine-app/architecture
+/docs/ARCHITECTURE.md               @peregrine-app/architecture
+/docs/DATA_MODEL.md                 @peregrine-app/architecture
+
+# The rules themselves.
+/AGENTS.md                          @peregrine-app/maintainers
+/SECURITY.md                        @peregrine-app/security
+
+# Supply chain, packaging, and the gates that hold them.
+/.github/workflows/                 @peregrine-app/infra
+/deny.toml                          @peregrine-app/security
+/NOTICE                             @peregrine-app/security
+
+# Storage migrations are append-only once merged; a second pair of eyes is the
+# only thing standing between us and an edited migration.
+/crates/peregrine-storage/migrations/  @peregrine-app/storage
+/crates/peregrine-storage/migrations/journal.toml @peregrine-app/storage

@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF if we ever add any, but nothing here uses them yet.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+
+# Generated IPC bindings are reviewed in diffs, not treated as noise.
+packages/ipc-client/src/generated/** linguist-generated=true

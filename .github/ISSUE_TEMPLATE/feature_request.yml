@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a capability the app does not have.
+labels: ["kind/feature", "state/triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do today? Describe the task, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing, and any workaround you use today.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Discovery and search
+        - Acquisition and downloads
+        - Library and storage
+        - Playback and subtitles
+        - Casting
+        - Settings and appearance
+        - Accessibility and i18n
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope acknowledgements
+      options:
+        - label: I understand Peregrine does not host, index, or bundle access to content, and any indexer is user-configured and off by default.
+          required: true
+        - label: I searched existing issues and docs/PLAN.md §7 (deliberately deferred work) for this.
+          required: true

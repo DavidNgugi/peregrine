@@ -1,0 +1,352 @@
+# Architecture allowlist.
+#
+# This file is the architecture, expressed as data. `cargo xtask check-arch`
+# reads it and fails the build on any edge that is not permitted here, so
+# changing the dependency direction requires a reviewed diff to this file
+# rather than a quiet edit to a manifest.
+#
+# Derived from docs/ARCHITECTURE.md §5 (module map) and §2 (principle P2), and
+# enforced by AGENTS R6. When this file and ARCHITECTURE.md disagree, that is a
+# bug in one of them, not a licence to choose.
+#
+#   may_depend_on  workspace crates this crate may name. Everything else is an
+#                  illegal edge, including a dev-dependency cycle.
+#   runtime        third-party crates permitted in [dependencies] and in
+#                  target-specific dependency tables.
+#   build          third-party crates permitted in [build-dependencies].
+#   pure           no IO, no async, no clock, no randomness, enforced by
+#                  scanning the crate's sources for the forbidden paths below.
+#   optional       crates that may be named as `optional = true` features. A
+#                  crate named here but absent from `runtime` is still illegal.
+
+[workspace]
+# Directories scanned for member manifests. Globs are relative to the repo root.
+members = ["crates/*", "apps/desktop/src-tauri", "xtask"]
+# Members that are not published and never ship.
+unpublished = ["xtask", "peregrine-testkit"]
+
+# Test-only crates every member may use. Keeping one list, rather than a
+# per-crate list, is deliberate: a test dependency cannot leak into the shipped
+# graph, and diverging dev-dependency sets across crates is churn.
+[dev-dependencies]
+allowed = [
+  "anyhow", "criterion", "futures", "insta", "mockall", "proptest",
+  "rstest", "serde", "serde_json", "tempfile", "tokio", "tracing",
+  "tracing-subscriber", "wiremock",
+]
+
+# A pure crate is scanned for these substrings in its sources. These are paths,
+# not crate names, so `std::fs` is caught even though it needs no dependency.
+[purity]
+forbidden_paths = [
+  "std::fs", "std::net", "std::process", "std::env",
+  "std::time::SystemTime", "std::time::Instant", "std::thread::sleep",
+  "tokio::", "sqlx::", "reqwest::", "tauri::", "std::sync::Mutex",
+]
+allowed_files = ["build.rs"]
+
+
+# --- Per-crate policy -------------------------------------------------------
+
+
+[crates.peregrine-app]
+may_depend_on = [
+  "peregrine-cast",
+  "peregrine-domain",
+  "peregrine-indexers",
+  "peregrine-monitor",
+  "peregrine-platform",
+  "peregrine-playback",
+  "peregrine-providers",
+  "peregrine-secrets",
+  "peregrine-storage",
+  "peregrine-stream",
+  "peregrine-sync",
+  "peregrine-torrent",
+]
+runtime = [
+  "anyhow",
+  "dashmap",
+  "futures",
+  "jiff",
+  "serde",
+  "serde_json",
+  "thiserror",
+  "tokio",
+  "tokio-util",
+  "tracing",
+  "ulid",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-cast]
+may_depend_on = [
+  "peregrine-domain",
+  "peregrine-playback",
+  "peregrine-stream",
+]
+runtime = [
+  "mdns-sd",
+  "rupnp",
+  "rust_cast",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-domain]
+may_depend_on = []
+runtime = [
+  "jiff",
+  "serde",
+  "thiserror",
+  "ulid",
+]
+build = []
+pure = true
+
+
+[crates.peregrine-indexers]
+may_depend_on = [
+  "peregrine-domain",
+  "peregrine-providers",
+]
+runtime = [
+  "reqwest",
+  "serde",
+  "serde_json",
+  "thiserror",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-ipc]
+may_depend_on = [
+  "peregrine-app",
+]
+runtime = [
+  "serde",
+  "serde_json",
+  "specta",
+  "tauri",
+  "tauri-specta",
+  "thiserror",
+  "tokio",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-mcp]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  "serde",
+  "serde_json",
+  "thiserror",
+  "tokio",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-monitor]
+may_depend_on = [
+  "peregrine-domain",
+  "peregrine-providers",
+  "peregrine-sync",
+]
+runtime = [
+  "jiff",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-platform]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  "jiff",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-playback]
+may_depend_on = [
+  "peregrine-domain",
+  "peregrine-stream",
+  "peregrine-sync",
+]
+runtime = [
+  "ffmpeg-sidecar",
+  "jiff",
+  "raw-window-handle",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tokio-util",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-providers]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  "backon",
+  "governor",
+  "jiff",
+  "moka",
+  "reqwest",
+  "reqwest-middleware",
+  "reqwest-retry",
+  "serde",
+  "serde_json",
+  "thiserror",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-secrets]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  "keyring",
+  "secrecy",
+  "thiserror",
+  "tracing",
+  "zeroize",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-storage]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  "futures",
+  "jiff",
+  "serde",
+  "serde_json",
+  "sqlx",
+  "thiserror",
+  "tokio",
+  "tracing",
+  "ulid",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-stream]
+may_depend_on = [
+  "peregrine-domain",
+  "peregrine-torrent",
+]
+runtime = [
+  "axum",
+  "hyper",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tower",
+  "tower-http",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-sync]
+may_depend_on = [
+  "peregrine-domain",
+  "peregrine-providers",
+  "peregrine-storage",
+]
+runtime = [
+  "backon",
+  "blurhash",
+  "dashmap",
+  "fast_image_resize",
+  "futures",
+  "image",
+  "jiff",
+  "moka",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tokio-util",
+  "tracing",
+  "ulid",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-testkit]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = []
+build = []
+pure = false
+
+
+[crates.peregrine-torrent]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  "futures",
+  "jiff",
+  "librqbit",
+  "serde",
+  "thiserror",
+  "tokio",
+  "tokio-util",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.xtask]
+may_depend_on = []
+runtime = [
+  "anyhow",
+  "serde",
+  "sha2",
+  "toml",
+]
+build = []
+pure = false

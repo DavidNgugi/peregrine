@@ -1,0 +1,20 @@
+[workspace]
+members = ["storage", "app"]
+
+[dev-dependencies]
+allowed = []
+
+[purity]
+forbidden_paths = []
+
+[crates.storage]
+may_depend_on = []
+runtime = []
+build = []
+pure = false
+
+[crates.app]
+may_depend_on = []
+runtime = []
+build = []
+pure = false

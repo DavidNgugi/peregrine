@@ -1,0 +1,4 @@
+# `cargo xtask <command>` is how AGENTS.md §3 names the repository gates. The
+# alias keeps that spelling working without installing a cargo-xtask binary.
+[alias]
+xtask = "run --quiet --package xtask --"

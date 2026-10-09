@@ -1,0 +1,13 @@
+[package]
+name = "peregrine-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Peregrine test doubles."
+publish = false
+
+[lints]
+workspace = true

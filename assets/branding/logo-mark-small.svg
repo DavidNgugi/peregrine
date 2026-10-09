@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Peregrine">
+  <title>Peregrine mark, small size</title>
+  <!-- Two strokes instead of three: below ~20px the third stroke blurs into the second. -->
+  <g fill="none" stroke="currentColor" stroke-linecap="round">
+    <path d="M3.5 12h12" stroke-width="4.4"/>
+    <path d="M3.5 21h7.5" stroke-width="4.4"/>
+  </g>
+  <path d="M19.9 10.4 28.6 17.6l-8.7 7.2z" fill="currentColor"/>
+</svg>

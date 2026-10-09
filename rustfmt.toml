@@ -1,0 +1,7 @@
+# Stable-only options: a nightly-only setting here would make `cargo fmt --check`
+# behave differently for contributors on stable, which is the whole toolchain.
+edition = "2024"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"

@@ -1,0 +1,22 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Repository gates: dependency edges, migration immutability, TODO discipline."
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

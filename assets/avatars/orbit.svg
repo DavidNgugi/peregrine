@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 76 76" role="img" aria-label="Peregrine avatar Orbit">
+  <title>Orbit avatar</title>
+  <rect x="2" y="2" width="72" height="72" rx="22" fill="#7f6bff"/>
+  <circle cx="38" cy="46" r="8" fill="#fff"/><ellipse cx="38" cy="46" rx="20" ry="8" fill="none" stroke="#fff" stroke-width="4" transform="rotate(-20 38 46)"/>
+</svg>

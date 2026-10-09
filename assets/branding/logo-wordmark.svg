@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" role="img" aria-label="Peregrine">
+  <title>Peregrine wordmark</title>
+  <g transform="translate(4 8)">
+    <g fill="none" stroke="currentColor" stroke-linecap="round">
+      <path d="M3.5 9h12" stroke-width="3.4"/>
+      <path d="M3.5 16h8.5" stroke-width="3.4"/>
+      <path d="M3.5 23h5.5" stroke-width="3.4"/>
+    </g>
+    <path d="M19.6 9.4 28.4 16l-8.8 6.6z" fill="currentColor"/>
+  </g>
+  <text x="46" y="31.5" font-family="system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Cantarell, Inter, sans-serif"
+        font-size="25" font-weight="600" letter-spacing="-0.4" fill="currentColor">Peregrine</text>
+</svg>

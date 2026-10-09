@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Peregrine">
+  <title>Peregrine mark</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round">
+    <path d="M3.5 9h12" stroke-width="3.4"/>
+    <path d="M3.5 16h8.5" stroke-width="3.4"/>
+    <path d="M3.5 23h5.5" stroke-width="3.4"/>
+  </g>
+  <path d="M19.6 9.4 28.4 16l-8.8 6.6z" fill="currentColor"/>
+</svg>

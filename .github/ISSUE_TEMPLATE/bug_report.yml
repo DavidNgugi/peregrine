@@ -1,0 +1,56 @@
+name: Bug report
+description: Something behaves incorrectly in the app.
+labels: ["kind/bug", "state/triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste API keys, tokens, magnets, or filesystem paths. Redact them.
+        Security defects go through SECURITY.md, not this form.
+  - type: input
+    id: version
+    attributes:
+      label: Peregrine version and OS
+      description: From Settings → About, plus your OS and version. Include desktop scaling if the bug looks visual.
+      placeholder: 0.1.0 (a1b2c3d), macOS 26.4.1, Apple silicon, 150% scaling
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the defect. Start from a fresh launch if you can.
+      placeholder: |
+        1. Open Discover
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostics
+      description: Settings → Diagnostics → Copy diagnostics. Redact paths, magnets, and keys.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this defect.
+          required: true
+        - label: This is not a security defect (those go through SECURITY.md).
+          required: true

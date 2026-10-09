@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 76 76" role="img" aria-label="Peregrine avatar Grid">
+  <title>Grid avatar</title>
+  <rect x="2" y="2" width="72" height="72" rx="22" fill="#c084fc"/>
+  <rect x="20" y="28" width="15" height="15" rx="4" fill="#fff"/><rect x="41" y="28" width="15" height="15" rx="4" fill="#fff" opacity=".6"/><rect x="20" y="49" width="15" height="15" rx="4" fill="#fff" opacity=".6"/><rect x="41" y="49" width="15" height="15" rx="4" fill="#fff"/>
+</svg>

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "default-dark",
+  "name": "Default Dark",
+  "author": "Peregrine",
+  "appearance": "dark",
+  "hueBrand": 250,
+  "tokens": {
+    "surface-0": "oklch(0.19 0.008 var(--hue-brand))",
+    "surface-1": "oklch(0.23 0.010 var(--hue-brand))",
+    "surface-2": "oklch(0.27 0.012 var(--hue-brand))",
+    "surface-scrim": "oklch(0.12 0.010 var(--hue-brand) / 0.72)",
+    "text-primary": "oklch(0.96 0.005 var(--hue-brand))",
+    "text-secondary": "oklch(0.78 0.010 var(--hue-brand))",
+    "text-tertiary": "oklch(0.62 0.010 var(--hue-brand))",
+    "text-on-accent": "oklch(0.99 0 0)",
+    "border-subtle": "oklch(0.32 0.010 var(--hue-brand))",
+    "border-strong": "oklch(0.44 0.012 var(--hue-brand))",
+    "accent": "oklch(0.68 0.16 var(--hue-brand))",
+    "accent-hover": "oklch(0.73 0.16 var(--hue-brand))",
+    "accent-muted": "oklch(0.42 0.08 var(--hue-brand))",
+    "state-ok": "oklch(0.72 0.15 150)",
+    "state-warn": "oklch(0.80 0.15 85)",
+    "state-danger": "oklch(0.68 0.19 25)",
+    "state-info": "oklch(0.72 0.12 240)"
+  },
+  "wallpaper": {
+    "kind": "gradient",
+    "from": "oklch(0.26 0.03 var(--hue-brand))",
+    "to": "oklch(0.14 0.01 var(--hue-brand))",
+    "angle": 200
+  }
+}

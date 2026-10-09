@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Peregrine app icon">
+  <title>Peregrine app icon</title>
+  <!-- macOS squircle container with the standard ~10% safe margin for the mark. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e2130"/>
+      <stop offset="1" stop-color="#12141d"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <g transform="translate(238 238) scale(17.125)">
+    <g fill="none" stroke="#f2f4f8" stroke-linecap="round">
+      <path d="M3.5 9h12" stroke-width="3.4"/>
+      <path d="M3.5 16h8.5" stroke-width="3.4"/>
+      <path d="M3.5 23h5.5" stroke-width="3.4"/>
+    </g>
+    <path d="M19.6 9.4 28.4 16l-8.8 6.6z" fill="#6aa6ff"/>
+  </g>
+</svg>

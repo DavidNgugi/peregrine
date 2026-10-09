@@ -1,0 +1,14 @@
+[workspace]
+members = ["known", "unknown"]
+
+[dev-dependencies]
+allowed = []
+
+[purity]
+forbidden_paths = []
+
+[crates.known]
+may_depend_on = []
+runtime = []
+build = []
+pure = false

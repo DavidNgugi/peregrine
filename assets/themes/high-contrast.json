@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "high-contrast",
+  "name": "High Contrast",
+  "author": "Peregrine",
+  "appearance": "dark",
+  "hueBrand": 250,
+  "tokens": {
+    "surface-0": "oklch(0.08 0 0)",
+    "surface-1": "oklch(0.14 0 0)",
+    "surface-2": "oklch(0.20 0 0)",
+    "surface-scrim": "oklch(0 0 0 / 0.90)",
+    "text-primary": "oklch(1 0 0)",
+    "text-secondary": "oklch(0.92 0 0)",
+    "text-tertiary": "oklch(0.84 0 0)",
+    "text-on-accent": "oklch(0.08 0 0)",
+    "border-subtle": "oklch(0.62 0 0)",
+    "border-strong": "oklch(0.86 0 0)",
+    "accent": "oklch(0.88 0.16 95)",
+    "accent-hover": "oklch(0.94 0.16 95)",
+    "accent-muted": "oklch(0.40 0.08 95)",
+    "state-ok": "oklch(0.86 0.20 150)",
+    "state-warn": "oklch(0.90 0.18 85)",
+    "state-danger": "oklch(0.78 0.22 25)",
+    "state-info": "oklch(0.84 0.16 240)"
+  },
+  "wallpaper": {
+    "kind": "solid",
+    "from": "oklch(0.08 0 0)"
+  }
+}

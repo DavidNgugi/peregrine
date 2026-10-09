@@ -1,0 +1,14 @@
+[workspace]
+members = ["domain"]
+
+[dev-dependencies]
+allowed = []
+
+[purity]
+forbidden_paths = ["std::fs", "std::time::SystemTime"]
+
+[crates.domain]
+may_depend_on = []
+runtime = []
+build = []
+pure = true
