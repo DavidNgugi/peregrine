@@ -392,6 +392,8 @@ impl EpisodeSpan {
 }
 
 /// A parsed release title, with the raw text kept for auditability.
+// Serialization only: a derived `Deserialize` could build a release whose fields
+// disagree with each other, so `parse` stays the one way in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReleaseName {
     raw: String,
