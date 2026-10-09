@@ -1,0 +1,131 @@
+# The gates AGENTS.md §3 names, run on every pull request (PG-E0-13).
+#
+# Three jobs exist because they fail for different reasons and a maintainer needs
+# to know which: `gates` is the architecture and backlog contract, `rust` is the
+# code on every platform we ship, `frontend` is the TypeScript surface, and
+# `supply-chain` is the dependency policy. MSRV is separate because it is a
+# compatibility floor, not a correctness check.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: no job here writes to the repository, so no job may ask to.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  gates:
+    name: repository gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Dependency direction and pure-crate sources
+        run: cargo xtask check-arch
+      - name: Migrations are append-only
+        run: cargo xtask check-migrations
+      - name: Every deferral names a task or an issue
+        run: cargo xtask check-todos
+      - name: The declared backlog roll-up is not stale
+        run: cargo xtask backlog-stats
+
+  rust:
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The Tauri shell needs the WebKitGTK stack to link on Linux. This is the
+      # prerequisite list from the Tauri v2 documentation.
+      - name: Linux system dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Clippy (pedantic, warnings are errors)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --locked
+
+  msrv:
+    name: msrv (1.95.0)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Build at the declared MSRV
+        run: cargo build --workspace --locked
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install (lockfile is authoritative)
+        run: pnpm install --frozen-lockfile
+      - name: Build every package
+        run: pnpm -r build
+      - name: Typecheck (strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes)
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Unit tests
+        run: pnpm test
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      # Licence allowlist, banned crates, and advisories, per deny.toml and
+      # docs/DEPENDENCIES.md §6. A new licence stops the build until the docs and
+      # an ADR are updated.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit frontend dependencies
+        run: pnpm audit --audit-level high

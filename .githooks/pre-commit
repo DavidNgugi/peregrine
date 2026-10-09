@@ -1,0 +1,48 @@
+#!/bin/sh
+# Local pre-commit checks (PG-E0-10), so a formatting or architecture mistake is
+# caught before it reaches CI. Enable once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# The checks are scoped to what the commit touches: a documentation-only commit
+# must not require a Rust toolchain or an installed node_modules.
+
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+rust_changed=$(printf '%s\n' "$staged" | grep -E '(^|/)Cargo\.toml$|\.rs$|^arch-allowlist\.toml$' || true)
+if [ -n "$rust_changed" ]; then
+  if ! cargo fmt --all --check; then
+    echo "pre-commit: formatting differs; run 'cargo fmt --all'" >&2
+    exit 1
+  fi
+  # The architecture check is the one gate that must never be skipped: it is the
+  # only thing standing between a hurried import and a reversed dependency.
+  cargo xtask check-arch || exit 1
+fi
+
+migrations_changed=$(printf '%s\n' "$staged" | grep -E '^crates/peregrine-storage/migrations/' || true)
+if [ -n "$migrations_changed" ]; then
+  cargo xtask check-migrations || exit 1
+fi
+
+if [ -n "$rust_changed" ] || [ -n "$migrations_changed" ]; then
+  cargo xtask check-todos || exit 1
+fi
+
+frontend_changed=$(printf '%s\n' "$staged" | grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' || true)
+if [ -n "$frontend_changed" ]; then
+  if [ -d node_modules ] && [ -f package.json ]; then
+    printf '%s\n' "$frontend_changed" | xargs pnpm exec eslint --max-warnings 0 || exit 1
+  else
+    echo "pre-commit: skipping frontend lint; run 'pnpm install' first" >&2
+  fi
+fi

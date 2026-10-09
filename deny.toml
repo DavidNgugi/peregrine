@@ -1,0 +1,82 @@
+# Supply-chain policy. Enforced by `cargo deny check` in CI (workflow `ci.yml`,
+# job `supply-chain`), which is the gate `PG-E0-14` requires.
+#
+# This file exists so that the licence and advisory rules in AGENTS R21-R25 and
+# docs/DEPENDENCIES.md §6 are mechanical rather than a review habit.
+
+[graph]
+# Only the platforms we ship. Checking every cfg on every target produces
+# findings for crates that never enter a Peregrine build.
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+  { triple = "x86_64-pc-windows-msvc" },
+  { triple = "aarch64-pc-windows-msvc" },
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "aarch64-unknown-linux-gnu" },
+]
+
+[advisories]
+version = 2
+# An advisory is a build failure, not a warning. A known-vulnerable dependency is
+# not something to ship and note later.
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# The allowlist from docs/DEPENDENCIES.md §6. Copyleft is absent on purpose:
+# GPL and LGPL code must stay outside the process boundary as a separate
+# executable (ADR 0009), and MPL file-level obligations are not accepted for
+# statically linked code.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unlicense",
+  "CC0-1.0",
+  "Zlib",
+  "0BSD",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.9
+# The allowlist is a policy that is deliberately ahead of the dependency graph:
+# `BSD-3-Clause` arrives with `encoding_rs` (subtitle decoding) and Zlib with
+# other platform crates. An allowlisted licence that nothing uses yet is not a
+# finding, so the "unmatched license allowance" warning is off rather than
+# repeatedly explained.
+unused-allowed-license = "allow"
+# `encoding_rs` is (Apache-2.0 OR MIT) AND BSD-3-Clause; its notice is retained in
+# NOTICE. Both components are on the allowlist, so no exception is needed here.
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Deny by name rather than by licence as a second line of defence: these are the
+# specific mistakes the docs call out, and a name is unambiguous even when a
+# crate's licence metadata is wrong.
+# A graph-wide denial is only correct for a crate whose *presence anywhere* is
+# unacceptable: copyleft inside our process boundary, or a system TLS stack we
+# deliberately do not use.
+#
+# It is the wrong tool for "we chose something else", which is what the rest of
+# docs/DEPENDENCIES.md §"Deliberately not used" records. `time` and `once_cell`
+# are unavoidable transitive dependencies of ordinary crates — `once_cell`
+# already arrives via `tempfile` -> `proptest` — so denying them graph-wide would
+# fail the build for a dependency we never chose. Direct-dependency discipline is
+# enforced where it can actually be enforced: `cargo xtask check-arch` rejects any
+# crate name not listed for that crate in arch-allowlist.toml.
+deny = [
+  # Static linking would put LGPL/GPL code inside our binary (ADR 0009).
+  { name = "libmpv2", reason = "LGPL-2.1 and statically linked; mpv runs as a subprocess (ADR 0013)" },
+  { name = "mpv-client", reason = "GPL-3.0; we speak JSON IPC over a socket instead" },
+  { name = "openssl", reason = "reqwest uses rustls so we do not depend on a system TLS stack" },
+  { name = "openssl-sys", reason = "reqwest uses rustls so we do not depend on a system TLS stack" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

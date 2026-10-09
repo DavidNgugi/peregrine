@@ -1,0 +1,26 @@
+# Keeps the repository labels identical to .github/labels.yml, so the taxonomy is
+# reviewed in a diff instead of being clicked into existence (PG-E0-12).
+
+name: labels
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/labels.yml", ".github/workflows/labels.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EndBug/label-sync@v2
+        with:
+          config-file: .github/labels.yml
+          # A label someone added by hand is left alone rather than deleted;
+          # removing one is a deliberate change to this workflow.
+          delete-other-labels: false

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "schedule:weekly", ":dependencyDashboard"],
+  "labels": ["kind/chore", "area/ci"],
+  "rangeStrategy": "pin",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "Grouped weekly Rust crate updates, one PR so the CI matrix runs once (PG-E0-17).",
+      "matchManagers": ["cargo"],
+      "groupName": "rust dependencies",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Grouped weekly frontend updates. A major needs a CI pass plus a visual regression run (DEPENDENCIES §1).",
+      "matchManagers": ["npm"],
+      "groupName": "frontend dependencies",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Pinned exactly by policy (DEPENDENCIES §1). Renovate may propose a new pin, but not a range.",
+      "matchPackageNames": ["specta", "tauri-specta"],
+      "rangeStrategy": "pin"
+    },
+    {
+      "description": "GitHub Actions are grouped separately so a broken action does not block crate updates.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "ci"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "description": "A security advisory is not left for the weekly window (R21).",
+    "labels": ["kind/security", "prio/P0"],
+    "schedule": ["at any time"]
+  }
+}

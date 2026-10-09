@@ -70,14 +70,14 @@ graph LR
 | PG-E0-07 | `xtask check-todos` requires an issue reference on every TODO | Fails on a bare TODO fixture | — | XS | done |
 | PG-E0-08 | Rust formatting and lint policy | `cargo clippy -- -D warnings` clean; pedantic lints configured | PG-E0-01 | XS | done |
 | PG-E0-09 | TypeScript strict config and lint stack | `tsc --noEmit` clean with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` | PG-E0-02 | S | todo |
-| PG-E0-10 | Pre-commit hooks: format, lint staged files, arch check | A commit with a formatting error is rejected locally | PG-E0-08, PG-E0-09 | S | todo |
+| PG-E0-10 | Pre-commit hooks: format, lint staged files, arch check | A commit with a formatting error is rejected locally | PG-E0-08, PG-E0-09 | S | done |
 | PG-E0-11 | Commit convention, PR template with perf and security checklists, CODEOWNERS | Template rendered on a test PR | — | XS | review |
 | PG-E0-12 | Issue templates and label taxonomy, milestones mapped to phases | Templates produce labelled issues | — | XS | review |
-| PG-E0-13 | CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 | Green on a trivial PR with cache warm | PG-E0-01 | M | todo |
-| PG-E0-14 | Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit` | Build fails on an advisory fixture | PG-E0-13 | S | todo |
+| PG-E0-13 | CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 | Green on a trivial PR with cache warm | PG-E0-01 | M | review |
+| PG-E0-14 | Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit` | Build fails on an advisory fixture | PG-E0-13 | S | doing |
 | PG-E0-15 | Dead-dependency gate: `knip`, `cargo-machete` | Build fails on an unused fixture dependency | PG-E0-13 | XS | todo |
 | PG-E0-16 | Release workflow: bundles, SBOM, signed manifest, changelog | A tagged pre-release publishes artifacts and a manifest | PG-E0-13 | M | todo |
-| PG-E0-17 | Automated dependency updates, grouped weekly | A grouped PR opens on schedule | PG-E0-13 | XS | todo |
+| PG-E0-17 | Automated dependency updates, grouped weekly | A grouped PR opens on schedule | PG-E0-13 | XS | review |
 | PG-E0-18 | `LICENSE`, `NOTICE`, third-party attribution scaffold | Attribution file lists every runtime dependency and sidecar | — | S | doing |
 
 ## E1 · App shell and platform

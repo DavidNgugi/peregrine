@@ -103,6 +103,7 @@ pnpm test                    # frontend unit tests
 pnpm test:e2e                # Playwright flows
 cargo xtask check-arch       # dependency rules
 cargo xtask check-migrations # migration immutability
+cargo xtask check-todos      # every deferral names a task or an issue
 cargo xtask check-docs       # broken links and mermaid block parity
 cargo xtask check-theme      # theme schema and contrast gate
 cargo xtask check-notices    # sidecar licences and source offers
@@ -111,6 +112,14 @@ cargo xtask gen-ipc          # regenerate TS bindings
 cargo xtask backlog-stats    # task and effort roll-up
 cargo clippy --workspace -- -D warnings
 pnpm lint && pnpm typecheck
+```
+
+Enable the local pre-commit hooks once per clone. They run formatting, the
+architecture check, the migration check, and lint on staged files, scoped to what
+the commit touches:
+
+```bash
+git config core.hooksPath .githooks
 ```
 
 Any new recurring command is added to `xtask` and documented here in the same pull request.
