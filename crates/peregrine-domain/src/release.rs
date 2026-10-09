@@ -6,10 +6,10 @@
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Vertical resolution a release declares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Resolution {
     /// `2160p`, `4K`, or `UHD`.
     #[serde(rename = "2160p")]
@@ -61,7 +61,7 @@ impl Resolution {
 }
 
 /// Where the video came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReleaseSource {
     /// `REMUX` or `BDREMUX`.
     #[serde(rename = "remux")]
@@ -155,7 +155,7 @@ impl ReleaseSource {
 }
 
 /// Video codec family a release declares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VideoCodec {
     /// `x264`, `H.264`, or `AVC`.
     #[serde(rename = "h264")]
@@ -245,7 +245,7 @@ impl HdrFormat {
 }
 
 /// Audio codec a release declares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AudioCodec {
     /// `AAC`.
     #[serde(rename = "aac")]
