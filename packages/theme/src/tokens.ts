@@ -43,16 +43,28 @@ export const SEMANTIC_COLOUR_TOKENS = [
   "--focus-ring",
 ] as const;
 
-/** Colour tokens the light theme overrides; the rest are inherited from `:root`. */
+/**
+ * Colour tokens the light theme overrides. `--focus-ring` is the only semantic
+ * colour it inherits, because it derives from `--accent`.
+ */
 export const LIGHT_THEME_OVERRIDES = [
   "--surface-0",
   "--surface-1",
   "--surface-2",
+  "--surface-scrim",
   "--text-primary",
   "--text-secondary",
   "--text-tertiary",
+  "--text-on-accent",
   "--border-subtle",
+  "--border-strong",
   "--accent",
+  "--accent-hover",
+  "--accent-muted",
+  "--state-ok",
+  "--state-warn",
+  "--state-danger",
+  "--state-info",
 ] as const;
 
 export const TYPOGRAPHY_FONT_TOKENS = ["--font-ui"] as const;

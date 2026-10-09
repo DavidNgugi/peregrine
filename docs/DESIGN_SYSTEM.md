@@ -54,11 +54,11 @@ Every colour is authored in **OKLCH** so lightness is perceptually uniform and a
 
   --text-primary:   oklch(0.96 0.005 var(--hue-brand));
   --text-secondary: oklch(0.78 0.010 var(--hue-brand));
-  --text-tertiary:  oklch(0.62 0.010 var(--hue-brand));
-  --text-on-accent: oklch(0.99 0 0);
+  --text-tertiary:  oklch(0.65 0.010 var(--hue-brand));
+  --text-on-accent: oklch(0.30 0 0);
 
   --border-subtle:  oklch(0.32 0.010 var(--hue-brand));
-  --border-strong:  oklch(0.44 0.012 var(--hue-brand));
+  --border-strong:  oklch(0.55 0.012 var(--hue-brand));
 
   --accent:         oklch(0.68 0.16 var(--hue-brand));
   --accent-hover:   oklch(0.73 0.16 var(--hue-brand));
@@ -76,15 +76,34 @@ Every colour is authored in **OKLCH** so lightness is perceptually uniform and a
   --surface-0: oklch(0.99 0.002 var(--hue-brand));
   --surface-1: oklch(0.97 0.004 var(--hue-brand));
   --surface-2: oklch(0.94 0.006 var(--hue-brand));
+  --surface-scrim: oklch(0.30 0.010 var(--hue-brand) / 0.45);
+
   --text-primary:   oklch(0.20 0.010 var(--hue-brand));
   --text-secondary: oklch(0.45 0.010 var(--hue-brand));
-  --text-tertiary:  oklch(0.58 0.010 var(--hue-brand));
+  --text-tertiary:  oklch(0.52 0.010 var(--hue-brand));
+  --text-on-accent: oklch(0.99 0 0);
+
   --border-subtle:  oklch(0.90 0.006 var(--hue-brand));
+  --border-strong:  oklch(0.615 0.010 var(--hue-brand));
+
   --accent:         oklch(0.55 0.18 var(--hue-brand));
+  --accent-hover:   oklch(0.50 0.18 var(--hue-brand));
+  --accent-muted:   oklch(0.92 0.04 var(--hue-brand));
+
+  --state-ok:       oklch(0.55 0.14 150);
+  --state-warn:     oklch(0.62 0.14 75);
+  --state-danger:   oklch(0.55 0.19 25);
+  --state-info:     oklch(0.55 0.14 240);
 }
 ```
 
+The light block lists every semantic colour whose light value differs from the dark base, because those are exactly the drift points between this example, `packages/theme/src/tokens.css`, and `assets/themes/default-light.json`.
+
+`--text-on-accent` is chosen against the accent it sits on, not against the surface. A dark-theme accent is bright (`oklch(0.68 …)` in Default Dark, `oklch(0.66 …)` in Midnight), so only a dark label clears 4.5:1 and those themes carry `--text-on-accent` near `oklch(0.30 0 0)`; the light theme's darker accent takes a light label. The polarity is therefore per theme and must be re-derived whenever an accent changes.
+
 ### 2.2 Contrast requirements
+
+Thresholds:
 
 | Pair | Minimum |
 | --- | --- |
@@ -94,7 +113,22 @@ Every colour is authored in **OKLCH** so lightness is perceptually uniform and a
 | Progress and state indicators | 3:1, and never colour alone: pair with icon or text |
 | Focus ring | 3:1 against both the component and the background |
 
-`xtask check-theme` computes contrast for every semantic pair in every shipped theme and fails the build on a violation. APCA values are reported alongside for information, but WCAG AA is the gate because that is what the platform accessibility tooling reports to users.
+`xtask check-theme` computes contrast for every semantic pair in every shipped theme and fails the build on a violation. The shipped values failed the matrix below before this change, so the matrix is the enforced reading of the thresholds above rather than a guideline:
+
+| Foreground | Background | Minimum |
+| --- | --- | --- |
+| `--text-primary`, `--text-secondary`, `--text-tertiary` | `--surface-0`, `--surface-1`, `--surface-2` | 4.5:1 |
+| `--text-on-accent` | `--accent`, `--accent-hover` | 4.5:1 |
+| `--border-strong` | `--surface-0`, `--surface-1`, `--surface-2` | 3:1 |
+| `--accent`, `--accent-hover` | `--surface-0`, `--surface-1`, `--surface-2` | 3:1 |
+| `--state-ok`, `--state-warn`, `--state-danger`, `--state-info` | `--surface-0`, `--surface-1`, `--surface-2` | 3:1 |
+| `--border-subtle` | — | excluded: decorative, no threshold |
+| `--surface-scrim` | — | excluded: composited and decorative, no threshold |
+| `--accent-muted` | — | excluded: decorative tint, no threshold |
+
+Rules that make the matrix testable: every pair is measured in both orders and the worse ratio is the one that must clear its minimum; a token carrying an alpha channel is composited over its background before measuring; OKLCH is converted to linear sRGB and the WCAG 2.2 relative-luminance formula is applied. An OKLCH value outside sRGB is gamut-mapped by reducing chroma at constant lightness and hue and clipping the residual, and every pair must clear its minimum under that rendering as well as under plain per-channel clipping, so the gate and the themes cannot disagree about an out-of-gamut accent. The focus-ring row above is satisfied by requiring `--accent` against every surface, because §2.1 defines `--focus-ring` as `var(--accent)`.
+
+APCA values are reported alongside for information, but WCAG AA is the gate because that is what the platform accessibility tooling reports to users.
 
 ### 2.3 System accent integration
 

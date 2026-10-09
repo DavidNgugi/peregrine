@@ -15,11 +15,11 @@
 
   --text-primary: oklch(0.96 0.005 var(--hue-brand));
   --text-secondary: oklch(0.78 0.01 var(--hue-brand));
-  --text-tertiary: oklch(0.62 0.01 var(--hue-brand));
-  --text-on-accent: oklch(0.99 0 0);
+  --text-tertiary: oklch(0.65 0.01 var(--hue-brand));
+  --text-on-accent: oklch(0.3 0 0);
 
   --border-subtle: oklch(0.32 0.01 var(--hue-brand));
-  --border-strong: oklch(0.44 0.012 var(--hue-brand));
+  --border-strong: oklch(0.55 0.012 var(--hue-brand));
 
   --accent: oklch(0.68 0.16 var(--hue-brand));
   --accent-hover: oklch(0.73 0.16 var(--hue-brand));
@@ -56,15 +56,31 @@
   --text-micro--line-height: 15px;
 }
 
+/* Mirrors assets/themes/default-light.json. It overrides every semantic colour
+   whose light value differs from the base dark theme, so the runtime light
+   rendering and the shipped light theme cannot drift apart. */
 [data-theme="light"] {
   color-scheme: light;
 
   --surface-0: oklch(0.99 0.002 var(--hue-brand));
   --surface-1: oklch(0.97 0.004 var(--hue-brand));
   --surface-2: oklch(0.94 0.006 var(--hue-brand));
+  --surface-scrim: oklch(0.3 0.01 var(--hue-brand) / 0.45);
+
   --text-primary: oklch(0.2 0.01 var(--hue-brand));
   --text-secondary: oklch(0.45 0.01 var(--hue-brand));
-  --text-tertiary: oklch(0.58 0.01 var(--hue-brand));
+  --text-tertiary: oklch(0.52 0.01 var(--hue-brand));
+  --text-on-accent: oklch(0.99 0 0);
+
   --border-subtle: oklch(0.9 0.006 var(--hue-brand));
+  --border-strong: oklch(0.615 0.01 var(--hue-brand));
+
   --accent: oklch(0.55 0.18 var(--hue-brand));
+  --accent-hover: oklch(0.5 0.18 var(--hue-brand));
+  --accent-muted: oklch(0.92 0.04 var(--hue-brand));
+
+  --state-ok: oklch(0.55 0.14 150);
+  --state-warn: oklch(0.62 0.14 75);
+  --state-danger: oklch(0.55 0.19 25);
+  --state-info: oklch(0.55 0.14 240);
 }
