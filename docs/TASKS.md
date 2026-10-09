@@ -127,9 +127,9 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | todo |
-| PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | todo |
-| PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | todo |
+| PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | done |
+| PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | done |
+| PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | done |
 | PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | todo |
 | PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | todo |
 | PG-E3-06 | Migration 0004: library tables including partial unique indices | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M | todo |
