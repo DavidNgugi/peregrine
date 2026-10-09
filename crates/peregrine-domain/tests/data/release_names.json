@@ -1,0 +1,3821 @@
+[
+  {
+    "name": "Movie.2019.2160p.BluRay.x264-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.4K.BluRay.x264-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1440p.BluRay.x264-GROUP",
+    "resolution": "1440p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080i.BluRay.x264-GROUP",
+    "resolution": "1080i",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.720p.BluRay.x264-GROUP",
+    "resolution": "720p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.576p.BluRay.x264-GROUP",
+    "resolution": "576p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.480p.BluRay.x264-GROUP",
+    "resolution": "480p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.REMUX.x264-GROUP",
+    "resolution": "1080p",
+    "source": "remux",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BDREMUX.x264-GROUP",
+    "resolution": "1080p",
+    "source": "remux",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BLU-RAY.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BDRip.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bdrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BRRip.x264-GROUP",
+    "resolution": "1080p",
+    "source": "brrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.x264-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEBDL.x264-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB.x264-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEBRip.x264-GROUP",
+    "resolution": "1080p",
+    "source": "webrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.HDTV.x264-GROUP",
+    "resolution": "1080p",
+    "source": "hdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.DVDRip.x264-GROUP",
+    "resolution": "1080p",
+    "source": "dvdrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.HDRip.x264-GROUP",
+    "resolution": "1080p",
+    "source": "hdrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.SDTV.x264-GROUP",
+    "resolution": "1080p",
+    "source": "sdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.PDTV.x264-GROUP",
+    "resolution": "1080p",
+    "source": "pdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.CAM.x264-GROUP",
+    "resolution": "1080p",
+    "source": "cam",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.TS.x264-GROUP",
+    "resolution": "1080p",
+    "source": "ts",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.TC.x264-GROUP",
+    "resolution": "1080p",
+    "source": "tc",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.R5.x264-GROUP",
+    "resolution": "1080p",
+    "source": "r5",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.H.264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.AVC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x265-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.H.265-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.HEVC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.AV1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "av1",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.XviD-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.DivX-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "divx",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.VP9-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "vp9",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.SDR.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "sdr",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.HDR.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.HDR10.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.HDR10+.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "hdr10_plus",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.HLG.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "hlg",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.DV.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.DoVi.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.BluRay.Dolby.Vision.x265-GROUP",
+    "resolution": "2160p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.AAC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.AC3-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DD-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.EAC3-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DDP-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DD+-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTS-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTS-HD-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTSHD-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTS:X-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-x"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTS-X-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-x"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.TrueHD-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "truehd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.Atmos-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.FLAC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "flac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.MP3-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "mp3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.Opus-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "opus"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.PCM-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "pcm"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.LPCM-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "pcm"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-NTb",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "NTb",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.DDP5.1.H.264-CMRG",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-[RARBG]",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "RARBG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.720p.WEBRip.x264-[YTS.MX]",
+    "resolution": "720p",
+    "source": "webrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "YTS.MX",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": null,
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.TrueHD.Atmos.7.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": null,
+    "hdr": null,
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.LPCM.2.0-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": null,
+    "hdr": null,
+    "audio": [
+      "pcm"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.DTS-HD.MA.5.1",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.AAC",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.REPACK-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": "REPACK",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.PROPER-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": "PROPER",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.RERIP-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": "RERIP",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264.PROPER",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": "PROPER",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-REPACK",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": "REPACK",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-RERIP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": "RERIP",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-REAL",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": "REAL",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.BluRay.x264-GROUP.v2",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": "v2",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.x264-GROUP.REPACK",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": "REPACK",
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Real.Steel.2011.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Show.Name.S01.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Show.Name.Season.1.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Show.Name.Season 2.720p.HDTV.x264-GROUP",
+    "resolution": "720p",
+    "source": "hdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 2,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Show.Name.COMPLETE.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Show.Name.S01.COMPLETE.1080p.WEB-DL.x264-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "The.Wire.S01.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "The.Wire.S02.COMPLETE.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 2,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "The.Sopranos.Season.1.iNTERNAL.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Fleabag.S02.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 2,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Succession.S04.COMPLETE.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 4,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Severance.S01.2160p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Game.of.Thrones.S08.COMPLETE.2160p.BluRay.REMUX.HDR.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 8,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Firefly.S01.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": null,
+    "season_pack": true
+  },
+  {
+    "name": "Breaking.Bad.S01E01.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Breaking.Bad.S01E01.720p.HDTV.x264-GROUP",
+    "resolution": "720p",
+    "source": "hdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Breaking.Bad.S02E05.2160p.WEB-DL.DDP5.1.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      5,
+      5
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Breaking.Bad.S05E14E15E16.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 5,
+    "episodes": [
+      14,
+      16
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Breaking.Bad.S02E05E06.720p.HDTV.x264-GROUP",
+    "resolution": "720p",
+    "source": "hdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      5,
+      6
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Wire.S03E10-E12.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      10,
+      12
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Wire.S03E10E11E12.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      10,
+      12
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Wire.S03E10-12.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      10,
+      12
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Show.Name.S01E05E03.1080p.WEB-DL.x264-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      3,
+      5
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Show.Name.S10E20-E22.1080p.WEB-DL.x264-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": 10,
+    "episodes": [
+      20,
+      22
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Chernobyl.S01E01.2160p.WEB-DL.DDP5.1.DV.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Chernobyl.S01E02.2160p.WEB-DL.DDP5.1.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      2,
+      2
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Fleabag.S02E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Barry.S03E08.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      8,
+      8
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Succession.S04E03.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 4,
+    "episodes": [
+      3,
+      3
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Severance.S01E09.2160p.WEB-DL.DDP5.1.Atmos.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      9,
+      9
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Andor.S01E01.2160p.WEB-DL.DDP5.1.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Bear.S02E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Ted.Lasso.S03E05.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      5,
+      5
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Stranger.Things.S04E01.2160p.WEB-DL.DDP5.1.Atmos.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 4,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Stranger.Things.S04E01E02.2160p.WEB-DL.DDP5.1.Atmos.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 4,
+    "episodes": [
+      1,
+      2
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Game.of.Thrones.S08E06.2160p.WEB-DL.DDP5.1.Atmos.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 8,
+    "episodes": [
+      6,
+      6
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Office.US.S07E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 7,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Friends.S05E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 5,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Community.S02E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Brooklyn.Nine-Nine.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Expanse.S03E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Westworld.S01E01.2160p.WEB-DL.DDP5.1.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Better.Call.Saul.S06E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 6,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Mad.Men.S07E01.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 7,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Crown.S06E01.2160p.WEB-DL.DDP5.1.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 6,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Peaky.Blinders.S06E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 6,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Sherlock.S01E01.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Doctor.Who.S01E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Battlestar.Galactica.S01E01.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Last.of.Us.S01E01.2160p.WEB-DL.DDP5.1.Atmos.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.White.Lotus.S02E01.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Euphoria.S02E01.2160p.WEB-DL.DDP5.1.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Arcane.S01E01.2160p.WEB-DL.DDP5.1.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Attack.on.Titan.S04E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 4,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Demon.Slayer.S03E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 3,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Jujutsu.Kaisen.S02E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 2,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "One.Piece.S01E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Naruto.S01E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Bleach.S01E01.1080p.WEB-DL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-FGT",
+    "resolution": "1080p",
+    "source": "remux",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "FGT",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.1080p.BluRay.x264.DD5.1-FGT",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "FGT",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.1080p.BluRay.DDP5.1.x264-CMRG",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.1080p.WEB-DL.AAC2.0.H264-FGT",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "FGT",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.720p.WEBRip.x264.AAC2.0-YTS.MX",
+    "resolution": "720p",
+    "source": "webrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "YTS.MX",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.480p.DVDRip.XviD.AC3-ETRG",
+    "resolution": "480p",
+    "source": "dvdrip",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "ETRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.1080i.HDTV.DD5.1.x264-W4F",
+    "resolution": "1080i",
+    "source": "hdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "W4F",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.576p.PDTV.XviD.MP3-ETRG",
+    "resolution": "576p",
+    "source": "pdtv",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [
+      "mp3"
+    ],
+    "group": "ETRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.480p.SDTV.XviD-ETRG",
+    "resolution": "480p",
+    "source": "sdtv",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [],
+    "group": "ETRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Matrix.1999.CAM.XviD-ETRG",
+    "resolution": null,
+    "source": "cam",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [],
+    "group": "ETRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Inception.2010.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.7.1.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Inception.2010.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Inception.2010.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Interstellar.2014.2160p.WEB-DL.HDR10Plus.DDP5.1.DV.H.265-SMURF",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3"
+    ],
+    "group": "SMURF",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Interstellar.2014.1080p.BluRay.x265.10bit.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h265",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Interstellar.2014.2160p.WEB-DL.DDP5.1.Atmos.DV.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Dark.Knight.2008.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Dark.Knight.2008.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.7.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Blade.Runner.2049.2017.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.7.1.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Blade.Runner.2049.2017.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Dune.2021.2160p.UHD.BluRay.REMUX.HDR10Plus.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10_plus",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Dune.2021.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Dune.2021.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Dune.2021.1080p.BluRay.x264.DTS-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Arrival.2016.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Arrival.2016.1080p.BluRay.x264.DTS-HD.MA.5.1-FGT",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "FGT",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Arrival.2016.720p.BluRay.x264.AAC-GROUP",
+    "resolution": "720p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Parasite.2019.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Parasite.2019.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Whiplash.2014.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Whiplash.2014.2160p.WEB-DL.DDP5.1.DV.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Mad.Max.Fury.Road.2015.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Mad.Max.Fury.Road.2015.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Grand.Budapest.Hotel.2014.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Everything.Everywhere.All.at.Once.2022.2160p.WEB-DL.DDP5.1.DV.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Everything.Everywhere.All.at.Once.2022.1080p.WEB-DL.DDP5.1.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "eac3"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Oppenheimer.2023.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.7.1.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Oppenheimer.2023.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Tenet.2020.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Joker.2019.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Joker.2019.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Sicario.2015.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.7.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Heat.1995.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Alien.1979.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Aliens.1986.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Thing.1982.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Jurassic.Park.1993.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-X-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-x"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Pulp.Fiction.1994.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Fight.Club.1999.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Goodfellas.1990.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Casino.1995.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Prestige.2006.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Memento.2000.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Dunkirk.2017.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "La.La.Land.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Moonlight.2016.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Spotlight.2015.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Birdman.2014.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Gravity.2013.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Revenant.2015.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Departed.2006.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "There.Will.Be.Blood.2007.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Social.Network.2010.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Martian.2015.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Martian.2015.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Spider-Man.2002.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Spider-Man.No.Way.Home.2021.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.HEVC-CMRG",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": "dolby_vision",
+    "audio": [
+      "eac3",
+      "atmos"
+    ],
+    "group": "CMRG",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "X-Men.Days.of.Future.Past.2014.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "1917.2019.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "1917.2019.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Django.Unchained.2012.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Inglourious.Basterds.2009.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Once.Upon.a.Time.in.Hollywood.2019.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Toy.Story.1995.2160p.UHD.BluRay.REMUX.HDR.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Finding.Nemo.2003.1080p.BluRay.x264.DD5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The.Lion.King.1994.2160p.UHD.BluRay.REMUX.HDR.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Spirited.Away.2001.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Your.Name.2016.1080p.BluRay.x264.FLAC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "flac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Princess.Mononoke.1997.1080p.BluRay.x264.FLAC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "flac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Akira.1988.2160p.UHD.BluRay.REMUX.HDR.HEVC.TrueHD.Atmos-GROUP",
+    "resolution": "2160p",
+    "source": "remux",
+    "video_codec": "h265",
+    "hdr": "hdr10",
+    "audio": [
+      "truehd",
+      "atmos"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Ghost.in.the.Shell.1995.1080p.BluRay.x264.DTS-HD.MA.5.1-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "dts-hd"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Perfect.Blue.1997.1080p.BluRay.x264.FLAC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "flac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Paprika.2006.1080p.BluRay.x264.FLAC-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "flac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie_2019_1080p_BluRay_x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie 2019 1080p BluRay x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.DTS.X.5.1.HEVC-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h265",
+    "hdr": null,
+    "audio": [
+      "dts-x"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.Opus-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": null,
+    "hdr": null,
+    "audio": [
+      "opus"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.2160p.WEB-DL.AV1.Opus-GROUP",
+    "resolution": "2160p",
+    "source": "web-dl",
+    "video_codec": "av1",
+    "hdr": null,
+    "audio": [
+      "opus"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.VP9.Opus-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "vp9",
+    "hdr": null,
+    "audio": [
+      "opus"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.DivX.MP3-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "divx",
+    "hdr": null,
+    "audio": [
+      "mp3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB-DL.XviD.MP3-GROUP",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [
+      "mp3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.720p.HDTV.XviD.AC3-GROUP",
+    "resolution": "720p",
+    "source": "hdtv",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.HDTV.DD5.1.x264-GROUP",
+    "resolution": "1080p",
+    "source": "hdtv",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.576p.PDTV.XviD-GROUP",
+    "resolution": "576p",
+    "source": "pdtv",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.480p.SDTV.XviD-GROUP",
+    "resolution": "480p",
+    "source": "sdtv",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.480p.DVDRip.XviD.AC3-GROUP",
+    "resolution": "480p",
+    "source": "dvdrip",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.720p.BRRip.x264.AAC-GROUP",
+    "resolution": "720p",
+    "source": "brrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.720p.BDRip.x264.AAC-GROUP",
+    "resolution": "720p",
+    "source": "bdrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.HDRip.XviD.AC3-GROUP",
+    "resolution": "1080p",
+    "source": "hdrip",
+    "video_codec": "xvid",
+    "hdr": null,
+    "audio": [
+      "ac3"
+    ],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEBRip.x264-GROUP",
+    "resolution": "1080p",
+    "source": "webrip",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEBDL.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.2019.1080p.WEB.AAC2.0.H.264-NTb",
+    "resolution": "1080p",
+    "source": "web-dl",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [
+      "aac"
+    ],
+    "group": "NTb",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Amélie.2001.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Матрица.1999.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "映画.2019.1080p.BluRay.x264-GROUP",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": "GROUP",
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Spider-Man.2002.1080p.BluRay.x264",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "The-Office.S01E01.1080p.BluRay.x264",
+    "resolution": "1080p",
+    "source": "bluray",
+    "video_codec": "h264",
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": null,
+    "season": 1,
+    "episodes": [
+      1,
+      1
+    ],
+    "season_pack": false
+  },
+  {
+    "name": "Some.Random.Release.Name",
+    "resolution": null,
+    "source": null,
+    "video_codec": null,
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Untagged.Release.2020",
+    "resolution": null,
+    "source": null,
+    "video_codec": null,
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "Movie.With.No.Tags",
+    "resolution": null,
+    "source": null,
+    "video_codec": null,
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  },
+  {
+    "name": "the.quick.brown.fox",
+    "resolution": null,
+    "source": null,
+    "video_codec": null,
+    "hdr": null,
+    "audio": [],
+    "group": null,
+    "repack": null,
+    "season": null,
+    "episodes": null,
+    "season_pack": false
+  }
+]
