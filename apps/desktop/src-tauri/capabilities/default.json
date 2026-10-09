@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions for the main window. The Phase 0 shell reads the OS theme and makes no other IPC call, so only the window module's read-only default set is granted.",
+  "windows": ["main"],
+  "permissions": ["core:window:default"]
+}

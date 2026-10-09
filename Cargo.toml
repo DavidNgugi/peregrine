@@ -10,6 +10,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "apps/desktop/src-tauri",
   "crates/peregrine-domain",
   "crates/peregrine-storage",
   "crates/peregrine-providers",

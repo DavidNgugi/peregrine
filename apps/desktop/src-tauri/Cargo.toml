@@ -1,0 +1,24 @@
+[package]
+name = "peregrine-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Peregrine desktop shell: window and process lifecycle only."
+publish = false
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+# The shell is deliberately thin: the window, the event loop, and an error type
+# that says why a launch failed. Everything else arrives over the IPC contract
+# (docs/ARCHITECTURE.md §7), which is why no internal crate is depended on.
+[dependencies]
+tauri = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -100,6 +100,13 @@ build = []
 pure = false
 
 
+[crates.peregrine-desktop]
+may_depend_on = []
+runtime = ["serde", "serde_json", "tauri", "thiserror", "tracing"]
+build = ["tauri-build"]
+pure = false
+
+
 [crates.peregrine-domain]
 may_depend_on = []
 runtime = [
