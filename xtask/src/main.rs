@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use xtask::{arch, backlog, deaddeps, genipc, migrations, theme, todos, workspace};
+use xtask::{arch, backlog, commands, deaddeps, genipc, migrations, theme, todos, workspace};
 
 fn main() -> ExitCode {
     match run() {
@@ -79,6 +79,10 @@ fn run() -> Result<bool> {
             let (report, checked) = todos::check(&root)?;
             Ok(xtask::report::finish("check-todos", &report, checked))
         }
+        "check-commands" => {
+            let (report, checked) = commands::check(&root)?;
+            Ok(xtask::report::finish("check-commands", &report, checked))
+        }
         "backlog-stats" => backlog::run(&root),
         "check-dead-deps" => deaddeps::run(&root),
         "check-theme" => theme::run(&root),
@@ -107,6 +111,7 @@ cargo xtask — repository gates
   check-migrations           migrations are append-only and journaled
   check-migrations --update  record new migrations (never rewrites an existing entry)
   check-todos                every deferral marker names a task or an issue
+  check-commands             an IPC command parses, calls, and maps in twenty lines or fewer
   check-dead-deps            no manifest declares a dependency its sources never use
   check-theme                every shipped theme clears the DESIGN_SYSTEM §2.2 contrast matrix
   gen-ipc                    the committed TS bindings match a fresh export

@@ -129,7 +129,7 @@ graph LR
 | --- | --- | --- | --- | --- |
 | PG-E2-01 | `specta` + `tauri-specta` export pipeline and generated client, pinned to the exact `2.0.0-rc.25` RC (no stable 2.x exists) with a written fallback to hand-written DTOs | One Rust type change propagates to a compiling TS call site; the RC pin is exact | PG-E0-03 | M | done |
 | PG-E2-02 | Structured `AppError` with stable codes and UI mapping | Every code has a message key and a retryability flag | PG-E2-01 | S | done |
-| PG-E2-03 | Command registration with a ≤20-line rule and a lint check | A fixture command with logic fails the check | PG-E2-01 | S | todo |
+| PG-E2-03 | Command registration with a ≤20-line rule and a lint check | A fixture command with logic fails the check | PG-E2-01 | S | done |
 | PG-E2-04 | Event bus with namespaced, versioned topics | Topic names are declared in one manifest shared with TS | PG-E2-01 | M | done |
 | PG-E2-05 | Coalescing / rate-limiting event batcher with drop counters | A 1 kHz producer delivers ≤4 Hz with audit of drops | PG-E2-04 | M | done |
 | PG-E2-06 | Job-scoped command pattern: start returns job ID, progress streams **Remaining:** the pattern is implemented and the hello job's start returns before any work; a load test that measures every command against the 100 ms rule arrives with PG-E2-10's contract tests and PG-E2-12's instrumentation. | No command blocks >100 ms in a load test | PG-E2-04 | M | doing |

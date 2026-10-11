@@ -104,6 +104,7 @@ pnpm test:e2e                # Playwright flows
 cargo xtask check-arch       # dependency rules
 cargo xtask check-migrations # migration immutability
 cargo xtask check-todos      # every deferral names a task or an issue
+cargo xtask check-commands   # every IPC command fits the parse-call-map budget
 cargo xtask check-dead-deps  # unused Rust dependencies (needs cargo-machete on PATH)
 cargo xtask check-docs       # broken links and mermaid block parity
 cargo xtask check-theme      # theme schema and contrast gate

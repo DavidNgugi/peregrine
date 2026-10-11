@@ -44,6 +44,8 @@ jobs:
         run: cargo xtask check-migrations
       - name: Every deferral names a task or an issue
         run: cargo xtask check-todos
+      - name: Every IPC command parses, calls, and maps within its line budget
+        run: cargo xtask check-commands
       - name: Every shipped theme passes its contrast matrix
         run: cargo xtask check-theme
       # The binding gate builds `peregrine-ipc`'s generator binary, which pulls in

@@ -118,9 +118,12 @@ pub struct EventHealth {
 #[specta::specta]
 pub async fn health(state: State<'_, RuntimeState>) -> Result<Health, AppError> {
     let health = state.runtime()?.health().await;
-    Ok(guard_response(
-        "system::health",
-        Health {
+    Ok(guard_response("system::health", Health::from(health)))
+}
+
+impl From<peregrine_app::Health> for Health {
+    fn from(health: peregrine_app::Health) -> Self {
+        Self {
             startup_millis: u64::try_from(health.startup.as_millis()).unwrap_or(u64::MAX),
             scheduler: SchedulerHealth {
                 ready: health.scheduler.ready as u32,
@@ -137,8 +140,8 @@ pub async fn health(state: State<'_, RuntimeState>) -> Result<Health, AppError> 
                 dropped: health.events.dropped,
                 degraded: health.events.is_degraded(),
             },
-        },
-    ))
+        }
+    }
 }
 
 /// The last lines of the newest log file, newest last.
