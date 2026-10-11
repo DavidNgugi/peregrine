@@ -170,6 +170,12 @@ export type ErrorCode =
 "PROVIDER_UNAVAILABLE" | 
 /**  A provider's payload no longer matches the shape we decode. */
 "PROVIDER_SCHEMA_DRIFT" | 
+/**
+ *  The safety gate refused a release: its contents did not match what the release
+ *  claimed. Documented as `UNSAFE_CONTENT` in the acquisition flow, and the one code
+ *  that must never be retried unchanged.
+ */
+"UNSAFE_CONTENT" | 
 /**  Playback failed; retrying from the last known position is offered. */
 "PLAYBACK_FAILED" | 
 /**  A cast renderer went away; another device or local playback can resume. */

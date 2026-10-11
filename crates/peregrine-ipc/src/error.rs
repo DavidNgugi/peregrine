@@ -49,6 +49,10 @@ pub enum ErrorCode {
     ProviderUnavailable,
     /// A provider's payload no longer matches the shape we decode.
     ProviderSchemaDrift,
+    /// The safety gate refused a release: its contents did not match what the release
+    /// claimed. Documented as `UNSAFE_CONTENT` in the acquisition flow, and the one code
+    /// that must never be retried unchanged.
+    UnsafeContent,
     /// Playback failed; retrying from the last known position is offered.
     PlaybackFailed,
     /// A cast renderer went away; another device or local playback can resume.
@@ -90,6 +94,7 @@ impl ErrorCode {
         ErrorCode::ProviderRateLimited,
         ErrorCode::ProviderUnavailable,
         ErrorCode::ProviderSchemaDrift,
+        ErrorCode::UnsafeContent,
         ErrorCode::PlaybackFailed,
         ErrorCode::DeviceUnavailable,
         ErrorCode::Cancelled,
@@ -150,6 +155,11 @@ impl ErrorCode {
             ErrorCode::ProviderSchemaDrift => (
                 "error.provider_schema_drift",
                 "The provider changed its response format; showing cached data.",
+                false,
+            ),
+            ErrorCode::UnsafeContent => (
+                "error.unsafe_content",
+                "The download was stopped by the safety check.",
                 false,
             ),
             ErrorCode::PlaybackFailed => (
@@ -256,6 +266,7 @@ mod tests {
             (ErrorCode::StorageCorrupt, "\"STORAGE_CORRUPT\""),
             (ErrorCode::ProviderRateLimited, "\"PROVIDER_RATE_LIMITED\""),
             (ErrorCode::ProviderSchemaDrift, "\"PROVIDER_SCHEMA_DRIFT\""),
+            (ErrorCode::UnsafeContent, "\"UNSAFE_CONTENT\""),
             (ErrorCode::DeviceUnavailable, "\"DEVICE_UNAVAILABLE\""),
             (ErrorCode::Internal, "\"INTERNAL\""),
         ];
@@ -349,6 +360,7 @@ mod tests {
             ErrorCode::PermissionDenied,
             ErrorCode::DiskFull,
             ErrorCode::ProviderSchemaDrift,
+            ErrorCode::UnsafeContent,
             ErrorCode::Cancelled,
             ErrorCode::Unsupported,
             ErrorCode::Internal,

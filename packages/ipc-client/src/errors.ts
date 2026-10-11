@@ -55,6 +55,8 @@ export type IpcErrorMessageKey =
   | "ipc.error.provider_rate_limited.advice"
   | "ipc.error.provider_unavailable.title"
   | "ipc.error.provider_unavailable.advice"
+  | "ipc.error.provider_schema_drift.title"
+  | "ipc.error.provider_schema_drift.advice"
   | "ipc.error.unsafe_content.title"
   | "ipc.error.unsafe_content.advice"
   | "ipc.error.playback_failed.title"
@@ -79,8 +81,9 @@ export interface IpcErrorCopy {
 // what makes a variant added to the Rust enum fail to compile here until it has
 // copy: that is the R4 test for the promise that no code renders blank.
 //
-// `PROVIDER_SCHEMA_DRIFT` renders the copy written for `unsafe_content` because
-// that is the user-visible condition — a download stopped by the safety check.
+// Every code has copy of its own. `PROVIDER_SCHEMA_DRIFT` and `UNSAFE_CONTENT` used
+// to share one entry, which told a user whose metadata went stale that a download
+// had been blocked; they are different conditions and now read differently.
 const COPY: Readonly<Record<ErrorCode, IpcErrorCopy>> = {
   INVALID_INPUT: {
     titleKey: "ipc.error.invalid_input.title",
@@ -111,6 +114,10 @@ const COPY: Readonly<Record<ErrorCode, IpcErrorCopy>> = {
     adviceKey: "ipc.error.provider_unavailable.advice",
   },
   PROVIDER_SCHEMA_DRIFT: {
+    titleKey: "ipc.error.provider_schema_drift.title",
+    adviceKey: "ipc.error.provider_schema_drift.advice",
+  },
+  UNSAFE_CONTENT: {
     titleKey: "ipc.error.unsafe_content.title",
     adviceKey: "ipc.error.unsafe_content.advice",
   },
