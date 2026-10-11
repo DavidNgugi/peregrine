@@ -2545,12 +2545,16 @@ version = "0.1.0"
 name = "peregrine-ipc"
 version = "0.1.0"
 dependencies = [
+ "peregrine-app",
  "serde",
  "serde_json",
  "specta",
  "specta-typescript",
  "tauri",
  "tauri-specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

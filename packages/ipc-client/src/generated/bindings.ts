@@ -18,6 +18,57 @@ export const commands = {
 	 *  would be the one call site the UI's error handling could not cover.
 	 */
 	buildInfo: () => typedError<BuildInfo, AppError_Serialize>(__TAURI_INVOKE("build_info")),
+	/**
+	 *  The process's own measurements.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`crate::error::ErrorCode::Internal`] when the scheduler has stopped, because its
+	 *  counters are then not the running application's.
+	 */
+	health: () => typedError<Health, AppError_Serialize>(__TAURI_INVOKE("health")),
+	/**
+	 *  The last lines of the newest log file, newest last.
+	 * 
+	 *  The runtime bounds the read — a 64 KiB window and at most `peregrine_app::runtime::
+	 *  MAX_LOG_LINES` lines — so this answer cannot exceed the IPC payload budget.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`crate::error::ErrorCode::Internal`] when the log file exists but cannot be read.
+	 */
+	logTail: (lines: number | null) => typedError<string[], AppError_Serialize>(__TAURI_INVOKE("log_tail", { lines })),
+	/**
+	 *  Starts the hello job.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] when `steps` is outside the documented range,
+	 *  [`ErrorCode::Internal`] when the scheduler is not running.
+	 */
+	startHello: (steps: number) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("start_hello", { steps })),
+	/**
+	 *  Asks a running job to stop.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] when `job_id` is not a job id,
+	 *  [`ErrorCode::NotFound`] when no live job has it.
+	 */
+	cancel: (jobId: string) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("cancel", { jobId })),
+	/**
+	 *  The newest page of the job journal.
+	 * 
+	 *  The page size is capped here rather than trusted: an unbounded page would break the
+	 *  64 KB response budget in ARCHITECTURE §7 rule 1. Keyset paging below a cursor is a
+	 *  repository concern and is tested there; this surface shows the newest work, which is
+	 *  what a diagnostics screen needs.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::StorageCorrupt`] when the journal cannot be read.
+	 */
+	list: (limit: number | null) => typedError<JobRecord_Serialize[], AppError_Serialize>(__TAURI_INVOKE("list", { limit })),
 };
 
 /* Types */
@@ -133,6 +184,158 @@ export type ErrorCode =
  */
 "INTERNAL";
 
+/**
+ *  The event bus's counters.
+ * 
+ *  `degraded` is derived rather than sent separately, so the UI cannot render a live view
+ *  as healthy while the numbers say updates were discarded.
+ */
+export type EventHealth = {
+	/**  Updates accepted from producers. */
+	published: number,
+	/**  Updates replaced by a newer one before delivery. */
+	coalesced: number,
+	/**  Updates the transport accepted. */
+	delivered: number,
+	/**  Updates the transport refused. */
+	failed: number,
+	/**  Updates discarded because too many subjects were already waiting. */
+	dropped: number,
+	/**  Whether anything was refused or discarded. */
+	degraded: boolean,
+};
+
+/**
+ *  What the diagnostics screen reports about the running process.
+ * 
+ *  Every value is measured; none is hardcoded (PG-E25-06's rule applied to the one
+ *  screen that exists today).
+ */
+export type Health = {
+	/**  How long startup took, in milliseconds. */
+	startupMillis: number,
+	/**  The scheduler's counters. */
+	scheduler: SchedulerHealth,
+	/**  The event bus's counters. */
+	events: EventHealth,
+};
+
+/**  One row of the job journal. */
+export type JobRecord = JobRecord_Serialize | JobRecord_Deserialize;
+
+/**  One row of the job journal. */
+export type JobRecord_Deserialize = {
+	/**  The row's id, which is also the paging cursor. */
+	id: number,
+	/**  The job kind. */
+	kind: string,
+	/**  The stored phase. */
+	state: JobState,
+	/**  Scheduling priority. */
+	priority: number,
+	/**  Completion in permille, from 0 to 1000. */
+	progressPermille: number,
+	/**  How many attempts have been made. */
+	attempts: number,
+	/**  How many attempts are allowed. */
+	maxAttempts: number,
+	/**  Unix milliseconds when the next attempt is due, while deferred. */
+	nextAttemptAt?: number | null,
+	/**  The last failure's stable code. */
+	lastErrorCode?: string | null,
+	/**  The last failure's message. */
+	lastError?: string | null,
+	/**  Unix milliseconds when the job was submitted. */
+	createdAt: number,
+	/**  Unix milliseconds when an attempt first started. */
+	startedAt?: number | null,
+	/**  Unix milliseconds when the job reached a terminal state. */
+	finishedAt?: number | null,
+	/**  Whether cancellation has been requested. */
+	cancelRequested: boolean,
+};
+
+/**  One row of the job journal. */
+export type JobRecord_Serialize = {
+	/**  The row's id, which is also the paging cursor. */
+	id: number,
+	/**  The job kind. */
+	kind: string,
+	/**  The stored phase. */
+	state: JobState,
+	/**  Scheduling priority. */
+	priority: number,
+	/**  Completion in permille, from 0 to 1000. */
+	progressPermille: number,
+	/**  How many attempts have been made. */
+	attempts: number,
+	/**  How many attempts are allowed. */
+	maxAttempts: number,
+	/**  Unix milliseconds when the next attempt is due, while deferred. */
+	nextAttemptAt?: number | null,
+	/**  The last failure's stable code. */
+	lastErrorCode?: string | null,
+	/**  The last failure's message. */
+	lastError?: string | null,
+	/**  Unix milliseconds when the job was submitted. */
+	createdAt: number,
+	/**  Unix milliseconds when an attempt first started. */
+	startedAt?: number | null,
+	/**  Unix milliseconds when the job reached a terminal state. */
+	finishedAt?: number | null,
+	/**  Whether cancellation has been requested. */
+	cancelRequested: boolean,
+};
+
+/**  A job the runtime accepted. */
+export type JobStarted = {
+	/**  The scheduler's identity for the job; the key its events carry. */
+	jobId: string,
+	/**
+	 *  The journal row it reports into.
+	 * 
+	 *  `Number` opts this `i64` into a TypeScript `number`, which specta otherwise refuses
+	 *  rather than silently losing precision. A row id and a Unix-millisecond timestamp
+	 *  both stay well inside the 2^53 a JavaScript number represents exactly.
+	 */
+	journalId: number,
+};
+
+/**
+ *  The lifecycle phase, as the UI reads it.
+ * 
+ *  A separate enum from the storage crate's, because the wire form is part of the IPC
+ *  contract and the storage spelling is part of the schema; `every_phase_matches_the_
+ *  schema` proves they cannot drift.
+ */
+export type JobState = 
+/**  Accepted and waiting for a worker slot. */
+"queued" | 
+/**  An attempt is executing. */
+"running" | 
+/**  Waiting for a retry deadline. */
+"deferred" | 
+/**  Terminal: the last attempt succeeded. */
+"succeeded" | 
+/**  Terminal: the last attempt failed, or panicked. */
+"failed" | 
+/**  Terminal: cancellation was observed, or the job never started. */
+"canceled";
+
+/**  The scheduler's counters. */
+export type SchedulerHealth = {
+	/**  Jobs ready to start. */
+	ready: number,
+	/**  Jobs waiting for a retry deadline. */
+	deferred: number,
+	/**  Attempts currently executing. */
+	inflight: number,
+	/**  Jobs the scheduler still tracks. */
+	live: number,
+	/**  Retries scheduled since the process started. */
+	retriesScheduled: number,
+};
+
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
     try {
@@ -143,3 +346,13 @@ async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; dat
     }
 }
 
+
+/* Event topics: generated from the manifest in `peregrine-app`. */
+/** Every event topic the backend emits, with its payload schema version. */
+export const eventTopics = {
+	jobProgress: { name: "job://progress", version: 1 },
+	jobState: { name: "job://state", version: 1 },
+} as const;
+
+/** The wire name of an event topic. */
+export type EventTopicName = (typeof eventTopics)[keyof typeof eventTopics]["name"];

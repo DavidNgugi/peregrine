@@ -5,6 +5,11 @@
 //! path, so the generator only ever writes where it is told. That keeps the
 //! binding generator testable without a repository and gives the drift gate one
 //! place to compare the committed file against a fresh export.
+//!
+//! Two things are written, in one file: what `specta` derives from the Rust types, and
+//! the event-topic manifest, which is not a type it can see. Appending the second here
+//! rather than hand-editing the committed file is what keeps the drift gate meaningful —
+//! the committed file is exactly what this produces.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,5 +52,11 @@ fn run() -> Result<(), String> {
     }
     peregrine_ipc::builder()
         .export(specta_typescript::Typescript::default(), &out)
-        .map_err(|error| format!("cannot export the TypeScript bindings: {error}"))
+        .map_err(|error| format!("cannot export the TypeScript bindings: {error}"))?;
+
+    let mut bindings = std::fs::read_to_string(&out)
+        .map_err(|error| format!("cannot read back {}: {error}", out.display()))?;
+    bindings.push_str(&peregrine_ipc::bindings::topics_block());
+    std::fs::write(&out, bindings)
+        .map_err(|error| format!("cannot write {}: {error}", out.display()))
 }

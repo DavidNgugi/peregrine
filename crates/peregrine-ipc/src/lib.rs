@@ -9,8 +9,16 @@
 //! desktop shell passes it to Tauri, and `peregrine-ipc`'s `gen-ipc` binary
 //! exports the TypeScript bindings from the same builder, so a command that is
 //! invokable is also a command that is typed.
+//!
+//! [`runtime::serve`] is the other half: it starts `peregrine-app`'s runtime
+//! process-wide, installs it as Tauri's managed state, and points the event bus at
+//! the webview. The shell calls it once, from `setup`, and calls
+//! [`runtime::shutdown`] on the way out.
 
+pub mod bindings;
 pub mod error;
+pub mod jobs;
+pub mod runtime;
 pub mod system;
 
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -19,13 +27,21 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 ///
 /// This is the only place a command is registered; the desktop shell and the
 /// binding generator both read it, so a command that is invokable is also
-/// exported. Today the surface is the `system` namespace's `build_info`;
-/// everything in docs/ARCHITECTURE.md §7 joins this list as it is built.
+/// exported. Everything in docs/ARCHITECTURE.md §7 joins this list as it is
+/// built; today that is the `system` and `jobs` namespaces.
 #[must_use]
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
-        // The command is generic over the runtime, so the macro cannot infer
-        // which one this builder registers; the desktop shell uses `Wry`.
-        .commands(collect_commands![system::build_info::<tauri::Wry>])
+        // `build_info` is generic over the runtime, so the macro cannot infer which one
+        // this builder registers; the desktop shell uses `Wry`. The commands that take
+        // managed state are not generic and need no turbofish.
+        .commands(collect_commands![
+            system::build_info::<tauri::Wry>,
+            system::health,
+            system::log_tail,
+            jobs::start_hello,
+            jobs::cancel,
+            jobs::list,
+        ])
         .events(collect_events![])
 }

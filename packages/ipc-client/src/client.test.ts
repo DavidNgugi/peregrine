@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-const { getBuildInfo, isSuccessful } = await import("./client.js");
+const { getBuildInfo, isSuccessful, unwrap } = await import("./client.js");
 
 beforeEach(() => {
   invoke.mockReset();
@@ -51,5 +51,29 @@ describe("isSuccessful", () => {
     if (isSuccessful(ok)) {
       expect(ok.data).toBe(1);
     }
+  });
+});
+
+describe("unwrap", () => {
+  it("returns the payload of a successful result", async () => {
+    await expect(unwrap(Promise.resolve({ status: "ok", data: { id: 1 } }))).resolves.toEqual({
+      id: 1,
+    });
+  });
+
+  it("throws the normalized error of a failed result", async () => {
+    const failure = {
+      status: "error",
+      error: { code: "NOT_FOUND", message: "gone", retryable: false },
+    } as const;
+    await expect(unwrap(Promise.resolve(failure))).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("throws INTERNAL for a code this build does not know", async () => {
+    const failure = {
+      status: "error",
+      error: { code: "FROM_A_NEWER_CORE", message: "no", retryable: false },
+    } as const;
+    await expect(unwrap(Promise.resolve(failure))).rejects.toMatchObject({ code: "INTERNAL" });
   });
 });
