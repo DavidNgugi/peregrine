@@ -246,9 +246,9 @@ graph TD
 | `peregrine-stream` | axum router serving byte-range media, subtitle sidecars, and cast streams; token auth; per-session lifetime; bandwidth accounting. | `domain`, `torrent`, `axum` | Loopback and LAN listeners are separate bind addresses with separate token scopes. LAN listener only exists while casting. |
 | `peregrine-cast` | Discovery (`mdns-sd` for Chromecast, `rupnp` for DLNA), renderer capability model, Chromecast CASTV2 and DLNA AVTransport adapters, delivery-mode decisions, playback-state reconciliation. Reuses `playback`'s sidecar supervisor for remux and transcode. | `domain`, `stream`, `playback` | Off by default. Never scans the whole subnet beyond the standard discovery protocols. |
 | `peregrine-secrets` | Keyring read/write, in-memory `Secret` wrappers, log redaction filter. | `domain`, `keyring`, `secrecy` | Secret values are never `Debug`-printed, never serialized to the DB, never included in error strings. |
-| `peregrine-platform` | Path resolution per OS, permission requests, tray, dock/taskbar badges, autostart, notifications, power-save inhibition during playback, and the `OsAuthenticator` adapters (LocalAuthentication, Windows Hello, polkit and fprintd). | `domain` | One `cfg`-gated module per OS behind a common interface. Authentication adapters report which mechanism answered, and report unavailability rather than faking success. |
-| `peregrine-app` | Services that compose the above into use cases: `LibraryService`, `DiscoveryService`, `AcquisitionService`, `PlaybackService`, `SubtitleService`, `SettingsService`, `CastService`, `NotificationService`, `AccountService`, `MaintenanceService`. | everything above | Services are the only place where multiple ports are combined. |
-| `peregrine-ipc` | Tauri commands, event emitters, DTO mapping, error mapping, `specta` type export. | `app` | Commands are ≤20 lines: parse, call one service, map result. No logic. |
+| `peregrine-platform` | Path resolution per OS, the production `Clock`, permission requests, tray, dock/taskbar badges, autostart, notifications, power-save inhibition during playback, and the `OsAuthenticator` adapters (LocalAuthentication, Windows Hello, polkit and fprintd). | `domain` | One `cfg`-gated module per OS behind a common interface. Authentication adapters report which mechanism answered, and report unavailability rather than faking success. |
+| `peregrine-app` | The runtime that composes the above — logging, the database, the scheduler, and the event bus — plus the services that use them: `LibraryService`, `DiscoveryService`, `AcquisitionService`, `PlaybackService`, `SubtitleService`, `SettingsService`, `CastService`, `NotificationService`, `AccountService`, `MaintenanceService`. | everything above | Services are the only place where multiple ports are combined, and `Runtime` is the only place they are assembled. |
+| `peregrine-ipc` | Tauri commands, event emitters, DTO mapping, error mapping, `specta` type export, and the one place the runtime is served over Tauri. | `app` | Commands are ≤20 lines: parse, call one service, map result. No logic. |
 | `xtask` | Dependency-edge check, migration lint, IPC binding generation, release notes, bench harness, performance budget gate. | dev tooling | Runs in CI, never shipped. |
 
 ### Enforced rules
@@ -369,7 +369,8 @@ graph LR
 | `cast` | `discover_devices`, `start_cast`, `stop_cast`, `get_cast_capabilities` | Device-scoped |
 | `watchlist` | `add`, `remove`, `list`, `reorder` | Optimistic |
 | `settings` | `get_schema`, `get_values`, `set_value`, `reset_section`, `export_config`, `import_config` | Schema-driven; the UI renders from the registry |
-| `system` | `get_permissions`, `request_permission`, `open_path`, `get_disk_budget`, `tail_logs`, `export_diagnostics` | — |
+| `jobs` | `start_hello`, `cancel`, `list` | Job-scoped: a start returns an ID and streams `job://progress` and `job://state`; `cancel` records the request before it trips the token; `list` is a capped page of the journal |
+| `system` | `get_permissions`, `request_permission`, `open_path`, `get_disk_budget`, `health`, `log_tail`, `export_diagnostics` | `health` reports the scheduler's and the event bus's counters, `log_tail` the newest lines of the redacted log |
 
 ### Rules
 

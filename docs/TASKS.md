@@ -17,11 +17,13 @@ Every task implicitly includes its tests, error handling, structured logging, an
 
 ## Implementation status
 
-The desktop is a Phase 0 shell. It registers `system.build_info`, renders an empty Discover screen and an idle player bar, and supports a light/dark theme switch. Provider, torrent, indexer, playback, stream, cast, platform, monitor, MCP, and testkit crates remain documentation-only scaffolds.
+The desktop now starts a real runtime: it opens the SQLite database, runs the scheduler, publishes events through the coalescing bus to the webview, keeps redacted JSON logs, and drains all of it on exit. A Diagnostics screen starts a hello job, watches its progress, cancels it, and reads the journal row and the log tail the core wrote (PG-E0-19). Discover is still an empty shell, and provider, torrent, indexer, playback, stream, cast, monitor, MCP, and testkit crates remain documentation-only scaffolds.
 
-Library implementations exist for SQLite opening and a single writer with seven migrations; external IDs, release parsing, quality profiles, and path policy; the scheduler; notification policy and service ports; redacted logging; and generated IPC bindings and theme validation. The shell does not yet open the database, start the scheduler, or install the logging subscriber. Those implementations remain `doing` until the applicable Definition of Done is met through PG-E0-19 and their own acceptance criteria. PG-E0-19 can integrate their existing library APIs before those tasks close; a prerequisite identifies the implementation it needs, not a requirement to defer integration until that implementation is independently reachable. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
+Library implementations exist for SQLite opening and a single writer with seven migrations; the job journal; external IDs, release parsing, quality profiles, and path policy; the scheduler; the event bus and its rate limiter; notification policy and service ports; redacted logging; and generated IPC bindings and theme validation. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
 
-The current verification passed the frontend build, 54 unit tests, typecheck, lint, and formatting. Rust tests and repository gates could not run because the installed Cargo 1.80.1 cannot parse edition 2024; the workspace declares Rust 1.95. A suitable toolchain and green CI are still required. This does not invalidate earlier test evidence, but it does not establish a current Rust or cross-platform pass.
+The current verification, with rustc 1.99.0 on macOS arm64, passed 315 Rust tests and 75 frontend tests, plus `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `cargo xtask check-arch`, `check-migrations`, `check-todos`, and `gen-ipc --check`, and the frontend typecheck, lint, format check, and build. What that does not establish: any Windows or Linux run (PG-E0-13 still owes a green three-platform CI), a run of the packaged app, and the platform and soak suites that do not exist yet.
+
+Measured once on that machine in a debug build, for the record rather than as a budget: startup to a ready runtime on an empty data directory was 8.6 ms; 5 000 no-op jobs through the scheduler took 85 ms to submit and 91 ms in total (about 55 000 jobs/s of queue overhead); 200 one-step hello jobs ran end to end at 15.2 ms each, dominated by the job's own 10 ms step and a 1 ms poll interval. `PG-E27-08` owns the benches and the budget gate that would make these numbers enforceable; there is no budget gate for them today.
 
 PG-E0-14 retains the recorded supply-chain findings pending a fresh audit. PG-E28-07 owns documentation checking, PG-E26-01 owns sidecar notice checking, and PG-E22-02 owns icon checking; their documented xtask commands are not implemented yet. E2E, parser fuzz targets, and performance budgets remain open under E4 and E27.
 
@@ -93,7 +95,7 @@ graph LR
 | PG-E0-17 | Automated dependency updates, grouped weekly | A grouped PR opens on schedule | PG-E0-13 | XS | review |
 | PG-E0-18 | `LICENSE`, `NOTICE`, third-party attribution scaffold | Attribution file lists every runtime dependency and sidecar | — | S | doing |
 
-| PG-E0-19 | Connect the Phase 0 runtime: initialize and retain redacted logging, open SQLite, start the scheduler, and register a hello-job service through IPC | From the desktop UI, start a hello job, persist its journal state, observe rate-limited progress and cancellation, and view its redacted log output; shutdown drains the scheduler and database; startup failures use structured errors; measure startup and scheduler performance | PG-E0-03, PG-E2-02, PG-E2-06, PG-E2-07, PG-E3-02, PG-E6-01, PG-E25-01 | M | todo |
+| PG-E0-19 | Connect the Phase 0 runtime: initialize and retain redacted logging, open SQLite, start the scheduler, and register a hello-job service through IPC | From the desktop UI, start a hello job, persist its journal state, observe rate-limited progress and cancellation, and view its redacted log output; shutdown drains the scheduler and database; startup failures use structured errors; measure startup and scheduler performance | PG-E0-03, PG-E2-02, PG-E2-06, PG-E2-07, PG-E3-02, PG-E6-01, PG-E25-01 | M | done |
 
 ## E1 · App shell and platform
 
@@ -128,14 +130,14 @@ graph LR
 | PG-E2-01 | `specta` + `tauri-specta` export pipeline and generated client, pinned to the exact `2.0.0-rc.25` RC (no stable 2.x exists) with a written fallback to hand-written DTOs | One Rust type change propagates to a compiling TS call site; the RC pin is exact | PG-E0-03 | M | done |
 | PG-E2-02 | Structured `AppError` with stable codes and UI mapping | Every code has a message key and a retryability flag | PG-E2-01 | S | doing |
 | PG-E2-03 | Command registration with a ≤20-line rule and a lint check | A fixture command with logic fails the check | PG-E2-01 | S | todo |
-| PG-E2-04 | Event bus with namespaced, versioned topics | Topic names are declared in one manifest shared with TS | PG-E2-01 | M | todo |
-| PG-E2-05 | Coalescing / rate-limiting event batcher with drop counters | A 1 kHz producer delivers ≤4 Hz with audit of drops | PG-E2-04 | M | todo |
-| PG-E2-06 | Job-scoped command pattern: start returns job ID, progress streams | No command blocks >100 ms in a load test | PG-E2-04 | M | todo |
-| PG-E2-07 | Cancellation API for every job-scoped command | Cancel mid-job leaves no partial DB state | PG-E2-06 | M | todo |
+| PG-E2-04 | Event bus with namespaced, versioned topics | Topic names are declared in one manifest shared with TS | PG-E2-01 | M | done |
+| PG-E2-05 | Coalescing / rate-limiting event batcher with drop counters | A 1 kHz producer delivers ≤4 Hz with audit of drops | PG-E2-04 | M | done |
+| PG-E2-06 | Job-scoped command pattern: start returns job ID, progress streams **Remaining:** the pattern is implemented and the hello job's start returns before any work; a load test that measures every command against the 100 ms rule arrives with PG-E2-10's contract tests and PG-E2-12's instrumentation. | No command blocks >100 ms in a load test | PG-E2-04 | M | doing |
+| PG-E2-07 | Cancellation API for every job-scoped command | Cancel mid-job leaves no partial DB state | PG-E2-06 | M | done |
 | PG-E2-08 | Typed asset protocol for cached images and local thumbs | Poster loads without base64 or IPC payloads | PG-E2-01 | M | todo |
 | PG-E2-09 | Payload size guard: responses over 64 KB log a warning in dev | Fixture oversized response triggers the guard | PG-E2-01 | XS | todo |
 | PG-E2-10 | IPC contract tests generated from the command registry | Every command has a test that exercises its error path | PG-E2-02 | M | todo |
-| PG-E2-11 | Backpressure signal to the UI when events are dropped | UI shows a degraded live indicator instead of stalling | PG-E2-05 | S | todo |
+| PG-E2-11 | Backpressure signal to the UI when events are dropped | UI shows a degraded live indicator instead of stalling | PG-E2-05 | S | done |
 | PG-E2-12 | Dev-only command timing instrumentation, surfaced in Diagnostics | p95 latency per command visible without a accountr | PG-E2-10, PG-E25-01 | S | todo |
 
 ## E3 · Storage
@@ -151,7 +153,7 @@ graph LR
 | PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | doing |
 | PG-E3-08 | Migration 0006: acquisition tables including `release_decision` **Spec defect to settle:** §2.7 documents `CREATE INDEX download_job_hash_uq ON download_job (info_hash) WHERE info_hash IS NOT NULL` — a **non-unique** index whose name claims uniqueness. Transcribed literally, and the test now asserts non-uniqueness, because inventing `UNIQUE` to match a name would be guessing at the schema when the name is what is probably wrong. | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M | doing |
 | PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables **Two spec gaps found here:** §2.7's `image_ref UNIQUE (owner_kind, owner_id, role, provider, path, language)` treats NULLs as distinct, so duplicate artwork rows with a NULL `language` coexist; the quality-profile contradiction rules now map to DATA_MODEL §3 I35. The artwork schema correction remains PG-E3-19. | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S | doing |
-| PG-E3-10 | Type-safe repositories per aggregate with row mappers | Round-trip property test for every entity | PG-E3-04 | L | todo |
+| PG-E3-10 | Type-safe repositories per aggregate with row mappers **Remaining:** the job journal's repository exists (`insert_job`, `update_job`, `job`, keyset `list_jobs`) with round-trip and guard tests; the catalogue, library, account, and acquisition repositories do not exist yet, and the per-entity property tests are still owed. | Round-trip property test for every entity | PG-E3-04 | L | doing |
 | PG-E3-11 | Keyset pagination helper used by every list query | `OFFSET` is absent from the codebase, enforced by grep gate | PG-E3-10 | S | todo |
 | PG-E3-12 | FTS5 contentless table with explicit maintenance and rebuild command | Rebuild reproduces identical search results | PG-E3-04 | M | todo |
 | PG-E3-13 | Migration runner with pre-migration backup and rotation | A failing migration leaves the database untouched and backed up | PG-E3-03 | M | todo |
@@ -223,7 +225,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E6-01 | Job scheduler: priority queues, worker pool, dedupe, backoff with jitter **Remaining:** The in-memory scheduler and its tests exist; shared testkit fakes, desktop startup, a persisted hello job, and IPC progress remain under PG-E4-19 and PG-E0-19. Scheduler performance measurement is still required. | Deferred jobs retry on schedule; dedupe proven | PG-E3-08, PG-E4-19 | L | doing |
+| PG-E6-01 | Job scheduler: priority queues, worker pool, dedupe, backoff with jitter **Remaining:** The scheduler runs behind the desktop runtime with a persisted job and IPC progress (PG-E0-19), and its queue overhead was measured once (about 55 000 no-op jobs/s in a debug build) — that number is recorded in the status section, not enforced. What remains: the shared testkit fakes (PG-E4-19), and the conformance suite a fake engine passes. | Deferred jobs retry on schedule; dedupe proven | PG-E3-08, PG-E4-19 | L | doing |
 | PG-E6-02 | Resource token acquisition with panic-safe release **Remaining:** PG-E6-01 already tests panic-safe worker-slot release. This task covers resource tokens beyond worker slots; verify release on panic, cancellation, and retry without duplicating that test. | Injected panic releases the token (guard test) | PG-E6-01 | M | todo |
 | PG-E6-03 | Concurrency classes: metadata, image, dataset, subtitle, probe **Remaining:** SchedulerClasses exists; wire each production job kind and prove independent limits under load. | Each class has an independent limit asserted under load | PG-E6-01 | M | todo |
 | PG-E6-04 | Incremental change sync with persisted cursors and overlapping windows | Crash between cursor advance and upsert loses nothing | PG-E6-01, PG-E5-09 | M | todo |
@@ -620,7 +622,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels **Remaining:** The subscriber, rotation, redaction, and level reload exist as library code; install and retain the subscriber at desktop startup under PG-E0-19 and expose level changes through settings. Retention and key-shape scrubbing remain PG-E25-03. | Log level change applies at runtime | PG-E0-08 | M | doing |
+| PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels **Remaining:** The subscriber is installed and retained at desktop startup (PG-E0-19) and the log tail reaches the Diagnostics screen. Still owed: exposing level changes through settings, which needs the settings registry (PG-E20-01). Retention and key-shape scrubbing remain PG-E25-03. | Log level change applies at runtime | PG-E0-08 | M | doing |
 | PG-E25-02 | Metrics registry: counters, histograms, per-provider and per-session | Exposed internally and rendered in Diagnostics | PG-E25-01 | M | todo |
 | PG-E25-03 | Log tail and export with a size cap and secret scrubbing, plus the two gaps PG-E25-01 flagged as unbuilt: **log retention** (ARCHITECTURE §16's 7 days / 20 MB — `tracing-appender` has no byte-cap primitive, so it belongs with log management) and **key-shape scrubbing** (SECURITY.md T13; only values registered through `Secret` are currently removed, and heuristics need their own false-positive policy) | Exported bundle is inspectable before sending | PG-E25-01 | M | todo |
 | PG-E25-04 | Opt-in crash reporting with a self-hostable DSN, empty by default | No network call occurs when unconfigured (asserted) | PG-E24-13 | M | todo |

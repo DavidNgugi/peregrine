@@ -4,7 +4,7 @@ A fast, native-feeling desktop app for discovering, collecting, and watching you
 
 Peregrine browses a catalogue from free metadata providers, keeps it in sync locally so it never waits on the network, downloads what you choose with a safety gate in front, manages a library you already have, and plays it back with resume, subtitles, and casting.
 
-> **Status: Phase 0 in progress.** Peregrine currently renders a themed shell with an empty Discover screen. Storage, domain rules, the scheduler, logging infrastructure, and generated IPC bindings exist as library foundations; runtime integration and the media workflows remain unfinished. [TASKS.md](./docs/TASKS.md#implementation-status) records implementation status, remaining work, and verification limits.
+> **Status: Phase 0 in progress.** Peregrine runs a real runtime: it opens its SQLite database, runs the scheduler, streams job progress over IPC at a bounded rate, writes redacted JSON logs, and drains all of it on exit. A Diagnostics screen starts a hello job, watches it, cancels it, and reads the journal and log; Discover is still an empty shell and the discovery, acquisition, library, and playback workflows are not implemented. [TASKS.md](./docs/TASKS.md#implementation-status) records implementation status, remaining work, and verification limits.
 
 ---
 
@@ -92,7 +92,7 @@ The full 1.0 backlog estimates ~1 120 ideal days. The earlier core estimate of ~
 
 ## Building from source
 
-The workspace declares Rust 1.95 or newer. Frontend build, tests, typecheck, lint, and formatting pass in the current audit; Rust checks require a suitable toolchain. Platform window verification remains under `PG-E0-03`, and supply-chain findings remain under `PG-E0-14`.
+The workspace declares Rust 1.95 or newer; the current audit ran the Rust gates on 1.99.0 (macOS arm64) and the frontend gates on Node 24. Platform window verification remains under `PG-E0-03`, and supply-chain findings remain under `PG-E0-14`.
 
 ```bash
 cargo build --workspace        # crates, one per module map entry
