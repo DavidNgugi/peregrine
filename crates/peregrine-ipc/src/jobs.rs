@@ -13,6 +13,7 @@ use specta_typescript::Number;
 use tauri::State;
 
 use crate::error::{AppError, ErrorCode};
+use crate::guard::guard_response;
 use crate::runtime::RuntimeState;
 
 /// A job the runtime accepted.
@@ -147,10 +148,13 @@ pub async fn start_hello(
     steps: u32,
 ) -> Result<JobStarted, AppError> {
     let started = state.runtime()?.start_hello(steps).await?;
-    Ok(JobStarted {
-        job_id: started.job.to_string(),
-        journal_id: started.journal_id,
-    })
+    Ok(guard_response(
+        "jobs::start_hello",
+        JobStarted {
+            job_id: started.job.to_string(),
+            journal_id: started.journal_id,
+        },
+    ))
 }
 
 /// Asks a running job to stop.
@@ -188,7 +192,10 @@ pub async fn list(
     const MAX_PAGE: u32 = 100;
     let limit = limit.unwrap_or(20).clamp(1, MAX_PAGE);
     let rows = state.runtime()?.jobs(limit).await?;
-    Ok(rows.into_iter().map(JobRecord::from).collect())
+    Ok(guard_response(
+        "jobs::list",
+        rows.into_iter().map(JobRecord::from).collect::<Vec<_>>(),
+    ))
 }
 
 impl From<RuntimeError> for AppError {

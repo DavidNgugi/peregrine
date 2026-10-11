@@ -18,6 +18,7 @@ specta-typescript = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 # The error taxonomy's tests pin the wire format, so they need the serializer.
@@ -25,6 +26,8 @@ serde_json = { workspace = true }
 # The command tests start a real runtime against a temporary data directory.
 tempfile = { workspace = true }
 tokio = { workspace = true }
+# The response-size guard's test attaches a subscriber that captures what it logged.
+tracing-subscriber = { workspace = true }
 # `tauri::test` is behind this feature and carries no production code
 # (docs/DEPENDENCIES.md §4 treats dev-only crates as never redistributed).
 tauri = { workspace = true, features = ["test"] }

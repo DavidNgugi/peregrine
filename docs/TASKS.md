@@ -135,7 +135,7 @@ graph LR
 | PG-E2-06 | Job-scoped command pattern: start returns job ID, progress streams **Remaining:** the pattern is implemented and the hello job's start returns before any work; a load test that measures every command against the 100 ms rule arrives with PG-E2-10's contract tests and PG-E2-12's instrumentation. | No command blocks >100 ms in a load test | PG-E2-04 | M | doing |
 | PG-E2-07 | Cancellation API for every job-scoped command | Cancel mid-job leaves no partial DB state | PG-E2-06 | M | done |
 | PG-E2-08 | Typed asset protocol for cached images and local thumbs | Poster loads without base64 or IPC payloads | PG-E2-01 | M | todo |
-| PG-E2-09 | Payload size guard: responses over 64 KB log a warning in dev | Fixture oversized response triggers the guard | PG-E2-01 | XS | todo |
+| PG-E2-09 | Payload size guard: responses over 64 KB log a warning in dev | Fixture oversized response triggers the guard | PG-E2-01 | XS | done |
 | PG-E2-10 | IPC contract tests generated from the command registry | Every command has a test that exercises its error path | PG-E2-02 | M | todo |
 | PG-E2-11 | Backpressure signal to the UI when events are dropped | UI shows a degraded live indicator instead of stalling | PG-E2-05 | S | done |
 | PG-E2-12 | Dev-only command timing instrumentation, surfaced in Diagnostics | p95 latency per command visible without a accountr | PG-E2-10, PG-E25-01 | S | todo |

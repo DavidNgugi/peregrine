@@ -1,6 +1,7 @@
 //! The `system` namespace of the command surface (docs/ARCHITECTURE.md §7).
 
 use crate::error::AppError;
+use crate::guard::guard_response;
 use crate::runtime::RuntimeState;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -117,24 +118,27 @@ pub struct EventHealth {
 #[specta::specta]
 pub async fn health(state: State<'_, RuntimeState>) -> Result<Health, AppError> {
     let health = state.runtime()?.health().await;
-    Ok(Health {
-        startup_millis: u64::try_from(health.startup.as_millis()).unwrap_or(u64::MAX),
-        scheduler: SchedulerHealth {
-            ready: health.scheduler.ready as u32,
-            deferred: health.scheduler.deferred as u32,
-            inflight: health.scheduler.inflight as u32,
-            live: health.scheduler.live as u32,
-            retries_scheduled: health.scheduler.retries_scheduled,
+    Ok(guard_response(
+        "system::health",
+        Health {
+            startup_millis: u64::try_from(health.startup.as_millis()).unwrap_or(u64::MAX),
+            scheduler: SchedulerHealth {
+                ready: health.scheduler.ready as u32,
+                deferred: health.scheduler.deferred as u32,
+                inflight: health.scheduler.inflight as u32,
+                live: health.scheduler.live as u32,
+                retries_scheduled: health.scheduler.retries_scheduled,
+            },
+            events: EventHealth {
+                published: health.events.published,
+                coalesced: health.events.coalesced,
+                delivered: health.events.delivered,
+                failed: health.events.failed,
+                dropped: health.events.dropped,
+                degraded: health.events.is_degraded(),
+            },
         },
-        events: EventHealth {
-            published: health.events.published,
-            coalesced: health.events.coalesced,
-            delivered: health.events.delivered,
-            failed: health.events.failed,
-            dropped: health.events.dropped,
-            degraded: health.events.is_degraded(),
-        },
-    })
+    ))
 }
 
 /// The last lines of the newest log file, newest last.
@@ -152,7 +156,8 @@ pub async fn log_tail(
     lines: Option<u32>,
 ) -> Result<Vec<String>, AppError> {
     let lines = lines.unwrap_or(100);
-    Ok(state.runtime()?.log_tail(lines).await?)
+    let tail = state.runtime()?.log_tail(lines).await?;
+    Ok(guard_response("system::log_tail", tail))
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@
 
 pub mod bindings;
 pub mod error;
+pub mod guard;
 pub mod jobs;
 pub mod runtime;
 pub mod system;
