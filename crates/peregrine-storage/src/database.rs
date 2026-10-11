@@ -7,6 +7,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoo
 use tracing::info;
 
 use crate::error::StorageError;
+use crate::jobs::{JobChange, JobRecord, NewJob};
 use crate::pragmas;
 use crate::writer::{NewEvent, WriteRequest, WriteResponse, WriterHandle};
 
@@ -58,7 +59,56 @@ impl Database {
     pub async fn append_event(&self, event: NewEvent) -> Result<i64, StorageError> {
         match self.writer.send(WriteRequest::AppendEvent(event)).await? {
             WriteResponse::EventAppended { id } => Ok(id),
+            other => Err(unexpected_response("append_event", &other)),
         }
+    }
+
+    /// Adds one job to the journal through the single writer.
+    ///
+    /// The row starts in `queued`, which is the phase the runtime reports before the
+    /// scheduler has an attempt to run.
+    pub async fn insert_job(&self, job: NewJob) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertJob(Box::new(job)))
+            .await?
+        {
+            WriteResponse::JobInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_job", &other)),
+        }
+    }
+
+    /// Applies one change to a journal row, reporting whether the row was still there.
+    ///
+    /// `false` is not an error: a job that finished while a late progress report was in
+    /// flight is the ordinary case, and the guards in `jobs::update` are what stop that
+    /// report from resurrecting a terminal row.
+    pub async fn update_job(&self, id: i64, change: JobChange) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpdateJob {
+                id,
+                change: Box::new(change),
+            })
+            .await?
+        {
+            WriteResponse::JobUpdated { changed } => Ok(changed),
+            other => Err(unexpected_response("update_job", &other)),
+        }
+    }
+
+    /// One journal row, or `None` when no such row exists.
+    pub async fn job(&self, id: i64) -> Result<Option<JobRecord>, StorageError> {
+        crate::jobs::get(&self.readers, id).await
+    }
+
+    /// A page of journal rows, newest first, below `after` when one is given.
+    pub async fn list_jobs(
+        &self,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<JobRecord>, StorageError> {
+        crate::jobs::list(&self.readers, after, i64::from(limit)).await
     }
 
     /// How many rows `event_log` holds, read through the pool.
@@ -73,6 +123,17 @@ impl Database {
         // `COUNT(*)` cannot be negative; the conversion exists so a count cannot be
         // mistaken for the rowid `append_event` returns.
         Ok(u64::try_from(count).unwrap_or_default())
+    }
+}
+
+/// The writer answered a request it was not sent.
+///
+/// Unreachable by construction — the handle sends one request and reads its own answer —
+/// so a mismatch is an internal invariant violation rather than a database condition.
+fn unexpected_response(operation: &'static str, response: &WriteResponse) -> StorageError {
+    StorageError::UnexpectedValue {
+        column: operation,
+        found: format!("{response:?}"),
     }
 }
 

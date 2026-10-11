@@ -8,6 +8,7 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::StorageError;
+use crate::jobs::{JobChange, NewJob};
 
 /// How many requests may wait behind the one the writer is applying.
 ///
@@ -21,6 +22,14 @@ const WRITE_QUEUE_DEPTH: usize = 1;
 pub(crate) enum WriteRequest {
     /// Append one row to `event_log`.
     AppendEvent(NewEvent),
+    /// Insert one row into `job`.
+    ///
+    /// Boxed because the request travels through a channel sized at one slot, so the
+    /// enum's size is the size of its largest variant, and a job row is much larger than
+    /// the alternative.
+    InsertJob(Box<NewJob>),
+    /// Apply one change to a `job` row.
+    UpdateJob { id: i64, change: Box<JobChange> },
 }
 
 /// The writer's answer to a [`WriteRequest`].
@@ -28,6 +37,10 @@ pub(crate) enum WriteRequest {
 pub(crate) enum WriteResponse {
     /// The rowid `SQLite` assigned to the appended `event_log` row.
     EventAppended { id: i64 },
+    /// The rowid `SQLite` assigned to the inserted `job` row.
+    JobInserted { id: i64 },
+    /// Whether a `job` row was there to change.
+    JobUpdated { changed: bool },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -101,6 +114,14 @@ async fn apply(
             .await
             .map(|id| WriteResponse::EventAppended { id })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertJob(job) => crate::jobs::insert(connection, &job)
+            .await
+            .map(|id| WriteResponse::JobInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::UpdateJob { id, change } => crate::jobs::update(connection, id, &change)
+            .await
+            .map(|changed| WriteResponse::JobUpdated { changed })
+            .map_err(StorageError::from_sqlx),
     }
 }
 
@@ -172,7 +193,9 @@ mod tests {
             .send(WriteRequest::AppendEvent(event(1)))
             .await
             .unwrap();
-        let WriteResponse::EventAppended { id } = response;
+        let WriteResponse::EventAppended { id } = response else {
+            panic!("the writer answered `append_event` with another request's response");
+        };
         assert!(
             id >= 1,
             "the writer must still answer after a reply was dropped"

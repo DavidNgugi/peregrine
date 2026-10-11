@@ -49,6 +49,19 @@ pub enum StorageError {
     #[error("the single-writer task has stopped; reopen the database before writing again")]
     WriterStopped,
 
+    /// A stored value is outside the set the schema's `CHECK` constraints allow.
+    ///
+    /// This cannot come from a database this build wrote; it means the file was written
+    /// by a different version. Reporting the column and the value is what makes that
+    /// diagnosable, rather than a panic inside a row mapper.
+    #[error("the column `{column}` holds the unexpected value `{found}`")]
+    UnexpectedValue {
+        /// The column that holds it.
+        column: &'static str,
+        /// What it held.
+        found: String,
+    },
+
     /// A connection cannot be brought to the documented PRAGMA set.
     ///
     /// Only the required pragmas produce this. The connection must be discarded: without
