@@ -404,6 +404,7 @@ mod command_tests {
     use peregrine_app::events::{Event, EventSink, EventSinkError};
     use peregrine_app::{Observability, Runtime, RuntimeConfig};
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
     use tauri::Manager as _;
     use tempfile::TempDir;
 
@@ -548,6 +549,101 @@ mod command_tests {
         assert_eq!(health.scheduler.live, 0);
         assert_eq!(health.scheduler.inflight, 0);
         assert!(!health.events.degraded);
+
+        crate::runtime::shutdown(app.handle()).await;
+    }
+
+    /// PG-E2-06's acceptance: no command blocks for longer than 100 ms, measured while
+    /// the scheduler is busy with real work.
+    ///
+    /// The budget is the documented one and not a tighter number, so the test fails on a
+    /// regression rather than on a slow machine. This is the one test in the suite with a
+    /// wall-clock assertion in it; ARCHITECTURE §7 rule 2 and R10 are why it exists, and
+    /// the alternative — reviewing every command by eye — is what the rule was written to
+    /// replace.
+    #[tokio::test]
+    async fn no_command_blocks_for_longer_than_the_budget() {
+        const BUDGET: Duration = Duration::from_millis(100);
+        const ROUNDS: u32 = 20;
+        const BUSY_JOBS: u32 = 8;
+
+        let directory = TempDir::new().unwrap();
+        let app = served(&directory).await;
+        let state = app.state::<RuntimeState>();
+
+        // The load: eight jobs of fifty steps each (about half a second of work apiece),
+        // so the scheduler and the single database writer are contended for the whole
+        // measurement rather than idle while it runs.
+        for _ in 0..BUSY_JOBS {
+            let _ = start_hello(state.clone(), 50).await.unwrap();
+        }
+
+        let mut worst: Vec<(&'static str, Duration)> = Vec::new();
+        let measured = tokio::time::timeout(Duration::from_secs(60), async {
+            for _ in 0..ROUNDS {
+                let started = Instant::now();
+                let _ = crate::system::build_info(app.handle().clone()).unwrap();
+                worst.push(("system::build_info", started.elapsed()));
+
+                let started = Instant::now();
+                let _ = crate::system::health(state.clone()).await.unwrap();
+                worst.push(("system::health", started.elapsed()));
+
+                let started = Instant::now();
+                let _ = crate::system::log_tail(state.clone(), Some(10))
+                    .await
+                    .unwrap();
+                worst.push(("system::log_tail", started.elapsed()));
+
+                let started = Instant::now();
+                let _ = list(state.clone(), Some(5)).await.unwrap();
+                worst.push(("jobs::list", started.elapsed()));
+
+                let started = Instant::now();
+                let job = start_hello(state.clone(), 20).await.unwrap();
+                worst.push(("jobs::start_hello", started.elapsed()));
+
+                let started = Instant::now();
+                cancel(state.clone(), job.job_id).await.unwrap();
+                worst.push(("jobs::cancel", started.elapsed()));
+            }
+        })
+        .await;
+        assert!(
+            measured.is_ok(),
+            "a command did not answer at all; the surface is blocking, not slow"
+        );
+
+        // The evidence, so a failure says which command and by how much, and a pass is
+        // inspectable with `--nocapture` rather than taken on faith.
+        let mut slowest = ("none", Duration::ZERO);
+        for (name, elapsed) in &worst {
+            if *elapsed > slowest.1 {
+                slowest = (name, *elapsed);
+            }
+        }
+        for name in [
+            "system::build_info",
+            "system::health",
+            "system::log_tail",
+            "jobs::list",
+            "jobs::start_hello",
+            "jobs::cancel",
+        ] {
+            let command_worst = worst
+                .iter()
+                .filter(|(candidate, _)| *candidate == name)
+                .map(|(_, elapsed)| *elapsed)
+                .max()
+                .unwrap_or_default();
+            println!("{name}: worst of {ROUNDS} rounds {command_worst:?}");
+        }
+        assert!(
+            slowest.1 < BUDGET,
+            "`{}` took {:?}, over the {BUDGET:?} budget in ARCHITECTURE §7 rule 2",
+            slowest.0,
+            slowest.1
+        );
 
         crate::runtime::shutdown(app.handle()).await;
     }
