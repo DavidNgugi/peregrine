@@ -1506,7 +1506,11 @@ mod tests {
         assert_eq!(release.source(), None);
         assert_eq!(release.video_codec(), None);
         assert_eq!(release.hdr(), None);
-        assert!(release.audio().is_empty());
+        assert!(
+            release.audio().is_empty(),
+            "a name with no audio token parses to no audio codecs: {:?}",
+            release.audio()
+        );
         assert_eq!(release.group(), None);
         assert_eq!(release.repack(), None);
         assert_eq!(release.season(), None);

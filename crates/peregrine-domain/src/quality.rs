@@ -623,7 +623,10 @@ mod tests {
             caps(None, None),
             groups(&[], &[]),
         );
-        assert!(unrestricted.resolutions().is_empty());
+        assert!(
+            unrestricted.resolutions().is_empty(),
+            "a profile with no resolution rule accepts every resolution"
+        );
         assert!(unrestricted.size_caps().allows(0));
         assert!(unrestricted.size_caps().allows(u64::MAX));
         assert!(unrestricted.groups().permits(Some("ANY")));

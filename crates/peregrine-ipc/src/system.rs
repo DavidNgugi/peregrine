@@ -60,7 +60,7 @@ mod tests {
         let info = build_info(app.handle().clone()).unwrap();
 
         assert_eq!(info.app_version, expected);
-        assert!(!info.app_name.is_empty());
+        assert!(!info.app_name.is_empty(), "the bundle must name the app");
         assert_eq!(
             info.target,
             format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)

@@ -272,7 +272,10 @@ mod tests {
     /// catalogue key and a retryability decision.
     #[test]
     fn every_code_has_a_message_key_and_a_retryability_flag() {
-        assert!(!ErrorCode::ALL.is_empty());
+        assert!(
+            !ErrorCode::ALL.is_empty(),
+            "a taxonomy with no codes would make every check below vacuous"
+        );
         for code in ErrorCode::ALL {
             let meta = code.metadata();
             assert_eq!(meta.code, *code, "metadata returned the wrong code");

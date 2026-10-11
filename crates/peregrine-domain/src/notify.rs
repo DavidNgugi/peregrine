@@ -1191,7 +1191,10 @@ mod tests {
     #[test]
     fn the_system_sound_is_never_empty() {
         for platform in [Platform::MacOs, Platform::Windows, Platform::Linux] {
-            assert!(!platform.system_sound().is_empty());
+            assert!(
+                !platform.system_sound().is_empty(),
+                "{platform:?} must name a sound value"
+            );
         }
         assert_eq!(
             Platform::current(),
