@@ -149,9 +149,25 @@ impl Database {
         }
     }
 
-    /// One title's identity, or `None` when no such title exists.
-    pub async fn title_identity(&self, id: i64) -> Result<Option<TitleIdentity>, StorageError> {
-        crate::catalogue::identity(&self.readers, id).await
+    /// One title's identity, when `scope` may see it.
+    ///
+    /// A title outside the scope reads as `None` rather than as a refusal: an account must
+    /// not be able to tell a title it may not see from one that does not exist (AGENTS R34).
+    pub async fn title_identity(
+        &self,
+        scope: peregrine_domain::AccountScope,
+        id: i64,
+    ) -> Result<Option<TitleIdentity>, StorageError> {
+        crate::catalogue::identity(&self.readers, scope, id).await
+    }
+
+    /// The newest page of titles `scope` may see.
+    pub async fn list_titles(
+        &self,
+        scope: peregrine_domain::AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<TitleIdentity>, StorageError> {
+        crate::catalogue::list_titles(&self.readers, scope, request).await
     }
 
     /// The title an external id belongs to, or `None` when no title has it.

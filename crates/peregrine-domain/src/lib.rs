@@ -4,7 +4,12 @@
 //!
 //! No IO, no async, no clock, and no randomness: every time and ID is injected, so
 //! every rule here is testable without a database, a network, or a GUI.
+//!
+//! [`AccountScope`] is the parameter every content read takes (AGENTS R34); the vocabulary
+//! for what an account may see lives here so the UI can never compute it and no adapter can
+//! invent its own.
 
+pub mod account;
 pub mod id;
 pub mod notify;
 pub mod path;
@@ -13,6 +18,7 @@ pub mod quality;
 pub mod redaction;
 pub mod release;
 
+pub use account::{AccountError, AccountId, AccountScope, Visibility};
 pub use id::{ExternalId, ExternalIdError, Provider};
 pub use notify::{
     BURST_SUMMARY_THRESHOLD, DEDUPE_WINDOW_MILLIS, DeepLink, DeepLinkError, EnableReason,

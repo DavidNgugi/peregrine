@@ -14,11 +14,17 @@
 //! An external id belongs to exactly one title. Attaching one that is already attached
 //! elsewhere is refused rather than moved, because silently re-pointing a provider id is how
 //! two titles end up sharing a history.
+//!
+//! Every read takes an [`AccountScope`] (AGENTS R34). The scope is applied in SQL, not after
+//! the rows are fetched, so content outside it never leaves the database: a read that
+//! filtered in Rust would still have loaded the row, and the next read to forget the filter
+//! would return it.
 
-use peregrine_domain::{ExternalId, Provider};
+use peregrine_domain::{AccountScope, ExternalId, Provider};
 use sqlx::Connection as _;
 
 use crate::error::StorageError;
+use crate::page::PageRequest;
 
 /// A title's kind, as `title.kind` stores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,19 +255,58 @@ pub(crate) async fn attach_external_ids(
     transaction.commit().await.map_err(StorageError::from_sqlx)
 }
 
-/// Reads one title's identity.
+/// The scope's rule, as a flag a query binds.
+///
+/// A flag rather than assembled SQL: the alternative is building the `WHERE` clause from a
+/// bool, which is how string composition creeps into a repository. The clause itself is a
+/// literal in each statement, and this only decides whether its first branch applies.
+const fn hidden_by_scope(scope: AccountScope) -> i64 {
+    scope.is_restricted() as i64
+}
+
+/// Reads one title's identity, when the scope may see it.
+///
+/// A title outside the scope reads as `None`, which is the whole point of R34: a restricted
+/// account must not be able to tell "no such title" from "not for you".
 pub(crate) async fn identity(
     pool: &sqlx::SqlitePool,
+    scope: AccountScope,
     id: i64,
 ) -> Result<Option<TitleIdentity>, StorageError> {
     let row = sqlx::query_as::<_, IdentityRow>(
-        "SELECT id, kind, subtype, name, sort_name, metadata_state, adult FROM title WHERE id = ?1",
+        "SELECT id, kind, subtype, name, sort_name, metadata_state, adult FROM title \
+         WHERE id = ?1 AND (?2 = 0 OR (adult = 0 AND content_rating IS NOT NULL))",
     )
     .bind(id)
+    .bind(hidden_by_scope(scope))
     .fetch_optional(pool)
     .await
     .map_err(StorageError::from_sqlx)?;
     row.map(TryInto::try_into).transpose()
+}
+
+/// Reads one page of titles the scope may see, newest first.
+///
+/// The scope is the first branch of the `WHERE` clause and the cursor the second, so a
+/// restricted page is still a page: the rows that were never visible do not consume the
+/// limit, which a filter applied after the query would have done.
+pub(crate) async fn list_titles(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    request: PageRequest,
+) -> Result<Vec<TitleIdentity>, StorageError> {
+    let rows = sqlx::query_as::<_, IdentityRow>(
+        "SELECT id, kind, subtype, name, sort_name, metadata_state, adult FROM title \
+         WHERE (?1 = 0 OR (adult = 0 AND content_rating IS NOT NULL)) \
+           AND (?2 IS NULL OR id < ?2) ORDER BY id DESC LIMIT ?3",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(request.bindable_cursor())
+    .bind(request.bindable_limit())
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter().map(TryInto::try_into).collect()
 }
 
 /// Reads the title an external id belongs to.
@@ -382,7 +427,10 @@ impl TryFrom<ExternalIdRow> for TitleExternalId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::Database;
+    use crate::database::{Database, open_writer_connection};
+    use crate::page::Cursor;
+    use peregrine_domain::AccountId;
+    use sqlx::SqliteConnection as SqlxConnection;
     use tempfile::TempDir;
 
     const NOW: i64 = 1_700_000_000_000;
@@ -406,6 +454,41 @@ mod tests {
 
     fn id(text: &str) -> ExternalId {
         ExternalId::parse(text).expect("the fixture is a valid external id")
+    }
+
+    /// The scope the fixtures are read with: an account with no ceiling and no curation.
+    fn any_account() -> AccountScope {
+        AccountScope::unrestricted(AccountId::new(1).expect("account one exists"))
+    }
+
+    /// Inserts a title with the two columns a scope reads.
+    ///
+    /// The stub insert deliberately leaves `adult` and `content_rating` alone — they arrive
+    /// with the provider sync — so a test that is about visibility has to set them itself.
+    async fn insert_rated(
+        connection: &mut SqlxConnection,
+        name: &str,
+        adult: i64,
+        rating: Option<&str>,
+    ) -> i64 {
+        let result = sqlx::query(
+            "INSERT INTO title (kind, subtype, name, sort_name, content_rating, adult, \
+             metadata_state, created_at, updated_at) \
+             VALUES ('movie', 'standard', ?1, ?2, ?3, ?4, 'complete', 0, 0)",
+        )
+        .bind(name)
+        .bind(name.to_lowercase())
+        .bind(rating)
+        .bind(adult)
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+        result.last_insert_rowid()
+    }
+
+    /// The ids of a page, in the order it was read.
+    fn ids_of(titles: &[TitleIdentity]) -> Vec<i64> {
+        titles.iter().map(|title| title.id).collect()
     }
 
     fn attached(text: &str, is_primary: bool) -> TitleExternalId {
@@ -471,7 +554,11 @@ mod tests {
             .await
             .unwrap();
 
-        let identity = database.title_identity(id).await.unwrap().expect("the row");
+        let identity = database
+            .title_identity(any_account(), id)
+            .await
+            .unwrap()
+            .expect("the row");
         assert_eq!(identity.id, id);
         assert_eq!(identity.kind, TitleKind::Show);
         assert_eq!(identity.subtype, TitleSubtype::Anime);
@@ -486,7 +573,10 @@ mod tests {
 
         assert_eq!(database.title_count().await.unwrap(), 1);
         assert_eq!(
-            database.title_identity(id + 1).await.unwrap(),
+            database
+                .title_identity(any_account(), id + 1)
+                .await
+                .unwrap(),
             None,
             "an id that does not exist reads as nothing"
         );
@@ -705,7 +795,7 @@ mod tests {
         connection.close().await.unwrap();
 
         let error = database
-            .title_identity(1)
+            .title_identity(any_account(), 1)
             .await
             .expect_err("a kind this build does not know must not be read as one it does");
         assert!(
@@ -719,5 +809,193 @@ mod tests {
             "{error:?}"
         );
         assert!(error.to_string().contains("series"), "{error}");
+    }
+
+    /// R34: an unrestricted scope sees what the catalogue holds, whatever the rating.
+    #[tokio::test]
+    async fn an_unrestricted_scope_sees_every_title() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        let database = database(&directory).await;
+        let (rated, unrated, adult) = rated_fixtures(&path).await;
+
+        let visible = database
+            .list_titles(any_account(), PageRequest::first(10))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            ids_of(&visible),
+            vec![adult, unrated, rated],
+            "newest first, and nothing is hidden"
+        );
+        assert!(
+            visible.iter().any(|title| title.adult),
+            "the adult flag is reported rather than stripped"
+        );
+    }
+
+    /// R34's fail-closed rule: a restricted scope sees neither adult-flagged content nor
+    /// content with no certification.
+    #[tokio::test]
+    async fn a_restricted_scope_hides_adult_and_unrated_content() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        let database = database(&directory).await;
+        let (rated, unrated, adult) = rated_fixtures(&path).await;
+
+        let scope = AccountScope::restricted(AccountId::new(2).unwrap());
+        let visible = database
+            .list_titles(scope, PageRequest::first(10))
+            .await
+            .unwrap();
+        assert_eq!(ids_of(&visible), vec![rated]);
+
+        // A title outside the scope is indistinguishable from one that does not exist: the
+        // read answers `None` for both, so a caller cannot probe for what it may not see.
+        assert_eq!(database.title_identity(scope, adult).await.unwrap(), None);
+        assert_eq!(database.title_identity(scope, unrated).await.unwrap(), None);
+        assert_eq!(
+            database.title_identity(scope, i64::MAX).await.unwrap(),
+            None
+        );
+        assert!(
+            database
+                .title_identity(scope, rated)
+                .await
+                .unwrap()
+                .is_some(),
+            "a rated title it may see is still readable by id"
+        );
+
+        // The same rows are readable by the account that owns them, so the hiding is the
+        // scope's and not a row that failed to be written.
+        assert!(
+            database
+                .title_identity(any_account(), adult)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            database
+                .title_identity(any_account(), unrated)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    /// A stub has no certification, so a restricted scope cannot see it until a provider
+    /// supplies one. That is the fail-closed rule applied to the sync path, and it is worth
+    /// naming because it is easy to mistake for a bug.
+    #[tokio::test]
+    async fn a_fresh_stub_is_not_visible_to_a_restricted_scope() {
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+        let stub = database
+            .insert_stub_title(stub("Alien", TitleKind::Movie))
+            .await
+            .unwrap();
+
+        let scope = AccountScope::restricted(AccountId::new(2).unwrap());
+        assert!(
+            database
+                .list_titles(scope, PageRequest::first(10))
+                .await
+                .unwrap()
+                .is_empty(),
+            "a stub carries no certification, so a restricted scope cannot see it"
+        );
+        assert_eq!(database.title_identity(scope, stub).await.unwrap(), None);
+        assert!(
+            database
+                .title_identity(any_account(), stub)
+                .await
+                .unwrap()
+                .is_some(),
+            "the row exists; the scope is what hides it"
+        );
+    }
+
+    /// Hidden rows must not consume a page: a scope applied after the query would return
+    /// short pages and eventually none at all, which looks like the catalogue emptying.
+    #[tokio::test]
+    async fn a_restricted_page_is_still_a_full_page() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        let database = database(&directory).await;
+
+        let mut setup = open_writer_connection(&path).await.unwrap();
+        let mut visible = Vec::new();
+        for index in 0..4 {
+            visible
+                .push(insert_rated(&mut setup, &format!("Visible {index}"), 0, Some("PG")).await);
+            let _ = insert_rated(&mut setup, &format!("Hidden {index}"), 0, None).await;
+        }
+        setup.close().await.unwrap();
+
+        let scope = AccountScope::restricted(AccountId::new(2).unwrap());
+        let first = database
+            .list_titles(scope, PageRequest::first(2))
+            .await
+            .unwrap();
+        assert_eq!(
+            first.len(),
+            2,
+            "two visible rows, not two rows minus hidden ones"
+        );
+
+        let second = database
+            .list_titles(
+                scope,
+                PageRequest::after(Cursor::new(first.last().unwrap().id), 2),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids_of(&second), vec![visible[1], visible[0]]);
+        assert!(
+            database
+                .list_titles(
+                    scope,
+                    PageRequest::after(Cursor::new(second.last().unwrap().id), 2)
+                )
+                .await
+                .unwrap()
+                .is_empty(),
+            "the pages end where the visible rows do"
+        );
+    }
+
+    /// The empty case: a catalogue with nothing in it lists nothing, for either scope.
+    #[tokio::test]
+    async fn an_empty_catalogue_lists_nothing() {
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+
+        for scope in [
+            any_account(),
+            AccountScope::restricted(AccountId::new(2).unwrap()),
+        ] {
+            assert!(
+                database
+                    .list_titles(scope, PageRequest::first(10))
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "an empty catalogue lists nothing"
+            );
+        }
+    }
+
+    /// Three titles that differ only in what a scope reads: a rated one, an unrated one, and
+    /// an adult one. Returned in insertion order, so a test can say which is which.
+    async fn rated_fixtures(path: &std::path::Path) -> (i64, i64, i64) {
+        let mut setup = open_writer_connection(path).await.unwrap();
+        let rated = insert_rated(&mut setup, "Alien", 0, Some("R")).await;
+        let unrated = insert_rated(&mut setup, "Unrated", 0, None).await;
+        let adult = insert_rated(&mut setup, "Adult", 1, Some("X")).await;
+        setup.close().await.unwrap();
+        (rated, unrated, adult)
     }
 }
