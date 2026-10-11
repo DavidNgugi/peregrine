@@ -12,6 +12,29 @@ use peregrine_storage::JobPhase;
 use serde_json::{Value, json};
 use ulid::Ulid;
 
+/// Why a caller-supplied job id is not one.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("`{text}` is not a job id")]
+pub struct JobIdError {
+    /// What the caller sent.
+    pub text: String,
+}
+
+/// Parses a job id supplied by a caller.
+///
+/// The IPC boundary takes ids as strings, so this is where a malformed one becomes a
+/// typed failure with the offending text in it rather than a panic or a silent new id.
+/// It lives here rather than in the command layer so that only this crate names [`Ulid`].
+///
+/// # Errors
+///
+/// [`JobIdError`] when `text` is not a ULID.
+pub fn parse_job_id(text: &str) -> Result<Ulid, JobIdError> {
+    Ulid::from_string(text).map_err(|_| JobIdError {
+        text: text.to_owned(),
+    })
+}
+
 /// The stable error code a cancelled job records.
 ///
 /// It is the string form of `peregrine-ipc`'s `ErrorCode::Cancelled`; that crate's test
@@ -50,6 +73,25 @@ pub fn progress(job: Ulid, journal_id: i64, permille: u16, attempt: u32) -> Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A round trip through the wire form, and the malformed inputs that must not panic.
+    #[test]
+    fn job_ids_round_trip_and_reject_nonsense() {
+        let job = Ulid::from_parts(1_700_000_000_000, 7);
+        assert_eq!(parse_job_id(&job.to_string()).unwrap(), job);
+
+        for rejected in ["", " ", "not-a-ulid", "01J8", "01J8ZXQ9K0000000000000000!"] {
+            let error = parse_job_id(rejected).expect_err("must be rejected");
+            assert_eq!(error.text, rejected);
+        }
+
+        // The nil ULID is a valid encoding, so it parses: it is an id no job will ever
+        // have, which the runtime reports as `UnknownJob` rather than as bad input.
+        assert_eq!(
+            parse_job_id(&"0".repeat(26)).unwrap(),
+            Ulid::from_parts(0, 0)
+        );
+    }
 
     /// The keys are the UI's contract, so a rename is a deliberate edit here.
     #[test]

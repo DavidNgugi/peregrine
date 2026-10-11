@@ -11,6 +11,9 @@ export const en = {
       name: "Peregrine",
     },
     shell: {
+      nav: {
+        label: "Screens",
+      },
       theme: {
         switchToLight: "Switch to the light theme",
         switchToDark: "Switch to the dark theme",
@@ -28,6 +31,37 @@ export const en = {
       empty: {
         title: "Nothing here yet",
         body: "Peregrine has no catalogue data yet. Titles appear here once discovery is available.",
+      },
+    },
+    jobs: {
+      title: "Diagnostics",
+      subtitle: "The scheduler's own view of the work this build can do.",
+      degraded: "{{count}} updates were dropped; the numbers below may lag.",
+      error: {
+        dismiss: "Dismiss",
+      },
+      action: {
+        start: "Start a hello job",
+        cancel: "Cancel the job",
+        refresh: "Refresh",
+      },
+      progress: {
+        label: "Job progress",
+        idle: "No job has run in this session.",
+        value: "{{phase}} · {{percent}}%",
+      },
+      journal: {
+        title: "Job journal",
+        empty: "No job has been recorded yet.",
+        id: "ID",
+        kind: "Kind",
+        state: "State",
+        progress: "Progress",
+        attempts: "Attempts",
+      },
+      log: {
+        title: "Recent log",
+        empty: "Nothing has been logged yet.",
       },
     },
     ipc: {

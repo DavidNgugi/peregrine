@@ -21,4 +21,8 @@ pub use notify::{
     ServiceError,
 };
 pub use observability::{LogConfig, Observability, ObservabilityError};
+// The runtime's own surface speaks these, so a caller that only uses `Runtime` — the IPC
+// layer, which may depend on this crate and not on storage — can name what it is handed
+// without a second dependency edge (AGENTS R6).
+pub use peregrine_storage::{JobPhase, JobRecord, StorageError};
 pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, StartedJob};

@@ -320,13 +320,12 @@ impl Runtime {
         Ok(())
     }
 
-    /// A page of journal rows, newest first.
-    pub async fn jobs(
-        &self,
-        after: Option<i64>,
-        limit: u32,
-    ) -> Result<Vec<JobRecord>, RuntimeError> {
-        Ok(self.database.list_jobs(after, limit).await?)
+    /// The newest page of journal rows.
+    ///
+    /// Keyset paging below a cursor is the repository's (`Database::list_jobs`); this is
+    /// the page a screen shows, so it does not need a cursor to walk backwards yet.
+    pub async fn jobs(&self, limit: u32) -> Result<Vec<JobRecord>, RuntimeError> {
+        Ok(self.database.list_jobs(None, limit).await?)
     }
 
     /// The counters a diagnostics screen shows.
@@ -571,7 +570,7 @@ mod tests {
     async fn await_terminal(runtime: &Runtime, journal_id: i64) -> JobRecord {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                let row = runtime.jobs(None, 20).await.unwrap();
+                let row = runtime.jobs(20).await.unwrap();
                 let row = row
                     .into_iter()
                     .find(|row| row.id == journal_id)
@@ -676,7 +675,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(25)).await;
         runtime.shutdown().await;
 
-        let rows = runtime.jobs(None, 10).await.unwrap();
+        let rows = runtime.jobs(10).await.unwrap();
         let row = rows
             .into_iter()
             .find(|row| row.id == started.journal_id)
@@ -710,7 +709,7 @@ mod tests {
             );
         }
         assert!(
-            runtime.jobs(None, 10).await.unwrap().is_empty(),
+            runtime.jobs(10).await.unwrap().is_empty(),
             "a refused request must not leave a journal row behind"
         );
 
@@ -822,7 +821,7 @@ mod tests {
         let (runtime, _sink) = runtime(&directory).await;
 
         assert!(
-            runtime.jobs(None, 10).await.unwrap().is_empty(),
+            runtime.jobs(10).await.unwrap().is_empty(),
             "a fresh runtime has journaled nothing"
         );
         let health = runtime.health().await;
