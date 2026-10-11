@@ -4,7 +4,7 @@ A fast, native-feeling desktop app for discovering, collecting, and watching you
 
 Peregrine browses a catalogue from free metadata providers, keeps it in sync locally so it never waits on the network, downloads what you choose with a safety gate in front, manages a library you already have, and plays it back with resume, subtitles, and casting.
 
-> **Status: Phase 0 in progress.** The design documents are complete and implementation has started. The walking skeleton is partly in place: the Cargo and pnpm workspaces build, the repository gates and the supply-chain policy run, the SQLite foundation with migration 0001 and its single-writer design is tested, the domain core holds `ExternalId`, the release-name parser and the clock and id ports, the Tauri shell compiles against tauri 2.12.1, and the React workspace builds under a strict TypeScript and lint configuration. Still missing: the generated IPC client, the scheduler, logging with the Diagnostics surface, the theme contrast gate, and notifications. Per-task state — including which tasks are verified rather than merely written — is in [docs/TASKS.md](./docs/TASKS.md); the remaining Phase 0 work is in [docs/PLAN.md](./docs/PLAN.md).
+> **Status: Phase 0 in progress.** Peregrine currently renders a themed shell with an empty Discover screen. Storage, domain rules, the scheduler, logging infrastructure, and generated IPC bindings exist as library foundations; runtime integration and the media workflows remain unfinished. [TASKS.md](./docs/TASKS.md#implementation-status) records implementation status, remaining work, and verification limits.
 
 ---
 
@@ -26,6 +26,8 @@ Peregrine browses a catalogue from free metadata providers, keeps it in sync loc
 ---
 
 ## What it does
+
+The features below describe the planned product; current implementation status is tracked in [TASKS.md](./docs/TASKS.md#implementation-status).
 
 | | |
 | --- | --- |
@@ -86,11 +88,11 @@ Tauri v2 shell, Rust workspace core, React front end. The Rust core owns all sta
 | `v1.5.0` | Client mode: browse and play an existing Jellyfin or Plex library, with progress written back | Phase 7 |
 | `v1.6.0` | Accounts: several people with their own avatars, content, and history; a child account a parent curates which cannot download; and account switching gated by Touch ID, Windows Hello, or the device password | Phase 8 |
 
-Effort is estimated bottom-up at ~577 ideal days for the core 1.0 and ~1 115 for the full quality bar. The numbers, the reasoning, and the honest calendar scenarios are in [PLAN.md](./docs/PLAN.md) §4.
+The full 1.0 backlog estimates ~1 120 ideal days. The earlier core estimate of ~577 ideal days still needs re-baselining for the added integration and schema tasks; [PLAN.md](./docs/PLAN.md) §4 records the scope and calendar assumptions.
 
 ## Building from source
 
-The Rust workspace, the frontend workspace, and the repository gates all work today. The one thing a headless check cannot confirm is the app window itself, which `PG-E0-03` tracks platform by platform.
+The workspace declares Rust 1.95 or newer. Frontend build, tests, typecheck, lint, and formatting pass in the current audit; Rust checks require a suitable toolchain. Platform window verification remains under `PG-E0-03`, and supply-chain findings remain under `PG-E0-14`.
 
 ```bash
 cargo build --workspace        # crates, one per module map entry
@@ -116,7 +118,7 @@ Running the desktop app uses the same install:
 pnpm tauri dev
 ```
 
-Requirements: Rust (stable, current minus two), Node 22+ with pnpm, and platform build tools. mpv and ffmpeg are bundled as pinned sidecars; no system packages are required.
+Requirements: Rust 1.95 or newer, Node 22+ with pnpm, and the platform build tools and Tauri system dependencies. Sidecar bundling is planned under `PG-E26-01`; this scaffold does not yet bundle mpv, ffprobe, or ffmpeg.
 
 ## Repository layout
 
@@ -139,7 +141,7 @@ xtask/            repository checks, codegen, release helpers
 | [TECH_STACK.md](./docs/TECH_STACK.md) | Every technology choice with its rejected alternatives |
 | [DEPENDENCIES.md](./docs/DEPENDENCIES.md) | Pinned versions, licences, update policy, redistribution obligations |
 | [PLAN.md](./docs/PLAN.md) | Phases, exit criteria, effort model, risk register, release checklist |
-| [TASKS.md](./docs/TASKS.md) | 472 granular tasks with acceptance criteria and estimates |
+| [TASKS.md](./docs/TASKS.md) | 474 tasks through 1.0, plus the written post-1.0 roadmap, with acceptance criteria and estimates |
 | [DESIGN_SYSTEM.md](./docs/DESIGN_SYSTEM.md) | Tokens, colour, typography, motion, components, theming, accessibility |
 | [adr/](./docs/adr/) | Decision records with the alternatives each decision beat |
 | [research/](./docs/research/) | Reference-codebase lessons, dependency verification, data sources, desktop UX |
@@ -158,7 +160,7 @@ Peregrine is a media client. It does not host, index, or distribute content.
 
 - Metadata comes from the TMDB API and the official IMDb datasets, downloaded by you to your machine and never redistributed by this project.
 - Built-in indexer adapters ship **disabled**. Enabling one is your decision and your responsibility, and the app tells you so plainly before it happens.
-- The bundled `mpv` and `ffmpeg` binaries are separate executables, invoked as subprocesses and never linked into the app. `mpv` ships as upstream's GPL build (an LGPL-only build has no Linux X11 video output) and `ffmpeg` as an LGPL-only build. Their licence texts, build configurations, and source offers ship alongside them and are listed in [DEPENDENCIES.md](./docs/DEPENDENCIES.md).
+- The planned `mpv` and `ffmpeg` sidecars are separate executables, invoked as subprocesses and never linked into the app. `mpv` ships as upstream's GPL build (an LGPL-only build has no Linux X11 video output) and `ffmpeg` as an LGPL-only build. Their licence texts, build configurations, and source offers ship alongside them and are listed in [DEPENDENCIES.md](./docs/DEPENDENCIES.md).
 - Nothing from the project's dependencies is copied into this codebase. VLC and Jellyseerr-informed patterns were studied for architecture only; see [docs/research/reference-codebases.md](./docs/research/reference-codebases.md) for the licence analysis of each reference.
 
 ## Contributing

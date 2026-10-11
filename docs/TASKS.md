@@ -15,6 +15,16 @@ Granular, reviewable backlog. Phases and exit criteria come from [PLAN.md](./PLA
 
 Every task implicitly includes its tests, error handling, structured logging, and doc updates per PLAN §8. "Acceptance" states the observable proof beyond that.
 
+## Implementation status
+
+The desktop is a Phase 0 shell. It registers `system.build_info`, renders an empty Discover screen and an idle player bar, and supports a light/dark theme switch. Provider, torrent, indexer, playback, stream, cast, platform, monitor, MCP, and testkit crates remain documentation-only scaffolds.
+
+Library implementations exist for SQLite opening and a single writer with seven migrations; external IDs, release parsing, quality profiles, and path policy; the scheduler; notification policy and service ports; redacted logging; and generated IPC bindings and theme validation. The shell does not yet open the database, start the scheduler, or install the logging subscriber. Those implementations remain `doing` until the applicable Definition of Done is met through PG-E0-19 and their own acceptance criteria. PG-E0-19 can integrate their existing library APIs before those tasks close; a prerequisite identifies the implementation it needs, not a requirement to defer integration until that implementation is independently reachable. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
+
+The current verification passed the frontend build, 54 unit tests, typecheck, lint, and formatting. Rust tests and repository gates could not run because the installed Cargo 1.80.1 cannot parse edition 2024; the workspace declares Rust 1.95. A suitable toolchain and green CI are still required. This does not invalidate earlier test evidence, but it does not establish a current Rust or cross-platform pass.
+
+PG-E0-14 retains the recorded supply-chain findings pending a fresh audit. PG-E28-07 owns documentation checking, PG-E26-01 owns sidecar notice checking, and PG-E22-02 owns icon checking; their documented xtask commands are not implemented yet. E2E, parser fuzz targets, and performance budgets remain open under E4 and E27.
+
 ## Epic dependency graph
 
 ```mermaid
@@ -76,12 +86,14 @@ graph LR
 | PG-E0-10 | Pre-commit hooks: format, lint staged files, arch check | A commit with a formatting error is rejected locally | PG-E0-08, PG-E0-09 | S | done |
 | PG-E0-11 | Commit convention, PR template with perf and security checklists, CODEOWNERS | Template rendered on a test PR | — | XS | review |
 | PG-E0-12 | Issue templates and label taxonomy, milestones mapped to phases | Templates produce labelled issues | — | XS | review |
-| PG-E0-13 | CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 | Green on a trivial PR with cache warm | PG-E0-01 | M | review |
+| PG-E0-13 | CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 **Remaining:** Install the Tauri Linux prerequisites in the Ubuntu MSRV job as well as the other jobs, and record a green three-platform CI run. | Green on a trivial PR with cache warm | PG-E0-01 | M | review |
 | PG-E0-14 | Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit`. **Open, and the job is red on the real graph:** 5 MPL-2.0 crates enter through Tauri's Linux stack (`cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`, `selectors`) and DEPENDENCIES §6 says no MPL-2.0 ships, so this needs a deliberate allowlist + §6 decision (and probably ADR 0009); `paste` and `proc-macro-error` are unmaintained transitively (specta/Tauri), needing a documented ignore or a dropped feature; and the `wildcards` ban false-positives on our own `{ workspace = true }` path deps in `peregrine-app` and `peregrine-desktop` | Build fails on an advisory fixture | PG-E0-13 | S | doing |
 | PG-E0-15 | Dead-dependency gate: `knip`, `cargo-machete` | Build fails on an unused fixture dependency | PG-E0-13 | XS | doing |
 | PG-E0-16 | Release workflow: bundles, SBOM, signed manifest, changelog | A tagged pre-release publishes artifacts and a manifest | PG-E0-13 | M | todo |
 | PG-E0-17 | Automated dependency updates, grouped weekly | A grouped PR opens on schedule | PG-E0-13 | XS | review |
 | PG-E0-18 | `LICENSE`, `NOTICE`, third-party attribution scaffold | Attribution file lists every runtime dependency and sidecar | — | S | doing |
+
+| PG-E0-19 | Connect the Phase 0 runtime: initialize and retain redacted logging, open SQLite, start the scheduler, and register a hello-job service through IPC | From the desktop UI, start a hello job, persist its journal state, observe rate-limited progress and cancellation, and view its redacted log output; shutdown drains the scheduler and database; startup failures use structured errors; measure startup and scheduler performance | PG-E0-03, PG-E2-02, PG-E2-06, PG-E2-07, PG-E3-02, PG-E6-01, PG-E25-01 | M | todo |
 
 ## E1 · App shell and platform
 
@@ -101,7 +113,7 @@ graph LR
 | PG-E1-12 | Native file and folder pickers wrapped in a typed API | Returns resolved paths, never raw strings | PG-E1-01 | S | all | todo |
 | PG-E1-13 | Autostart registration per OS, off by default | Toggle survives reboot; removed cleanly on uninstall | PG-E1-09 | S | all | todo |
 | PG-E1-14 | Native notification delivery through `tauri-plugin-notification`: `on_action` handler registered at startup, int32 ids from a persisted counter, resolved per-OS sound value, deep link in `extra`, delivery state written to the centre before the OS call | A toast routes to the right screen when clicked; the centre entry exists even when delivery fails; no notification is shown without a registered listener | PG-E1-09, PG-E1-19 | M | todo |
-| PG-E1-19 | `NotificationService`: the event catalogue from [ADR 0015](./adr/0015-native-notifications.md), per-event policy, dedupe window, burst summaries, global rate limit, focus suppression, quiet hours with digest, severity handling, and the in-app centre as the authoritative record | Table-driven tests over the policy matrix: every suppression records a reason; critical events ignore quiet hours but not focus modes; five completions in a burst produce one summary toast and five centre entries | PG-E3-09 | L **In progress:** the domain policy and redaction scanner are complete and tested (proptest caught `is_safe("")` returning false), the app ports and service compile with the workspace at 265 tests and strict clippy clean. **Remaining:** the storage repository over the `notification` table, the `peregrine-platform` `OsNotifier` adapter, service tests against fakes, and the mutation evidence for R31's "centre survives OS delivery failing" claim. | doing |
+| PG-E1-19 | `NotificationService`: the event catalogue from [ADR 0015](./adr/0015-native-notifications.md), per-event policy, dedupe window, burst summaries, global rate limit, focus suppression, quiet hours with digest, severity handling, and the in-app centre as the authoritative record **In progress:** the domain policy and redaction scanner are complete and tested (proptest caught `is_safe("")` returning false), the app ports and service compile in an earlier workspace run; the current audit could not rerun Rust checks with the installed Cargo 1.80.1. **Remaining:** the storage repository over the `notification` table, the `peregrine-platform` `OsNotifier` adapter, service tests against fakes, and the mutation evidence for R31's "centre survives OS delivery failing" claim. **Remaining:** Require AccountScope on centre reads and apply visibility in the service before exposing the centre through IPC; add tests for restricted accounts and hidden subjects. | Table-driven tests over the policy matrix: every suppression records a reason; critical events ignore quiet hours but not focus modes; five completions in a burst produce one summary toast and five centre entries | PG-E3-09 | L | doing |
 | PG-E1-20 | Consent and permission handling: wizard step with per-event choice, `isPermissionGranted`/`requestPermission` probe, a test-notification button, an OS-settings deep link, denial fallback to the in-app centre, and revocation detection | A declined user is never asked again unprompted and still receives every event in the centre; the test button reports honestly whether a notification arrived; the resolved state and OS link are visible in Settings | PG-E1-19, PG-E1-12 | M | todo |
 | PG-E1-21 | Sound policy per OS: verified sound values per event class, master and per-event switches, optional custom file validated per OS, honest "best effort" copy, and the synthesized WebAudio in-app chime (no bundled audio assets) | Sound on and off both verified by ear on each OS with the result recorded in SPIKE-11; a custom file that fails to load falls back with one non-modal notice; the chime never overlaps itself and respects the master switch | PG-E1-14 | M | all | todo |
 | PG-E1-15 | Dock and taskbar progress badges driven by aggregate download progress | Badge clears when the queue is idle | PG-E1-09 | S | mac, win | todo |
@@ -130,15 +142,15 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | done |
-| PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | done |
-| PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | done |
-| PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | done |
-| PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | done |
-| PG-E3-06 | Migration 0004: library tables including partial unique indices | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M **Spec defect to settle:** `DATA_MODEL` §2.3 declares `media_file.video_account TEXT`, which is almost certainly ffprobe's `profile` mistyped. It was transcribed literally; the document needs correcting before anything reads that column. | done |
-| PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | done |
-| PG-E3-08 | Migration 0006: acquisition tables including `release_decision` | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M **Spec defect to settle:** §2.7 documents `CREATE INDEX download_job_hash_uq ON download_job (info_hash) WHERE info_hash IS NOT NULL` — a **non-unique** index whose name claims uniqueness. Transcribed literally, and the test now asserts non-uniqueness, because inventing `UNIQUE` to match a name would be guessing at the schema when the name is what is probably wrong. | done |
-| PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S **Two spec gaps found here:** §2.7's `image_ref UNIQUE (owner_kind, owner_id, role, provider, path, language)` treats NULLs as distinct, so duplicate artwork rows with a NULL `language` coexist; and §3 has no quality-profile invariant, so `QualityProfile`'s two contradiction rules (`PG-E4-05`) have no §3 row to map to, which R4 wants. | done |
+| PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | doing |
+| PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | doing |
+| PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | doing |
+| PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | doing |
+| PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | doing |
+| PG-E3-06 | Migration 0004: library tables including partial unique indices **Spec defect to settle:** `DATA_MODEL` §2.3 declares `media_file.video_account TEXT`, which is almost certainly ffprobe's `profile` mistyped. It was transcribed literally; the document needs correcting before anything reads that column. | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M | doing |
+| PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | doing |
+| PG-E3-08 | Migration 0006: acquisition tables including `release_decision` **Spec defect to settle:** §2.7 documents `CREATE INDEX download_job_hash_uq ON download_job (info_hash) WHERE info_hash IS NOT NULL` — a **non-unique** index whose name claims uniqueness. Transcribed literally, and the test now asserts non-uniqueness, because inventing `UNIQUE` to match a name would be guessing at the schema when the name is what is probably wrong. | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M | doing |
+| PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables **Two spec gaps found here:** §2.7's `image_ref UNIQUE (owner_kind, owner_id, role, provider, path, language)` treats NULLs as distinct, so duplicate artwork rows with a NULL `language` coexist; the quality-profile contradiction rules now map to DATA_MODEL §3 I35. The artwork schema correction remains PG-E3-19. | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S | doing |
 | PG-E3-10 | Type-safe repositories per aggregate with row mappers | Round-trip property test for every entity | PG-E3-04 | L | todo |
 | PG-E3-11 | Keyset pagination helper used by every list query | `OFFSET` is absent from the codebase, enforced by grep gate | PG-E3-10 | S | todo |
 | PG-E3-12 | FTS5 contentless table with explicit maintenance and rebuild command | Rebuild reproduces identical search results | PG-E3-04 | M | todo |
@@ -149,18 +161,20 @@ graph LR
 | PG-E3-17 | Disk accounting queries for per-tier usage | Diagnostics totals match filesystem measurement within 2% | PG-E3-10 | S | todo |
 | PG-E3-18 | Fixture databases for every previous release, used in migration tests | CI tests upgrade from each fixture | PG-E3-13 | M | todo |
 
+| PG-E3-19 | Resolve the schema defects recorded by PG-E3-06, PG-E3-08, and PG-E3-09 before repository consumers land | Decide the intended video-profile column and info-hash index semantics, document null-language artwork uniqueness, and apply required corrections in a new append-only migration; upgrade fixtures preserve existing rows and reject duplicate artwork under the agreed key | PG-E3-09 | M | todo |
+
 ## E4 · Domain core
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E4-01 | Core entities and value objects with validating constructors | Illegal states unrepresentable; construction failures are typed | PG-E0-01 | M | done |
-| PG-E4-02 | `ExternalId` with provider prefixes and parsing | Round-trip property test over generated ID shapes | PG-E4-01 | S | done |
-| PG-E4-03 | `ReleaseName` parser: resolution, source, codec, HDR, audio, group, repack, season pack, multi-episode | ≥ 95% correct on a 200-name corpus; no panics on fuzz input | PG-E4-01 | L | done |
+| PG-E4-01 | Core entities and value objects with validating constructors **Remaining:** The current crate exports IDs, release parsing, quality profiles, path policy, notification policy, and clock/id ports. Catalogue, library, and account-scope entities and application integration remain. | Illegal states unrepresentable; construction failures are typed | PG-E0-01 | M | doing |
+| PG-E4-02 | `ExternalId` with provider prefixes and parsing | Round-trip property test over generated ID shapes | PG-E4-01 | S | doing |
+| PG-E4-03 | `ReleaseName` parser: resolution, source, codec, HDR, audio, group, repack, season pack, multi-episode | ≥ 95% correct on a 200-name corpus; no panics on fuzz input | PG-E4-01 | L | doing |
 | PG-E4-04 | `NameParser` for library filenames and folders | Same corpus requirement as PG-E4-03 plus anime absolute and `1x01` forms | PG-E4-03 | L | todo |
-| PG-E4-05 | `QualityProfile` model with rules, caps, and cut-off rank | Serialization round-trip and validation of contradictory rules | PG-E4-01 | M | done |
+| PG-E4-05 | `QualityProfile` model with rules, caps, and cut-off rank | Serialization round-trip and validation of contradictory rules | PG-E4-01 | M | doing |
 | PG-E4-06 | `ReleaseRanker` pure scoring with per-rule reason output | Monotonicity, determinism, and totality property tests | PG-E4-05, PG-E4-03 | L | todo |
 | PG-E4-07 | `TorrentInspector` rules: extension allowlist, traversal, reserved names, caps, unicode spoofing | Each hostile fixture classified correctly, with reason strings | PG-E4-01 | L | todo |
-| PG-E4-08 | `PathGuard` policy model, pure containment logic | Escape attempts rejected; property test over generated paths | PG-E4-01 | M | done |
+| PG-E4-08 | `PathGuard` policy model, pure containment logic | Escape attempts rejected; property test over generated paths | PG-E4-01 | M | doing |
 | PG-E4-09 | `WatchPolicy`: resume point, watched threshold, next-episode selection | Boundary tests at 0%, 2%, 50%, 92%, 95%, 99%, and zero-duration | PG-E4-01 | M | todo |
 | PG-E4-10 | `EpisodeOrderingStrategy` for aired, absolute, DVD, anime | Ordering fixtures reproduce expected lists | PG-E4-07, PG-E3-05 | M | todo |
 | PG-E4-11 | Download job state machine with guarded transitions | Illegal transitions rejected; every state reachable in a test | PG-E4-01 | M | todo |
@@ -169,7 +183,7 @@ graph LR
 | PG-E4-14 | Subtitle timing math: offset, frame-rate conversion, PAL speedup | Property test: offset then reverse offset is identity | PG-E4-01 | S | todo |
 | PG-E4-15 | Subtitle format model and SRT/VTT/ASS writers | Round-trip of styling-bearing ASS preserves italics and positioning | PG-E4-14 | M | todo |
 | PG-E4-16 | Domain event enum covering every state-changing operation | Repository layer emits only declared events | PG-E4-11, PG-E4-13 | S | todo |
-| PG-E4-17 | `Clock` and `IdGenerator` ports for determinism in tests | No `SystemTime::now` or random call outside an adapter (grep gate) | PG-E4-01 | S | done |
+| PG-E4-17 | `Clock` and `IdGenerator` ports for determinism in tests **Remaining:** Ports and local test fakes exist; production adapters and the rule forbidding clock/randomness outside adapters must be verified before completion. | No `SystemTime::now` or random call outside an adapter (grep gate) | PG-E4-01 | S | doing |
 | PG-E4-18 | Fuzz targets for release-name, filename, and subtitle parsers | 24 h fuzz run without panic in Phase 4 | PG-E4-03, PG-E4-04, PG-E4-15 | M | todo |
 | PG-E4-19 | `Conformance`-friendly fake implementations for all ports | Fakes live in `testkit`, usable from any crate's tests | PG-E4-17 | M | todo |
 | PG-E4-20 | Domain documentation pass: invariants stated where enforced | Each invariant in DATA_MODEL §3 maps to a named test | PG-E4-01 | S | todo |
@@ -209,9 +223,9 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E6-01 | Job scheduler: priority queues, worker pool, dedupe, backoff with jitter | Deferred jobs retry on schedule; dedupe proven | PG-E3-08, PG-E4-19 | L | done |
-| PG-E6-02 | Resource token acquisition with panic-safe release | Injected panic releases the token (guard test) | PG-E6-01 | M | todo |
-| PG-E6-03 | Concurrency classes: metadata, image, dataset, subtitle, probe | Each class has an independent limit asserted under load | PG-E6-01 | M | todo |
+| PG-E6-01 | Job scheduler: priority queues, worker pool, dedupe, backoff with jitter **Remaining:** The in-memory scheduler and its tests exist; shared testkit fakes, desktop startup, a persisted hello job, and IPC progress remain under PG-E4-19 and PG-E0-19. Scheduler performance measurement is still required. | Deferred jobs retry on schedule; dedupe proven | PG-E3-08, PG-E4-19 | L | doing |
+| PG-E6-02 | Resource token acquisition with panic-safe release **Remaining:** PG-E6-01 already tests panic-safe worker-slot release. This task covers resource tokens beyond worker slots; verify release on panic, cancellation, and retry without duplicating that test. | Injected panic releases the token (guard test) | PG-E6-01 | M | todo |
+| PG-E6-03 | Concurrency classes: metadata, image, dataset, subtitle, probe **Remaining:** SchedulerClasses exists; wire each production job kind and prove independent limits under load. | Each class has an independent limit asserted under load | PG-E6-01 | M | todo |
 | PG-E6-04 | Incremental change sync with persisted cursors and overlapping windows | Crash between cursor advance and upsert loses nothing | PG-E6-01, PG-E5-09 | M | todo |
 | PG-E6-05 | IMDb ratings dataset download, checksum, parse, transactional swap | Header change or truncated file leaves the old dataset in place | PG-E6-01 | L | todo |
 | PG-E6-06 | Ratings join into `title` via `external_id` | 100 k-title join completes within the DB budget | PG-E6-05 | M | todo |
@@ -239,7 +253,7 @@ graph LR
 | PG-E7-05 | Hover preview: dwell, scale, metadata panel, trailer peek toggle | Cancels cleanly on leave; no layout thrash measured | PG-E7-04, PG-E21-08 | M | todo |
 | PG-E7-06 | Virtualized grid with fixed tile geometry | 5 000 items at ≥60 fps; blurhash fills first paint | PG-E7-04 | L | todo |
 | PG-E7-07 | Horizontal rails with keyboard traversal and edge affordances | Arrow keys traverse; no scroll jank on 500-item rails | PG-E7-04 | M | todo |
-| PG-E7-08 | Discover screen: hero, continue watching, top 10, on the air, upcoming, top rated, recommendations | Each rail has a defined empty state | PG-E7-07, PG-E18-04 | L | todo |
+| PG-E7-08 | Discover screen: hero, continue watching, top 10, on the air, upcoming, top rated, recommendations **Remaining:** The Continue Watching rail has an empty state until PG-E18-04 supplies progress; that task integrates the rail after Discover exists. | Each rail has a defined empty state | PG-E7-07 | L | todo |
 | PG-E7-09 | Filter surface: type, genre, year, rating, runtime, language, country, provider, status, availability, sort | Filter state is URL-encoded and shareable | PG-E7-06 | L | todo |
 | PG-E7-10 | Smart collections: saved filter plus sort, pinned to the sidebar | Persisted, reorderable, applied in one click | PG-E7-09, PG-E3-07 | M | todo |
 | PG-E7-11 | Title detail: hero expansion, backdrop cross-fade, actions, availability | Shared-element transition from card; reduced-motion path exists | PG-E7-03, PG-E21-09 | L | todo |
@@ -380,9 +394,9 @@ graph LR
 | PG-E14-05 | Name-parsing match pipeline into catalogue with confidence scoring | ≥ 98% correct attribution on the naming corpus | PG-E4-04, PG-E5-13 | L | todo |
 | PG-E14-06 | Sidecar metadata support: NFO, existing artwork, `.srt` siblings | NFO title and year win over filename parsing | PG-E14-05 | M | todo |
 | PG-E14-07 | Episode matching: absolute, multi-episode, ranges, specials placement | Fixture table of 60 ambiguous cases with expected results | PG-E14-05, PG-E4-10 | L | todo |
-| PG-E14-08 | Unmatched file queue with suggestions and manual matching UI | Manual match creates the item and remembers the rule | PG-E14-07, PG-E14-09 | M | todo |
+| PG-E14-08 | Unmatched file queue with suggestions and manual matching UI | Manual match creates the item and remembers the rule | PG-E14-07 | M | todo |
 | PG-E14-09 | Match-rule memory: user corrections become reusable patterns | Second occurrence auto-matches | PG-E14-08 | M | todo |
-| PG-E14-10 | ffprobe pipeline with JSON cache keyed by path, mtime, and probe version | Repeat scan does not re-probe unchanged files | PG-E14-03, PG-E16-04 | M | todo |
+| PG-E14-10 | ffprobe pipeline with JSON cache keyed by path, mtime, and probe version | Repeat scan does not re-probe unchanged files | PG-E14-03 | M | todo |
 | PG-E14-11 | Media file quality labelling from probe output | Labels match a fixture expectation table | PG-E14-10 | M | todo |
 | PG-E14-12 | Duplicate detection across roots with a resolution preference | Duplicates reported, never auto-deleted | PG-E14-10 | M | todo |
 | PG-E14-13 | Missing-file reconciliation with `missing_since` and progress retention | Removing and restoring a file preserves watch progress | PG-E14-10, PG-E3-06 | M | todo |
@@ -425,7 +439,7 @@ graph LR
 | PG-E16-06 | Wayland degraded hand-off: mpv toplevel in theatre mode with the webview video region hidden, never a black rectangle | Playback usable on Wayland; limitations published in the README and platform matrix | PG-E16-05 | L | todo |
 | PG-E16-07 | Player overlay UI: controls, timeline, chapters, hover previews | Auto-hide, keyboard-first, no layout shift on show | PG-E16-03, PG-E21-09 | L | todo |
 | PG-E16-08 | Timeline interactions: scrub with thumbnails, precise seek, chapter markers | Thumbnails generated lazily and cached | PG-E16-07 | L | todo |
-| PG-E16-09 | Track selection: video quality variants, audio device, audio track, subtitles | Selections persist per show and per file | PG-E16-04, PG-E17-09 | M | todo |
+| PG-E16-09 | Track selection: video quality variants, audio device, audio track, subtitles | Selections persist per show and per file | PG-E16-04 | M | todo |
 | PG-E16-10 | Playback speed, aspect, zoom, and audio delay controls | All persist per session and optionally per show | PG-E16-07 | S | todo |
 | PG-E16-11 | Fullscreen, always-on-top, picture-in-picture native window | PiP works without a webview video element | PG-E16-05 | M | todo |
 | PG-E16-12 | Buffer health and stall UI for streaming sources | Honest buffering state with actionable options | PG-E16-01, PG-E10-06 | M | todo |
@@ -479,7 +493,7 @@ graph LR
 | PG-E18-06 | Mark watched, unwatched, and bulk season marking | Manual overrides survive subsequent playbacks | PG-E18-01, PG-E7-13 | S | todo |
 | PG-E18-07 | Watch history timeline with filtering | Accurate and paginated by keyset | PG-E18-01 | S | todo |
 | PG-E18-08 | Multi-device position merge rules (local wins by recency) | Conflict fixtures resolve deterministically | PG-E18-01 | M | todo |
-| PG-E18-09 | Trakt device OAuth and scrobble after Phase 5 scope confirmation | Opt-in; failures never affect local state | PG-E18-08, PG-E29-05 | M | todo |
+| PG-E18-09 | Trakt device OAuth and scrobble after Phase 5 scope confirmation **Remaining:** Deliver OAuth and scrobbling first; PG-E29-05 adds conflict resolution and the offline queue. | Opt-in; failures never affect local state | PG-E18-08 | M | todo |
 | PG-E18-10 | Resume across a re-downloaded file with a different duration | Position scaled by percentage with a warning if wildly different | PG-E18-08, PG-E14-13 | S | todo |
 
 ---
@@ -537,7 +551,7 @@ graph LR
 | PG-E21-08 | Micro-interaction library: hover, press, toggle, checkbox, drag, drop, feedback states | Each documented with its trigger and duration | PG-E21-07 | M | todo |
 | PG-E21-09 | Shared-element transitions: card to detail hero, rail to grid, player chrome | 60 fps during transition with transform-only animation | PG-E21-07 | L | todo |
 | PG-E21-10 | Scroll choreography: rail snapping, sticky headers, backdrop parallax with a budget | No long tasks > 50 ms during scroll | PG-E21-09 | M | todo |
-| PG-E21-11 | Reduced-motion and reduced-transparency paths for every animation | `prefers-reduced-motion` disables non-essential motion | PG-E21-09, PG-E23-02 | M | todo |
+| PG-E21-11 | Reduced-motion and reduced-transparency paths for every animation | `prefers-reduced-motion` disables non-essential motion | PG-E21-09 | M | todo |
 | PG-E21-12 | Loading and empty state library: skeletons, blurhash, empty illustrations, error states | No screen uses a bare spinner | PG-E21-04 | M | todo |
 | PG-E21-13 | Icon set: a consistent outlined system with a product-specific subset | No emoji as icons anywhere (grep gate) | PG-E21-03 | M | todo |
 | PG-E21-14 | Native-feel audit checklist applied to every screen | Documented pass per screen with fixes recorded | PG-E21-12 | M | todo |
@@ -554,7 +568,7 @@ graph LR
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
 | PG-E22-01 | Logo and wordmark: primary, mono, and small-size variants | Legible at 16 px; ships as SVG with a single currentColor path set | — | M | todo |
-| PG-E22-02 | App icon per OS: macOS squircle with safe margins, Windows multi-size `.ico`, Linux PNG set | Passes each platform's iconography guidelines | PG-E22-01 | M | todo |
+| PG-E22-02 | App icon per OS: macOS squircle with safe margins, Windows multi-size `.ico`, Linux PNG set **Remaining:** Implement cargo xtask icons --check for platform sizes and formats; current icon files alone do not satisfy the gate. | Passes each platform's iconography guidelines | PG-E22-01 | M | todo |
 | PG-E22-03 | Shipped themes: Default Dark, Default Light, Midnight, plus one high-contrast | Each passes contrast validation and visual snapshots | PG-E21-01 | M | doing |
 | PG-E22-04 | Theme file format and a documented authoring guide | A community theme can be added without a rebuild | PG-E21-02 | M | todo |
 | PG-E22-05 | Theme import and export with validation | Invalid theme rejected with a clear reason | PG-E22-04 | S | todo |
@@ -588,16 +602,16 @@ graph LR
 | PG-E24-01 | Tauri capabilities per window, minimal and reviewed | The player window cannot call filesystem or shell commands | PG-E2-01 | M | todo |
 | PG-E24-02 | Strict CSP with no remote origins in the main window | A CSP violation test page fails to load scripts | PG-E24-01 | M | todo |
 | PG-E24-03 | `PathGuard` implementation with canonicalization and root allowlist | Symlink escape and prefix-match escape attempts rejected | PG-E4-08 | M | todo |
-| PG-E24-04 | Remove or lock down every shell and opener capability | Media paths cannot be opened by the system handler | PG-E24-01, PG-E11-13 | S | todo |
-| PG-E24-05 | Secrets: keyring storage, `Secret` wrapper, redaction layer | A log-scanning test finds no key material across all log paths | PG-E20-04 | M | doing |
-| PG-E24-06 | Sandboxed trailer webview with origin restrictions and no IPC access | Trailer cannot invoke any app command | PG-E7-14, PG-E24-01 | M | todo |
-| PG-E24-07 | Local HTTP hardening: token scope, no listing, no-store, session lifetime | Requests without a valid token are rejected; listing returns 404 | PG-E19-04 | M | todo |
+| PG-E24-04 | Remove or lock down every shell and opener capability | Media paths cannot be opened by the system handler | PG-E24-01 | S | todo |
+| PG-E24-05 | Secrets: keyring storage, `Secret` wrapper, redaction layer | A log-scanning test finds no key material across all log paths | PG-E0-01 | M | doing |
+| PG-E24-06 | Sandboxed trailer webview with origin restrictions and no IPC access | Trailer cannot invoke any app command | PG-E24-01 | M | todo |
+| PG-E24-07 | Local HTTP hardening: token scope, no listing, no-store, session lifetime | Requests without a valid token are rejected; listing returns 404 | PG-E10-05 | M | todo |
 | PG-E24-08 | Fuzzing programme for parsers and protocol handlers with CI cadence | 24 h runs clean; corpus checked in | PG-E4-18 | M | todo |
 | PG-E24-09 | SBOM generation and release attachment | SBOM lists every runtime and bundled component | PG-E0-16 | S | todo |
 | PG-E24-10 | Dependency review policy: bans, licence allowlist, advisory gate | A banned crate fails CI | PG-E0-14 | S | todo |
 | PG-E24-11 | Update signing verification and downgrade protection | A tampered manifest is rejected | PG-E26-05 | M | todo |
 | PG-E24-12 | Threat-model review with the STRIDE table from SECURITY.md, findings triaged | Written report with accepted risks named | PG-E11-12 | M | todo |
-| PG-E24-13 | Crash-report scrubbing: paths, keys, and titles removed | Scrubber fixture test proves no user data leaves | PG-E25-04 | M | todo |
+| PG-E24-13 | Crash-report scrubbing: paths, keys, and titles removed | Scrubber fixture test proves no user data leaves | PG-E25-01 | M | todo |
 | PG-E24-14 | Permission model: least privilege, revocation detection, plain-language prompts | Revoking a folder mid-session degrades gracefully | PG-E27-09 | M | todo |
 | PG-E24-15 | Adversarial review of the deletion and path code by a second pair of eyes | Review recorded with findings resolved | PG-E15-10 | M | todo |
 | PG-E24-16 | Security documentation: reporting policy, supported versions, disclosure timeline | Published in SECURITY.md | PG-E24-12 | S | todo |
@@ -606,7 +620,7 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels | Log level change applies at runtime | PG-E0-08 | M | done |
+| PG-E25-01 | `tracing` setup: structured JSON, rotation, redaction, per-module levels **Remaining:** The subscriber, rotation, redaction, and level reload exist as library code; install and retain the subscriber at desktop startup under PG-E0-19 and expose level changes through settings. Retention and key-shape scrubbing remain PG-E25-03. | Log level change applies at runtime | PG-E0-08 | M | doing |
 | PG-E25-02 | Metrics registry: counters, histograms, per-provider and per-session | Exposed internally and rendered in Diagnostics | PG-E25-01 | M | todo |
 | PG-E25-03 | Log tail and export with a size cap and secret scrubbing, plus the two gaps PG-E25-01 flagged as unbuilt: **log retention** (ARCHITECTURE §16's 7 days / 20 MB — `tracing-appender` has no byte-cap primitive, so it belongs with log management) and **key-shape scrubbing** (SECURITY.md T13; only values registered through `Secret` are currently removed, and heuristics need their own false-positive policy) | Exported bundle is inspectable before sending | PG-E25-01 | M | todo |
 | PG-E25-04 | Opt-in crash reporting with a self-hostable DSN, empty by default | No network call occurs when unconfigured (asserted) | PG-E24-13 | M | todo |
@@ -631,7 +645,7 @@ graph LR
 | PG-E26-08 | Changelog automation from conventional commits | Release notes group by category | PG-E0-16 | S | todo |
 | PG-E26-09 | Install and uninstall cleanliness checks per OS | No leftover processes, no orphan tray icons, no stray files | PG-E26-02, PG-E26-04 | M | todo |
 | PG-E26-10 | Portable mode: config and data beside the executable | Works on a USB stick without touching user account paths | PG-E26-01, PG-E3-01 | M | todo |
-| PG-E26-11 | First-run wizard integrated into the packaged build, including the first account (name and avatar) and the notifications consent step | A clean machine reaches a working state in under 3 minutes, with one adult account created and its avatar rendered | PG-E27-09, PG-E26-02 | M | todo |
+| PG-E26-11 | First-run wizard integrated into the packaged build, including the first account (name and avatar) and the notifications consent step | A clean machine reaches a working state in under 3 minutes, with one adult account created and its avatar rendered | PG-E26-02 | M | todo |
 | PG-E26-12 | Beta channel with telemetry-free feedback flow | Beta builds identifiable in About and Diagnostics | PG-E26-05 | S | todo |
 | PG-E26-13 | Distribution docs: Homebrew cask, winget, Flathub submission steps | Each package manager install path tested at least once | PG-E26-04 | M | todo |
 | PG-E26-14 | Crash-safe upgrade path from each prior release | Upgrade preserves library, progress, and settings | PG-E26-05, PG-E3-18 | M | todo |
@@ -678,7 +692,7 @@ graph LR
 | PG-E28-04 | Indexer authoring guide including the legal checklist | Contributions cannot add an enabled-by-default indexer | PG-E12-14 | M | todo |
 | PG-E28-05 | Troubleshooting guide covering the top failure modes from beta | Each entry has a symptom, cause, and fix | PG-E25-07 | M | todo |
 | PG-E28-06 | FAQ: subtitles, seeding, VPN, casting limitations, indexers, legal questions | Answers are honest about limitations | PG-E28-01 | M | todo |
-| PG-E28-07 | Architecture docs kept in sync, with a docs check in CI for broken links and diagrams | CI fails on a broken relative link or invalid mermaid block | PG-E0-13 | S | todo |
+| PG-E28-07 | Architecture docs kept in sync, with a docs check in CI for broken links and diagrams **Remaining:** Implementation status and dependency ordering are reconciled; cargo xtask check-docs and its negative fixtures are still absent, so this task remains open. | CI fails on a broken relative link or invalid mermaid block | PG-E0-13 | S | doing |
 | PG-E28-08 | Screenshot and demo-asset pipeline kept current per release | Screenshots refresh automatically from a scripted run | PG-E27-06 | M | todo |
 | PG-E28-09 | Release notes template focused on user-visible change and known issues | Every release lists known issues | PG-E26-08 | XS | todo |
 | PG-E28-10 | Community files: code of conduct, support policy, roadmap visibility | Published and referenced from the README | PG-E28-01 | S | todo |
@@ -705,6 +719,8 @@ graph LR
 ---
 
 ## Critical path
+
+Phase 0 first closes PG-E0-19 using the already implemented foundations, then completes notification delivery and per-platform verification. The first product slice after that is provider → storage/cache → IPC → Discover. Dependency edges name prerequisites; conformance and integration checks follow their implementation, rather than creating cycles.
 
 The shortest sequence that produces a genuinely usable app. Everything off this path can slip without delaying the milestone.
 
@@ -871,11 +887,11 @@ E37 stays unwritten until E36 lands and `SPIKE-19` has reported, for the same re
 
 ## Task count and effort roll-up
 
-Counted from this file programmatically (`xtask backlog-stats` will own this once the repo exists), not estimated by hand.
+Counted from this file by `cargo xtask backlog-stats`. Estimate cells contain only a band; implementation notes belong in the task description.
 
 | Phase | Epics | Tasks | Ideal days |
 | --- | --- | --- | --- |
-| 0 Foundations | E0–E4 | 89 | 169 |
+| 0 Foundations | E0–E4 | 91 | 174 |
 | 1 Discovery | E5–E9 | 80 | 199 |
 | 2 Acquisition and library | E10–E15 | 92 | 227 |
 | 3 Playback and subtitles | E16–E18 | 54 | 136 |
@@ -885,16 +901,18 @@ Counted from this file programmatically (`xtask backlog-stats` will own this onc
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
 | 9 Roadmap: homelab deployment | E36 written; E37 pending | 17 written | 56 |
-| **Full backlog (phases 0–5)** | | **472** | **1 115** |
+| **Full backlog (phases 0–5)** | | **474** | **1 120** |
 
 Two numbers matter, and they are different by design.
 
 | Scope | Content | Tasks | Ideal days | Why |
 | --- | --- | --- | --- | --- |
 | **Core 1.0** | Working discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, plus signed installers and updates | 225 | 577 (+30% contingency ≈ **750**) | This is a genuinely usable, shippable app |
-| **Full quality bar** | Everything in this file: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 472 | **1 115** | This is what "no known defects, every platform, every edge case" costs |
+| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 474 | **1 120** | This is what "no known defects, every platform, every edge case" costs |
 
 Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
+
+The core 1.0 figure is the previous scope baseline; it has not yet been re-estimated to include PG-E0-19 and PG-E3-19. The full backlog total includes both.
 
 The gap is the 1.x roadmap, not waste. Cutting the full bar to ship 1.0 sooner is a deliberate trade, not a shortcut, and [PLAN.md](./PLAN.md) §7 records what is deferred and why.
 
@@ -902,6 +920,6 @@ Reference points for calibration, since bottom-up estimates on novel work are al
 
 - Comparable open-source media clients are 80 000–150 000 lines of production code across client and server. This backlog lands in that range.
 - The estimates assume an experienced Rust **and** React developer, and they include tests, error handling, and logging per the Definition of Done in PLAN §8.
-- Re-baseline after Phase 0 using measured velocity. If Phase 0's 89 tasks take materially longer than 169 ideal days, scale every later phase by the observed factor rather than trimming the quality bar silently.
+- Re-baseline after Phase 0 using measured velocity. If Phase 0's 91 tasks take materially longer than 174 ideal days, scale every later phase by the observed factor rather than trimming the quality bar silently.
 
 Tasks marked `L` or `XL` are not estimable to better than ±50% until they are picked up; break each into sub-tasks smaller than five ideal days at that point.

@@ -1,6 +1,6 @@
 # Peregrine — Delivery Plan
 
-Scope, sequencing, exit criteria, and the risk register. The granular backlog that implements this plan is in [TASKS.md](./TASKS.md); the architectural constraints that make the sequencing necessary are in [ARCHITECTURE.md](./ARCHITECTURE.md).
+Scope, sequencing, exit criteria, and the risk register. The granular backlog and [current implementation status](./TASKS.md#implementation-status) are in [TASKS.md](./TASKS.md); the architectural constraints that make the sequencing necessary are in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 
@@ -245,7 +245,7 @@ Committed roadmap, excluded from the 1.0 figures, specified in [adr/0020](./adr/
 
 ## 4. Effort model
 
-The phase figures below are the **critical-path** estimate: exactly the tasks in [TASKS.md](./TASKS.md) marked as required for a usable, shippable app, priced from that file's per-task labels. They exclude quality breadth (casting, full i18n, an accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, collections) that the full backlog also prices.
+The phase figures below are the previous **critical-path** estimate for a usable, shippable app. They have not yet been re-estimated to include PG-E0-19 (runtime integration) and PG-E3-19 (schema correction); the full backlog total includes both. TASKS.md does not currently tag individual tasks as core versus full scope, so the core subtotal is a planning baseline rather than a mechanically checked roll-up. They exclude quality breadth (casting, full i18n, an accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, collections) that the full backlog also prices.
 
 | Phase | Ideal days (midpoint) | Reasonable band | Cumulative |
 | --- | --- | --- | --- |
@@ -262,13 +262,13 @@ The phase figures below are the **critical-path** estimate: exactly the tasks in
 | Scope | Tasks | Ideal days | Content |
 | --- | --- | --- | --- |
 | Core 1.0 | 225 | ≈ 750 budgeted | Discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, signed installers and updates |
-| Full quality bar | 472 | ≈ 1 115 | Everything in TASKS.md, including casting, full i18n, an accessibility audit, soak and chaos programmes, per-OS package breadth, accounts, Trakt |
+| Full quality bar | 474 | ≈ 1 120 | Everything in TASKS.md, including casting, full i18n, an accessibility audit, soak and chaos programmes, per-OS package breadth, accounts, Trakt |
 
 The Phase 6 roadmap in §2 is **not** in these figures: monitoring and agent access add 22 tasks and ~66 ideal days on top, the media server adds roughly 90 more, accounts with parental gating add 43, and homelab deployment adds 56, all tracked separately so the 1.0 numbers keep their meaning.
 
 Calendar conversion. An "ideal day" is focused, uninterrupted work. A realistic full-time developer delivers about four effective days per week across a year once interruptions, review, debugging, and learning are counted, so budget **≈ 200 effective days per person-year**.
 
-| Team | Core 1.0 (≈ 750 ideal days) | Full quality bar (≈ 1 115 ideal days) |
+| Team | Core 1.0 (≈ 750 ideal days) | Full quality bar (≈ 1 120 ideal days) |
 | --- | --- | --- |
 | Solo, part-time (≈ 90 effective days/year) | ≈ 8.3 years | not viable |
 | Solo, full-time (≈ 200 effective days/year) | ≈ 3.8 years | ≈ 5.6 years |

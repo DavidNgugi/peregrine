@@ -1014,7 +1014,7 @@ CREATE TABLE share_device (
 
 ## 3. Invariants
 
-Asserted by tests in `peregrine-storage` and by debug assertions in the repositories.
+These are required invariants. Implemented schema constraints are tested in `peregrine-storage`; service, repository, and domain test mappings are tracked under PG-E4-20. Unimplemented rows are requirements, not verification claims. Schema defects in the current migrations are tracked under PG-E3-19; existing migrations remain immutable.
 
 | # | Invariant | Enforced by |
 | --- | --- | --- |
@@ -1031,7 +1031,7 @@ Asserted by tests in `peregrine-storage` and by debug assertions in the reposito
 | I11 | `media_file.missing_since` is set when the path is absent at scan time, and the row is kept so watch progress survives a re-download. | Scan behaviour + test |
 | I12 | Terminal `job` rows are never used for dedupe. | Partial unique index includes only non-terminal states |
 | I13 | A suppressed notification always records a reason; nothing is dropped silently. | `CHECK (delivery_state <> 'suppressed' OR suppressed_reason IS NOT NULL)` |
-| I14 | A `critical` notification is never suppressed for `disabled` or `quiet_hours`; only delivery failure can stop it. | Policy function is the only writer; asserted by table-driven test |
+| I14 | A `critical` notification ignores event disablement and quiet hours; consent, deduplication, focus suppression, and rate limits still apply under ADR 0015, and OS focus modes are never bypassed. | Policy function is the only writer; asserted by table-driven test |
 | I15 | No notification `title`, `body`, or `deep_link` contains a filesystem path, secret, magnet URI, tracker URL, or infohash, and no adult-flagged title name appears in one. | Redaction pass before insert, plus a scanning test over every event template |
 | I16 | A monitor's state only advances with recorded evidence: every transition writes a `monitor_event` row first. | Repository transition guard; an event-less transition is a test failure |
 | I17 | No monitored event can notify twice. | `UNIQUE (dedupe_key)` on `monitor_event`, where the key is monitor + subject + kind |
@@ -1052,6 +1052,7 @@ Asserted by tests in `peregrine-storage` and by debug assertions in the reposito
 | I32 | Guest session state — progress, watchlist, and requests — is deleted when the guest session ends. | Session-end cleanup, asserted by a test that ends a guest session and then looks for the rows |
 | I33 | A custom avatar is a raster image, bounded in size and dimensions, with EXIF and GPS stripped, and never an SVG or animated format. | Import path validates, decodes through the bounded image path, re-encodes without metadata, and rejects SVG outright |
 | I34 | At most one `guest` account exists, its name is not editable, and it carries no custom avatar. | Partial unique index on `kind`; the service refuses a rename or avatar change for `guest` |
+| I35 | Quality-profile size floors never exceed ceilings, and a release group cannot be both allowed and blocked. | Domain tests `contradictory_size_caps_are_rejected_at_construction`, `contradictory_group_rules_are_rejected_at_construction`, `contradictory_rules_are_rejected_during_deserialization`, and `a_group_on_both_lists_is_rejected_during_deserialization` |
 
 ---
 
