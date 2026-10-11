@@ -189,7 +189,13 @@ pub struct Scheduler {
     cancels: mpsc::Sender<Ulid>,
     next_sequence: AtomicU64,
     config: SchedulerConfig,
-    engine: Option<JoinHandle<()>>,
+    /// The engine task, taken once by [`Scheduler::shutdown`].
+    ///
+    /// A synchronous mutex rather than a cell: taking the handle and dropping the guard
+    /// happen without an `.await` between them, so the lock is never held across one, and
+    /// `shutdown` can therefore take `&self` — which is what lets one `Arc<Scheduler>` be
+    /// both the submission handle and the shutdown handle the application holds.
+    engine: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Scheduler {
@@ -215,7 +221,7 @@ impl Scheduler {
             cancels,
             next_sequence: AtomicU64::new(0),
             config,
-            engine: Some(engine),
+            engine: Mutex::new(Some(engine)),
         }
     }
 
@@ -301,17 +307,15 @@ impl Scheduler {
     /// for the engine task, not for the jobs: a job that ignores its token keeps running
     /// in its own task, detached, and that is deliberate — waiting for it would let one
     /// badly-behaved job block the shutdown it was asked to cooperate with.
-    pub async fn shutdown(&mut self) {
+    ///
+    /// Idempotent: a second call finds no engine to wait for and returns at once.
+    pub async fn shutdown(&self) {
         self.config.shutdown.cancel();
-        let engine = self.engine.take();
+        // The `Request::Shutdown` message is what ends the engine's loop, and this send is
+        // what makes the wait below terminate rather than hang on its outcome channel.
+        let engine = self.engine.lock().ok().and_then(|mut slot| slot.take());
         if let Some(engine) = engine {
-            // Best effort: if the engine's channel is already closed there is nothing to
-            // ask for, and the handle below is then already finished.
             let _ = self.requests.send(Request::Shutdown).await;
-            // Dropping the last sender is what lets the engine task finish its loop, so
-            // it happens before the await rather than after.
-            let requests = std::mem::replace(&mut self.requests, mpsc::channel(1).0);
-            drop(requests);
             // A panic in a job is caught by its own attempt task, so this handle can only
             // fail while the process is already unwinding, where there is nothing useful
             // left to report.
@@ -417,7 +421,8 @@ impl Drop for Scheduler {
         // that here because `Drop` cannot await, so the worker is detached; a caller that
         // must observe the stop calls `shutdown` first.
         self.config.shutdown.cancel();
-        if let Some(engine) = self.engine.take()
+        let engine = self.engine.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(engine) = engine
             && let Ok(runtime) = tokio::runtime::Handle::try_current()
         {
             runtime.spawn(async move {

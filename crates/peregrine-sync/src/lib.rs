@@ -26,6 +26,6 @@ pub use core::{
 pub use error::{JobError, SchedulerError};
 pub use heap::JobSpec;
 pub use job::{
-    Job, JobCompletion, JobContext, JobHandle, JobKind, JobOutcome, JobOutput, JobResult, JobState,
-    JobStateKind,
+    Job, JobCompletion, JobContext, JobFuture, JobHandle, JobKind, JobOutcome, JobOutput,
+    JobResult, JobState, JobStateKind,
 };

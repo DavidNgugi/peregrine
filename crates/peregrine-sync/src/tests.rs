@@ -466,7 +466,7 @@ async fn a_running_job_observes_its_token_and_the_engine_keeps_working() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_panicking_job_fails_only_itself_and_releases_its_slot() {
-    let mut scheduler = scheduler_with_one_worker();
+    let scheduler = scheduler_with_one_worker();
     let panicked = scheduler
         .submit(spec("test.panics", 1, None), Panics)
         .await
@@ -634,7 +634,7 @@ async fn a_successful_job_resolves_with_its_value_and_its_attempt_count() {
 
 #[tokio::test]
 async fn an_empty_scheduler_runs_nothing_and_reports_zero() {
-    let mut scheduler = scheduler_with_one_worker();
+    let scheduler = scheduler_with_one_worker();
     assert_eq!(
         scheduler.metrics().await,
         crate::SchedulerMetrics::default()
@@ -668,4 +668,41 @@ async fn dropping_a_handle_does_not_cancel_the_job() {
         !token.is_cancelled(),
         "dropping the only handle must not cancel user-visible work"
     );
+}
+
+#[tokio::test]
+async fn a_shared_scheduler_can_be_shut_down_through_a_borrow() {
+    // The application holds one `Arc<Scheduler>` and uses it for both submission and
+    // shutdown, so `shutdown` must work through a shared borrow. The job below is queued
+    // behind a worker that is still running, which is the case where the root token alone
+    // is not enough: the engine has to be told to stop so the queued job never starts.
+    let scheduler = Arc::new(scheduler_with_one_worker());
+    let (running, started) = oneshot::channel();
+    let blocker = scheduler
+        .submit(
+            spec("test.blocker", 1, None),
+            WaitsForCancellation::new(running),
+        )
+        .await
+        .unwrap();
+    let _ = started.await;
+    let queued = scheduler
+        .submit(spec("test.queued", 1, None), Noop)
+        .await
+        .unwrap();
+    let queued_token = queued.cancellation().clone();
+
+    let shared = Arc::clone(&scheduler);
+    shared.shutdown().await;
+
+    assert!(
+        queued_token.is_cancelled(),
+        "a queued job's token must be released by shutdown, not only by its own handle"
+    );
+    assert!(
+        blocker.cancellation().is_cancelled(),
+        "a running job's token must be released by shutdown"
+    );
+    // A second shutdown finds no engine to wait for; it must return rather than hang.
+    shared.shutdown().await;
 }
