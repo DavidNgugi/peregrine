@@ -6,6 +6,7 @@ use sqlx::ConnectOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use tracing::info;
 
+use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
 use crate::error::StorageError;
 use crate::jobs::{JobChange, JobRecord, NewJob};
 use crate::page::PageRequest;
@@ -106,6 +107,72 @@ impl Database {
     /// A page of journal rows, newest first.
     pub async fn list_jobs(&self, request: PageRequest) -> Result<Vec<JobRecord>, StorageError> {
         crate::jobs::list(&self.readers, request).await
+    }
+
+    /// Inserts one title in its `stub` state and reports its row id.
+    ///
+    /// A stub is the identity a provider sync hangs its data off: the row exists, the name
+    /// is known, and every field a provider fills is still NULL until that sync runs
+    /// (PG-E5-06).
+    pub async fn insert_stub_title(&self, stub: StubTitle) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertStubTitle(Box::new(stub)))
+            .await?
+        {
+            WriteResponse::TitleInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_stub_title", &other)),
+        }
+    }
+
+    /// Attaches external ids to a title, refusing any that another title owns.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Conflict`] when an id in `ids` is already attached elsewhere; nothing
+    /// in the call is applied in that case.
+    pub async fn attach_external_ids(
+        &self,
+        title_id: i64,
+        ids: &[TitleExternalId],
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::AttachExternalIds {
+                title_id,
+                ids: ids.to_vec(),
+            })
+            .await?
+        {
+            WriteResponse::ExternalIdsAttached => Ok(()),
+            other => Err(unexpected_response("attach_external_ids", &other)),
+        }
+    }
+
+    /// One title's identity, or `None` when no such title exists.
+    pub async fn title_identity(&self, id: i64) -> Result<Option<TitleIdentity>, StorageError> {
+        crate::catalogue::identity(&self.readers, id).await
+    }
+
+    /// The title an external id belongs to, or `None` when no title has it.
+    pub async fn title_for_external_id(
+        &self,
+        id: &peregrine_domain::ExternalId,
+    ) -> Result<Option<i64>, StorageError> {
+        crate::catalogue::title_for(&self.readers, id).await
+    }
+
+    /// Every external id attached to a title, in provider order.
+    pub async fn external_ids_of(
+        &self,
+        title_id: i64,
+    ) -> Result<Vec<TitleExternalId>, StorageError> {
+        crate::catalogue::external_ids(&self.readers, title_id).await
+    }
+
+    /// How many titles the catalogue holds.
+    pub async fn title_count(&self) -> Result<i64, StorageError> {
+        crate::catalogue::title_count(&self.readers).await
     }
 
     /// How many rows `event_log` holds, read through the pool.

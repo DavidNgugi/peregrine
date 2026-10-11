@@ -12,6 +12,7 @@
 //! pool. No `sqlx` type appears in this crate's public surface, so the driver stays an
 //! implementation detail of the adapter.
 
+mod catalogue;
 mod database;
 mod error;
 mod jobs;
@@ -20,6 +21,9 @@ mod page;
 mod pragmas;
 mod writer;
 
+pub use catalogue::{
+    MetadataState, StubTitle, TitleExternalId, TitleIdentity, TitleKind, TitleSubtype,
+};
 pub use database::Database;
 pub use error::StorageError;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};

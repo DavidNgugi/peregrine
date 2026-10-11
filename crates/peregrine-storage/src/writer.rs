@@ -7,6 +7,7 @@
 
 use tokio::sync::{mpsc, oneshot};
 
+use crate::catalogue::{StubTitle, TitleExternalId};
 use crate::error::StorageError;
 use crate::jobs::{JobChange, NewJob};
 
@@ -30,6 +31,13 @@ pub(crate) enum WriteRequest {
     InsertJob(Box<NewJob>),
     /// Apply one change to a `job` row.
     UpdateJob { id: i64, change: Box<JobChange> },
+    /// Insert one title in its `stub` state.
+    InsertStubTitle(Box<StubTitle>),
+    /// Attach external ids to one title.
+    AttachExternalIds {
+        title_id: i64,
+        ids: Vec<TitleExternalId>,
+    },
 }
 
 /// The writer's answer to a [`WriteRequest`].
@@ -41,6 +49,10 @@ pub(crate) enum WriteResponse {
     JobInserted { id: i64 },
     /// Whether a `job` row was there to change.
     JobUpdated { changed: bool },
+    /// The rowid `SQLite` assigned to the inserted `title` row.
+    TitleInserted { id: i64 },
+    /// The external ids are attached.
+    ExternalIdsAttached,
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -122,6 +134,15 @@ async fn apply(
             .await
             .map(|changed| WriteResponse::JobUpdated { changed })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
+            .await
+            .map(|id| WriteResponse::TitleInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::AttachExternalIds { title_id, ids } => {
+            crate::catalogue::attach_external_ids(connection, title_id, &ids)
+                .await
+                .map(|()| WriteResponse::ExternalIdsAttached)
+        }
     }
 }
 

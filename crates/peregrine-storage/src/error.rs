@@ -49,6 +49,17 @@ pub enum StorageError {
     #[error("the single-writer task has stopped; reopen the database before writing again")]
     WriterStopped,
 
+    /// The write conflicts with a row that already exists and belongs to something else.
+    ///
+    /// Distinct from a statement failure because the caller can act on it: the user chose a
+    /// release that is already attached elsewhere, or an id that another title owns, and the
+    /// answer is to report which one rather than to retry.
+    #[error("{detail}")]
+    Conflict {
+        /// What conflicts, phrased for a user.
+        detail: String,
+    },
+
     /// A stored value is outside the set the schema's `CHECK` constraints allow.
     ///
     /// This cannot come from a database this build wrote; it means the file was written

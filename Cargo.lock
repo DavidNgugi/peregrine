@@ -2599,6 +2599,7 @@ dependencies = [
 name = "peregrine-storage"
 version = "0.1.0"
 dependencies = [
+ "peregrine-domain",
  "sqlx",
  "tempfile",
  "thiserror 2.0.21",

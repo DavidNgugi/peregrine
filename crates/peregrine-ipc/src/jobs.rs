@@ -234,6 +234,11 @@ impl From<RuntimeError> for AppError {
 fn storage_error(error: &StorageError) -> AppError {
     match error {
         StorageError::Busy { .. } => AppError::new(ErrorCode::StorageBusy),
+        // The detail is written for a user by the repository that refused the write, and it
+        // names the id rather than a path or a secret.
+        StorageError::Conflict { detail } => {
+            AppError::new(ErrorCode::Conflict).with_detail(detail.clone())
+        }
         StorageError::Open { .. } => AppError::new(ErrorCode::PermissionDenied)
             .with_detail("The library database could not be opened.")
             .with_cause("the database file could not be opened"),

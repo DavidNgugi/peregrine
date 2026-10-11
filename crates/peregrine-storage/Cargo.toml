@@ -10,6 +10,7 @@ description = "SQLite access, migrations, and the single-writer connection."
 publish = false
 
 [dependencies]
+peregrine-domain = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
