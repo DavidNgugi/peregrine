@@ -1,0 +1,833 @@
+//! The Phase 0 runtime: the composition root that connects logging, storage, and the
+//! scheduler, and the one place a job is started (PG-E0-19).
+//!
+//! Everything below this module is a library that can be built and tested on its own;
+//! nothing above it — the IPC command surface and the desktop shell — is allowed to
+//! assemble services itself. The runtime is therefore the only thing that knows the
+//! database's path, which scheduler a job runs on, and where the logs are.
+//!
+//! Startup order is the design, not a detail: the log directory is opened by the
+//! composition root first, because every later failure has to be reportable; the database
+//! is opened second, so a migration failure stops the app before any job can be accepted;
+//! and the event bus is last, so nothing is published into a bus whose sink is not ready.
+
+use std::collections::HashMap;
+use std::io::SeekFrom;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+
+use peregrine_domain::Clock;
+use peregrine_platform::SystemClock;
+use peregrine_storage::{Database, JobChange, JobPhase, JobRecord, NewJob, StorageError};
+use peregrine_sync::{
+    JobHandle, JobSpec, Scheduler, SchedulerConfig, SchedulerError, SchedulerMetrics,
+};
+use serde_json::json;
+use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+use tokio::time::Instant;
+use tracing::{info, warn};
+use ulid::Ulid;
+
+use crate::events::{EventBus, EventSink, EventStats};
+use crate::jobs::hello::{self, HelloJob};
+use crate::jobs::{CANCELLED_CODE, INTERNAL_CODE};
+use crate::observability::{LogConfig, Observability};
+
+/// The database file inside the data directory.
+const DATABASE_FILE: &str = "peregrine.sqlite";
+
+/// The log directory inside the data directory.
+const LOG_DIRECTORY: &str = "logs";
+
+/// The directives the runtime logs with when the caller does not choose.
+const DEFAULT_DIRECTIVES: &str = "info";
+
+/// The most log lines one tail request may return.
+pub const MAX_LOG_LINES: u32 = 500;
+
+/// The most bytes of log file a tail request reads (the IPC payload budget, × 1 KiB).
+const LOG_TAIL_BYTES: u64 = 64 * 1024;
+
+/// The prefix and suffix `peregrine-app`'s rotated files are named with.
+const LOG_FILE_PREFIX: &str = "peregrine.";
+const LOG_FILE_SUFFIX: &str = ".jsonl";
+
+/// How the runtime is wired before it is started.
+///
+/// The sink is handed in rather than constructed here: the Tauri emitter lives in
+/// `peregrine-ipc`, which is above this crate, and a test wants a sink it can read.
+pub struct RuntimeConfig {
+    data_directory: PathBuf,
+    sink: Arc<dyn EventSink>,
+    directives: String,
+}
+
+impl RuntimeConfig {
+    /// Builds a configuration for `data_directory`, delivering events to `sink`.
+    #[must_use]
+    pub fn new(data_directory: impl Into<PathBuf>, sink: Arc<dyn EventSink>) -> Self {
+        Self {
+            data_directory: data_directory.into(),
+            sink,
+            directives: DEFAULT_DIRECTIVES.to_owned(),
+        }
+    }
+
+    /// Replaces the log filter directives.
+    #[must_use]
+    pub fn with_directives(mut self, directives: impl Into<String>) -> Self {
+        self.directives = directives.into();
+        self
+    }
+
+    /// The directory everything the app owns lives under.
+    #[must_use]
+    pub fn data_directory(&self) -> &Path {
+        &self.data_directory
+    }
+
+    /// The `SQLite` file.
+    #[must_use]
+    pub fn database_path(&self) -> PathBuf {
+        self.data_directory.join(DATABASE_FILE)
+    }
+
+    /// The directory the rotated JSON lines are written to.
+    #[must_use]
+    pub fn logs_directory(&self) -> PathBuf {
+        self.data_directory.join(LOG_DIRECTORY)
+    }
+
+    /// The logging configuration for [`Observability::install`](crate::Observability).
+    #[must_use]
+    pub fn log_config(&self) -> LogConfig {
+        LogConfig {
+            directory: self.logs_directory(),
+            directives: self.directives.clone(),
+        }
+    }
+}
+
+/// A job the runtime has accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartedJob {
+    /// The scheduler's identity for the job; the key progress events carry.
+    pub job: Ulid,
+    /// The journal row this job reports into.
+    pub journal_id: i64,
+}
+
+/// What the diagnostics surface reports about the running process.
+#[derive(Debug, Clone, Copy)]
+pub struct Health {
+    /// How long startup took, from the first directory check to a ready runtime.
+    pub startup: Duration,
+    /// The scheduler's counters.
+    pub scheduler: SchedulerMetrics,
+    /// The event bus's counters.
+    pub events: EventStats,
+}
+
+/// The running application.
+pub struct Runtime {
+    config: RuntimeConfig,
+    database: Arc<Database>,
+    scheduler: Arc<Scheduler>,
+    bus: Arc<EventBus>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    live: Mutex<HashMap<Ulid, LiveJob>>,
+    // Never read: held for its `Drop`, which flushes the queued log lines and stops the
+    // writer thread. Losing it before shutdown would silently drop the lines that explain
+    // the shutdown.
+    _logging: Observability,
+    startup: Duration,
+}
+
+/// A job the runtime can still cancel.
+struct LiveJob {
+    handle: JobHandle,
+    journal_id: i64,
+}
+
+impl Runtime {
+    /// Opens the data directory, the database, and the scheduler.
+    ///
+    /// The logging handle is passed in already installed, so that a caller which cannot
+    /// install a process-wide subscriber — a test — can still start a runtime without
+    /// either failing or writing into the developer's log directory.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::DataDirectory`] when the directory cannot be created,
+    /// [`RuntimeError::Storage`] when the database cannot be opened or migrated. Both
+    /// happen before any job can be accepted, so a failure here leaves nothing running.
+    pub async fn start(
+        config: RuntimeConfig,
+        logging: Observability,
+    ) -> Result<Self, RuntimeError> {
+        let started = Instant::now();
+        tokio::fs::create_dir_all(config.data_directory())
+            .await
+            .map_err(|source| RuntimeError::DataDirectory {
+                path: config.data_directory().to_path_buf(),
+                source,
+            })?;
+
+        let database = Arc::new(Database::open(config.database_path()).await?);
+        let scheduler = Arc::new(Scheduler::new(SchedulerConfig::defaults()));
+        let bus = Arc::new(EventBus::new(Arc::clone(&config.sink)));
+
+        let startup = started.elapsed();
+        info!(
+            startup_ms = startup.as_millis(),
+            database = %config.database_path().display(),
+            "the runtime is ready"
+        );
+
+        Ok(Self {
+            config,
+            database,
+            scheduler,
+            bus,
+            clock: Arc::new(SystemClock),
+            live: Mutex::new(HashMap::new()),
+            _logging: logging,
+            startup,
+        })
+    }
+
+    /// The configuration this runtime was built with.
+    #[must_use]
+    pub fn config(&self) -> &RuntimeConfig {
+        &self.config
+    }
+
+    /// Starts the hello job (`PG-E0-19`) and returns its identities.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] when `steps` is outside
+    /// [`MIN_STEPS`](hello::MIN_STEPS)..=[`MAX_STEPS`](hello::MAX_STEPS), because a caller
+    /// that asks for an unbounded amount of work is a caller bug and the message says
+    /// which bound it broke.
+    pub async fn start_hello(&self, steps: u32) -> Result<StartedJob, RuntimeError> {
+        if !(hello::MIN_STEPS..=hello::MAX_STEPS).contains(&steps) {
+            return Err(RuntimeError::InvalidRequest {
+                detail: format!(
+                    "steps must be between {} and {}",
+                    hello::MIN_STEPS,
+                    hello::MAX_STEPS
+                ),
+            });
+        }
+
+        let now = self.clock.now().as_millisecond();
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: hello::KIND.to_owned(),
+                priority: hello::PRIORITY,
+                dedupe_key: None,
+                payload_json: json!({ "steps": steps }).to_string(),
+                max_attempts: 1,
+                created_at: now,
+            })
+            .await?;
+
+        let spec = JobSpec {
+            kind: hello::KIND.to_owned(),
+            priority: hello::PRIORITY,
+            dedupe_key: None,
+            max_attempts: 1,
+        };
+        let job = HelloJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
+            journal_id,
+            steps,
+        );
+
+        let handle = match self.scheduler.submit(spec, job).await {
+            Ok(handle) => handle,
+            Err(error) => {
+                // The row exists and will never run, so leaving it `queued` would show a
+                // job waiting forever in the UI. Closing it here is the same rule the
+                // scheduler applies to a failed attempt: a job that cannot run reaches a
+                // terminal state.
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some(INTERNAL_CODE.to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                return Err(RuntimeError::Scheduler(error));
+            }
+        };
+
+        let started = StartedJob {
+            job: handle.id(),
+            journal_id,
+        };
+        info!(
+            job = %started.job,
+            journal_id,
+            steps,
+            "accepted the hello job"
+        );
+        self.remember(handle, journal_id);
+        Ok(started)
+    }
+
+    /// Asks the job to stop.
+    ///
+    /// The request is journaled before the token trips, so a job that is never observed
+    /// again still shows that it was asked to stop.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::UnknownJob`] when no job with that id is live — a job that already
+    /// finished, or an id from another process.
+    pub async fn cancel(&self, job: Ulid) -> Result<(), RuntimeError> {
+        let journal_id = {
+            let live = self.live();
+            live.get(&job)
+                .map(|entry| entry.journal_id)
+                .ok_or(RuntimeError::UnknownJob { job })?
+        };
+
+        if let Err(error) = self
+            .database
+            .update_job(journal_id, JobChange::CancelRequested)
+            .await
+        {
+            // The cancellation itself must not depend on the audit write succeeding.
+            warn!(job = %job, %error, "the cancellation request could not be journaled");
+        }
+
+        let mut live = self.live();
+        if let Some(entry) = live.get_mut(&job) {
+            entry.handle.cancel();
+        }
+        info!(job = %job, "cancellation requested");
+        Ok(())
+    }
+
+    /// A page of journal rows, newest first.
+    pub async fn jobs(
+        &self,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<JobRecord>, RuntimeError> {
+        Ok(self.database.list_jobs(after, limit).await?)
+    }
+
+    /// The counters a diagnostics screen shows.
+    pub async fn health(&self) -> Health {
+        Health {
+            startup: self.startup,
+            scheduler: self.scheduler.metrics().await,
+            events: self.bus.stats(),
+        }
+    }
+
+    /// The last `lines` lines of the newest log file.
+    ///
+    /// Reading is bounded twice — a 64 KiB window from the end of the file and at most
+    /// [`MAX_LOG_LINES`] lines — because this answer travels over IPC, where a payload
+    /// over 64 KB is a design error (ARCHITECTURE §7 rule 1). When the window starts
+    /// mid-line the partial first line is dropped rather than returned as a truncated
+    /// JSON object.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Logs`] when the directory or the newest file cannot be read. No
+    /// log file at all is not an error: a process that has not logged yet returns an
+    /// empty tail.
+    pub async fn log_tail(&self, lines: u32) -> Result<Vec<String>, RuntimeError> {
+        let directory = self.config.logs_directory();
+        let Some(path) = newest_log_file(&directory).await else {
+            return Ok(Vec::new());
+        };
+
+        let mut file = tokio::fs::File::open(&path)
+            .await
+            .map_err(|source| RuntimeError::Logs {
+                path: path.clone(),
+                source,
+            })?;
+        let length = file
+            .metadata()
+            .await
+            .map_err(|source| RuntimeError::Logs {
+                path: path.clone(),
+                source,
+            })?
+            .len();
+        let window_start = length.saturating_sub(LOG_TAIL_BYTES);
+        file.seek(SeekFrom::Start(window_start))
+            .await
+            .map_err(|source| RuntimeError::Logs {
+                path: path.clone(),
+                source,
+            })?;
+
+        let mut buffer = Vec::new();
+        file.take(LOG_TAIL_BYTES)
+            .read_to_end(&mut buffer)
+            .await
+            .map_err(|source| RuntimeError::Logs {
+                path: path.clone(),
+                source,
+            })?;
+
+        let text = String::from_utf8_lossy(&buffer);
+        let mut tail: Vec<String> = text.lines().map(str::to_owned).collect();
+        if window_start > 0 && !tail.is_empty() {
+            tail.remove(0);
+        }
+        let wanted = lines.clamp(1, MAX_LOG_LINES) as usize;
+        if tail.len() > wanted {
+            tail.drain(..tail.len() - wanted);
+        }
+        Ok(tail)
+    }
+
+    /// Stops the scheduler and the bus, and closes the journal rows of live jobs.
+    ///
+    /// The scheduler deliberately does not wait for a job that ignores its token, so the
+    /// runtime closes their rows itself: a process that exits with a row still `running`
+    /// would show a job that can never finish. The job's own report is then refused by
+    /// the same terminal-state guard that refuses a late progress report.
+    ///
+    /// Idempotent.
+    pub async fn shutdown(&self) {
+        info!("the runtime is stopping");
+        self.scheduler.shutdown().await;
+        self.bus.shutdown().await;
+
+        let live: Vec<(Ulid, i64)> = {
+            let mut guard = self.live();
+            guard
+                .drain()
+                .map(|(job, entry)| (job, entry.journal_id))
+                .collect()
+        };
+        let now = self.clock.now().as_millisecond();
+        for (job, journal_id) in &live {
+            match self
+                .database
+                .update_job(
+                    *journal_id,
+                    JobChange::Finished {
+                        at: now,
+                        phase: JobPhase::Canceled,
+                        error_code: Some(CANCELLED_CODE.to_owned()),
+                        error: None,
+                    },
+                )
+                .await
+            {
+                Ok(true) => info!(job = %job, journal_id, "closed a live job's journal row"),
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(job = %job, journal_id, %error, "a live job's row could not be closed");
+                }
+            }
+        }
+        info!(closed = live.len(), "the runtime stopped");
+    }
+
+    /// The live jobs, with terminal entries pruned.
+    ///
+    /// Returns the guard rather than a copy because a caller needs `&mut` to cancel; the
+    /// lock is held only for synchronous work, never across an `.await`.
+    fn live(&self) -> MutexGuard<'_, HashMap<Ulid, LiveJob>> {
+        let mut live = match self.live.lock() {
+            Ok(live) => live,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        // A job handle that reached a terminal state is dead weight: dropping it does not
+        // cancel anything (ARCHITECTURE §7 rule 6), and keeping it would grow the map for
+        // the life of the process.
+        live.retain(|_, entry| !entry.handle.state().is_terminal());
+        live
+    }
+
+    /// Tracks an accepted job so it can be cancelled later.
+    fn remember(&self, handle: JobHandle, journal_id: i64) {
+        let mut live = self.live();
+        live.insert(handle.id(), LiveJob { handle, journal_id });
+    }
+}
+
+/// The newest rotated log file, or `None` when none exists.
+///
+/// The file name carries a `YYYY-MM-DD` date, so the greatest name is the newest file and
+/// no metadata read is needed to choose it.
+async fn newest_log_file(directory: &Path) -> Option<PathBuf> {
+    // A missing directory means nothing has been logged yet, which is not a failure to
+    // report to a user who is only asking what the log says.
+    let Ok(mut entries) = tokio::fs::read_dir(directory).await else {
+        return None;
+    };
+
+    let mut newest: Option<PathBuf> = None;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(LOG_FILE_PREFIX) || !name.ends_with(LOG_FILE_SUFFIX) {
+            continue;
+        }
+        let candidate = entry.path();
+        if newest.as_ref().is_none_or(|current| {
+            current
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_none_or(|current| name > current)
+        }) {
+            newest = Some(candidate);
+        }
+    }
+    newest
+}
+
+/// Why the runtime could not start, or could not do what it was asked.
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeError {
+    /// The data directory could not be created.
+    #[error("cannot create the data directory {}: {source}", path.display())]
+    DataDirectory {
+        /// The directory that failed.
+        path: PathBuf,
+        /// The filesystem's error.
+        source: std::io::Error,
+    },
+
+    /// The database could not be opened, migrated, or written.
+    #[error("the database could not be used: {0}")]
+    Storage(#[from] StorageError),
+
+    /// The scheduler is not accepting work.
+    #[error("the scheduler could not accept the job: {0}")]
+    Scheduler(#[from] SchedulerError),
+
+    /// The caller asked for something outside the documented range.
+    #[error("{detail}")]
+    InvalidRequest {
+        /// What the caller got wrong, phrased for a user.
+        detail: String,
+    },
+
+    /// No live job has that id.
+    #[error("no job {job} is running; it may have finished already")]
+    UnknownJob {
+        /// The id the caller asked about.
+        job: Ulid,
+    },
+
+    /// The log files could not be read.
+    #[error("cannot read the logs at {}: {source}", path.display())]
+    Logs {
+        /// The file or directory that failed.
+        path: PathBuf,
+        /// The filesystem's error.
+        source: std::io::Error,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::RecordingSink;
+    use std::fmt::Write as _;
+    use tempfile::TempDir;
+
+    /// Starts a runtime against a temporary directory, with a recording sink.
+    ///
+    /// The subscriber is built but never installed process-wide: `set_global_default` can
+    /// only be called once per process, so a test that installed it would make every other
+    /// test in this binary order-dependent. Dropping it here is deliberate — the runtime
+    /// holds the handle it needs, and nothing in these tests changes the log level.
+    async fn runtime(directory: &TempDir) -> (Runtime, Arc<RecordingSink>) {
+        let sink = Arc::new(RecordingSink::default());
+        let config = RuntimeConfig::new(directory.path(), Arc::clone(&sink) as Arc<dyn EventSink>);
+        let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
+        drop(subscriber);
+        let runtime = Runtime::start(config, logging).await.unwrap();
+        (runtime, sink)
+    }
+
+    /// Waits for the journal row to reach a terminal phase.
+    async fn await_terminal(runtime: &Runtime, journal_id: i64) -> JobRecord {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let row = runtime.jobs(None, 20).await.unwrap();
+                let row = row
+                    .into_iter()
+                    .find(|row| row.id == journal_id)
+                    .expect("the row exists");
+                if row.state.is_terminal() {
+                    return row;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the job must reach a terminal state")
+    }
+
+    /// The acceptance for PG-E0-19 in one test: the runtime opens the database, accepts a
+    /// job, the job's state is readable from the journal, progress arrived over the bus,
+    /// and shutdown leaves nothing running.
+    #[tokio::test]
+    async fn a_hello_job_runs_end_to_end_and_is_journaled() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, sink) = runtime(&directory).await;
+
+        let started = runtime.start_hello(4).await.unwrap();
+        assert!(runtime.config().database_path().exists());
+
+        let row = await_terminal(&runtime, started.journal_id).await;
+        assert_eq!(row.state, JobPhase::Succeeded);
+        assert_eq!(row.kind, hello::KIND);
+        assert_eq!(row.progress_permille, 1000);
+        assert_eq!(row.attempts, 1);
+        assert!(
+            row.started_at.is_some() && row.finished_at.is_some(),
+            "both timestamps are recorded: {row:?}"
+        );
+
+        let health = runtime.health().await;
+        assert!(health.startup < Duration::from_secs(30));
+        assert_eq!(
+            health.scheduler.live, 0,
+            "a finished job must not stay in the scheduler's bookkeeping"
+        );
+        assert_eq!(health.events.dropped, 0, "one job cannot exhaust the bus");
+        assert!(!health.events.is_degraded());
+
+        runtime.shutdown().await;
+        let delivered = sink.delivered();
+        assert!(
+            delivered
+                .iter()
+                .any(|event| event.topic.name() == "job://progress"),
+            "progress must reach the sink: {delivered:#?}"
+        );
+        assert!(
+            delivered
+                .iter()
+                .any(|event| event.payload["phase"] == "succeeded"),
+            "the terminal phase must reach the sink: {delivered:#?}"
+        );
+
+        // Idempotent: a second shutdown must not hang or double-close anything.
+        runtime.shutdown().await;
+    }
+
+    /// A cancellation is honored and journaled, and the row ends terminal rather than
+    /// running forever.
+    #[tokio::test]
+    async fn cancelling_a_hello_job_stops_it_and_closes_its_row() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let started = runtime.start_hello(hello::MAX_STEPS).await.unwrap();
+        runtime.cancel(started.job).await.unwrap();
+
+        let row = await_terminal(&runtime, started.journal_id).await;
+        assert_eq!(row.state, JobPhase::Canceled);
+        assert_eq!(row.last_error_code.as_deref(), Some(CANCELLED_CODE));
+        assert!(row.cancel_requested, "the request is part of the audit");
+
+        // The handle is gone once the job is terminal, so asking again is honest rather
+        // than a silent no-op.
+        let error = runtime
+            .cancel(started.job)
+            .await
+            .expect_err("a finished job cannot be cancelled again");
+        assert!(
+            matches!(error, RuntimeError::UnknownJob { .. }),
+            "{error:?}"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// Shutdown closes the row of a job that is still running, because the scheduler does
+    /// not wait for a job that is mid-step.
+    #[tokio::test]
+    async fn shutdown_closes_a_live_jobs_row() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let started = runtime.start_hello(hello::MAX_STEPS).await.unwrap();
+        // One step is enough for the job to have written its `running` row.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        runtime.shutdown().await;
+
+        let rows = runtime.jobs(None, 10).await.unwrap();
+        let row = rows
+            .into_iter()
+            .find(|row| row.id == started.journal_id)
+            .expect("the row exists");
+        assert_eq!(
+            row.state,
+            JobPhase::Canceled,
+            "a stopping runtime must not leave a job running: {row:?}"
+        );
+    }
+
+    /// The boundary: a step count outside the documented range is refused with the range
+    /// in the message, and nothing is journaled.
+    #[tokio::test]
+    async fn start_hello_refuses_a_step_count_outside_the_bounds() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        for steps in [0, hello::MAX_STEPS + 1, u32::MAX] {
+            let error = runtime
+                .start_hello(steps)
+                .await
+                .expect_err("the range must be enforced");
+            let RuntimeError::InvalidRequest { detail } = &error else {
+                panic!("expected an invalid-request failure, got {error:?}");
+            };
+            assert!(
+                detail.contains(&hello::MIN_STEPS.to_string())
+                    && detail.contains(&hello::MAX_STEPS.to_string()),
+                "the message must name the range: {detail}"
+            );
+        }
+        assert!(
+            runtime.jobs(None, 10).await.unwrap().is_empty(),
+            "a refused request must not leave a journal row behind"
+        );
+
+        // The bounds themselves are accepted.
+        let lowest = runtime.start_hello(hello::MIN_STEPS).await.unwrap();
+        let highest = runtime.start_hello(hello::MAX_STEPS).await.unwrap();
+        assert_ne!(lowest.journal_id, highest.journal_id);
+        runtime.cancel(highest.job).await.unwrap();
+        runtime.shutdown().await;
+    }
+
+    /// The log tail reads the newest file, stays inside the line limit, and does not
+    /// return the partial line a byte window starts in the middle of.
+    #[tokio::test]
+    async fn log_tail_reads_the_newest_file_within_its_window() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let logs = runtime.config().logs_directory();
+        tokio::fs::create_dir_all(&logs).await.unwrap();
+
+        // An older file that must be ignored.
+        tokio::fs::write(
+            logs.join("peregrine.2026-10-01.jsonl"),
+            "{\"message\":\"from-yesterday\"}\n",
+        )
+        .await
+        .unwrap();
+
+        // A newest file larger than the window, so the read starts mid-line.
+        let mut newest = String::from("{\"message\":\"partial-line-that-must-be-dropped\"}\n");
+        for index in 0..4_000 {
+            let _ = writeln!(newest, "{{\"message\":\"line-{index}\"}}");
+        }
+        assert!(
+            newest.len() as u64 > LOG_TAIL_BYTES,
+            "the fixture must be larger than the window"
+        );
+        tokio::fs::write(logs.join("peregrine.2026-10-12.jsonl"), &newest)
+            .await
+            .unwrap();
+
+        let tail = runtime.log_tail(10).await.unwrap();
+        assert_eq!(tail.len(), 10);
+        assert_eq!(tail[9], "{\"message\":\"line-3999\"}");
+        assert_eq!(tail[0], "{\"message\":\"line-3990\"}");
+        assert!(
+            !tail.iter().any(|line| line.contains("partial")),
+            "a window that starts mid-line must drop the partial record: {tail:?}"
+        );
+        assert!(
+            !tail.iter().any(|line| line.contains("yesterday")),
+            "the newest file is the one to read"
+        );
+
+        // Asking for more than the cap returns at most the cap.
+        assert_eq!(
+            runtime.log_tail(u32::MAX).await.unwrap().len(),
+            usize::try_from(MAX_LOG_LINES).unwrap()
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// A process that has logged nothing yet has an empty tail, not an error.
+    #[tokio::test]
+    async fn log_tail_of_a_process_that_has_not_logged_is_empty() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        assert!(
+            runtime.log_tail(10).await.unwrap().is_empty(),
+            "no line has been written by this runtime"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// A data directory that cannot exist fails startup with the path in the message.
+    #[tokio::test]
+    async fn start_reports_a_data_directory_that_cannot_be_created() {
+        let directory = TempDir::new().unwrap();
+        let blocked = directory.path().join("a-file");
+        std::fs::write(&blocked, b"not a directory").unwrap();
+
+        let sink = Arc::new(RecordingSink::default());
+        let config = RuntimeConfig::new(&blocked, sink as Arc<dyn EventSink>);
+        // The log directory has to be somewhere writable, so it is built from a second
+        // configuration; startup must fail on the data directory regardless.
+        let logs = RuntimeConfig::new(
+            directory.path().join("logs-home"),
+            Arc::new(RecordingSink::default()) as Arc<dyn EventSink>,
+        );
+        let (_subscriber, logging) = Observability::build(&logs.log_config()).unwrap();
+
+        let error = Runtime::start(config, logging)
+            .await
+            .err()
+            .expect("a file cannot be a data directory");
+        assert!(
+            matches!(error, RuntimeError::DataDirectory { .. }),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("a-file"), "{error}");
+    }
+
+    /// An empty journal lists nothing, and health reports a scheduler with no work.
+    #[tokio::test]
+    async fn a_fresh_runtime_has_no_jobs() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        assert!(
+            runtime.jobs(None, 10).await.unwrap().is_empty(),
+            "a fresh runtime has journaled nothing"
+        );
+        let health = runtime.health().await;
+        assert_eq!(health.scheduler, SchedulerMetrics::default());
+        assert_eq!(health.events, EventStats::default());
+        runtime.shutdown().await;
+    }
+}

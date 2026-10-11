@@ -11,12 +11,19 @@ publish = false
 
 [dependencies]
 peregrine-domain = { workspace = true }
+peregrine-platform = { workspace = true }
 peregrine-secrets = { workspace = true }
+peregrine-storage = { workspace = true }
+peregrine-sync = { workspace = true }
 jiff = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
+ulid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

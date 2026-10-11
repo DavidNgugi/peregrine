@@ -2495,13 +2495,19 @@ version = "0.1.0"
 dependencies = [
  "jiff",
  "peregrine-domain",
+ "peregrine-platform",
  "peregrine-secrets",
+ "peregrine-storage",
+ "peregrine-sync",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "ulid",
 ]
 
 [[package]]
@@ -2558,6 +2564,10 @@ version = "0.1.0"
 [[package]]
 name = "peregrine-platform"
 version = "0.1.0"
+dependencies = [
+ "jiff",
+ "peregrine-domain",
+]
 
 [[package]]
 name = "peregrine-playback"

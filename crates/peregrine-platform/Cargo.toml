@@ -9,5 +9,9 @@ repository.workspace = true
 description = "Peregrine component crate."
 publish = false
 
+[dependencies]
+peregrine-domain = { workspace = true }
+jiff = { workspace = true }
+
 [lints]
 workspace = true
