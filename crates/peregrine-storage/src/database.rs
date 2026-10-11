@@ -8,6 +8,7 @@ use tracing::info;
 
 use crate::error::StorageError;
 use crate::jobs::{JobChange, JobRecord, NewJob};
+use crate::page::PageRequest;
 use crate::pragmas;
 use crate::writer::{NewEvent, WriteRequest, WriteResponse, WriterHandle};
 
@@ -102,13 +103,9 @@ impl Database {
         crate::jobs::get(&self.readers, id).await
     }
 
-    /// A page of journal rows, newest first, below `after` when one is given.
-    pub async fn list_jobs(
-        &self,
-        after: Option<i64>,
-        limit: u32,
-    ) -> Result<Vec<JobRecord>, StorageError> {
-        crate::jobs::list(&self.readers, after, i64::from(limit)).await
+    /// A page of journal rows, newest first.
+    pub async fn list_jobs(&self, request: PageRequest) -> Result<Vec<JobRecord>, StorageError> {
+        crate::jobs::list(&self.readers, request).await
     }
 
     /// How many rows `event_log` holds, read through the pool.

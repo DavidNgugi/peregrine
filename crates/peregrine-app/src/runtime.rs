@@ -19,7 +19,9 @@ use std::time::Duration;
 
 use peregrine_domain::Clock;
 use peregrine_platform::SystemClock;
-use peregrine_storage::{Database, JobChange, JobPhase, JobRecord, NewJob, StorageError};
+use peregrine_storage::{
+    Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
+};
 use peregrine_sync::{
     JobHandle, JobSpec, Scheduler, SchedulerConfig, SchedulerError, SchedulerMetrics,
 };
@@ -320,12 +322,22 @@ impl Runtime {
         Ok(())
     }
 
-    /// The newest page of journal rows.
+    /// One page of journal rows, newest first.
     ///
-    /// Keyset paging below a cursor is the repository's (`Database::list_jobs`); this is
-    /// the page a screen shows, so it does not need a cursor to walk backwards yet.
-    pub async fn jobs(&self, limit: u32) -> Result<Vec<JobRecord>, RuntimeError> {
-        Ok(self.database.list_jobs(None, limit).await?)
+    /// `after` is the id of the previous page's last row; `None` reads the newest page. The
+    /// cursor is a bare `i64` here rather than in the command surface because the journal
+    /// screen shows one page, and `specta` cannot export a large integer as a command
+    /// argument without a DTO to carry it — the repository's capability is what matters.
+    pub async fn jobs(
+        &self,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<JobRecord>, RuntimeError> {
+        let request = match after {
+            Some(cursor) => PageRequest::after(Cursor::new(cursor), limit),
+            None => PageRequest::first(limit),
+        };
+        Ok(self.database.list_jobs(request).await?)
     }
 
     /// The counters a diagnostics screen shows.
@@ -570,7 +582,7 @@ mod tests {
     async fn await_terminal(runtime: &Runtime, journal_id: i64) -> JobRecord {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                let row = runtime.jobs(20).await.unwrap();
+                let row = runtime.jobs(None, 20).await.unwrap();
                 let row = row
                     .into_iter()
                     .find(|row| row.id == journal_id)
@@ -675,7 +687,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(25)).await;
         runtime.shutdown().await;
 
-        let rows = runtime.jobs(10).await.unwrap();
+        let rows = runtime.jobs(None, 10).await.unwrap();
         let row = rows
             .into_iter()
             .find(|row| row.id == started.journal_id)
@@ -709,7 +721,7 @@ mod tests {
             );
         }
         assert!(
-            runtime.jobs(10).await.unwrap().is_empty(),
+            runtime.jobs(None, 10).await.unwrap().is_empty(),
             "a refused request must not leave a journal row behind"
         );
 
@@ -821,7 +833,7 @@ mod tests {
         let (runtime, _sink) = runtime(&directory).await;
 
         assert!(
-            runtime.jobs(10).await.unwrap().is_empty(),
+            runtime.jobs(None, 10).await.unwrap().is_empty(),
             "a fresh runtime has journaled nothing"
         );
         let health = runtime.health().await;

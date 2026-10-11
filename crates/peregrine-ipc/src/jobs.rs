@@ -191,7 +191,7 @@ pub async fn list(
 ) -> Result<Vec<JobRecord>, AppError> {
     const MAX_PAGE: u32 = 100;
     let limit = limit.unwrap_or(20).clamp(1, MAX_PAGE);
-    let rows = state.runtime()?.jobs(limit).await?;
+    let rows = state.runtime()?.jobs(None, limit).await?;
     Ok(guard_response(
         "jobs::list",
         rows.into_iter().map(JobRecord::from).collect::<Vec<_>>(),

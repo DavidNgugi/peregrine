@@ -7,6 +7,7 @@
 //! UI page is "the next twenty rows below this id".
 
 use crate::error::StorageError;
+use crate::page::PageRequest;
 
 /// The lifecycle phase stored in `job.state`.
 ///
@@ -283,14 +284,14 @@ pub(crate) async fn get(
     row.map(TryInto::try_into).transpose()
 }
 
-/// Reads a page of rows, newest first, below `after` when one is given.
+/// Reads a page of rows, newest first.
 ///
-/// Keyset pagination, per AGENTS §5: the cursor is the last id of the previous page, so a
-/// row written between two pages cannot shift the second one.
+/// Keyset pagination, per AGENTS §5: the cursor is the id of the previous page's last row,
+/// so a job submitted between two page reads cannot shift the second one. The statement is
+/// written once for both cases, because a `NULL` cursor satisfies `?1 IS NULL`.
 pub(crate) async fn list(
     pool: &sqlx::SqlitePool,
-    after: Option<i64>,
-    limit: i64,
+    request: PageRequest,
 ) -> Result<Vec<JobRecord>, StorageError> {
     let rows = sqlx::query_as::<_, JobRow>(
         "SELECT id, kind, state, priority, dedupe_key, progress_permille, attempts, \
@@ -298,8 +299,8 @@ pub(crate) async fn list(
          started_at, finished_at, cancel_requested FROM job \
          WHERE (?1 IS NULL OR id < ?1) ORDER BY id DESC LIMIT ?2",
     )
-    .bind(after)
-    .bind(limit)
+    .bind(request.bindable_cursor())
+    .bind(request.bindable_limit())
     .fetch_all(pool)
     .await
     .map_err(StorageError::from_sqlx)?;
@@ -358,6 +359,7 @@ impl TryFrom<JobRow> for JobRecord {
 mod tests {
     use super::*;
     use crate::database::Database;
+    use crate::page::Cursor;
     use tempfile::TempDir;
 
     async fn database(directory: &TempDir) -> Database {
@@ -423,7 +425,10 @@ mod tests {
         assert_eq!(row.dedupe_key, None);
 
         assert_eq!(database.job(id + 1).await.unwrap(), None);
-        assert_eq!(database.list_jobs(None, 10).await.unwrap(), vec![row]);
+        assert_eq!(
+            database.list_jobs(PageRequest::first(10)).await.unwrap(),
+            vec![row]
+        );
     }
 
     #[tokio::test]
@@ -638,7 +643,7 @@ mod tests {
             );
         }
 
-        let first = database.list_jobs(None, 2).await.unwrap();
+        let first = database.list_jobs(PageRequest::first(2)).await.unwrap();
         assert_eq!(
             first.iter().map(|row| row.id).collect::<Vec<_>>(),
             vec![ids[4], ids[3]]
@@ -647,15 +652,21 @@ mod tests {
         // A row arriving between the two reads must not appear in the second page, nor
         // push anything out of it.
         database.insert_job(new_job("job-5")).await.unwrap();
-        let cursor = first.last().unwrap().id;
-        let second = database.list_jobs(Some(cursor), 2).await.unwrap();
+        let cursor = Cursor::new(first.last().unwrap().id);
+        let second = database
+            .list_jobs(PageRequest::after(cursor, 2))
+            .await
+            .unwrap();
         assert_eq!(
             second.iter().map(|row| row.id).collect::<Vec<_>>(),
             vec![ids[2], ids[1]]
         );
 
         let third = database
-            .list_jobs(Some(second.last().unwrap().id), 2)
+            .list_jobs(PageRequest::after(
+                Cursor::new(second.last().unwrap().id),
+                2,
+            ))
             .await
             .unwrap();
         assert_eq!(
@@ -664,7 +675,7 @@ mod tests {
         );
         assert!(
             database
-                .list_jobs(Some(ids[0]), 2)
+                .list_jobs(PageRequest::after(Cursor::new(ids[0]), 2))
                 .await
                 .unwrap()
                 .is_empty(),
@@ -678,11 +689,19 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let database = database(&directory).await;
         assert!(
-            database.list_jobs(None, 10).await.unwrap().is_empty(),
+            database
+                .list_jobs(PageRequest::first(10))
+                .await
+                .unwrap()
+                .is_empty(),
             "a fresh database has no jobs"
         );
         assert!(
-            database.list_jobs(Some(1), 10).await.unwrap().is_empty(),
+            database
+                .list_jobs(PageRequest::after(Cursor::new(1), 10))
+                .await
+                .unwrap()
+                .is_empty(),
             "a cursor below every row has nothing below it"
         );
     }

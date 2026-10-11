@@ -37,6 +37,7 @@ fi
 if [ -n "$rust_changed" ] || [ -n "$migrations_changed" ]; then
   cargo xtask check-todos || exit 1
   cargo xtask check-commands || exit 1
+  cargo xtask check-offset || exit 1
 fi
 
 frontend_changed=$(printf '%s\n' "$staged" | grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' || true)

@@ -1078,7 +1078,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | Unmatched files review | `unmatched_file` ordered by `confidence DESC`, joined to suggestions | ≤ 3 ms |
 | Title detail | One title row + one season list + credits by `credit_title_order_idx` | ≤ 5 ms |
 
-Keyset pagination (`WHERE (sort_key, id) < (?, ?)`) is required everywhere: `OFFSET` on a 100 k-row grid is the classic source of a janky scroll.
+Keyset pagination (`WHERE (sort_key, id) < (?, ?)`) is required everywhere: `OFFSET` on a 100 k-row grid is the classic source of a janky scroll. `peregrine-storage`'s `PageRequest` is the shape every list query takes, and `cargo xtask check-offset` fails the build on the clause.
 
 ---
 
