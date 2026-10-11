@@ -349,7 +349,7 @@ CREATE TABLE media_file (
   container       TEXT,
   duration_ms     INTEGER,
   video_codec     TEXT,
-  video_account   TEXT,
+  video_profile   TEXT,               -- ffprobe's profile: "High", "Main 10"
   width           INTEGER,
   height          INTEGER,
   bit_depth       INTEGER,
@@ -571,7 +571,13 @@ CREATE TABLE download_job (
 CREATE INDEX download_job_active_idx ON download_job (state, priority)
   WHERE state IN ('queued','inspecting','metadata','downloading','paused');
 CREATE INDEX download_job_title_idx  ON download_job (title_id, episode_id);
-CREATE INDEX download_job_hash_uq    ON download_job (info_hash) WHERE info_hash IS NOT NULL;
+-- At most one *live* job per info hash. A terminal job (completed, failed, blocked,
+-- removed) is history, so re-downloading a release after a removal is a new job rather
+-- than a conflict. The live set is the same one `download_job_active_idx` uses, plus
+-- `seeding`, because a seeding job's torrent is still in the engine.
+CREATE UNIQUE INDEX download_job_hash_uq ON download_job (info_hash)
+  WHERE info_hash IS NOT NULL
+    AND state IN ('queued','inspecting','metadata','downloading','paused','seeding');
 
 CREATE TABLE download_file (
   id                INTEGER PRIMARY KEY,
@@ -642,7 +648,10 @@ CREATE TABLE image_ref (
   role         TEXT NOT NULL CHECK (role IN ('poster','backdrop','logo','still','profile')),
   provider     TEXT NOT NULL,
   path         TEXT NOT NULL,
-  language     TEXT,
+  -- ISO 639-1, or '' when the provider gives none. Never NULL: SQLite treats NULLs as
+  -- distinct in a UNIQUE constraint, so a nullable language would let the same artwork
+  -- be stored twice.
+  language     TEXT NOT NULL DEFAULT '',
   width        INTEGER,
   height       INTEGER,
   vote_average REAL,
@@ -1053,6 +1062,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I33 | A custom avatar is a raster image, bounded in size and dimensions, with EXIF and GPS stripped, and never an SVG or animated format. | Import path validates, decodes through the bounded image path, re-encodes without metadata, and rejects SVG outright |
 | I34 | At most one `guest` account exists, its name is not editable, and it carries no custom avatar. | Partial unique index on `kind`; the service refuses a rename or avatar change for `guest` |
 | I35 | Quality-profile size floors never exceed ceilings, and a release group cannot be both allowed and blocked. | Domain tests `contradictory_size_caps_are_rejected_at_construction`, `contradictory_group_rules_are_rejected_at_construction`, `contradictory_rules_are_rejected_during_deserialization`, and `a_group_on_both_lists_is_rejected_during_deserialization` |
+| I36 | Artwork has at most one row per owner, role, provider, path, and language, where "no language" is the empty string rather than NULL; and at most one *live* download job exists per info hash, while terminal jobs may repeat. | `artwork_language_is_a_sentinel_and_never_null`, `the_info_hash_index_is_unique_among_live_jobs_only`, and the two upgrade tests in `peregrine-storage`'s `migrations` module |
 
 ---
 

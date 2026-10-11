@@ -30,3 +30,7 @@ sha256 = "0252cbe707df28a3f4acb6be697169aafde4d5d99aab435cb93d4b40c78317e0"
 [[migration]]
 file = "0007_cache_and_platform.sql"
 sha256 = "a52dcc88a432333925644c962b1eb7e35a387e2d27c0ec5bc5cddd4033273955"
+
+[[migration]]
+file = "0008_schema_corrections.sql"
+sha256 = "ba22a658cc5b7c20719fb197045a7fa9ab13c553e56334debcb100a10b1b266a"

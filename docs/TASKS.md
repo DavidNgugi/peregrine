@@ -19,7 +19,7 @@ Every task implicitly includes its tests, error handling, structured logging, an
 
 The desktop now starts a real runtime: it opens the SQLite database, runs the scheduler, publishes events through the coalescing bus to the webview, keeps redacted JSON logs, and drains all of it on exit. A Diagnostics screen starts a hello job, watches its progress, cancels it, and reads the journal row and the log tail the core wrote (PG-E0-19). Discover is still an empty shell, and provider, torrent, indexer, playback, stream, cast, monitor, MCP, and testkit crates remain documentation-only scaffolds.
 
-Library implementations exist for SQLite opening and a single writer with seven migrations; the job journal; external IDs, release parsing, quality profiles, and path policy; the scheduler; the event bus and its rate limiter; notification policy and service ports; redacted logging; and generated IPC bindings and theme validation. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
+Storage is complete for Phase 0: SQLite opening with the documented PRAGMA set, the single writer and reader pool, eight migrations whose schema the tests assert column by column, keyset-paged reads, and the job journal. The three schema defects PG-E3-06, PG-E3-08 and PG-E3-09 had recorded are settled by migration 0008 and the document they came from is corrected (PG-E3-19). Domain implementations exist for external IDs, release parsing, quality profiles, and path policy; and the application layer holds the scheduler, the event bus and its rate limiter, the runtime, notification policy and service ports, and redacted logging, with generated IPC bindings and theme validation. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
 
 The current verification, with rustc 1.99.0 on macOS arm64, passed 324 Rust tests and 75 frontend tests at the commit that wrote this paragraph (the counts move with every test added), plus `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `cargo xtask check-arch`, `check-migrations`, `check-todos`, `check-commands`, and `gen-ipc --check`, and the frontend typecheck, lint, format check, and build. What that does not establish: any Windows or Linux run (PG-E0-13 still owes a green three-platform CI), a run of the packaged app, and the platform and soak suites that do not exist yet.
 
@@ -144,15 +144,15 @@ graph LR
 
 | ID | Task | Acceptance | Deps | Est | State |
 | --- | --- | --- | --- | --- |
-| PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | doing |
-| PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | doing |
-| PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | doing |
-| PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | doing |
-| PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | doing |
-| PG-E3-06 | Migration 0004: library tables including partial unique indices **Spec defect to settle:** `DATA_MODEL` §2.3 declares `media_file.video_account TEXT`, which is almost certainly ffprobe's `profile` mistyped. It was transcribed literally; the document needs correcting before anything reads that column. | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M | doing |
-| PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | doing |
-| PG-E3-08 | Migration 0006: acquisition tables including `release_decision` **Spec defect to settle:** §2.7 documents `CREATE INDEX download_job_hash_uq ON download_job (info_hash) WHERE info_hash IS NOT NULL` — a **non-unique** index whose name claims uniqueness. Transcribed literally, and the test now asserts non-uniqueness, because inventing `UNIQUE` to match a name would be guessing at the schema when the name is what is probably wrong. | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M | doing |
-| PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables **Two spec gaps found here:** §2.7's `image_ref UNIQUE (owner_kind, owner_id, role, provider, path, language)` treats NULLs as distinct, so duplicate artwork rows with a NULL `language` coexist; the quality-profile contradiction rules now map to DATA_MODEL §3 I35. The artwork schema correction remains PG-E3-19. | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S | doing |
+| PG-E3-01 | SQLite open path with PRAGMAs on every connection | WAL on, foreign keys on, busy timeout set; asserted in a test | PG-E0-01 | S | done |
+| PG-E3-02 | Single-writer channel and reader pool | 20 concurrent writers serialize without `SQLITE_BUSY` | PG-E3-01 | M | done |
+| PG-E3-03 | Migration 0001: settings, account, secret_ref, job, event_log | Applies on an empty database and is reversible in a test fixture | PG-E3-01 | S | done |
+| PG-E3-04 | Migration 0002: catalogue tables per DATA_MODEL §2.2 | Applies and satisfies the schema snapshot test | PG-E3-03 | M | done |
+| PG-E3-05 | Migration 0003: seasons, episodes, episode_ordering | Unique constraints proven by negative tests | PG-E3-04 | S | done |
+| PG-E3-06 | Migration 0004: library tables including partial unique indices **Spec defect settled:** §2.3 declared `media_file.video_account TEXT`, ffprobe's `profile` mistyped; migration 0008 renames the column and the document is corrected. | One movie item, one episode item invariants hold under concurrency | PG-E3-05 | M | done |
+| PG-E3-07 | Migration 0005: subtitles, progress, watchlist, smart collections | Generated column and partial index verified | PG-E3-06 | S | done |
+| PG-E3-08 | Migration 0006: acquisition tables including `release_decision` **Spec defect settled:** §2.7 declared a non-unique index named `_uq`; migration 0008 makes it unique among live jobs and reconciles any duplicate live rows. | Dedupe index proven to exclude terminal jobs | PG-E3-07 | M | done |
+| PG-E3-09 | Migration 0007: cache, image, dataset, notification, device, cast tables **Spec gap settled:** §2.7's `image_ref UNIQUE (…)` treated NULLs as distinct, so duplicate artwork rows with a NULL `language` could coexist; migration 0008 rebuilds the table with `language NOT NULL DEFAULT ''`. The quality-profile contradiction rules map to DATA_MODEL §3 I35. | Cache tables droppable with no user-data loss (invariant I9) | PG-E3-08 | S | done |
 | PG-E3-10 | Type-safe repositories per aggregate with row mappers **Remaining:** the job journal's repository exists (`insert_job`, `update_job`, `job`, keyset `list_jobs`) with round-trip and guard tests; the catalogue, library, account, and acquisition repositories do not exist yet, and the per-entity property tests are still owed. | Round-trip property test for every entity | PG-E3-04 | L | doing |
 | PG-E3-11 | Keyset pagination helper used by every list query | `OFFSET` is absent from the codebase, enforced by grep gate | PG-E3-10 | S | todo |
 | PG-E3-12 | FTS5 contentless table with explicit maintenance and rebuild command | Rebuild reproduces identical search results | PG-E3-04 | M | todo |
@@ -163,7 +163,7 @@ graph LR
 | PG-E3-17 | Disk accounting queries for per-tier usage | Diagnostics totals match filesystem measurement within 2% | PG-E3-10 | S | todo |
 | PG-E3-18 | Fixture databases for every previous release, used in migration tests | CI tests upgrade from each fixture | PG-E3-13 | M | todo |
 
-| PG-E3-19 | Resolve the schema defects recorded by PG-E3-06, PG-E3-08, and PG-E3-09 before repository consumers land | Decide the intended video-profile column and info-hash index semantics, document null-language artwork uniqueness, and apply required corrections in a new append-only migration; upgrade fixtures preserve existing rows and reject duplicate artwork under the agreed key | PG-E3-09 | M | todo |
+| PG-E3-19 | Resolve the schema defects recorded by PG-E3-06, PG-E3-08, and PG-E3-09 before repository consumers land | Decide the intended video-profile column and info-hash index semantics, document null-language artwork uniqueness, and apply required corrections in a new append-only migration; upgrade fixtures preserve existing rows and reject duplicate artwork under the agreed key | PG-E3-09 | M | done |
 
 ## E4 · Domain core
 
@@ -914,7 +914,7 @@ Two numbers matter, and they are different by design.
 
 Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
 
-The core 1.0 figure is the previous scope baseline; it has not yet been re-estimated to include PG-E0-19 and PG-E3-19. The full backlog total includes both.
+The core 1.0 figure is the previous scope baseline; it has not yet been re-estimated to include PG-E0-19 and PG-E3-19, both of which have since landed. The full backlog total includes both.
 
 The gap is the 1.x roadmap, not waste. Cutting the full bar to ship 1.0 sooner is a deliberate trade, not a shortcut, and [PLAN.md](./PLAN.md) §7 records what is deferred and why.
 

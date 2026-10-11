@@ -338,7 +338,7 @@ mod tests {
         ("container", "TEXT", 0, None, 0),
         ("duration_ms", "INTEGER", 0, None, 0),
         ("video_codec", "TEXT", 0, None, 0),
-        ("video_account", "TEXT", 0, None, 0),
+        ("video_profile", "TEXT", 0, None, 0),
         ("width", "INTEGER", 0, None, 0),
         ("height", "INTEGER", 0, None, 0),
         ("bit_depth", "INTEGER", 0, None, 0),
@@ -582,7 +582,7 @@ mod tests {
         ("role", "TEXT", 1, None, 0),
         ("provider", "TEXT", 1, None, 0),
         ("path", "TEXT", 1, None, 0),
-        ("language", "TEXT", 0, None, 0),
+        ("language", "TEXT", 1, Some("''"), 0),
         ("width", "INTEGER", 0, None, 0),
         ("height", "INTEGER", 0, None, 0),
         ("vote_average", "REAL", 0, None, 0),
@@ -923,10 +923,9 @@ mod tests {
             "WHERE state IN ('queued','inspecting','metadata','downloading','paused')",
         ),
         ("download_job_title_idx", "(title_id, episode_id)"),
-        (
-            "download_job_hash_uq",
-            "(info_hash) WHERE info_hash IS NOT NULL",
-        ),
+        ("download_job_hash_uq", "UNIQUE INDEX download_job_hash_uq"),
+        ("download_job_hash_uq", "WHERE info_hash IS NOT NULL"),
+        ("download_job_hash_uq", "'seeding'"),
         ("release_decision_title_idx", "(title_id, created_at DESC)"),
         ("provider_cache_expiry_idx", "(expires_at)"),
         ("provider_cache_resource_idx", "(provider, resource)"),
@@ -1034,6 +1033,22 @@ mod tests {
         sqlx::query(sql).execute(&mut *connection).await.map(|_| ())
     }
 
+    /// Runs one statement the test built from its own literal table.
+    ///
+    /// Separate from [`statement`] only in lifetime, and the `AssertSqlSafe` is the audit
+    /// that difference needs: every value interpolated here comes from a `const` list of
+    /// literals in this module, never from a caller or a fixture file, so there is nothing
+    /// for an injection to reach.
+    async fn literal_statement(
+        connection: &mut SqliteConnection,
+        sql: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&mut *connection)
+            .await
+            .map(|_| ())
+    }
+
     /// Writes every statement, failing the test on the first refused one.
     async fn write_all(connection: &mut SqliteConnection, statements: &[&'static str]) {
         for sql in statements {
@@ -1106,8 +1121,8 @@ mod tests {
         let applied = apply(&mut connection).await.unwrap();
 
         assert_eq!(
-            applied, 7,
-            "the embedded set is 0001–0007, one migration per file"
+            applied, 8,
+            "the embedded set is 0001–0008, one migration per file"
         );
         assert_eq!(
             names(
@@ -1120,7 +1135,7 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            vec![1, 2, 3, 4, 5, 6, 7],
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
             "every applied migration must be recorded, in order"
         );
     }
@@ -1177,18 +1192,23 @@ mod tests {
             );
         }
 
-        // `download_job_hash_uq` is documented as a plain `CREATE INDEX` even though its
-        // name says `_uq`. Transcribing it faithfully means asserting it is NOT unique;
-        // a later migration may make it unique, but that decision is not this one.
+        // `download_job_hash_uq` is unique among live jobs only: history may repeat, so a
+        // terminal row must not block a re-download of the same release (PG-E3-19).
         let hash = &index_sql
             .iter()
             .find(|(name, _)| name == "download_job_hash_uq")
             .unwrap()
             .1;
         assert!(
-            !hash.to_uppercase().contains("UNIQUE"),
-            "`download_job_hash_uq` is documented as non-unique: {hash}"
+            hash.to_uppercase().contains("UNIQUE"),
+            "`download_job_hash_uq` must be unique: {hash}"
         );
+        for terminal in ["'completed'", "'failed'", "'blocked'", "'removed'"] {
+            assert!(
+                !hash.contains(terminal),
+                "`{terminal}` is terminal, so it must not be in the live set: {hash}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1500,10 +1520,10 @@ mod tests {
         let mut second = open_writer_connection(&path).await.unwrap();
         let applied = apply(&mut second).await.unwrap();
 
-        assert_eq!(applied, 7);
+        assert_eq!(applied, 8);
         assert_eq!(
             versions(&mut second).await,
-            vec![1, 2, 3, 4, 5, 6, 7],
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
             "a second run must not record the migrations twice"
         );
     }
@@ -2178,5 +2198,301 @@ mod tests {
 
         assert!(path.is_file(), "open must have created the database file");
         assert_eq!(database.event_count().await.unwrap(), 1);
+    }
+
+    /// A connection holding migrations 0001-0007 only, with the base fixtures in it.
+    ///
+    /// PG-E3-19's acceptance asks for an upgrade fixture that preserves existing rows, and
+    /// the only honest way to test that is to write rows under the shape that preceded the
+    /// correction. `run_to` stops the embedded migrator at a version and records it, so
+    /// applying the rest afterwards is the real upgrade path rather than a replay.
+    async fn migrated_up_to_0007(directory: &TempDir) -> SqliteConnection {
+        let mut connection = open_writer_connection(&directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        MIGRATOR.run_to(7, &mut connection).await.unwrap();
+        assert_eq!(
+            versions(&mut connection).await,
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "the upgrade fixture must stop at the migration before the correction"
+        );
+        write_all(&mut connection, BASE_FIXTURES).await;
+        connection
+    }
+
+    /// PG-E3-19: the name says `_uq`, so it is unique — among live jobs only, because
+    /// re-downloading a release after a failure or a removal is ordinary.
+    #[tokio::test]
+    async fn the_info_hash_index_is_unique_among_live_jobs_only() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        let live = "INSERT INTO download_job (title_id, state, release_title, save_path, added_at, info_hash) \
+                    VALUES (1, 'downloading', 'Alien 1979 1080p', '/downloads', 0, 'aabb')";
+        statement(&mut connection, live).await.unwrap();
+        let refused = statement(&mut connection, live)
+            .await
+            .expect_err("two live jobs may not share one info hash");
+        assert!(
+            refused.to_string().to_uppercase().contains("UNIQUE"),
+            "the refusal must be the uniqueness constraint: {refused}"
+        );
+
+        // A terminal row for the same hash is history, not a duplicate.
+        for terminal in ["completed", "failed", "blocked", "removed"] {
+            statement(
+                &mut connection,
+                match terminal {
+                    "completed" => "INSERT INTO download_job (title_id, state, release_title, save_path, added_at, info_hash) \
+                                    VALUES (1, 'completed', 'Alien', '/downloads', 0, 'aabb')",
+                    "failed" => "INSERT INTO download_job (title_id, state, release_title, save_path, added_at, info_hash) \
+                                 VALUES (1, 'failed', 'Alien', '/downloads', 0, 'aabb')",
+                    "blocked" => "INSERT INTO download_job (title_id, state, release_title, save_path, added_at, info_hash) \
+                                  VALUES (1, 'blocked', 'Alien', '/downloads', 0, 'aabb')",
+                    _ => "INSERT INTO download_job (title_id, state, release_title, save_path, added_at, info_hash) \
+                          VALUES (1, 'removed', 'Alien', '/downloads', 0, 'aabb')",
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("`{terminal}` is terminal, so it may repeat: {error}"));
+        }
+
+        // A job with no hash never collides with another job with no hash, which is what
+        // the `IS NOT NULL` half of the predicate is for.
+        let hashless = "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
+                        VALUES (1, 'queued', 'Alien', '/downloads', 0)";
+        statement(&mut connection, hashless).await.unwrap();
+        statement(&mut connection, hashless).await.unwrap();
+
+        // Once the live job is gone the hash is free again: a re-download is a new job.
+        statement(
+            &mut connection,
+            "UPDATE download_job SET state = 'removed' WHERE state = 'downloading'",
+        )
+        .await
+        .unwrap();
+        statement(&mut connection, live).await.unwrap();
+    }
+
+    /// PG-E3-19: `language` is a sentinel, not NULL, because a NULL defeats a UNIQUE
+    /// constraint in SQLite and identical artwork rows could coexist.
+    #[tokio::test]
+    async fn artwork_language_is_a_sentinel_and_never_null() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+
+        // Omitting the column means "the provider gave no language".
+        statement(
+            &mut connection,
+            "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path) \
+             VALUES ('title', 1, 'poster', 'tmdb', '/poster.jpg')",
+        )
+        .await
+        .unwrap();
+        let language: String =
+            sqlx::query_scalar("SELECT language FROM image_ref WHERE path = '/poster.jpg'")
+                .fetch_one(&mut connection)
+                .await
+                .unwrap();
+        assert_eq!(language, "", "the sentinel is the empty string");
+
+        let duplicate = "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path) \
+                         VALUES ('title', 1, 'poster', 'tmdb', '/poster.jpg')";
+        let refused = statement(&mut connection, duplicate)
+            .await
+            .expect_err("the same artwork must not be storable twice");
+        assert!(
+            refused.to_string().to_uppercase().contains("UNIQUE"),
+            "the refusal must be the uniqueness constraint: {refused}"
+        );
+
+        let null_language = "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, language) \
+                             VALUES ('title', 1, 'poster', 'tmdb', '/other.jpg', NULL)";
+        let refused = statement(&mut connection, null_language)
+            .await
+            .expect_err("NULL is no longer a storable language");
+        assert!(
+            refused.to_string().to_uppercase().contains("NOT NULL"),
+            "the refusal must be the NOT NULL constraint: {refused}"
+        );
+
+        // A different language is a different row: the key still includes it.
+        statement(
+            &mut connection,
+            "INSERT INTO image_ref (owner_kind, owner_id, role, provider, path, language) \
+             VALUES ('title', 1, 'poster', 'tmdb', '/poster.jpg', 'de')",
+        )
+        .await
+        .unwrap();
+    }
+
+    /// PG-E3-19: the rename carries the values that were written under the old name, and
+    /// the old name is gone.
+    #[tokio::test]
+    async fn an_upgrade_renames_the_video_profile_column_and_keeps_its_values() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated_up_to_0007(&directory).await;
+
+        statement(
+            &mut connection,
+            "INSERT INTO media_file \
+             (media_item_id, path, size_bytes, mtime_ms, added_at, video_account, updated_at) \
+             VALUES (1, '/media/alien.mkv', 1, 0, 0, 'High', 0)",
+        )
+        .await
+        .unwrap();
+        // The fixture needs a media item to point at; BASE_FIXTURES creates one.
+        apply(&mut connection).await.unwrap();
+
+        let profile: Option<String> = sqlx::query_scalar(
+            "SELECT video_profile FROM media_file WHERE path = '/media/alien.mkv'",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+        assert_eq!(
+            profile.as_deref(),
+            Some("High"),
+            "the probe value must survive the rename"
+        );
+
+        assert!(
+            sqlx::query_scalar::<_, String>("SELECT video_account FROM media_file")
+                .fetch_all(&mut connection)
+                .await
+                .is_err(),
+            "the mistyped column must be gone"
+        );
+    }
+
+    /// PG-E3-19: two live jobs for one hash cannot be reconciled by refusing to open the
+    /// database, so the later ones are marked failed — and nothing is deleted.
+    #[tokio::test]
+    async fn an_upgrade_reconciles_duplicate_live_info_hashes_without_deleting_a_row() {
+        /// The live download states, which is the predicate the corrected index uses.
+        const LIVE: [&str; 6] = [
+            "queued",
+            "inspecting",
+            "metadata",
+            "downloading",
+            "paused",
+            "seeding",
+        ];
+
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated_up_to_0007(&directory).await;
+
+        // Under the old index two live jobs could share a hash, and a third live row could
+        // share it with a job that had already finished.
+        for (state, hash) in [
+            ("downloading", "aabb"),
+            ("metadata", "aabb"),
+            ("seeding", "aabb"),
+            ("queued", "ccdd"),
+            ("completed", "aabb"),
+        ] {
+            literal_statement(
+                &mut connection,
+                &format!(
+                    "INSERT INTO download_job \
+                     (title_id, state, release_title, save_path, added_at, info_hash) \
+                     VALUES (1, '{state}', 'Alien', '/downloads', 0, '{hash}')"
+                ),
+            )
+            .await
+            .unwrap();
+        }
+
+        apply(&mut connection).await.unwrap();
+
+        let rows: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, state, COALESCE(info_hash, ''), error_code FROM download_job ORDER BY id",
+        )
+        .fetch_all(&mut connection)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 5, "no row may be deleted by an upgrade");
+
+        let live_aabb: Vec<&(i64, String, String, Option<String>)> = rows
+            .iter()
+            .filter(|row| row.2 == "aabb" && LIVE.contains(&row.1.as_str()))
+            .collect();
+        assert_eq!(
+            live_aabb.len(),
+            1,
+            "one live job per hash after the upgrade"
+        );
+        assert_eq!(
+            live_aabb[0].0, 1,
+            "the earliest live row is the one that stays live"
+        );
+        for row in rows.iter().filter(|row| row.0 == 2 || row.0 == 3) {
+            assert_eq!(row.1, "failed", "a superseded duplicate is marked");
+            assert_eq!(row.3.as_deref(), Some("DUPLICATE_INFO_HASH"));
+        }
+        assert_eq!(rows[3].1, "queued", "a different hash is untouched");
+        assert_eq!(rows[4].1, "completed", "history is left alone");
+        assert_eq!(rows[4].3, None, "a terminal row keeps its own error state");
+    }
+
+    /// PG-E3-19: identical artwork collapses to one row, language becomes a sentinel, and
+    /// the surviving rows keep their ids.
+    #[tokio::test]
+    async fn an_upgrade_collapses_identical_artwork_and_makes_language_not_null() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated_up_to_0007(&directory).await;
+
+        // Under the old schema the first two rows were both storable, because a NULL
+        // language and an empty-string language are different values to a UNIQUE
+        // constraint. The third is a different path and the fourth a real language.
+        for (path, language) in [
+            ("/poster.jpg", "NULL"),
+            ("/poster.jpg", "''"),
+            ("/backdrop.jpg", "NULL"),
+            ("/poster.jpg", "'de'"),
+        ] {
+            literal_statement(
+                &mut connection,
+                &format!(
+                    "INSERT INTO image_ref \
+                     (owner_kind, owner_id, role, provider, path, language) \
+                     VALUES ('title', 1, 'poster', 'tmdb', '{path}', {language})"
+                ),
+            )
+            .await
+            .unwrap();
+        }
+
+        apply(&mut connection).await.unwrap();
+
+        let rows: Vec<(i64, String, String)> =
+            sqlx::query_as("SELECT id, path, language FROM image_ref ORDER BY id")
+                .fetch_all(&mut connection)
+                .await
+                .unwrap();
+
+        assert_eq!(
+            rows.len(),
+            3,
+            "the two `poster.jpg` rows without a language collapse into one"
+        );
+        assert_eq!(
+            rows[0],
+            (1, "/poster.jpg".to_owned(), String::new()),
+            "the earliest row survives, with the sentinel"
+        );
+        assert_eq!(
+            rows[1],
+            (3, "/backdrop.jpg".to_owned(), String::new()),
+            "a different path is a different row, and its NULL became the sentinel"
+        );
+        assert_eq!(
+            rows[2],
+            (4, "/poster.jpg".to_owned(), "de".to_owned()),
+            "a real language is a different row, and ids are preserved"
+        );
     }
 }
