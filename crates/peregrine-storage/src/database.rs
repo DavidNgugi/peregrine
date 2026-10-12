@@ -226,6 +226,66 @@ impl Database {
         crate::catalogue::title_count(&self.readers).await
     }
 
+    /// One page of titles `scope` may see that match `query`, the highest id first.
+    ///
+    /// `query` is the user's own text, and this is the only place it reaches `FTS5`: it is
+    /// turned into a `MATCH` expression of quoted terms, so a query the grammar would refuse
+    /// is answered with an empty page instead of an error (AGENTS R34 and §4's hostile row).
+    /// An empty or whitespace-only query is not a search and reads nothing.
+    pub async fn search(
+        &self,
+        scope: peregrine_domain::AccountScope,
+        query: &str,
+        request: PageRequest,
+    ) -> Result<Vec<TitleIdentity>, StorageError> {
+        crate::fts::search(&self.readers, scope, query, request).await
+    }
+
+    /// Rewrites one title's search index row from the source tables.
+    ///
+    /// Returns `false` when no title holds `title_id`, in which case nothing was indexed.
+    /// The caller is the provider sync that changed a title's name or its cast; nothing in
+    /// the repository layer updates a `title` row yet (PG-E5-06), so this is exercised by
+    /// the tests and is the call that path will make.
+    pub async fn reindex_title(&self, title_id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ReindexTitle { title_id })
+            .await?
+        {
+            WriteResponse::TitleReindexed { indexed } => Ok(indexed),
+            other => Err(unexpected_response("reindex_title", &other)),
+        }
+    }
+
+    /// Removes one title's search index row, reporting whether there was one.
+    ///
+    /// The title itself is not touched: this is the index half of a removal, and the row is
+    /// what is left when the catalogue still holds the title.
+    pub async fn remove_title_index(&self, title_id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RemoveTitleIndex { title_id })
+            .await?
+        {
+            WriteResponse::TitleIndexRemoved { removed } => Ok(removed),
+            other => Err(unexpected_response("remove_title_index", &other)),
+        }
+    }
+
+    /// Rebuilds the whole search index from the source tables, reporting how many titles it
+    /// indexed.
+    ///
+    /// It runs through the single writer, so it cannot interleave with a title being indexed,
+    /// and it is the recovery path `DATA_MODEL` §6 names after a dataset reimport or a change
+    /// to what the index reads.
+    pub async fn rebuild_search_index(&self) -> Result<u64, StorageError> {
+        match self.writer.send(WriteRequest::RebuildSearchIndex).await? {
+            WriteResponse::SearchIndexRebuilt { indexed } => Ok(indexed),
+            other => Err(unexpected_response("rebuild_search_index", &other)),
+        }
+    }
+
     /// How many rows `event_log` holds, read through the pool.
     ///
     /// This is the read path in miniature — a typed query on a pooled connection — and

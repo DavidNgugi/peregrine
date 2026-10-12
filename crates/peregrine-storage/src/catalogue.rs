@@ -81,11 +81,17 @@ pub struct TitleExternalId {
     pub fetched_at: i64,
 }
 
-/// Inserts one stub title and reports the row id.
+/// Inserts one stub title, indexes it, and reports the row id.
+///
+/// The title row and its search index row are written in one transaction. A title that
+/// committed without an index row would be invisible to search until a rebuild, and a
+/// rebuild is a maintenance operation rather than a step the write path may depend on.
 pub(crate) async fn insert_stub(
     connection: &mut sqlx::SqliteConnection,
     stub: &StubTitle,
-) -> Result<i64, sqlx::Error> {
+) -> Result<i64, StorageError> {
+    let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+
     // `metadata_state` is written literally rather than bound: this statement creates a
     // stub, and the state that says so is part of what a stub is.
     let result = sqlx::query(
@@ -98,9 +104,19 @@ pub(crate) async fn insert_stub(
     .bind(stub.original_name.as_deref())
     .bind(&stub.sort_name)
     .bind(stub.at)
-    .execute(&mut *connection)
-    .await?;
-    Ok(result.last_insert_rowid())
+    .execute(&mut *transaction)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    let id = result.last_insert_rowid();
+    crate::fts::reindex(&mut transaction, id)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    transaction
+        .commit()
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(id)
 }
 
 /// Attaches external ids to a title, refusing one that belongs to another.
@@ -158,7 +174,7 @@ pub(crate) async fn attach_external_ids(
 /// A flag rather than assembled SQL: the alternative is building the `WHERE` clause from a
 /// bool, which is how string composition creeps into a repository. The clause itself is a
 /// literal in each statement, and this only decides whether its first branch applies.
-const fn hidden_by_scope(scope: AccountScope) -> i64 {
+pub(crate) const fn hidden_by_scope(scope: AccountScope) -> i64 {
     scope.is_restricted() as i64
 }
 
@@ -250,8 +266,12 @@ pub(crate) async fn title_count(pool: &sqlx::SqlitePool) -> Result<i64, StorageE
         .map_err(StorageError::from_sqlx)
 }
 
+/// The `title` columns a scoped read returns.
+///
+/// Shared with `fts`, which reads the same columns for a search result: one mapper is what
+/// keeps a title read by id and a title found by search the same value.
 #[derive(sqlx::FromRow)]
-struct IdentityRow {
+pub(crate) struct IdentityRow {
     id: i64,
     kind: String,
     subtype: String,

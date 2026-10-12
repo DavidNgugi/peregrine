@@ -34,3 +34,7 @@ sha256 = "a52dcc88a432333925644c962b1eb7e35a387e2d27c0ec5bc5cddd4033273955"
 [[migration]]
 file = "0008_schema_corrections.sql"
 sha256 = "ba22a658cc5b7c20719fb197045a7fa9ab13c553e56334debcb100a10b1b266a"
+
+[[migration]]
+file = "0009_search_index.sql"
+sha256 = "21cd9fbb0bd503e3251439d3b2f79c75a427d1a05b23a96d01778e2fcf0d546d"

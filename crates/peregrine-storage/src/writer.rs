@@ -6,6 +6,7 @@
 //! is serialized behind the writer task instead of failing with `SQLITE_BUSY`.
 
 use peregrine_domain::Event;
+use sqlx::Connection as _;
 use tokio::sync::{mpsc, oneshot};
 
 use peregrine_domain::centre::{Delivery, NewCentreEntry, NotificationId, Recorded};
@@ -51,6 +52,12 @@ pub(crate) enum WriteRequest {
         id: NotificationId,
         delivery: Box<Delivery>,
     },
+    /// Rewrite one title's search index row from the source tables.
+    ReindexTitle { title_id: i64 },
+    /// Remove one title's search index row.
+    RemoveTitleIndex { title_id: i64 },
+    /// Rebuild the whole search index from the source tables.
+    RebuildSearchIndex,
 }
 
 /// The writer's answer to a [`WriteRequest`].
@@ -70,6 +77,12 @@ pub(crate) enum WriteResponse {
     NotificationRecorded { recorded: Recorded },
     /// Whether a `notification` row was there to change.
     NotificationDelivered { changed: bool },
+    /// Whether a search index row was written, which is `false` for an id no title holds.
+    TitleReindexed { indexed: bool },
+    /// Whether a search index row was removed.
+    TitleIndexRemoved { removed: bool },
+    /// How many titles the rebuild indexed.
+    SearchIndexRebuilt { indexed: u64 },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -176,8 +189,7 @@ async fn apply(
             .map_err(StorageError::from_sqlx),
         WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
             .await
-            .map(|id| WriteResponse::TitleInserted { id })
-            .map_err(StorageError::from_sqlx),
+            .map(|id| WriteResponse::TitleInserted { id }),
         WriteRequest::AttachExternalIds { title_id, ids } => {
             crate::catalogue::attach_external_ids(connection, title_id, &ids)
                 .await
@@ -193,6 +205,34 @@ async fn apply(
                 .await
                 .map(|changed| WriteResponse::NotificationDelivered { changed })
         }
+        WriteRequest::ReindexTitle { title_id } => {
+            let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+            let indexed = crate::fts::reindex(&mut transaction, title_id)
+                .await
+                .map_err(StorageError::from_sqlx)?;
+            transaction
+                .commit()
+                .await
+                .map_err(StorageError::from_sqlx)?;
+            Ok(WriteResponse::TitleReindexed { indexed })
+        }
+        WriteRequest::RemoveTitleIndex { title_id } => {
+            let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+            let removed = crate::fts::unindex(&mut transaction, title_id)
+                .await
+                .map_err(StorageError::from_sqlx)?;
+            transaction
+                .commit()
+                .await
+                .map_err(StorageError::from_sqlx)?;
+            Ok(WriteResponse::TitleIndexRemoved { removed })
+        }
+        // The rebuild runs on the writer's connection, never a second one: a rebuild that
+        // raced the write path would interleave its `delete-all` with a title being indexed.
+        WriteRequest::RebuildSearchIndex => crate::fts::rebuild(connection)
+            .await
+            .map(|indexed| WriteResponse::SearchIndexRebuilt { indexed })
+            .map_err(StorageError::from_sqlx),
     }
 }
 
