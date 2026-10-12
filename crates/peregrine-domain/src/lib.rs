@@ -12,6 +12,7 @@
 pub mod account;
 pub mod catalogue;
 pub mod id;
+pub mod inspect;
 pub mod library;
 pub mod notify;
 pub mod path;
@@ -28,6 +29,10 @@ pub use catalogue::{
     Person, Season, SeasonNumber, Title, TitleAlias, TitleKind, TitleStatus, TitleSubtype,
 };
 pub use id::{ExternalId, ExternalIdError, Provider};
+pub use inspect::{
+    EntryKind, Finding, InspectionLimits, OptIn, Reason, SafetyReport, TorrentDescription,
+    TorrentEntry, TorrentInspector, Verdict,
+};
 pub use library::{
     LibraryRoot, LibraryRootKind, MediaFile, MediaItem, MediaItemState, MediaOrigin,
     PlaybackPosition, ProgressSource, ScanMode, SmartCollection, StoredWatchProgress,
