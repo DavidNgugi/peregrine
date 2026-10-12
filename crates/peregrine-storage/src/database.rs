@@ -7,6 +7,11 @@ use sqlx::Connection as _;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use tracing::{info, warn};
 
+use peregrine_domain::{
+    AccountScope, LibraryRoot, MediaFile, MediaItem, SubtitleTrack, UnmatchedFile, WatchProgress,
+    WatchlistEntry,
+};
+
 use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
 use crate::error::StorageError;
 use crate::integrity::Recovery;
@@ -190,7 +195,7 @@ impl Database {
     /// not be able to tell a title it may not see from one that does not exist (AGENTS R34).
     pub async fn title_identity(
         &self,
-        scope: peregrine_domain::AccountScope,
+        scope: AccountScope,
         id: i64,
     ) -> Result<Option<TitleIdentity>, StorageError> {
         crate::catalogue::identity(&self.readers, scope, id).await
@@ -199,7 +204,7 @@ impl Database {
     /// The newest page of titles `scope` may see.
     pub async fn list_titles(
         &self,
-        scope: peregrine_domain::AccountScope,
+        scope: AccountScope,
         request: PageRequest,
     ) -> Result<Vec<TitleIdentity>, StorageError> {
         crate::catalogue::list_titles(&self.readers, scope, request).await
@@ -284,6 +289,329 @@ impl Database {
             WriteResponse::SearchIndexRebuilt { indexed } => Ok(indexed),
             other => Err(unexpected_response("rebuild_search_index", &other)),
         }
+    }
+
+    /// Inserts one library root and reports the id `SQLite` assigned.
+    pub async fn insert_library_root(&self, root: LibraryRoot) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertLibraryRoot(Box::new(root)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_library_root", &other)),
+        }
+    }
+
+    /// One library root, or `None` when no such row exists.
+    ///
+    /// No [`AccountScope`] applies and none is asked for: a root is a directory the user
+    /// configured, not content.
+    pub async fn library_root(&self, id: i64) -> Result<Option<LibraryRoot>, StorageError> {
+        crate::library::root(&self.readers, id).await
+    }
+
+    /// A page of library roots, newest first.
+    pub async fn list_library_roots(
+        &self,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::LibraryRootRow>, StorageError> {
+        crate::library::list_roots(&self.readers, request).await
+    }
+
+    /// Records that a root was scanned at `at`, reporting whether the row was there.
+    pub async fn record_root_scan(&self, id: i64, at: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordRootScan { id, at })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("record_root_scan", &other)),
+        }
+    }
+
+    /// Inserts one media item and reports the id `SQLite` assigned.
+    ///
+    /// The two partial unique indices refuse a second film item for one title or a second item
+    /// for one episode (I2); that arrives as a statement failure rather than a silent second
+    /// row.
+    pub async fn insert_media_item(&self, item: MediaItem) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertMediaItem(Box::new(item)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_media_item", &other)),
+        }
+    }
+
+    /// One media item, when `scope` may see the title it is for.
+    pub async fn media_item(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<MediaItem>, StorageError> {
+        crate::library::item(&self.readers, scope, id).await
+    }
+
+    /// The item for one title or one episode, when `scope` may see it.
+    pub async fn media_item_for(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Option<MediaItem>, StorageError> {
+        crate::library::item_for(&self.readers, scope, title_id, episode_id).await
+    }
+
+    /// A page of one title's items, newest first, when `scope` may see the title.
+    pub async fn list_media_items(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::MediaItemRow>, StorageError> {
+        crate::library::list_items_for_title(&self.readers, scope, title_id, request).await
+    }
+
+    /// Inserts one media file and reports the id `SQLite` assigned.
+    ///
+    /// `media_file.path` is `UNIQUE`, so two items can never claim one file (I3): the second
+    /// insert fails rather than producing a second row for the same bytes.
+    pub async fn insert_media_file(&self, file: MediaFile) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertMediaFile(Box::new(file)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_media_file", &other)),
+        }
+    }
+
+    /// One file, when `scope` may see the title its item is for.
+    pub async fn media_file(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<MediaFile>, StorageError> {
+        crate::library::file(&self.readers, scope, id).await
+    }
+
+    /// The file a path names, when `scope` may see it.
+    pub async fn media_file_by_path(
+        &self,
+        scope: AccountScope,
+        path: &str,
+    ) -> Result<Option<MediaFile>, StorageError> {
+        crate::library::file_by_path(&self.readers, scope, path).await
+    }
+
+    /// A page of one item's files, newest first, when `scope` may see the item.
+    pub async fn list_media_files(
+        &self,
+        scope: AccountScope,
+        media_item_id: i64,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::MediaFileRow>, StorageError> {
+        crate::library::list_files_for_item(&self.readers, scope, media_item_id, request).await
+    }
+
+    /// Marks one file absent at scan time, or present again.
+    ///
+    /// The instant is the caller's — [`MediaFile::mark_missing`] keeps the *first* one, so a
+    /// file that stays gone keeps saying when it was first noticed (I11) — and `false` means
+    /// the row was not there, which is not an error.
+    pub async fn set_media_file_missing(
+        &self,
+        id: i64,
+        missing_since: Option<i64>,
+        updated_at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetFileMissing {
+                id,
+                missing_since,
+                updated_at,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("set_media_file_missing", &other)),
+        }
+    }
+
+    /// Inserts one unmatched file and reports its id, or `None` when the path was already
+    /// there.
+    ///
+    /// `ignore_conflict` is the scan's answer to seeing the same unplaceable file twice: with
+    /// it set the second sighting leaves the first row — and its `first_seen_at` — alone.
+    pub async fn insert_unmatched_file(
+        &self,
+        file: UnmatchedFile,
+        ignore_conflict: bool,
+    ) -> Result<Option<i64>, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertUnmatchedFile {
+                file: Box::new(file),
+                ignore_conflict,
+            })
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(Some(id)),
+            WriteResponse::RowIgnored => Ok(None),
+            other => Err(unexpected_response("insert_unmatched_file", &other)),
+        }
+    }
+
+    /// One unmatched file, when `scope` may be offered its suggestion.
+    pub async fn unmatched_file(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<UnmatchedFile>, StorageError> {
+        crate::library::unmatched(&self.readers, scope, id).await
+    }
+
+    /// A page of unmatched files, newest first.
+    pub async fn list_unmatched_files(
+        &self,
+        scope: AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::UnmatchedFileRow>, StorageError> {
+        crate::library::list_unmatched(&self.readers, scope, request).await
+    }
+
+    /// How many rows `unmatched_file` holds.
+    pub async fn unmatched_count(&self) -> Result<i64, StorageError> {
+        crate::library::unmatched_count(&self.readers).await
+    }
+
+    /// Inserts one subtitle track and reports the id `SQLite` assigned.
+    pub async fn insert_subtitle_track(&self, track: SubtitleTrack) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertSubtitleTrack(Box::new(track)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_subtitle_track", &other)),
+        }
+    }
+
+    /// One subtitle track, when `scope` may see the media it belongs to.
+    pub async fn subtitle_track(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<SubtitleTrack>, StorageError> {
+        crate::library::subtitle(&self.readers, scope, id).await
+    }
+
+    /// A page of one file's subtitle tracks, newest first.
+    pub async fn list_subtitle_tracks(
+        &self,
+        scope: AccountScope,
+        media_file_id: i64,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::SubtitleTrackRow>, StorageError> {
+        crate::library::list_subtitles_for_file(&self.readers, scope, media_file_id, request).await
+    }
+
+    /// Writes one account's progress for one title or episode.
+    ///
+    /// The value is keyed on `(account_id, entity_key)`, so a player reporting a position twice
+    /// updates one row. The percentage is the domain's derivation, never this layer's (I6).
+    pub async fn record_watch_progress(&self, progress: WatchProgress) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpsertWatchProgress(Box::new(progress)))
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("record_watch_progress", &other)),
+        }
+    }
+
+    /// One account's progress for one title or episode, when `scope` may see the title.
+    pub async fn watch_progress(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Option<WatchProgress>, StorageError> {
+        crate::watch::progress_for(&self.readers, scope, title_id, episode_id).await
+    }
+
+    /// A page of what one account is part-way through, most recently updated first.
+    pub async fn list_continue_watching(
+        &self,
+        scope: AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<crate::watch::WatchProgressRow>, StorageError> {
+        crate::watch::list_continue(&self.readers, scope, request).await
+    }
+
+    /// A page of everything one account has watched, most recently updated first.
+    pub async fn list_watch_progress(
+        &self,
+        scope: AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<crate::watch::WatchProgressRow>, StorageError> {
+        crate::watch::list_progress(&self.readers, scope, request).await
+    }
+
+    /// Writes one watchlist entry.
+    pub async fn add_to_watchlist(&self, entry: WatchlistEntry) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpsertWatchlist(Box::new(entry)))
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("add_to_watchlist", &other)),
+        }
+    }
+
+    /// Removes one watchlist entry, reporting whether it was there.
+    pub async fn remove_from_watchlist(
+        &self,
+        account_id: peregrine_domain::AccountId,
+        title_id: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RemoveWatchlist {
+                account_id,
+                title_id,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("remove_from_watchlist", &other)),
+        }
+    }
+
+    /// One watchlist entry, when `scope` may see the title.
+    pub async fn watchlist_entry(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+    ) -> Result<Option<WatchlistEntry>, StorageError> {
+        crate::watch::watchlist_entry(&self.readers, scope, title_id).await
+    }
+
+    /// A page of one account's watchlist, newest first.
+    pub async fn list_watchlist(
+        &self,
+        scope: AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<crate::watch::WatchlistRow>, StorageError> {
+        crate::watch::list_watchlist(&self.readers, scope, request).await
     }
 
     /// How many rows `event_log` holds, read through the pool.

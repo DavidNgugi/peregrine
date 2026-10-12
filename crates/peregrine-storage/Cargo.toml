@@ -10,13 +10,21 @@ description = "SQLite access, migrations, and the single-writer connection."
 publish = false
 
 [dependencies]
+jiff = { workspace = true }
 peregrine-domain = { workspace = true }
+# One column this crate owns the *shape* of rather than passing through:
+# `media_file.hdr_format` is stored as its serde label, and `serde_json` deserializes it back
+# against the enum's own `#[serde(rename)]` values, so the schema's `CHECK` and the enum's
+# spellings cannot drift. The columns that are general JSON (`probe_json`, `rules_json`)
+# travel as bytes or text and are never parsed here.
+serde_json = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

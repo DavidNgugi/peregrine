@@ -42,6 +42,36 @@ pub(crate) enum WriteRequest {
         title_id: i64,
         ids: Vec<TitleExternalId>,
     },
+    /// Insert one row into `library_root`.
+    InsertLibraryRoot(Box<peregrine_domain::LibraryRoot>),
+    /// Insert one row into `media_item`.
+    InsertMediaItem(Box<peregrine_domain::MediaItem>),
+    /// Insert one row into `media_file`.
+    InsertMediaFile(Box<peregrine_domain::MediaFile>),
+    /// Insert one row into `unmatched_file`.
+    InsertUnmatchedFile {
+        file: Box<peregrine_domain::UnmatchedFile>,
+        ignore_conflict: bool,
+    },
+    /// Insert one row into `subtitle_track`.
+    InsertSubtitleTrack(Box<peregrine_domain::SubtitleTrack>),
+    /// Record that a library root was scanned.
+    RecordRootScan { id: i64, at: i64 },
+    /// Mark a media file absent, or present again.
+    SetFileMissing {
+        id: i64,
+        missing_since: Option<i64>,
+        updated_at: i64,
+    },
+    /// Write one account's progress for one title or episode.
+    UpsertWatchProgress(Box<peregrine_domain::WatchProgress>),
+    /// Write one watchlist entry.
+    UpsertWatchlist(Box<peregrine_domain::WatchlistEntry>),
+    /// Remove one watchlist entry.
+    RemoveWatchlist {
+        account_id: peregrine_domain::AccountId,
+        title_id: i64,
+    },
     /// Insert or refresh one `notification` row.
     ///
     /// The read-then-write of the dedupe window happens on the writer's own connection,
@@ -73,6 +103,14 @@ pub(crate) enum WriteResponse {
     TitleInserted { id: i64 },
     /// The external ids are attached.
     ExternalIdsAttached,
+    /// The rowid `SQLite` assigned to an inserted library row.
+    RowInserted { id: i64 },
+    /// An `INSERT OR IGNORE` that found the row already there.
+    RowIgnored,
+    /// Whether a library row was there to change.
+    RowChanged { changed: bool },
+    /// Every row of the request was applied.
+    Applied,
     /// The notification row was inserted, or refreshed inside its dedupe window.
     NotificationRecorded { recorded: Recorded },
     /// Whether a `notification` row was there to change.
@@ -158,6 +196,83 @@ impl WriterHandle {
     }
 }
 
+/// Applies the requests that write the library and watch state.
+///
+/// Split from [`apply`] because the arm list is a dispatch table: the catalogue, jobs, and
+/// notification arms each read as one line, and thirteen library arms in the middle of them
+/// hide both halves. The channel is still one, and every request still arrives in order.
+async fn apply_library_write(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::InsertLibraryRoot(root) => crate::library::insert_root(connection, &root)
+            .await
+            .map(|id| WriteResponse::RowInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertMediaItem(item) => crate::library::insert_item(connection, &item)
+            .await
+            .map(|id| WriteResponse::RowInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertMediaFile(file) => crate::library::insert_file(connection, &file)
+            .await
+            .map(|id| WriteResponse::RowInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertUnmatchedFile {
+            file,
+            ignore_conflict,
+        } => crate::library::insert_unmatched(connection, &file, ignore_conflict)
+            .await
+            .map(|inserted| match inserted {
+                Some(id) => WriteResponse::RowInserted { id },
+                None => WriteResponse::RowIgnored,
+            })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertSubtitleTrack(track) => {
+            crate::library::insert_subtitle(connection, &track)
+                .await
+                .map(|id| WriteResponse::RowInserted { id })
+                .map_err(StorageError::from_sqlx)
+        }
+        WriteRequest::RecordRootScan { id, at } => {
+            crate::library::record_root_scan(connection, id, at)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+                .map_err(StorageError::from_sqlx)
+        }
+        WriteRequest::SetFileMissing {
+            id,
+            missing_since,
+            updated_at,
+        } => crate::library::set_file_missing(connection, id, missing_since, updated_at)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::UpsertWatchProgress(progress) => {
+            crate::watch::upsert_progress(connection, &progress)
+                .await
+                .map(|()| WriteResponse::Applied)
+                .map_err(StorageError::from_sqlx)
+        }
+        WriteRequest::UpsertWatchlist(entry) => crate::watch::upsert_watchlist(connection, &entry)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::RemoveWatchlist {
+            account_id,
+            title_id,
+        } => crate::watch::remove_watchlist(connection, account_id, title_id)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed })
+            .map_err(StorageError::from_sqlx),
+        // Reachable only if `apply` stops dispatching one of them here, which is a
+        // compile-time property of the two matches rather than a runtime state.
+        other => {
+            unreachable!("`apply` routed a non-library request to the library writer: {other:?}")
+        }
+    }
+}
+
 /// Applies requests one at a time until every handle is dropped.
 async fn run(mut connection: sqlx::SqliteConnection, mut requests: mpsc::Receiver<Envelope>) {
     while let Some(envelope) = requests.recv().await {
@@ -233,6 +348,7 @@ async fn apply(
             .await
             .map(|indexed| WriteResponse::SearchIndexRebuilt { indexed })
             .map_err(StorageError::from_sqlx),
+        other => apply_library_write(connection, other).await,
     }
 }
 

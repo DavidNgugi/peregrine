@@ -21,10 +21,15 @@ mod error;
 mod fts;
 mod integrity;
 mod jobs;
+mod json;
+mod library;
 mod migrations;
 mod notify;
 mod page;
 mod pragmas;
+#[cfg(test)]
+mod test_support;
+mod watch;
 mod writer;
 
 pub use catalogue::{
@@ -34,6 +39,8 @@ pub use database::Database;
 pub use error::StorageError;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
+pub use library::{LibraryRootRow, MediaFileRow, MediaItemRow, SubtitleTrackRow, UnmatchedFileRow};
 pub use notify::NotificationRepository;
 pub use page::{Cursor, MAX_PAGE_ROWS, PageRequest};
+pub use watch::{WatchProgressRow, WatchlistRow};
 pub use writer::NewEvent;

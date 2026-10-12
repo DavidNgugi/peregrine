@@ -1,0 +1,28 @@
+-- Migration 0010 — the index the watch-progress lists are read through.
+--
+-- PG-E3-10 adds the watch-state repository, whose two list reads are:
+--
+--   SELECT ... FROM watch_progress p JOIN title t ON t.id = p.title_id
+--    WHERE p.account_id = ?1
+--      AND (?2 IS NULL OR (p.updated_at, p.id) < (?2, ?3))
+--    ORDER BY p.updated_at DESC, p.id DESC LIMIT ?4
+--
+--   ... the same statement with `AND p.watched = 0 AND p.percent BETWEEN 0.02 AND 0.95`
+--
+-- The partial index migration 0005 already carries, `watch_progress_continue_idx`, covers
+-- only the second: its predicate is the rail's, and the query planner cannot use it for the
+-- first, which reads every status of an account's progress. Without this index that read is a
+-- scan of the account's rows plus a sort, and the table grows without bound because watch
+-- progress is retained forever (DATA_MODEL §6).
+--
+-- `updated_at` is carried in the index because it is the ordering column, so the page is
+-- walked in order and the `(updated_at, id)` keyset comparison is an index range rather than a
+-- post-scan filter. `id` is the rowid and is therefore already in the index's leaf entry, which
+-- is what makes the tuple comparison and the `ORDER BY` tie-break free. The statement's
+-- `title` join and scope predicate are applied to the rows the range returns, so a page of
+-- `LIMIT n` costs one index range of `n` rows plus one title lookup each.
+--
+-- Journaled by `cargo xtask check-migrations`; immutable after merge, so a schema change is a
+-- new migration, never an edit to this one.
+
+CREATE INDEX watch_progress_account_idx ON watch_progress (account_id, updated_at DESC);

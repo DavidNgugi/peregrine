@@ -161,7 +161,7 @@ mod tests {
         "title_fts_idx",
     ];
 
-    /// The forty tables the eight migrations create, per `DATA_MODEL` §2.1–§2.8.
+    /// The forty tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
     const DOCUMENTED_TABLES: [&str; 40] = [
         "account",
         "cast_session",
@@ -931,8 +931,8 @@ mod tests {
         ("watchlist_entry", "title", "title_id", "id", "CASCADE"),
     ];
 
-    /// Every named index the eight migrations create.
-    const DOCUMENTED_INDICES: [&str; 37] = [
+    /// Every named index the migrations create.
+    const DOCUMENTED_INDICES: [&str; 38] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "download_job_active_idx",
@@ -968,6 +968,7 @@ mod tests {
         "title_kind_release_idx",
         "title_sort_name_idx",
         "title_sync_idx",
+        "watch_progress_account_idx",
         "watch_progress_continue_idx",
         "watchlist_added_idx",
     ];
@@ -1030,6 +1031,10 @@ mod tests {
         (
             "subtitle_download_uq",
             "COALESCE(media_file_id, -1), COALESCE(episode_id, -1)",
+        ),
+        (
+            "watch_progress_account_idx",
+            "INDEX watch_progress_account_idx ON watch_progress (account_id, updated_at DESC)",
         ),
         (
             "watch_progress_continue_idx",
@@ -1264,8 +1269,8 @@ mod tests {
         let applied = apply(&mut connection, &path).await.unwrap();
 
         assert_eq!(
-            applied, 9,
-            "the embedded set is 0001–0009, one migration per file"
+            applied, 10,
+            "the embedded set is 0001–0010, one migration per file"
         );
         assert_eq!(
             documented_tables(&mut connection).await,
@@ -1274,7 +1279,7 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            (1..=9).collect::<Vec<_>>(),
+            (1..=10).collect::<Vec<_>>(),
             "every applied migration must be recorded, in order"
         );
     }
@@ -1711,10 +1716,10 @@ mod tests {
         let mut second = open_writer_connection(&path).await.unwrap();
         let applied = apply(&mut second, &path).await.unwrap();
 
-        assert_eq!(applied, 9);
+        assert_eq!(applied, 10);
         assert_eq!(
             versions(&mut second).await,
-            (1..=9).collect::<Vec<_>>(),
+            (1..=10).collect::<Vec<_>>(),
             "a second run must not record the migrations twice"
         );
     }
@@ -1781,7 +1786,7 @@ mod tests {
         .unwrap()
     }
 
-    /// Every foreign key the eight migrations declare, with the delete behaviour that
+    /// Every foreign key the migrations declare, with the delete behaviour that
     /// `pragma_foreign_key_list` reports. A dropped `ON DELETE` clause is invisible to
     /// `pragma_table_info`, so it gets its own test.
     #[tokio::test]
@@ -2690,7 +2695,9 @@ mod tests {
     const FAILING_MIGRATION: &str = include_str!("../tests/fixtures/failing_migration.sql");
 
     /// The version the fixture takes, past every merged migration.
-    const FAILING_VERSION: i64 = 10;
+    /// The version after the embedded set: this fixture migration is appended to the real
+    /// ones, so it moves whenever a migration is added.
+    const FAILING_VERSION: i64 = 11;
 
     /// A corrected version of the fixture, used to prove a failed run can be retried.
     const FIXED_MIGRATION: &str = "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY, note TEXT NOT NULL); \
@@ -2770,7 +2777,7 @@ mod tests {
         assert_eq!(description, "deliberately_failing");
         let message = error.to_string();
         assert!(
-            message.contains("0010_deliberately_failing"),
+            message.contains("0011_deliberately_failing"),
             "the error must name the migration: {message}"
         );
         assert!(
@@ -2796,7 +2803,7 @@ mod tests {
         assert_eq!(schema(&mut connection).await, before);
         assert_eq!(
             versions(&mut connection).await,
-            (1..=9).collect::<Vec<_>>(),
+            (1..=10).collect::<Vec<_>>(),
             "a failed migration must not be recorded"
         );
         let titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
@@ -2809,7 +2816,7 @@ mod tests {
         // no record of the version that failed.
         let mut copy = open_writer_connection(&backup).await.unwrap();
         assert!(!table_exists(&mut copy, "migration_probe").await);
-        assert_eq!(versions(&mut copy).await, (1..=9).collect::<Vec<_>>());
+        assert_eq!(versions(&mut copy).await, (1..=10).collect::<Vec<_>>());
         let copied_titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
             .fetch_one(&mut copy)
             .await
@@ -2838,10 +2845,10 @@ mod tests {
         ));
         let applied = run(&mut connection, &path, &fixed).await.unwrap();
 
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
         assert_eq!(
             versions(&mut connection).await,
-            (1..=10).collect::<Vec<_>>()
+            (1..=11).collect::<Vec<_>>()
         );
         assert!(table_exists(&mut connection, "migration_probe").await);
     }
@@ -2857,7 +2864,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(applied, 9);
+        assert_eq!(applied, 10);
         let copies = copies(&directory).await;
         assert_eq!(
             copies,
@@ -2872,7 +2879,10 @@ mod tests {
             vec![1, 2, 3, 4, 5, 6, 7],
             "the copy predates the migration that was pending"
         );
-        assert_eq!(versions(&mut connection).await, (1..=9).collect::<Vec<_>>());
+        assert_eq!(
+            versions(&mut connection).await,
+            (1..=10).collect::<Vec<_>>()
+        );
     }
 
     /// A database that is already up to date is not copied again: the copy is for an
