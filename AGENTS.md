@@ -101,6 +101,7 @@ pnpm tauri dev               # run the app
 cargo nextest run --workspace # backend tests
 pnpm test                    # frontend unit tests
 pnpm test:e2e                # Playwright flows
+pnpm gallery                 # the component gallery, in a browser, in both themes
 pnpm check-dead-deps         # unused frontend dependencies (needs pnpm install)
 cargo xtask check-arch       # dependency rules
 cargo xtask check-determinism # no wall clock or randomness outside an adapter crate

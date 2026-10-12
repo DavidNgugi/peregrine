@@ -28,6 +28,17 @@ export default defineConfig({
   // Tauri owns the terminal when it runs `pnpm dev`; clearing it would hide the
   // native build output that comes after the frontend is ready.
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      // Two entries, one build. The component gallery is a page that reads `packages/ui`, and
+      // giving it a package of its own would mean a second bundler, a second Tailwind
+      // configuration, and a second theme setup to keep in step with this one (PG-E21-15).
+      input: {
+        index: fileURLToPath(new URL("./index.html", import.meta.url)),
+        gallery: fileURLToPath(new URL("./gallery.html", import.meta.url)),
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
