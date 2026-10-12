@@ -27,9 +27,11 @@ peregrine-domain = { workspace = true }
 # entry is what makes it required rather than merely permitted.
 serde_json = { workspace = true }
 # `tray-icon` is what makes `tauri::tray` exist; the tray and its state-aware menu are
-# PG-E1-09. The window, the event loop, and the OS plugins are the only things this
-# feature reaches.
-tauri = { workspace = true, features = ["tray-icon"] }
+# PG-E1-09. `protocol-asset` is what makes the `asset:` protocol exist and what gives
+# `Manager::asset_protocol_scope` a scope to fill; the scope itself is PG-E2-08, and it is
+# deny-by-default, so the feature grants no directory on its own. The window, the event
+# loop, and the OS plugins are the only things these features reach.
+tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
 # A second launch has to find the first: the plugin owns the lock (a named mutex on
 # Windows, a D-Bus name on Linux, a Unix socket on macOS) and hands the second launch's
 # arguments to the running instance, which is the PG-E1-04 delivery and the seam PG-E1-11's
@@ -61,6 +63,11 @@ tracing = { workspace = true }
 # (docs/DEPENDENCIES.md §4 treats dev-only crates as never redistributed), which is
 # what lets the menu be built against the mock runtime outside the event loop.
 tauri = { workspace = true, features = ["test"] }
+# PG-E2-08's scope tests need real files on both sides of the boundary — one inside the
+# cache and one outside it — and a symlink that escapes, so the scope is asserted rather
+# than asserted-about. AGENTS R14 still holds: the paths are throwaway and nothing depends
+# on the developer's machine.
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

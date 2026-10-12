@@ -11,6 +11,7 @@
 use tauri::Manager as _;
 
 mod external;
+mod media;
 mod menu;
 mod tray;
 
@@ -97,6 +98,17 @@ pub fn run() -> Result<(), ShellError> {
             route_own_arguments(app);
             listen_for_opened_urls(app);
             start_tray(app);
+            // Before the document loads: an `<img>` pointing at a cached image is answered
+            // by the asset protocol, and the scope has to be filled before the first one is
+            // requested. A failure is reported and not fatal — images stay at their
+            // placeholder, and no other surface depends on this (PG-E2-08).
+            if let Err(error) = media::install(app.handle()) {
+                eprintln!("peregrine: {error}");
+                tracing::warn!(
+                    %error,
+                    "the asset protocol was not scoped, so cached images will not load"
+                );
+            }
             // After the window-state plugin has restored the geometry, which is what can
             // leave the window hidden; see the function.
             ensure_main_window_visible(app.handle());
