@@ -285,7 +285,7 @@ graph LR
   - Owed: SM1 was amended so that `removed` is reachable from **every** non-terminal state, because a queued download the user cannot cancel has no way out — a job parked behind the active-set limit can wait hours. `download::transition` currently rejects `Removed` from `queued`, `inspecting`, `metadata`, and `seeding`, so those four cells still need adding, one test per cell.
 - [x] **PG-E4-12** `M` · deps PG-E4-11 · Media availability derivation from items and jobs
   - Acceptance: Table-driven test over item and job combinations
-- [ ] **PG-E4-13** `M` · deps PG-E4-01 · Player session state machine
+- [x] **PG-E4-13** `M` · deps PG-E4-01 · Player session state machine
   - Acceptance: Every transition and failure path covered
 - [x] **PG-E4-14** `S` · deps PG-E4-01 · Subtitle timing math: offset, frame-rate conversion, PAL speedup
   - Acceptance: Property test: offset then reverse offset is identity
