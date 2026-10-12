@@ -167,6 +167,7 @@ Walk this list for every change and write the tests that apply. It is deliberate
 - Newtypes over primitives for anything with a unit or an invariant: `Bytes`, `Millis`, `Percent`, `SafePath`, `ImdbId`.
 - Iterators over index loops; `Option`/`Result` combinators over nested `match` where it reads better, and explicit `match` where it does not.
 - Every module has tests next to it (`#[cfg(test)]`), and cross-crate behaviour has an integration test under `tests/`.
+- A failing property test writes its seed under `proptest-regressions/`. **Commit that file** — it is what makes the failure permanent, and proptest's own guidance is to add them to source control. It is not build output, and deleting it throws away the regression. Review it rather than sweeping it in with `git add -A`, because the seed is only meaningful next to the test that produced it.
 
 ### TypeScript and React
 
