@@ -15,10 +15,10 @@ mod testing;
 
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
 pub use notify::{
-    CentreCursor, CentreEntry, CentreError, Delivery, EventPreference, NewCentreEntry,
-    NotificationCentre, NotificationId, NotificationPreferences, NotificationService, Outcome,
-    Preferences, PreferencesError, QuietHours, RecentNotification, RecentQuery, Recorded,
-    ServiceError,
+    CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, EventPreference,
+    NewCentreEntry, NotificationCentre, NotificationId, NotificationPreferences,
+    NotificationService, Outcome, Preferences, PreferencesError, QuietHours, RecentNotification,
+    RecentQuery, RecentWindow, Recorded, ServiceError, SubjectKind, SubjectNaming,
 };
 pub use observability::{LogConfig, Observability, ObservabilityError};
 // The runtime's own surface speaks these, so a caller that only uses `Runtime` — the IPC

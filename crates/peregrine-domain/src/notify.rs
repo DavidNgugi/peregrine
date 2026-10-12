@@ -72,6 +72,30 @@ pub enum Severity {
     Critical,
 }
 
+impl Severity {
+    /// The value the `notification.severity` constraint accepts.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Critical => "critical",
+        }
+    }
+
+    /// Parses the stored value, or `None` for one this build does not know.
+    ///
+    /// The read half of the mapping, next to the write half: a `CHECK` makes an unknown
+    /// value impossible, so a `None` here is a row written by another version.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "normal" => Some(Self::Normal),
+            "critical" => Some(Self::Critical),
+            _ => None,
+        }
+    }
+}
+
 /// The user's sound preference for one event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SoundChoice {
@@ -416,6 +440,23 @@ impl SuppressionReason {
             Self::DeliveryFailed => None,
         }
     }
+
+    /// Parses the value the `notification.suppressed_reason` constraint accepts.
+    ///
+    /// `DeliveryFailed` has no spelling to parse and is therefore never returned: the
+    /// database records a failed delivery as `delivery_state = 'failed'`.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "disabled" => Some(Self::Disabled),
+            "permission_denied" => Some(Self::PermissionDenied),
+            "quiet_hours" => Some(Self::QuietHours),
+            "duplicate" => Some(Self::Duplicate),
+            "focus_suppressed" => Some(Self::FocusSuppressed),
+            "rate_limited" => Some(Self::RateLimited),
+            _ => None,
+        }
+    }
 }
 
 /// The decision, in the order the reasons are checked.
@@ -474,6 +515,14 @@ pub fn plan(request: &PlannerRequest, state: &PlannerState) -> Planned {
 /// builds the route from identifiers, and an unknown route is a typed error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeepLink(String);
+
+impl DeepLink {
+    /// The link's text, which the centre row stores and the toast carries.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// The authority of every link this app owns.
 const DEEP_LINK_SCHEME: &str = "peregrine://";
@@ -648,16 +697,34 @@ impl Payload {
         self.title.as_str()
     }
 
+    /// The scanned title itself, which is the only form a centre row accepts.
+    #[must_use]
+    pub const fn title_text(&self) -> &NotificationText {
+        &self.title
+    }
+
     /// The body to show, when there is one.
     #[must_use]
     pub fn body(&self) -> Option<&str> {
         self.body.as_ref().map(NotificationText::as_str)
     }
 
+    /// The scanned body itself, when there is one.
+    #[must_use]
+    pub const fn body_text(&self) -> Option<&NotificationText> {
+        self.body.as_ref()
+    }
+
     /// The deep link's text, which the centre row stores and the toast carries.
     #[must_use]
     pub fn deep_link(&self) -> &str {
-        &self.deep_link.0
+        self.deep_link.as_str()
+    }
+
+    /// The scanned deep link itself, which is the only form a centre row accepts.
+    #[must_use]
+    pub const fn deep_link_value(&self) -> &DeepLink {
+        &self.deep_link
     }
 
     /// The resolved sound value, when one was asked for.
@@ -712,7 +779,13 @@ impl NotificationPayload {
             Some(body) => Some(NotificationText::checked(&body, MAX_TEXT_BYTES)?),
             None => None,
         };
-        let deep_link =
+        // A roll-up of several events is not about one of them, so its click cannot open one of
+        // them: ADR 0015 §4 sends a burst summary to the queue. A single event keeps its own
+        // route, and the digest — which is not an aggregation, however many events it stands
+        // for — keeps the centre's.
+        let deep_link = if self.event.aggregates() && self.burst_size > 1 {
+            burst_deep_link()
+        } else {
             deep_link_for(self.event, self.subject_id).map_err(|error| match error {
                 // An unsafe link and an unknown route are the same failure from the
                 // caller's side: the notification is abandoned rather than sent with a
@@ -724,7 +797,8 @@ impl NotificationPayload {
                 | DeepLinkError::NotAnIdentifier { .. }) => RedactionError::UnsafeLink {
                     reason: other.to_string(),
                 },
-            })?;
+            })?
+        };
         let sound = self.resolve_sound();
         Ok(Payload {
             title,
@@ -1129,11 +1203,70 @@ mod tests {
         ];
         for reason in reasons {
             assert!(reason.as_db_str().is_some(), "{reason:?} must be storable");
+            assert_eq!(
+                SuppressionReason::parse(reason.as_db_str().expect("just asserted")),
+                Some(reason),
+                "every storable reason must parse back"
+            );
         }
         assert_eq!(
             SuppressionReason::DeliveryFailed.as_db_str(),
             None,
             "a failed delivery is a failure, not a suppression"
+        );
+        assert_eq!(SuppressionReason::parse("delivery_failed"), None);
+        assert_eq!(SuppressionReason::parse(""), None);
+    }
+
+    #[test]
+    fn both_severities_round_trip_through_their_constraint_spelling() {
+        for (severity, spelling) in [
+            (Severity::Normal, "normal"),
+            (Severity::Critical, "critical"),
+        ] {
+            assert_eq!(severity.as_str(), spelling);
+            assert_eq!(Severity::parse(spelling), Some(severity));
+        }
+        assert_eq!(Severity::parse("warning"), None);
+        assert_eq!(Severity::parse(""), None);
+    }
+
+    #[test]
+    fn a_summary_routes_to_the_queue_and_a_single_event_to_its_own_screen() {
+        let payload = |event, subject_id, burst_size| NotificationPayload {
+            event,
+            subject_id,
+            subject_label: None,
+            burst_size,
+            hide_titles: false,
+            sound_enabled: false,
+            platform: Platform::MacOs,
+            custom_sound: None,
+        };
+
+        assert_eq!(
+            payload(NotificationEvent::DownloadCompleted, 7, 1)
+                .render()
+                .expect("catalogue copy is safe")
+                .deep_link(),
+            "peregrine://downloads",
+            "one finished download opens the library"
+        );
+        assert_eq!(
+            payload(NotificationEvent::DownloadCompleted, 7, 5)
+                .render()
+                .expect("catalogue copy is safe")
+                .deep_link(),
+            "peregrine://queue",
+            "a burst summary opens the queue, not one of the five titles"
+        );
+        assert_eq!(
+            payload(NotificationEvent::NotificationDigest, 0, 5)
+                .render()
+                .expect("catalogue copy is safe")
+                .deep_link(),
+            "peregrine://notifications",
+            "the digest is not an aggregation, however many events it stands for"
         );
     }
 
