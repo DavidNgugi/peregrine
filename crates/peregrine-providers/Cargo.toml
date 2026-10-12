@@ -17,6 +17,11 @@ publish = false
 peregrine-domain = { workspace = true }
 jiff = { workspace = true }
 thiserror = { workspace = true }
+# Response hygiene is a validating decode (PG-E5-05), so the deserializer is a runtime
+# dependency of the port rather than of one adapter: every provider's answer goes through it,
+# and a client type is what must *not* be here.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
