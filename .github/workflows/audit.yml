@@ -1,0 +1,55 @@
+# Secondary advisory checks, on a schedule rather than per pull request.
+#
+# `ci.yml` already gates every commit on `cargo-deny`, which reads the RustSec
+# database. These two jobs exist because they answer different questions and
+# because a new advisory for code that has not changed is not something a pull
+# request can notice:
+#
+#   * osv-scanner reads the OSV database, which aggregates RustSec with GHSA and
+#     the ecosystem databases, for both lockfiles in one scan.
+#   * cargo-audit is a second, independent implementation against RustSec.
+#     docs/DEPENDENCIES.md §4 records it as deliberately weekly rather than
+#     per-commit, because it overlaps `cargo-deny` and a duplicate per-commit
+#     job would only add latency.
+#
+# Both jobs are read-only with respect to the repository. The OSV job needs
+# `security-events: write` only to publish its SARIF results to the code-scanning
+# tab, which is how a maintainer sees a finding without reading a log.
+
+name: audit
+
+on:
+  schedule:
+    # 12:30 UTC every Monday, matching the cadence docs/DEPENDENCIES.md §4 records.
+    - cron: "30 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  osv-scanner:
+    name: osv-scanner (Cargo.lock, pnpm-lock.yaml)
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.7.0
+    with:
+      # Naming the two lockfiles rather than scanning the tree: this repository
+      # has exactly two dependency graphs, and a recursive scan would also walk
+      # test fixtures that are not part of either.
+      scan-args: |-
+        --lockfile=Cargo.lock
+        --lockfile=pnpm-lock.yaml
+
+  cargo-audit:
+    name: cargo-audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: RustSec advisories against Cargo.lock
+        run: cargo audit
