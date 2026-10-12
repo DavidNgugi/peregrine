@@ -110,6 +110,7 @@ from `pnpm-lock.yaml` instead of being copied from here, and it is in
 | `immer` | 11.1.21 | MIT | Immutable updates in Zustand slices |
 | `lucide-react` | 1.53.0 | ISC | Icon set; attribution required |
 | `@tauri-apps/api`, `@tauri-apps/cli` | 2.12.1 | Apache-2.0 OR MIT | Frontend bridge and CLI |
+| `@tauri-apps/plugin-dialog` | 2.8.2 | Apache-2.0 OR MIT | The native file and folder picker, wrapped by `apps/desktop/src/lib/picker.ts` so no feature names it directly. The Rust half is `tauri-plugin-dialog`, registered and granted exactly `dialog:allow-open` (PG-E1-12) |
 | `@tauri-apps/plugin-updater`, `@tauri-apps/plugin-store` | 2.13.2, 2.5.0 | MIT OR Apache-2.0 | Update prompt and small client-side persistence |
 | `vite-plugin-svgr` | 5.2.0 | MIT | SVG-as-component for icons |
 

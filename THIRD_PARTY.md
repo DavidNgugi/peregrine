@@ -37,7 +37,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 483 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 531 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -51,6 +51,16 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `allocator-api2` | 0.2.21 |
 | `android_system_properties` | 0.1.6 |
 | `anyhow` | 1.0.104 |
+| `async-broadcast` | 0.7.2 |
+| `async-channel` | 2.5.0 |
+| `async-executor` | 1.14.0 |
+| `async-io` | 2.6.0 |
+| `async-lock` | 3.4.2 |
+| `async-process` | 2.5.0 |
+| `async-recursion` | 1.2.0 |
+| `async-signal` | 0.2.14 |
+| `async-task` | 4.7.1 |
+| `async-trait` | 0.1.92 |
 | `atk` | 0.18.2 |
 | `atk-sys` | 0.18.2 |
 | `atoi` | 2.0.0 |
@@ -66,6 +76,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `block-buffer` | 0.10.4 |
 | `block-buffer` | 0.12.1 |
 | `block2` | 0.6.2 |
+| `blocking` | 1.7.0 |
 | `brotli` | 9.0.0 |
 | `brotli-decompressor` | 6.0.1 |
 | `bs58` | 0.5.1 |
@@ -88,6 +99,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `chrono` | 0.4.45 |
 | `cmov` | 0.5.4 |
 | `combine` | 4.6.8 |
+| `concurrent-queue` | 2.5.0 |
 | `const-oid` | 0.10.2 |
 | `cookie` | 0.18.2 |
 | `core-foundation` | 0.10.1 |
@@ -139,10 +151,15 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `either` | 1.19.0 |
 | `embed-resource` | 3.0.12 |
 | `embed_plist` | 1.2.2 |
+| `endi` | 1.1.1 |
+| `enumflags2` | 0.7.12 |
+| `enumflags2_derive` | 0.7.12 |
 | `equivalent` | 1.0.2 |
 | `erased-serde` | 0.4.10 |
+| `errno` | 0.3.14 |
 | `etcetera` | 0.11.0 |
 | `event-listener` | 5.4.2 |
+| `event-listener-strategy` | 0.5.4 |
 | `fastrand` | 2.5.0 |
 | `fdeflate` | 0.3.7 |
 | `field-offset` | 0.3.6 |
@@ -161,6 +178,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `futures-executor` | 0.3.34 |
 | `futures-intrusive` | 0.5.0 |
 | `futures-io` | 0.3.34 |
+| `futures-lite` | 2.6.1 |
 | `futures-macro` | 0.3.34 |
 | `futures-sink` | 0.3.34 |
 | `futures-task` | 0.3.34 |
@@ -191,6 +209,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `hashlink` | 0.11.1 |
 | `heck` | 0.4.1 |
 | `heck` | 0.5.0 |
+| `hermit-abi` | 0.5.3 |
 | `hex` | 0.4.3 |
 | `hkdf` | 0.13.0 |
 | `hmac` | 0.13.0 |
@@ -243,6 +262,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `libloading` | 0.7.4 |
 | `libredox` | 0.1.25 |
 | `libsqlite3-sys` | 0.37.0 |
+| `linux-raw-sys` | 0.12.1 |
 | `litemap` | 0.8.3 |
 | `lock_api` | 0.4.14 |
 | `log` | 0.4.34 |
@@ -284,6 +304,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `objc2-web-kit` | 0.3.2 |
 | `once_cell` | 1.21.4 |
 | `option-ext` | 0.2.0 |
+| `ordered-stream` | 0.2.0 |
 | `pango` | 0.18.3 |
 | `pango-sys` | 0.18.0 |
 | `parking` | 2.2.1 |
@@ -297,10 +318,12 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `phf_macros` | 0.13.1 |
 | `phf_shared` | 0.13.1 |
 | `pin-project-lite` | 0.2.17 |
+| `piper` | 0.2.5 |
 | `pkg-config` | 0.3.34 |
 | `plist` | 1.10.1 |
 | `png` | 0.17.16 |
 | `png` | 0.18.1 |
+| `polling` | 3.11.0 |
 | `portable-atomic` | 1.15.0 |
 | `portable-atomic-util` | 0.2.8 |
 | `potential_utf` | 0.1.6 |
@@ -327,8 +350,10 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `regex-automata` | 0.4.18 |
 | `regex-syntax` | 0.8.11 |
 | `reqwest` | 0.13.5 |
+| `rfd` | 0.16.0 |
 | `rustc-hash` | 2.1.3 |
 | `rustc_version` | 0.4.1 |
+| `rustix` | 1.1.5 |
 | `rustversion` | 1.0.23 |
 | `same-file` | 1.0.6 |
 | `schemars` | 0.8.22 |
@@ -358,6 +383,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `sha2` | 0.11.0 |
 | `sharded-slab` | 0.1.7 |
 | `shlex` | 2.0.1 |
+| `signal-hook-registry` | 1.4.8 |
 | `simd-adler32` | 0.3.10 |
 | `siphasher` | 1.0.4 |
 | `slab` | 0.4.12 |
@@ -400,6 +426,9 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tauri-codegen` | 2.7.1 |
 | `tauri-macros` | 2.7.1 |
 | `tauri-plugin` | 2.7.1 |
+| `tauri-plugin-dialog` | 2.8.2 |
+| `tauri-plugin-fs` | 2.7.0 |
+| `tauri-plugin-single-instance` | 2.5.3 |
 | `tauri-plugin-window-state` | 2.5.0 |
 | `tauri-runtime` | 2.12.1 |
 | `tauri-runtime-wry` | 2.12.1 |
@@ -407,6 +436,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tauri-specta-macros` | 2.0.0-rc.25 |
 | `tauri-utils` | 2.10.1 |
 | `tauri-winres` | 0.3.6 |
+| `tempfile` | 3.27.0 |
 | `tendril` | 0.5.1 |
 | `thiserror` | 1.0.69 |
 | `thiserror` | 2.0.21 |
@@ -446,6 +476,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `try-lock` | 0.2.5 |
 | `typeid` | 1.0.3 |
 | `typenum` | 1.20.1 |
+| `uds_windows` | 1.2.1 |
 | `ulid` | 3.0.0 |
 | `unicode-bidi` | 0.3.18 |
 | `unicode-ident` | 1.0.26 |
@@ -497,17 +528,27 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `windows-result` | 0.4.1 |
 | `windows-strings` | 0.5.1 |
 | `windows-sys` | 0.45.0 |
+| `windows-sys` | 0.60.2 |
 | `windows-sys` | 0.61.2 |
 | `windows-targets` | 0.42.2 |
+| `windows-targets` | 0.53.5 |
 | `windows-threading` | 0.2.1 |
 | `windows-version` | 0.1.7 |
 | `windows_aarch64_gnullvm` | 0.42.2 |
+| `windows_aarch64_gnullvm` | 0.53.1 |
 | `windows_aarch64_msvc` | 0.42.2 |
+| `windows_aarch64_msvc` | 0.53.1 |
 | `windows_i686_gnu` | 0.42.2 |
+| `windows_i686_gnu` | 0.53.1 |
+| `windows_i686_gnullvm` | 0.53.1 |
 | `windows_i686_msvc` | 0.42.2 |
+| `windows_i686_msvc` | 0.53.1 |
 | `windows_x86_64_gnu` | 0.42.2 |
+| `windows_x86_64_gnu` | 0.53.1 |
 | `windows_x86_64_gnullvm` | 0.42.2 |
+| `windows_x86_64_gnullvm` | 0.53.1 |
 | `windows_x86_64_msvc` | 0.42.2 |
+| `windows_x86_64_msvc` | 0.53.1 |
 | `winnow` | 0.5.40 |
 | `winnow` | 1.0.4 |
 | `winreg` | 0.56.0 |
@@ -518,6 +559,10 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `x11-dl` | 2.21.0 |
 | `yoke` | 0.8.3 |
 | `yoke-derive` | 0.8.4 |
+| `zbus` | 5.19.0 |
+| `zbus_macros` | 5.19.0 |
+| `zbus_names` | 4.3.4 |
+| `zcheapstr` | 1.1.0 |
 | `zerofrom` | 0.1.8 |
 | `zerofrom-derive` | 0.1.8 |
 | `zeroize` | 1.9.1 |
@@ -526,10 +571,13 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `zerovec-derive` | 0.11.6 |
 | `zlib-rs` | 0.6.8 |
 | `zmij` | 1.0.23 |
+| `zvariant` | 5.15.0 |
+| `zvariant_derive` | 5.15.0 |
+| `zvariant_utils` | 4.2.0 |
 
 ## Frontend packages
 
-The compiled frontend (`apps/desktop/dist`) bundles the 14 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
+The compiled frontend (`apps/desktop/dist`) bundles the 15 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
 
 Development-only packages are not redistributed and cannot appear here: pnpm records a workspace project's development dependencies in the lockfile but never resolves their transitive dependencies, so the Vite, ESLint, and Vitest toolchains have no edge into this walk. An optional *peer* that pnpm auto-installed for another package's types (`typescript`, `@types/react`) is excluded for the same reason: the bundle imports no code from it.
 
@@ -539,6 +587,7 @@ Licence expressions and texts are not repeated here: `docs/DEPENDENCIES.md` §3 
 | --- | --- |
 | `@babel/runtime` | 7.29.10 |
 | `@tauri-apps/api` | 2.12.1 |
+| `@tauri-apps/plugin-dialog` | 2.8.2 |
 | `class-variance-authority` | 0.7.1 |
 | `clsx` | 2.1.1 |
 | `html-parse-stringify` | 4.0.1 |

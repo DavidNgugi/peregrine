@@ -150,6 +150,15 @@ runtime = [
   "serde",
   "serde_json",
   "tauri",
+  # The native file and folder pickers (PG-E1-12). A picker is a modal the OS owns and
+  # draws; the plugin is the thin binding to it, and the alternative is a hand-written
+  # `rfd` call per platform plus our own ACL surface.
+  "tauri-plugin-dialog",
+  # Single-instance enforcement with argument forwarding (PG-E1-04). The plugin owns the
+  # per-OS lock — a named mutex, a D-Bus name, a Unix socket — that a second launch
+  # discovers; reimplementing it here would be three platform mechanisms maintained by us
+  # and tested by nobody else.
+  "tauri-plugin-single-instance",
   # Window geometry is this plugin's, not the shell's:
   # docs/ARCHITECTURE.md §6 puts "window geometry" in its row and lists
   # "Reimplemented" in the Never column.
