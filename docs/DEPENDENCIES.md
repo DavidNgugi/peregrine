@@ -137,7 +137,7 @@ CI also uses two actions, pinned by version and digest in `.github/workflows/rel
 | `vitest`, `@testing-library/react`, `@testing-library/user-event`, `msw` | 5.0.3, 16.3.3, 14.6.7, 3.0.2 | MIT | Frontend unit tests with a mocked IPC bridge |
 | `@playwright/test` | 1.64.0 | Apache-2.0 | E2E flows and frame-time measurement |
 | `eslint`, `typescript-eslint`, `prettier` | 10.12.0, 8.71.1, 3.9.9 | MIT | Lint and format. The `typescript-eslint` peer range against TypeScript 7 is resolved in §7 |
-| `knip`, `publint`, `size-limit` | 6.40.0, 0.3.25, 14.2.0 | ISC; MIT | Dead code, package hygiene, bundle budgets |
+| `knip`, `publint`, `size-limit` | 6.40.0, 0.3.25, 14.2.0 | ISC; MIT | Dead code, package hygiene, bundle budgets. Only `knip` is installed; `pnpm check-dead-deps` gates on it (PG-E0-15), and `publint` and `size-limit` are not installed yet |
 
 `toml` and `sha2` were resolved and licence-checked live against crates.io on **2026-10-09** with `User-Agent: peregrine-plan`; both are dev-only and appear in no shipped binary. Every other version above was resolved on **2026-10-08**.
 

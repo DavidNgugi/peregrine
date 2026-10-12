@@ -101,6 +101,7 @@ pnpm tauri dev               # run the app
 cargo nextest run --workspace # backend tests
 pnpm test                    # frontend unit tests
 pnpm test:e2e                # Playwright flows
+pnpm check-dead-deps         # unused frontend dependencies (needs pnpm install)
 cargo xtask check-arch       # dependency rules
 cargo xtask check-migrations # migration immutability
 cargo xtask check-todos      # every deferral names a task or an issue
@@ -125,7 +126,7 @@ the commit touches:
 git config core.hooksPath .githooks
 ```
 
-Any new recurring command is added to `xtask` and documented here in the same pull request.
+Any new recurring command is added to `xtask` — or, for the frontend, to `package.json` scripts — and documented here in the same pull request.
 
 ---
 

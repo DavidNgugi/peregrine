@@ -1,0 +1,7 @@
+{
+  "name": "unused-pnpm-dep",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A fixture for PG-E0-15: the dependency below is never imported, so the dead-dependency gate must fail here. It sits outside pnpm-workspace.yaml and is never built or installed, only scanned.",
+  "dependencies": { "definitely-never-imported": "1.0.0" }
+}
