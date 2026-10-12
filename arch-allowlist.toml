@@ -143,8 +143,14 @@ pure = false
 # The shell owns the window and the event loop, but the command surface it
 # serves is `peregrine-ipc`'s (docs/ARCHITECTURE.md §5). Registering the
 # commands here is what makes the generated TypeScript call a real one.
+#
+# `peregrine-domain` is the one edge beyond the contract, and it points the
+# allowed way: an adapter may depend on the pure core, never the reverse. A
+# `peregrine://` link is untrusted input, its grammar is a parser, and parsers
+# live in the domain with the tests that pin them (AGENTS R13/R15, PG-E1-11).
 may_depend_on = [
   "peregrine-ipc",
+  "peregrine-domain",
 ]
 runtime = [
   "serde",
@@ -154,6 +160,14 @@ runtime = [
   # draws; the plugin is the thin binding to it, and the alternative is a hand-written
   # `rfd` call per platform plus our own ACL surface.
   "tauri-plugin-dialog",
+  # The `peregrine://` scheme registration and the Apple Event delivery path (PG-E1-11).
+  # Without it the OS has nothing that maps the scheme to this application, and the URL a
+  # macOS launch carries is not in the process's argument vector at all.
+  "tauri-plugin-deep-link",
+  # The login item (PG-E1-13). Registering the plugin creates none; the settings toggle
+  # is the only thing that does, and reimplementing a `SMAppService` registration, a
+  # registry `Run` key, and an XDG autostart entry here would be three mechanisms.
+  "tauri-plugin-autostart",
   # Single-instance enforcement with argument forwarding (PG-E1-04). The plugin owns the
   # per-OS lock — a named mutex, a D-Bus name, a Unix socket — that a second launch
   # discovers; reimplementing it here would be three platform mechanisms maintained by us
@@ -163,6 +177,10 @@ runtime = [
   # docs/ARCHITECTURE.md §6 puts "window geometry" in its row and lists
   # "Reimplemented" in the Never column.
   "tauri-plugin-window-state",
+  # The tray's counters are re-read from the core on an interval (PG-E1-09), so the shell
+  # needs the timer the rest of the workspace already uses rather than a thread that
+  # sleeps beside the runtime.
+  "tokio",
   "thiserror",
   "tracing",
 ]
@@ -203,11 +221,19 @@ may_depend_on = [
   "peregrine-app",
 ]
 runtime = [
+  # The shortcut registry's accelerators are `muda`'s own `Modifiers`/`Code` and its
+  # `CMD_OR_CTRL`, so the platform modifier is one value rather than a macOS string and a
+  # Windows string that can drift apart (PG-E1-08). `tauri` already carries `muda` on
+  # every desktop platform, so this is a direct edge and not a new crate in the graph.
+  "muda",
   "serde",
   "serde_json",
   "specta",
   "specta-typescript",
   "tauri",
+  # The login-item commands (PG-E1-13). The shell registers the plugin; the commands are
+  # the only callers of `enable`, which is what keeps autostart off by default.
+  "tauri-plugin-autostart",
   "tauri-specta",
   "thiserror",
   "tokio",

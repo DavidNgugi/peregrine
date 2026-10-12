@@ -11,11 +11,18 @@ publish = false
 
 [dependencies]
 peregrine-app = { workspace = true }
+# The shortcut registry's accelerators are `muda`'s, so the platform modifier is the
+# same value the application menu is built from rather than a second table that can
+# drift (PG-E1-08). `tauri` already carries `muda` on every desktop platform.
+muda = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true }
 specta-typescript = { workspace = true }
 tauri = { workspace = true }
+# The login-item commands (PG-E1-13). The shell registers the plugin, so the OS
+# mechanism is one adapter rather than a second implementation here.
+tauri-plugin-autostart = { workspace = true }
 tauri-specta = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

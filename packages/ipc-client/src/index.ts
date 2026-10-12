@@ -13,9 +13,17 @@ export type {
   JobStarted,
   JobState,
   SchedulerHealth,
+  ShortcutBinding,
 } from "./generated/bindings.js";
 
-export { getBuildInfo, isSuccessful, unwrap } from "./client.js";
+export {
+  getAutoStartEnabled,
+  getBuildInfo,
+  isSuccessful,
+  listShortcuts,
+  setAutoStart,
+  unwrap,
+} from "./client.js";
 export type { CommandResult } from "./client.js";
 export {
   describeIpcError,

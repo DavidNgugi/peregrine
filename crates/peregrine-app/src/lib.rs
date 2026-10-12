@@ -25,4 +25,4 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // layer, which may depend on this crate and not on storage — can name what it is handed
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
-pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, StartedJob};
+pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, ShellStatus, StartedJob};

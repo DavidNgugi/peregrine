@@ -13,6 +13,7 @@ pub mod account;
 pub mod availability;
 pub mod catalogue;
 pub mod centre;
+pub mod deeplink;
 pub mod download;
 pub mod event;
 pub mod id;
@@ -60,6 +61,7 @@ pub use centre::{
     SubjectKind as NotificationSubjectKind,
     SubjectNaming,
 };
+pub use deeplink::{ExternalLink, ExternalLinkError};
 pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
 pub use event::{Event, SubjectKind, WatchSubject};
 pub use id::{ExternalId, ExternalIdError, Provider};

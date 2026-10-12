@@ -1,8 +1,8 @@
 //! PG-E2-10: the IPC contract as a suite generated from the command registry.
 //!
-//! docs/ARCHITECTURE.md §7 is a promise about the whole command surface, not about the six
-//! commands that exist today, so the suite is driven from the surface itself rather than from
-//! a list beside it. [`registered_commands`] reads the command names back out of the bindings
+//! docs/ARCHITECTURE.md §7 is a promise about the whole command surface, not about the
+//! commands that happen to exist today, so the suite is driven from the surface itself rather
+//! than from a list beside it. [`registered_commands`] reads the command names back out of the bindings
 //! the crate's own [`builder`](crate::builder) exports, which is the same `collect_commands!`
 //! the desktop shell installs: registering a seventh command without a case here fails
 //! `every_registered_command_has_a_case`, naming it.
@@ -158,6 +158,25 @@ fn cancel_with_an_unknown_id(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `list_shortcuts` reads a registry that is a constant of this build, and its one failure is a
+/// conflict inside that constant — a build defect its own tests catch, not a state any
+/// application can be in. Driven against the application whose runtime never started, which is
+/// the strongest state this suite can offer it.
+fn list_shortcuts_anywhere(_harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::shortcuts::list_shortcuts().map(drop) })
+}
+
+/// `autostart_enabled` reads the login item through the adapter the shell registers, and a mock
+/// application registers nothing: that is the failure this suite can reach.
+fn autostart_enabled_without_the_adapter(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::autostart::autostart_enabled(harness.dead_handle()).map(drop) })
+}
+
+/// `set_autostart` fails the same way when there is no adapter to write through.
+fn set_autostart_without_the_adapter(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::autostart::set_autostart(harness.dead_handle(), true).map(drop) })
+}
+
 /// `list` reads the journal through the runtime, so it fails the same way.
 fn list_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { jobs::list(harness.dead_state(), None).await.map(drop) })
@@ -259,6 +278,30 @@ fn cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: list_without_a_runtime,
+        },
+        ContractCase {
+            command: "list_shortcuts",
+            expected: Expected::CannotFail {
+                reason: "the registry is a constant of this build; its conflict check runs in the \
+                         crate's own tests, so no application state reaches the failure branch",
+            },
+            drive: list_shortcuts_anywhere,
+        },
+        ContractCase {
+            command: "autostart_enabled",
+            expected: Expected::Fails {
+                code: ErrorCode::Unsupported,
+                retryable: false,
+            },
+            drive: autostart_enabled_without_the_adapter,
+        },
+        ContractCase {
+            command: "set_autostart",
+            expected: Expected::Fails {
+                code: ErrorCode::Unsupported,
+                retryable: false,
+            },
+            drive: set_autostart_without_the_adapter,
         },
     ]
 }

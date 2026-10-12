@@ -63,6 +63,7 @@ pub struct RuntimeConfig {
     data_directory: PathBuf,
     sink: Arc<dyn EventSink>,
     directives: String,
+    tray_enabled: bool,
 }
 
 impl RuntimeConfig {
@@ -73,6 +74,7 @@ impl RuntimeConfig {
             data_directory: data_directory.into(),
             sink,
             directives: DEFAULT_DIRECTIVES.to_owned(),
+            tray_enabled: true,
         }
     }
 
@@ -80,6 +82,17 @@ impl RuntimeConfig {
     #[must_use]
     pub fn with_directives(mut self, directives: impl Into<String>) -> Self {
         self.directives = directives.into();
+        self
+    }
+
+    /// Turns the shell's tray icon on or off.
+    ///
+    /// The user's answer will come from the settings registry (PG-E20-01); until that
+    /// exists the runtime is built with the default, and the off path is a value a test
+    /// can set rather than a branch nobody has run (PG-E1-09's "hidden when disabled").
+    #[must_use]
+    pub fn with_tray_enabled(mut self, tray_enabled: bool) -> Self {
+        self.tray_enabled = tray_enabled;
         self
     }
 
@@ -132,6 +145,25 @@ pub struct Health {
     /// Whether the boot-time integrity check had to rebuild the database, which means the
     /// library it held is gone and has to be rebuilt by scanning (ARCHITECTURE §15).
     pub rescan_required: bool,
+}
+
+/// What the shell's tray shows about background work (PG-E1-09).
+///
+/// The shell asks the runtime for this rather than assembling it from webview events:
+/// the job journal and the scheduler are the only owners of "how much work is in
+/// flight" (ARCHITECTURE §6, "State ownership"), and a count computed in the UI would
+/// be wrong the moment a job started while the window was closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellStatus {
+    /// Jobs the scheduler still tracks: ready, deferred, or running.
+    pub active_downloads: u32,
+    /// Torrents seeding. Zero until a torrent engine is composed into the runtime
+    /// (PG-E10): `peregrine-torrent` is documentation-only today, so there is no source
+    /// for a different number and inventing one would be the lie the tray menu must not
+    /// tell.
+    pub seeding: u32,
+    /// Whether the shell should show a tray icon at all.
+    pub tray_enabled: bool,
 }
 
 /// The running application.
@@ -362,6 +394,16 @@ impl Runtime {
             scheduler: self.scheduler.metrics().await,
             events: self.bus.stats(),
             rescan_required: self.database.recovery().requires_rescan(),
+        }
+    }
+
+    /// The state the tray's menu presents (PG-E1-09).
+    pub async fn shell_status(&self) -> ShellStatus {
+        let scheduler = self.scheduler.metrics().await;
+        ShellStatus {
+            active_downloads: u32::try_from(scheduler.live).unwrap_or(u32::MAX),
+            seeding: 0,
+            tray_enabled: self.config.tray_enabled,
         }
     }
 
@@ -891,6 +933,34 @@ mod tests {
             JobPhase::Succeeded,
             "the rebuilt database must be a working one: {row:?}"
         );
+        runtime.shutdown().await;
+    }
+
+    /// The tray is on by default and the off state is a value, not a branch nobody has
+    /// run: PG-E1-09's "hidden when disabled" needs something to be disabled by.
+    #[test]
+    fn the_tray_is_enabled_unless_the_configuration_says_otherwise() {
+        let directory = TempDir::new().unwrap();
+        let sink = Arc::new(RecordingSink::default());
+        let enabled = RuntimeConfig::new(directory.path(), Arc::clone(&sink) as Arc<dyn EventSink>);
+        assert!(enabled.tray_enabled, "a tray nobody asked to hide is shown");
+        assert!(!enabled.with_tray_enabled(false).tray_enabled);
+    }
+
+    /// The counts the tray presents are the runtime's, read from the scheduler that owns
+    /// them; the shell never assembles them from webview events.
+    #[tokio::test]
+    async fn shell_status_reports_the_schedulers_counters_and_no_seeding() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let status = runtime.shell_status().await;
+        assert_eq!(status.active_downloads, 0, "nothing has been queued yet");
+        assert_eq!(
+            status.seeding, 0,
+            "no torrent engine is composed into the runtime yet (PG-E10)"
+        );
+        assert!(status.tray_enabled);
         runtime.shutdown().await;
     }
 }

@@ -12,7 +12,7 @@
  */
 
 import { commands } from "./generated/bindings.js";
-import type { BuildInfo } from "./generated/bindings.js";
+import type { BuildInfo, ShortcutBinding } from "./generated/bindings.js";
 import { normalizeIpcError } from "./errors.js";
 
 /** The generated result union for one command. */
@@ -43,4 +43,24 @@ export async function unwrap<T, E>(result: Promise<CommandResult<T, E>>): Promis
 /** The running binary's build metadata, or a thrown structured IPC error. */
 export async function getBuildInfo(): Promise<BuildInfo> {
   return unwrap(commands.buildInfo());
+}
+
+/**
+ * Every shortcut the core's registry declares, already rendered for this platform.
+ *
+ * The Settings list draws this and nothing else: a list maintained beside the registry
+ * would be a second source for the same fact (PG-E1-08).
+ */
+export async function listShortcuts(): Promise<ShortcutBinding[]> {
+  return unwrap(commands.listShortcuts());
+}
+
+/** Whether Peregrine is registered to start with the operating system's session. */
+export async function getAutoStartEnabled(): Promise<boolean> {
+  return unwrap(commands.autostartEnabled());
+}
+
+/** Registers or removes the login item. */
+export async function setAutoStart(enabled: boolean): Promise<void> {
+  await unwrap(commands.setAutostart(enabled));
 }

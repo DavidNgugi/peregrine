@@ -37,7 +37,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 531 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 551 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -65,6 +65,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `atk-sys` | 0.18.2 |
 | `atoi` | 2.0.0 |
 | `atomic-waker` | 1.1.2 |
+| `auto-launch` | 0.6.0 |
 | `autocfg` | 1.5.1 |
 | `base64` | 0.21.7 |
 | `base64` | 0.22.1 |
@@ -95,12 +96,15 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `cfb` | 0.14.0 |
 | `cfg-expr` | 0.15.8 |
 | `cfg-if` | 1.0.5 |
+| `cfg_aliases` | 0.2.2 |
 | `chacha20` | 0.10.2 |
 | `chrono` | 0.4.45 |
 | `cmov` | 0.5.4 |
 | `combine` | 4.6.8 |
 | `concurrent-queue` | 2.5.0 |
 | `const-oid` | 0.10.2 |
+| `const-random` | 0.1.18 |
+| `const-random-macro` | 0.1.16 |
 | `cookie` | 0.18.2 |
 | `core-foundation` | 0.10.1 |
 | `core-foundation-sys` | 0.8.7 |
@@ -114,6 +118,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `crossbeam-channel` | 0.5.17 |
 | `crossbeam-queue` | 0.3.14 |
 | `crossbeam-utils` | 0.8.23 |
+| `crunchy` | 0.2.4 |
 | `crypto-common` | 0.1.6 |
 | `crypto-common` | 0.2.2 |
 | `cssparser` | 0.37.0 |
@@ -135,12 +140,14 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `derive_more-impl` | 2.1.1 |
 | `digest` | 0.10.7 |
 | `digest` | 0.11.3 |
+| `dirs` | 6.0.0 |
 | `dirs` | 7.0.0 |
 | `dirs-sys` | 0.5.0 |
 | `dispatch2` | 0.3.1 |
 | `displaydoc` | 0.2.7 |
 | `dlopen2` | 0.8.2 |
 | `dlopen2_derive` | 0.4.3 |
+| `dlv-list` | 0.5.2 |
 | `dom_query` | 0.28.0 |
 | `dotenvy` | 0.15.7 |
 | `dpi` | 0.1.2 |
@@ -191,6 +198,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `gdkx11` | 0.18.2 |
 | `gdkx11-sys` | 0.18.2 |
 | `generic-array` | 0.14.9 |
+| `getrandom` | 0.2.17 |
 | `getrandom` | 0.3.4 |
 | `getrandom` | 0.4.3 |
 | `gio` | 0.18.4 |
@@ -204,6 +212,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `gtk-sys` | 0.18.2 |
 | `gtk3-macros` | 0.18.2 |
 | `hashbrown` | 0.12.3 |
+| `hashbrown` | 0.14.5 |
 | `hashbrown` | 0.16.1 |
 | `hashbrown` | 0.17.1 |
 | `hashlink` | 0.11.1 |
@@ -280,6 +289,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `ndk-context` | 0.1.1 |
 | `ndk-sys` | 0.6.0+11769913 |
 | `new_debug_unreachable` | 1.0.6 |
+| `nix` | 0.31.3 |
 | `nu-ansi-term` | 0.50.3 |
 | `num-conv` | 0.2.2 |
 | `num-traits` | 0.2.19 |
@@ -299,12 +309,16 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `objc2-foundation` | 0.3.2 |
 | `objc2-io-surface` | 0.3.2 |
 | `objc2-quartz-core` | 0.3.2 |
+| `objc2-security` | 0.3.2 |
+| `objc2-service-management` | 0.3.2 |
 | `objc2-ui-kit` | 0.3.2 |
 | `objc2-user-notifications` | 0.3.2 |
 | `objc2-web-kit` | 0.3.2 |
 | `once_cell` | 1.21.4 |
 | `option-ext` | 0.2.0 |
+| `ordered-multimap` | 0.7.3 |
 | `ordered-stream` | 0.2.0 |
+| `os_info` | 3.15.0 |
 | `pango` | 0.18.3 |
 | `pango-sys` | 0.18.0 |
 | `parking` | 2.2.1 |
@@ -351,6 +365,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `regex-syntax` | 0.8.11 |
 | `reqwest` | 0.13.5 |
 | `rfd` | 0.16.0 |
+| `rust-ini` | 0.21.3 |
 | `rustc-hash` | 2.1.3 |
 | `rustc_version` | 0.4.1 |
 | `rustix` | 1.1.5 |
@@ -388,6 +403,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `siphasher` | 1.0.4 |
 | `slab` | 0.4.12 |
 | `smallvec` | 1.16.2 |
+| `smappservice-rs` | 0.1.3 |
 | `socket2` | 0.6.5 |
 | `softbuffer` | 0.4.8 |
 | `soup3` | 0.5.0 |
@@ -426,6 +442,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tauri-codegen` | 2.7.1 |
 | `tauri-macros` | 2.7.1 |
 | `tauri-plugin` | 2.7.1 |
+| `tauri-plugin-autostart` | 2.7.0 |
+| `tauri-plugin-deep-link` | 2.6.1 |
 | `tauri-plugin-dialog` | 2.8.2 |
 | `tauri-plugin-fs` | 2.7.0 |
 | `tauri-plugin-single-instance` | 2.5.3 |
@@ -446,6 +464,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `time` | 0.3.55 |
 | `time-core` | 0.1.9 |
 | `time-macros` | 0.2.32 |
+| `tiny-keccak` | 2.0.2 |
 | `tinystr` | 0.8.4 |
 | `tinyvec` | 1.13.3 |
 | `tokio` | 1.53.2 |
@@ -525,6 +544,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `windows-interface` | 0.59.3 |
 | `windows-link` | 0.2.1 |
 | `windows-numerics` | 0.3.1 |
+| `windows-registry` | 0.6.1 |
 | `windows-result` | 0.4.1 |
 | `windows-strings` | 0.5.1 |
 | `windows-sys` | 0.45.0 |

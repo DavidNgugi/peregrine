@@ -64,6 +64,26 @@ export const en = {
         empty: "Nothing has been logged yet.",
       },
     },
+    shortcuts: {
+      discover: "Go to Discover",
+      jobs: "Go to Diagnostics",
+      settings: "Go to Settings",
+    },
+    settings: {
+      title: "Settings",
+      shortcuts: {
+        title: "Keyboard shortcuts",
+        description: "Every shortcut this build has, written the way this platform writes them.",
+      },
+      autostart: {
+        title: "Start with your computer",
+        description:
+          "Peregrine does not register itself to start with your computer unless you ask it to, and turning this off removes the entry the system keeps.",
+        label: "Start Peregrine when you sign in",
+        failed:
+          "The system would not change whether Peregrine starts with it. Your account may not allow it.",
+      },
+    },
     ipc: {
       error: {
         invalid_input: {

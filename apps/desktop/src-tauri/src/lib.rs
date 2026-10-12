@@ -12,6 +12,7 @@ use tauri::Manager as _;
 
 mod external;
 mod menu;
+mod tray;
 
 /// Why the desktop shell could not start or had to stop.
 #[derive(Debug, thiserror::Error)]
@@ -47,16 +48,58 @@ pub fn run() -> Result<(), ShellError> {
         // The pickers are called from the webview, so the plugin answers on the frontend's
         // behalf and the ACL is what decides whether it may (PG-E1-12).
         .plugin(tauri_plugin_dialog::init())
+        // The `peregrine://` scheme (PG-E1-11): the plugin is what the OS is told about at
+        // bundle time, and its `on_open_url` is the one delivery path that never appears in
+        // this process's argument vector — macOS delivers a URL as an Apple Event. The
+        // single-instance plugin's own `deep-link` feature is deliberately *not* enabled:
+        // it would feed the same argument vector into this plugin a second time, so one
+        // deep link would be routed twice.
+        .plugin(tauri_plugin_deep_link::init())
+        // The login item (PG-E1-13). `LaunchAgent` is the launcher macOS uses for a
+        // non-App-Store build, and registering the plugin creates no login item: autostart
+        // stays off until the settings toggle asks for it.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(ipc.invoke_handler())
+        // The document loads after `setup` has run, and an event emitted into a webview
+        // with no listener is gone. This is where a link that arrived on a cold start is
+        // released (PG-E1-11).
+        .on_page_load(|webview, _payload| {
+            if let Some(delivery) = webview.try_state::<external::Delivery>() {
+                delivery.flush(webview.app_handle());
+            }
+        })
         .setup(move |app| {
             ipc.mount_events(app);
             start_runtime(app);
+            // Installed before anything can be routed: the single-instance callback and the
+            // deep-link listener both run on the event loop, and this is the state that
+            // holds a link until the window can receive it.
+            app.manage(external::Delivery::default());
             // A menu the user cannot use is worse than no menu, so a failure to install
             // one is reported and the app keeps running with the platform default.
             if let Err(error) = menu::install(app.handle()) {
                 eprintln!("peregrine: {error}");
                 tracing::error!(%error, "the application menu was not installed");
             }
+            // The registry must not claim an accelerator an application menu item already
+            // owns: the menu would dispatch one of the two, and which one is the platform's
+            // business rather than ours (PG-E1-08). Checked here, where both exist, as well
+            // as by the command that draws the Settings list.
+            if let Err(conflict) = peregrine_ipc::shortcuts::validate_registry() {
+                tracing::error!(
+                    %conflict,
+                    "the shortcut registry conflicts with the application menu"
+                );
+            }
+            route_own_arguments(app);
+            listen_for_opened_urls(app);
+            start_tray(app);
+            // After the window-state plugin has restored the geometry, which is what can
+            // leave the window hidden; see the function.
+            ensure_main_window_visible(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -87,6 +130,64 @@ fn single_instance() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     })
 }
 
+/// Routes a deep link this process was *launched* with.
+///
+/// The single-instance plugin only sees a second launch; the first launch's own arguments
+/// reach no plugin at all, which is the half of "cold start and warm start both route"
+/// that PG-E1-04 deliberately left to PG-E1-11. The values stay inside
+/// [`external::forward`], which logs a route and never the text (SECURITY.md T13).
+fn route_own_arguments(app: &mut tauri::App) {
+    let arguments: Vec<String> = std::env::args_os()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    // A relative path argument would be relative to this directory, and the runtime's own
+    // working directory is not it once a handler runs; the router carries it alongside.
+    let working_directory = std::env::current_dir()
+        .map(|directory| directory.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    external::forward(
+        app.handle(),
+        &external::ExternalInput::new(arguments, working_directory),
+    );
+}
+
+/// Routes a `peregrine://` URL the OS hands to the running application.
+///
+/// macOS reaches this path, and it is the only one it reaches: Launch Services opens the
+/// already-running application and delivers an Apple Event, so the URL is never in any
+/// process's argument vector.
+fn listen_for_opened_urls(app: &mut tauri::App) {
+    use tauri_plugin_deep_link::DeepLinkExt as _;
+
+    let handle = app.handle().clone();
+    app.deep_link().on_open_url(move |event| {
+        let urls: Vec<String> = event
+            .urls()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect();
+        external::forward_urls(&handle, &urls);
+    });
+}
+
+/// Creates the tray and keeps its counts current (PG-E1-09).
+///
+/// The first state is read synchronously so the tray exists before the event loop turns;
+/// a runtime that has not started yet is not an error, and the refresh loop creates the
+/// tray on the first answer that arrives.
+fn start_tray(app: &mut tauri::App) {
+    if let Some(status) =
+        tauri::async_runtime::block_on(peregrine_ipc::runtime::shell_status(app.handle()))
+    {
+        if let Err(error) = tray::install(app.handle(), &status) {
+            tracing::warn!(%error, "the tray could not be created");
+        }
+    } else {
+        tracing::debug!("the tray waits for the runtime's first counters");
+    }
+    tray::spawn_refresh(app.handle().clone());
+}
+
 /// Raises and focuses the main window, which is the part of a second launch the user sees.
 ///
 /// Unconditional rather than `if is_minimized()`: asking costs a round trip to the event
@@ -105,6 +206,38 @@ fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     };
     if let Err(error) = window.unminimize().and_then(|()| window.set_focus()) {
         tracing::warn!(%error, "the main window could not be raised for a second launch");
+    }
+}
+
+/// Shows the main window when the restored window state says it is hidden.
+///
+/// `tauri-plugin-window-state` 2.5.0 saves `visible` under `StateFlags::all()` and calls
+/// `show()` in `restore_state` only when the restored value is `true` (its line
+/// `if flags.contains(StateFlags::VISIBLE) && should_show`). So a state file that says
+/// `visible: false` — which any action that hides the window writes, and which
+/// `docs/ARCHITECTURE.md` §17 warns about for the tray — makes the next launch restore the
+/// geometry and never appear. Removing the VISIBLE flag is not a fix: the plugin would then
+/// stop calling `show()` entirely, and the window would never appear at all.
+///
+/// So the shell owns the guarantee instead. This runs in `setup`, after the plugin has
+/// restored, and is a no-op when the window is already up.
+///
+/// One consequence to keep in mind for later work: a "start hidden, minimized to the tray"
+/// preference cannot be expressed while this stands. That behaviour is close-to-tray
+/// (PG-E1-10), and it will have to replace this check rather than live beside it.
+fn ensure_main_window_visible<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    match window.is_visible() {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::debug!("the restored window state hid the window; showing it");
+            if let Err(error) = window.show() {
+                tracing::warn!(%error, "the main window could not be shown");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "the main window's visibility could not be read"),
     }
 }
 

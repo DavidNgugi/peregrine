@@ -143,6 +143,19 @@ pub async fn shutdown<R: tauri::Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// The counts the shell's tray presents, read from the running runtime (PG-E1-09).
+///
+/// `None` when the runtime never started. The tray then shows no numbers rather than
+/// zeros, because "no runtime" and "nothing running" are different claims and only one of
+/// them is true.
+pub async fn shell_status<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Option<peregrine_app::ShellStatus> {
+    let state = app.try_state::<RuntimeState>()?;
+    let runtime = state.runtime().ok()?;
+    Some(runtime.shell_status().await)
+}
+
 /// Delivers a bus event to the webview.
 struct TauriSink<R: tauri::Runtime> {
     app: AppHandle<R>,

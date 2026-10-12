@@ -39,6 +39,34 @@ export const commands = {
 	 */
 	logTail: (lines: number | null) => typedError<string[], AppError_Serialize>(__TAURI_INVOKE("log_tail", { lines })),
 	/**
+	 *  Every shortcut this application has, as the Settings list renders it.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the registry conflicts with itself or with the menu,
+	 *  because a list whose entries cannot be told apart is not one the UI should draw.
+	 */
+	listShortcuts: () => typedError<ShortcutBinding[], AppError_Serialize>(__TAURI_INVOKE("list_shortcuts")),
+	/**
+	 *  Whether Peregrine is registered to start with the user's session.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Unsupported`] when the shell registered no login-item adapter, and
+	 *  [`ErrorCode::PermissionDenied`] when the OS refuses to answer, which on every platform
+	 *  this supports means the user's own settings are in the way.
+	 */
+	autostartEnabled: () => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("autostart_enabled")),
+	/**
+	 *  Registers or removes the login item.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Unsupported`] when the shell registered no login-item adapter, and
+	 *  [`ErrorCode::PermissionDenied`] when the OS refuses the change.
+	 */
+	setAutostart: (enabled: boolean) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_autostart", { enabled })),
+	/**
 	 *  Starts the hello job.
 	 * 
 	 *  # Errors
@@ -346,6 +374,32 @@ export type SchedulerHealth = {
 	live: number,
 	/**  Retries scheduled since the process started. */
 	retriesScheduled: number,
+};
+
+/**
+ *  One row of the Settings shortcut list.
+ * 
+ *  The four modifier flags are the shape the webview compares against `KeyboardEvent`, and
+ *  a flat set of booleans is what makes that comparison three lines of TypeScript rather
+ *  than a parsing routine. They are a wire DTO, not a state machine.
+ */
+export type ShortcutBinding = {
+	/**  The action id. */
+	id: string,
+	/**  The translation key for the label. */
+	labelKey: string,
+	/**  The accelerator as the user reads it on this platform. */
+	display: string,
+	/**  The `KeyboardEvent.code` value the webview sees for the key. */
+	code: string,
+	/**  Whether the platform's Command key (Meta) is held. */
+	meta: boolean,
+	/**  Whether Control is held. */
+	ctrl: boolean,
+	/**  Whether Alt or Option is held. */
+	alt: boolean,
+	/**  Whether Shift is held. */
+	shift: boolean,
 };
 
 /* Tauri Specta runtime */
