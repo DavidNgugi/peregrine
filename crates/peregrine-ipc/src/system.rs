@@ -39,14 +39,21 @@ pub struct BuildInfo {
 #[allow(clippy::needless_pass_by_value)]
 pub fn build_info<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<BuildInfo, AppError> {
     let package = app.package_info();
-    Ok(BuildInfo {
-        app_name: package.name.clone(),
-        app_version: package.version.to_string(),
-        // Cargo sets `TARGET` for build scripts, not for library compilation, so
-        // this is built from the OS and architecture constants the standard
-        // library guarantees instead of the target triple.
-        target: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
-    })
+    // Guarded like every other answer, even though this one cannot approach the budget
+    // today: the guard is what would catch a field growing into it (ARCHITECTURE §7 rule 1),
+    // and exempting the one command whose DTO is most likely to gain a field is the wrong
+    // place to start making exceptions.
+    Ok(guard_response(
+        "system::build_info",
+        BuildInfo {
+            app_name: package.name.clone(),
+            app_version: package.version.to_string(),
+            // Cargo sets `TARGET` for build scripts, not for library compilation, so
+            // this is built from the OS and architecture constants the standard
+            // library guarantees instead of the target triple.
+            target: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        },
+    ))
 }
 
 /// What the diagnostics screen reports about the running process.

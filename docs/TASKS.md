@@ -205,12 +205,14 @@ graph LR
   - Acceptance: Poster loads without base64 or IPC payloads
 - [x] **PG-E2-09** `XS` · deps PG-E2-01 · Payload size guard: responses over 64 KB log a warning in dev
   - Acceptance: Fixture oversized response triggers the guard
-- [ ] **PG-E2-10** `M` · deps PG-E2-02 · IPC contract tests generated from the command registry **Remaining:** the suite is in `crates/peregrine-ipc/src/contract_tests.rs` and the coverage test does fail by name when a command is registered without a case, but `system::build_info` has no failing path — its name, version, and target come from infallible lookups and it reaches for no managed state — so its case drives it against an application whose runtime never started and records that it cannot fail. The other five commands each drive a real failure through the mock app. The acceptance as written therefore holds for five of the six and cannot hold for the sixth: decide whether the intent, that no command's failure behaviour is untested, is met and tick this, or narrow the acceptance.
-  - Acceptance: Every command has a test that exercises its error path
+- [x] **PG-E2-10** `M` · deps PG-E2-02 · IPC contract tests generated from the command registry
+  - Acceptance: Every command's failure behaviour is tested, or the command is proven infallible with a recorded reason
+  - The acceptance was narrowed rather than the task left open, because the original wording cannot hold for a command that has no failure to exercise. `system::build_info` takes only an `AppHandle` and reads infallible bundle metadata, so its case drives it against an application whose runtime never started and asserts it still answers `Ok`; the exemption carries a non-empty reason in the case table, so a command that *does* touch managed state cannot claim it lazily. The other five each drive a real failure through a mock app and assert the code, the retryability the code's metadata implies, the message key, a path-free `detail`/`cause`, and a payload inside the 64 KB budget.
+  - Generated, not hand-written: the registry is enumerated by exporting the crate's own bindings and parsing `__TAURI_INVOKE("name")`, then compared **both ways** against the case table. Proven by mutation in both directions — a seventh command without a case fails naming the command, and a case naming an unregistered command fails naming the case. `collect_commands!` seals its list in a private field, so this reuses the same artifact `gen-ipc --check` pins rather than inventing a second source.
 - [x] **PG-E2-11** `S` · deps PG-E2-05 · Backpressure signal to the UI when events are dropped
   - Acceptance: UI shows a degraded live indicator instead of stalling
 - [ ] **PG-E2-12** `S` · deps PG-E2-10, PG-E25-01 · Dev-only command timing instrumentation, surfaced in Diagnostics
-  - Acceptance: p95 latency per command visible without a accountr
+  - Acceptance: p95 latency per command visible without an account
 
 ## E3 · Storage
 
@@ -1017,7 +1019,7 @@ graph LR
 - [ ] **PG-E25-05** `M` · deps PG-E25-02, PG-E3-17 · Diagnostics screen: provider health, disk budget, DB stats, slow queries, endpoint list
   - Acceptance: All values are real, none hardcoded
 - [ ] **PG-E25-06** `M` · deps PG-E25-02, PG-E7-22 · Startup and navigation timing instrumentation surfaced per screen
-  - Acceptance: Budgets visible without a accountr
+  - Acceptance: Budgets visible without an account
 - [ ] **PG-E25-07** `M` · deps PG-E6-01, PG-E13-10 · Job history view with failure reasons and retry actions
   - Acceptance: Explains every terminal state
 - [ ] **PG-E25-08** `S` · deps PG-E25-05 · Self-test command: DB integrity, disk space, provider reachability, keyring availability
