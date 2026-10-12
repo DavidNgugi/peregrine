@@ -1,0 +1,417 @@
+# This file exists because "a release" has to be one reproducible, verifiable
+# act rather than a maintainer running four commands by hand on four machines
+# (PG-E0-16). It is the only workflow that publishes anything.
+#
+# Trigger: a `v*` tag, which is a release decision; or a manual dry run, which
+# must be given a `v*`-shaped tag because the version check below compares that
+# input against tauri.conf.json before anything is built.
+#
+# The artefact is `dist/artifacts.manifest.json`: every published file with its
+# size and SHA-256, plus the version and the commit, signed with minisign. The
+# signing key is CI-only, because a manifest signed with a key a contributor
+# holds is not evidence of anything; the minisign public key is the only half
+# that belongs in the repository.
+#
+# Required repository secrets. A missing one is a failed release, never an
+# unsigned one — the signing job checks `vars.RELEASE_SIGNING_CONFIGURED`
+# before it touches a bundle:
+#   RELEASE_MINISIGN_SECRET_KEY  base64 of a minisign secret key file
+#                                (`minisign -G` then `base64 -w0`)
+#   RELEASE_MINISIGN_PASSWORD    the passphrase protecting that key
+#   RELEASE_MINISIGN_PUBLIC_KEY  the public key file's contents, used to verify
+#                                the signature before it is published
+# Required repository variable (Settings → Variables):
+#   RELEASE_SIGNING_CONFIGURED   the literal string `true`
+#
+# Tag conventions, since ADR 0009 makes the version a legal statement and not a
+# label: an annotated tag, and `version` in apps/desktop/src-tauri/tauri.conf.json
+# equal to it minus the `v` (a prerelease `v0.2.0-rc.1` must be declared as
+# `0.2.0-rc.1`, so the bundle filename, the manifest's `version`, and the tag
+# cannot disagree).
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # A dry run of the whole pipeline from an existing tag-shaped ref. The bundles
+  # and the signed manifest are still produced; only the GitHub release is
+  # skipped, so a dry run proves the artefact, not the upload.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag-shaped version to release (for example v0.1.0)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege: only `publish` writes to the repository, so only `publish`
+# asks to. The signing job below runs with a read-only token.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # One native build per platform we ship, because a Tauri bundle is not
+  # cross-compilable in practice: the installer formats, the WebView, and the
+  # code signing all belong to the host.
+  bundle:
+    name: bundle (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macos-aarch64
+            target: aarch64-apple-darwin
+          - os: macos-14
+            label: macos-x86_64
+            target: x86_64-apple-darwin
+          - os: windows-2022
+            label: windows-x86_64
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            label: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The version check reads the config as it is at the released commit,
+          # not as it is on the branch the tag was cut from.
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # A bundle pulls in the whole workspace; the frontend is a separate cache
+      # because `pnpm install` and `cargo build` age at completely different rates.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      # The Tauri shell needs the WebKitGTK stack to link on Linux. This is the
+      # prerequisite list ci.yml installs, kept identical on purpose: a release
+      # that builds against a different set of libraries than CI tests is a
+      # different artefact from the one that passed.
+      - name: Linux system dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install (lockfile is authoritative)
+        run: pnpm install --frozen-lockfile
+      - name: The bundle version is the version being released
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          declared="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          wanted="${RELEASE_TAG#v}"
+          case "$declared" in
+            "$wanted"|"$wanted"-*) ;;
+            *)
+              echo "::error::the release tag is $RELEASE_TAG but tauri.conf.json declares $declared; update the version and re-tag"
+              exit 1
+              ;;
+          esac
+      - name: Build the signed-or-not bundles
+        shell: bash
+        run: pnpm tauri build --target ${{ matrix.target }}
+      # Runs after the build because this is the only place the assembled bundle
+      # — with its sidecar executables and their notices — exists. A missing
+      # notice must stop the archive, not the compile.
+      - name: Bundled sidecar licences and source offers are present
+        shell: bash
+        # PG-E0-18 adds this command. Until it exists, xtask exits non-zero with
+        # `unknown command`, which is the correct outcome: a release must not
+        # publish a bundle whose notices nobody has checked.
+        run: cargo xtask check-notices
+      # The whole bundle directory is archived rather than its members: our own
+      # file list would be a second place that has to agree with
+      # `"targets": "all"` in tauri.conf.json, and the first time it disagreed we
+      # would ship a release that silently dropped an installer.
+      - name: Archive the bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf "dist/peregrine-${{ inputs.tag || github.ref_name }}-${{ matrix.label }}-bundle.tar.gz" \
+            -C "target/${{ matrix.target }}/release" bundle
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-${{ matrix.label }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # The inventory ADR 0009 §Decision 7 promises: one document per language graph.
+  # Both are produced on Linux because neither reads a built binary.
+  sbom:
+    name: sbom
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: taiki-e/install-action@v2
+        with:
+          # Pinned exactly, per docs/DEPENDENCIES.md §1: the CycloneDX document is
+          # a published artefact, and a tool upgrade changes its shape.
+          tool: cargo-cyclonedx@0.5.9
+      - name: Install (lockfile is authoritative)
+        run: pnpm install --frozen-lockfile
+      # `licenses list` reads the resolution already in pnpm-lock.yaml and the
+      # store, so the Node half of the SBOM cannot make a release depend on a
+      # registry being reachable.
+      - name: Node dependency inventory
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          pnpm licenses list --json > dist/node-licenses.json
+          # `paths` records absolute build-machine directories; publishing them
+          # would make the SBOM both non-reproducible and a small information leak.
+          node -e '
+            const fs = require("node:fs");
+            const input = JSON.parse(fs.readFileSync("dist/node-licenses.json", "utf8"));
+            const packages = {};
+            for (const [license, entries] of Object.entries(input)) {
+              for (const entry of entries) {
+                packages[entry.name] = {
+                  versions: entry.versions,
+                  license: entry.license ?? license,
+                  ...(entry.homepage ? { homepage: entry.homepage } : {}),
+                };
+              }
+            }
+            fs.writeFileSync("dist/node-licenses.json", JSON.stringify(packages, null, 2) + "\n");
+          '
+          test "$(node -e 'process.stdout.write(String(Object.keys(JSON.parse(require("node:fs").readFileSync("dist/node-licenses.json","utf8"))).length))')" -gt 0
+      # Describes the whole application crate, so one document carries every
+      # dependency the shipped binary can reach, resolved for the host target.
+      - name: Rust CycloneDX SBOM
+        run: cargo cyclonedx --manifest-path apps/desktop/src-tauri/Cargo.toml --format json --all-features
+      - name: Collect the SBOMs
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find apps/desktop/src-tauri -maxdepth 1 -name '*.cdx.json' -print -quit | grep . >/dev/null
+          mv apps/desktop/src-tauri/*.cdx.json dist/rust-sbom.cdx.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Assembles and signs. No `contents: write` here: given this job only reads and
+  # uploads artefacts, the most valuable thing an attacker who lands in it can
+  # steal is the signing key, and nothing else.
+  release:
+    name: manifest and changelog
+    needs: [bundle, sbom]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # git-cliff walks the tag history; a shallow checkout would produce a
+          # changelog for one commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # minisign does not publish a `/latest` download or an apt package, so the
+      # version, the archive, and its digest are all pinned here. The digest is
+      # what makes the pin meaningful.
+      - name: Install minisign 0.12 (digest-pinned)
+        shell: bash
+        env:
+          MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/minisign.tar.gz" \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          echo "${MINISIGN_SHA256}  ${RUNNER_TEMP}/minisign.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign
+          install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$HOME/.local/bin/minisign"
+      # PG-E0-18 also covers the third-party attribution file. It is not called
+      # here: this job has no bundle to inspect, and `bundle` already called it
+      # before anything was archived.
+      - uses: taiki-e/install-action@v2
+        with:
+          # docs/DEPENDENCIES.md §4 lists git-cliff as the project's changelog
+          # tool; `git log` would be a second, weaker formatter to maintain.
+          tool: git-cliff@2.14.2
+      - name: A release with no signing key fails here
+        shell: bash
+        env:
+          SECRET_KEY: ${{ secrets.RELEASE_MINISIGN_SECRET_KEY }}
+          PASSWORD: ${{ secrets.RELEASE_MINISIGN_PASSWORD }}
+          PUBLIC_KEY: ${{ secrets.RELEASE_MINISIGN_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in RELEASE_MINISIGN_SECRET_KEY RELEASE_MINISIGN_PASSWORD RELEASE_MINISIGN_PUBLIC_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::repository secret $name is not set; see the secret list at the top of .github/workflows/release.yml"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          if [ "${{ vars.RELEASE_SIGNING_CONFIGURED }}" != "true" ]; then
+            echo "::error::set the repository variable RELEASE_SIGNING_CONFIGURED=true to state that signing is configured; the workflow cannot tell an unset secret from an empty one on its own"
+            exit 1
+          fi
+          printf '%s' "$PASSWORD" > "$RUNNER_TEMP/minisign.pass"
+          printf '%s' "$SECRET_KEY" | base64 --decode > "$RUNNER_TEMP/minisign.key"
+          printf '%s' "$PUBLIC_KEY" > "$RUNNER_TEMP/minisign.pub"
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+      # The artefact this job signs is a checksum list, so the checksums have to
+      # describe what a downloader will actually get. Each build job archived
+      # `target/<target>/release/bundle` wholesale, so the digest covers the
+      # installer, the app image, and the sidecars ADR 0013 requires in the same
+      # bundle — not a hand-picked subset.
+      - name: Manifest — names, sizes, SHA-256, version, commit
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          commit="$(git rev-parse HEAD)"
+          artifacts='[]'
+          while IFS= read -r file; do
+            name="$(basename "$file")"
+            size="$(stat --format=%s "$file")"
+            sha="$(sha256sum "$file" | cut -d ' ' -f 1)"
+            artifacts="$(jq --arg n "$name" --argjson s "$size" --arg h "$sha" \
+              '. + [{name: $n, size_bytes: $s, sha256: $h}]' <<<"$artifacts")"
+          done < <(find dist -maxdepth 2 -type f -name '*.tar.gz' | sort)
+          sboms='[]'
+          while IFS= read -r file; do
+            name="$(basename "$file")"
+            size="$(stat --format=%s "$file")"
+            sha="$(sha256sum "$file" | cut -d ' ' -f 1)"
+            sboms="$(jq --arg n "$name" --argjson s "$size" --arg h "$sha" \
+              '. + [{name: $n, size_bytes: $s, sha256: $h}]' <<<"$sboms")"
+          done < <(find dist -maxdepth 2 -type f \( -name '*.cdx.json' -o -name 'node-licenses.json' \) | sort)
+          # ADR 0009 §Decision 4 requires a *written* offer beside the binaries.
+          # The manifest is the one document that is published with them, is
+          # signed, and names the exact commit, so the offer lives here rather
+          # than in a file nobody opens — plus notices/SOURCE-OFFER.md, which is
+          # inside the bundle and is what `check-notices` gates.
+          offer="Peregrine ${version} (commit ${commit}) is an aggregate of the following separate executables. mpv is distributed under GPL-2.0-or-later; ffmpeg and ffprobe are distributed under LGPL-2.1-or-later. The complete corresponding source for each is the upstream release recorded in notices/SOURCE-OFFER.md together with the build configuration reproduced in that file and in docs/DEPENDENCIES.md §5. Peregrine's own code is MIT OR Apache-2.0. Written offer, valid for three years from this release: see this release's assets and the repository at commit ${commit}."
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg version "$version" \
+            --arg commit "$commit" \
+            --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg source_offer "$offer" \
+            --argjson artifacts "$artifacts" \
+            --argjson sboms "$sboms" \
+            '{
+               schema: "peregrine.release-manifest/1",
+               tag: $tag,
+               version: $version,
+               commit: $commit,
+               generated_at: $generated_at,
+               source_offer: $source_offer,
+               artifacts: $artifacts,
+               sboms: $sboms
+             }' > dist/artifacts.manifest.json
+          count="$(jq '.artifacts | length' dist/artifacts.manifest.json)"
+          [ "$count" -gt 0 ] || { echo "::error::no bundles were collected for the manifest"; exit 1; }
+      - name: Sign the manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The passphrase is read from a file descriptor rather than an argument,
+          # so it never reaches the process table or a step log.
+          minisign -S -s "$RUNNER_TEMP/minisign.key" -p "$RUNNER_TEMP/minisign.pub" \
+            -t "peregrine release manifest" -c "peregrine CI" \
+            -x dist/artifacts.manifest.json.minisig -m dist/artifacts.manifest.json \
+            < "$RUNNER_TEMP/minisign.pass"
+      # A signature nobody checked is a file with a `.minisig` extension. This is
+      # the verification the release job's read-only token has to be worth.
+      - name: The signature verifies against the published key
+        shell: bash
+        run: minisign -V -p "$RUNNER_TEMP/minisign.pub" -m dist/artifacts.manifest.json -x dist/artifacts.manifest.json.minisig
+      - name: Changelog from the conventional-commit history
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git-cliff --tag "$RELEASE_TAG" --output dist/CHANGELOG.md
+          test -s dist/CHANGELOG.md
+      - uses: actions/upload-artifact@v7
+        with:
+          # The manifest and everything it hashes travel as one artefact, so the
+          # job that publishes them cannot pair a manifest with bundles it does
+          # not describe. No retention-days: this is the signed release record,
+          # and a failed publish must not leave the only signed copy to expire.
+          name: release
+          path: |
+            dist/release/artifacts.manifest.json
+            dist/release/artifacts.manifest.json.minisig
+            dist/release/CHANGELOG.md
+            dist/bundle-*/*.tar.gz
+            dist/sbom/*
+          if-no-files-found: error
+
+  publish:
+    name: publish to the GitHub release
+    needs: [release]
+    # `contents: write` exists for exactly one action, below.
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+      - uses: softprops/action-gh-release@v3
+        # A dry run stops one step short of publishing; everything that could make
+        # the artefact wrong has already run, which is what the dry run is for.
+        if: github.event_name == 'push'
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          body_path: dist/release/CHANGELOG.md
+          # A tagged release of a 0.x project is still a pre-release, and the file
+          # name comes from the tag, so it announces itself.
+          prerelease: ${{ !startsWith(github.ref_name, 'v1.') }}
+          # A release that matched nothing is a release that shipped nothing.
+          fail_on_unmatched_files: true
+          files: |
+            dist/release/artifacts.manifest.json
+            dist/release/artifacts.manifest.json.minisig
+            dist/release/CHANGELOG.md
+            dist/bundle-*/*.tar.gz
+            dist/sbom/*.cdx.json
+            dist/sbom/node-licenses.json
