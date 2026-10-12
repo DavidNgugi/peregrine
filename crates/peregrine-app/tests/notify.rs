@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use jiff::Timestamp;
 use peregrine_app::notify::{
-    Delivery, EventPreference, NewCentreEntry, NotificationCentre, NotificationPreferences,
-    NotificationService, Preferences, QuietHours, Recorded, ServiceError, SubjectKind,
-    SubjectNaming,
+    Consent, Delivery, EventPreference, NewCentreEntry, NotificationCentre,
+    NotificationPreferences, NotificationService, Preferences, QuietHours, Recorded, ServiceError,
+    SubjectKind, SubjectNaming,
 };
 use peregrine_domain::centre::{CentreError, NotificationId};
 use peregrine_domain::check_text;
@@ -269,7 +269,15 @@ impl<S: SubjectNaming + Sync + Clone + 'static> Harness<S> {
 /// The ADR 0015 §3 defaults, with consent given and every event switched on.
 fn consented() -> Preferences {
     all_on(Preferences {
-        consented: true,
+        consent: Consent::granted(),
+        ..Preferences::default()
+    })
+}
+
+/// The ADR 0015 §3 defaults, with the user having declined and every event switched on.
+fn declined(dont_ask_again: bool) -> Preferences {
+    all_on(Preferences {
+        consent: Consent::declined(dont_ask_again),
         ..Preferences::default()
     })
 }
@@ -413,7 +421,7 @@ async fn a_declined_user_records_permission_denied() {
     let harness = harness(
         &directory,
         Preferences {
-            consented: false,
+            consent: Consent::declined(false),
             ..Preferences::default()
         },
     )
@@ -441,6 +449,157 @@ async fn a_declined_user_records_permission_denied() {
     );
     assert_eq!(harness.notifier.count(), 0, "R31: a denial is respected");
     assert_eq!(harness.rows().await.len(), 1, "and the centre still works");
+}
+
+/// PG-E1-20's acceptance: a declined user is never asked again unprompted, and still
+/// receives every event in the centre.
+///
+/// The second clause is the one that has to be structural rather than remembered: the
+/// answer decides whether the notifier is called, and the row is written before that
+/// question is even asked, so a denial can only ever remove the toast.
+#[tokio::test]
+async fn a_declined_user_is_never_asked_again_and_still_gets_every_event() {
+    for dont_ask_again in [false, true] {
+        let directory = TempDir::new().unwrap();
+        let harness = harness(&directory, declined(dont_ask_again)).await;
+
+        assert!(
+            !harness.service.should_prompt_consent().await.unwrap(),
+            "a decline is final, unprompted (dont_ask_again = {dont_ask_again})"
+        );
+        assert_eq!(
+            harness.service.consent().await.unwrap(),
+            Consent::declined(dont_ask_again),
+            "the decision and the flag are the core's, not a renderer's"
+        );
+
+        for (event, subject) in [
+            (NotificationEvent::DownloadCompleted, 7),
+            (NotificationEvent::DownloadFailed, 8),
+            (NotificationEvent::TorrentBlocked, 9),
+            (NotificationEvent::DiskSpaceLow, 10),
+            (NotificationEvent::NewEpisodeAvailable, 11),
+        ] {
+            let outcome = harness
+                .service
+                .notify(account(), event, subject, None, Focus::default())
+                .await
+                .unwrap();
+            assert_eq!(
+                outcome.delivery,
+                Delivery::Suppressed(SuppressionReason::PermissionDenied),
+                "{event:?} must still be centred rather than toasted"
+            );
+        }
+
+        assert_eq!(
+            harness.notifier.count(),
+            0,
+            "not one event reached the OS for a user who declined"
+        );
+        assert_eq!(
+            harness.rows().await.len(),
+            5,
+            "and every event is in the centre all the same"
+        );
+    }
+}
+
+/// The answer is stored before anything acts on it, and recording it leaves the user's
+/// other choices — the sound switch, hidden titles, quiet hours, per-event rows — alone.
+#[tokio::test]
+async fn recording_consent_stores_the_answer_and_changes_nothing_else() {
+    let directory = TempDir::new().unwrap();
+    let mut wanted = Preferences {
+        sounds_enabled: false,
+        hide_titles: true,
+        quiet_hours: Some(overnight()),
+        ..Preferences::default()
+    };
+    switch_off(&mut wanted, NotificationEvent::LibraryScanFinished);
+    let harness = harness(&directory, wanted.clone()).await;
+
+    assert!(
+        harness.service.should_prompt_consent().await.unwrap(),
+        "the wizard may ask a user who has never answered"
+    );
+
+    let stored = harness
+        .service
+        .record_consent(Consent::granted())
+        .await
+        .unwrap();
+
+    assert_eq!(stored.consent, Consent::granted());
+    assert_eq!(stored.sounds_enabled, wanted.sounds_enabled);
+    assert_eq!(stored.hide_titles, wanted.hide_titles);
+    assert_eq!(stored.quiet_hours, wanted.quiet_hours);
+    // The stored rows are the user's, with the one documented normalisation: a critical
+    // event is stored enabled with its reason, which is what the settings screen shows.
+    assert_eq!(stored.events.len(), wanted.events.len());
+    for (before, after) in wanted.events.iter().zip(&stored.events) {
+        assert_eq!(before.event, after.event);
+        assert_eq!(
+            before.sound, after.sound,
+            "a sound choice is not consent's business"
+        );
+        if before.event.severity() == Severity::Critical {
+            assert!(after.enabled, "a critical event is stored enabled");
+        } else {
+            assert_eq!(before.enabled, after.enabled);
+            assert_eq!(before.reason, after.reason);
+        }
+    }
+    assert!(
+        !harness.service.should_prompt_consent().await.unwrap(),
+        "answered is answered, whichever way"
+    );
+    assert_eq!(
+        harness.preferences.load().await.unwrap().consent,
+        Consent::granted(),
+        "the answer survives the store, not the screen that asked"
+    );
+}
+
+/// Revocation detection: the user granted in the app and the OS later said no. The next
+/// event is centred rather than handed to a system that will drop it, and the state says
+/// which of the two happened so Settings can point at the OS settings.
+#[tokio::test]
+async fn a_revoked_os_permission_centres_the_next_event() {
+    let directory = TempDir::new().unwrap();
+    let harness = harness(&directory, consented()).await;
+
+    let revoked = harness.service.record_os_permission(false).await.unwrap();
+    assert!(revoked.consent.revoked());
+    assert!(!revoked.permits_delivery());
+
+    let outcome = harness
+        .service
+        .notify(
+            account(),
+            NotificationEvent::DownloadCompleted,
+            7,
+            None,
+            Focus::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.delivery,
+        Delivery::Suppressed(SuppressionReason::PermissionDenied)
+    );
+    assert_eq!(harness.notifier.count(), 0);
+    assert_eq!(harness.rows().await.len(), 1, "the centre entry stands");
+
+    // Granting it back in the OS restores delivery without another in-app question, and
+    // never rewrites the user's own answer.
+    let restored = harness.service.record_os_permission(true).await.unwrap();
+    assert!(restored.permits_delivery());
+    assert_eq!(
+        restored.consent.decision,
+        Consent::granted().decision,
+        "the OS's answer is recorded beside the user's, not instead of it"
+    );
 }
 
 /// I13 — path two: the event's own switch is off.
@@ -975,7 +1134,7 @@ async fn a_digest_is_delivered_although_its_own_event_is_default_off() {
         Preferences {
             quiet_hours: Some(overnight()),
             ..Preferences {
-                consented: true,
+                consent: Consent::granted(),
                 ..Preferences::default()
             }
         },
@@ -1021,7 +1180,7 @@ async fn a_digest_still_respects_a_declined_user() {
     let harness = harness(
         &directory,
         Preferences {
-            consented: false,
+            consent: Consent::declined(false),
             ..Preferences::default()
         },
     )

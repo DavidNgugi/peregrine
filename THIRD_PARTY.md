@@ -37,7 +37,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 551 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 562 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -226,6 +226,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `http` | 1.5.0 |
 | `http-body` | 1.1.0 |
 | `http-body-util` | 0.1.5 |
+| `http-range` | 0.1.5 |
 | `httparse` | 1.10.1 |
 | `hybrid-array` | 0.4.15 |
 | `hyper` | 1.12.0 |
@@ -275,6 +276,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `litemap` | 0.8.3 |
 | `lock_api` | 0.4.14 |
 | `log` | 0.4.34 |
+| `mac-notification-sys` | 0.6.15 |
 | `markup5ever` | 0.39.0 |
 | `matchers` | 0.2.0 |
 | `md-5` | 0.11.0 |
@@ -290,6 +292,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `ndk-sys` | 0.6.0+11769913 |
 | `new_debug_unreachable` | 1.0.6 |
 | `nix` | 0.31.3 |
+| `notify-rust` | 4.18.2 |
 | `nu-ansi-term` | 0.50.3 |
 | `num-conv` | 0.2.2 |
 | `num-traits` | 0.2.19 |
@@ -342,6 +345,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `portable-atomic-util` | 0.2.8 |
 | `potential_utf` | 0.1.6 |
 | `powerfmt` | 0.2.1 |
+| `ppv-lite86` | 0.2.21 |
 | `precomputed-hash` | 0.1.1 |
 | `proc-macro-crate` | 1.3.1 |
 | `proc-macro-crate` | 2.0.2 |
@@ -354,7 +358,10 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `r-efi` | 5.3.0 |
 | `r-efi` | 6.0.0 |
 | `rand` | 0.10.3 |
+| `rand` | 0.9.5 |
+| `rand_chacha` | 0.9.0 |
 | `rand_core` | 0.10.1 |
+| `rand_core` | 0.9.5 |
 | `raw-window-handle` | 0.6.2 |
 | `redox_syscall` | 0.5.18 |
 | `redox_users` | 0.5.3 |
@@ -446,6 +453,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tauri-plugin-deep-link` | 2.6.1 |
 | `tauri-plugin-dialog` | 2.8.2 |
 | `tauri-plugin-fs` | 2.7.0 |
+| `tauri-plugin-notification` | 2.6.0 |
 | `tauri-plugin-single-instance` | 2.5.3 |
 | `tauri-plugin-window-state` | 2.5.0 |
 | `tauri-runtime` | 2.12.1 |
@@ -454,6 +462,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tauri-specta-macros` | 2.0.0-rc.25 |
 | `tauri-utils` | 2.10.1 |
 | `tauri-winres` | 0.3.6 |
+| `tauri-winrt-notification` | 0.8.1 |
 | `tempfile` | 3.27.0 |
 | `tendril` | 0.5.1 |
 | `thiserror` | 1.0.69 |
@@ -583,6 +592,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `zbus_macros` | 5.19.0 |
 | `zbus_names` | 4.3.4 |
 | `zcheapstr` | 1.1.0 |
+| `zerocopy` | 0.8.62 |
+| `zerocopy-derive` | 0.8.62 |
 | `zerofrom` | 0.1.8 |
 | `zerofrom-derive` | 0.1.8 |
 | `zeroize` | 1.9.1 |
@@ -597,7 +608,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 
 ## Frontend packages
 
-The compiled frontend (`apps/desktop/dist`) bundles the 15 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
+The compiled frontend (`apps/desktop/dist`) bundles the 16 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
 
 Development-only packages are not redistributed and cannot appear here: pnpm records a workspace project's development dependencies in the lockfile but never resolves their transitive dependencies, so the Vite, ESLint, and Vitest toolchains have no edge into this walk. An optional *peer* that pnpm auto-installed for another package's types (`typescript`, `@types/react`) is excluded for the same reason: the bundle imports no code from it.
 
@@ -608,6 +619,7 @@ Licence expressions and texts are not repeated here: `docs/DEPENDENCIES.md` §3 
 | `@babel/runtime` | 7.29.10 |
 | `@tauri-apps/api` | 2.12.1 |
 | `@tauri-apps/plugin-dialog` | 2.8.2 |
+| `@tauri-apps/plugin-notification` | 2.6.0 |
 | `class-variance-authority` | 0.7.1 |
 | `clsx` | 2.1.1 |
 | `html-parse-stringify` | 4.0.1 |

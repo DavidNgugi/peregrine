@@ -17,9 +17,9 @@ use peregrine_domain::centre::{
     NotificationId, RecentQuery, Recorded, SubjectKind, SubjectNaming,
 };
 use peregrine_domain::notify::{
-    self, BURST_WINDOW_MILLIS, DEDUPE_WINDOW_MILLIS, Focus, NotificationEvent, NotificationPayload,
-    NotifyError, OsNotifier, Outgoing, Payload, Planned, PlannerRequest, PlannerState,
-    RATE_LIMIT_WINDOW_MILLIS, Severity, SuppressionReason,
+    self, BURST_WINDOW_MILLIS, Consent, DEDUPE_WINDOW_MILLIS, Focus, NotificationEvent,
+    NotificationPayload, NotifyError, OsNotifier, Outgoing, Payload, Planned, PlannerRequest,
+    PlannerState, RATE_LIMIT_WINDOW_MILLIS, Severity, SuppressionReason,
 };
 use peregrine_domain::ports::Clock;
 use peregrine_domain::redaction::RedactionError;
@@ -336,7 +336,7 @@ where
         // because the window it stands for has closed; consent, focus, and the rate limit all
         // still apply, because `plan` is still the only decider.
         let state = PlannerState {
-            consented: preferences.consented,
+            consented: preferences.permits_delivery(),
             enabled: true,
             quiet_hours: None,
             focus,
@@ -405,11 +405,80 @@ where
         let normalised = normalise(preferences);
         self.preferences.save(&normalised).await?;
         info!(
-            consented = normalised.consented,
+            consented = normalised.permits_delivery(),
             sounds = normalised.sounds_enabled,
             "notification preferences stored"
         );
         Ok(())
+    }
+
+    /// The user's answer to "may we notify you?", as stored.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Preferences`] when the store cannot answer.
+    pub async fn consent(&self) -> Result<Consent, ServiceError> {
+        Ok(self.preferences.load().await?.consent)
+    }
+
+    /// Whether the app may ask the user about OS notifications, unprompted (PG-E1-20).
+    ///
+    /// The caller asks this *before* drawing the wizard step or prompting at the first
+    /// relevant action, so a user who declined is never asked again by a path that forgot
+    /// to check. The answer is core state: it comes from the stored consent, not from
+    /// whether some component happens to have rendered already.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Preferences`] when the store cannot answer.
+    pub async fn should_prompt_consent(&self) -> Result<bool, ServiceError> {
+        Ok(self.preferences.load().await?.should_prompt())
+    }
+
+    /// Records the user's answer to the consent question, changing nothing else.
+    ///
+    /// One method for the one write, so a caller cannot store an answer that skipped the
+    /// normalisation `set_preferences` applies, and so the answer is persisted before
+    /// anything acts on it. Returns the preferences as stored, which is what the screen
+    /// that just asked has to show next.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Preferences`] when the store cannot answer.
+    pub async fn record_consent(&self, consent: Consent) -> Result<Preferences, ServiceError> {
+        let mut stored = self.preferences.load().await?;
+        stored.consent = consent;
+        let normalised = normalise(&stored);
+        self.preferences.save(&normalised).await?;
+        info!(
+            decision = ?normalised.consent.decision,
+            dont_ask_again = normalised.consent.dont_ask_again,
+            "the notification consent decision was stored"
+        );
+        Ok(normalised)
+    }
+
+    /// Records what the OS reported about its own notification permission.
+    ///
+    /// The permission is the OS's fact, not ours: the plugin's desktop `permission_state`
+    /// returns `Granted` unconditionally, so the signal is the webview probe the frontend
+    /// asks and reports back here. A `false` beside a granted consent is a revocation, and
+    /// the next event is centred rather than handed to a system that will drop it.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Preferences`] when the store cannot answer.
+    pub async fn record_os_permission(&self, granted: bool) -> Result<Preferences, ServiceError> {
+        let mut stored = self.preferences.load().await?;
+        stored.consent = stored.consent.with_os_permission(granted);
+        let normalised = normalise(&stored);
+        self.preferences.save(&normalised).await?;
+        if normalised.consent.revoked() {
+            warn!(
+                "the OS no longer grants notification permission; the in-app centre still receives every event"
+            );
+        }
+        Ok(normalised)
     }
 
     /// Records that this event reached the centre without an OS call, and why.
@@ -591,14 +660,18 @@ fn planner_state(
     focus: Focus,
 ) -> PlannerState {
     let setting = preferences.setting(event);
-    if !preferences.consented {
+    if !preferences.permits_delivery() {
+        // One line for both answers, because they are one outcome for the planner: the
+        // user has not agreed, or the OS has withdrawn the permission it granted.
+        // Neither loses the centre entry (AGENTS R31).
         info!(
             event = event.as_str(),
-            "the user has not consented to OS notifications"
+            revoked = preferences.consent.revoked(),
+            "the OS will not be asked: consent is absent or the permission was revoked"
         );
     }
     PlannerState {
-        consented: preferences.consented,
+        consented: preferences.permits_delivery(),
         enabled: setting.enabled,
         quiet_hours: preferences
             .quiet_hours

@@ -89,6 +89,11 @@ tauri-plugin-dialog = { version = "2.8.2" }
 # per-OS registration maintained by us plus no handler for the Apple Event, which is
 # the one delivery path `std::env::args` cannot see.
 tauri-plugin-deep-link = { version = "2.6.1" }
+# Native notification delivery (PG-E1-14). The plugin is the per-OS binding to the
+# notification server — UNUserNotificationCenter on macOS, a Windows toast, a D-Bus
+# `Notify` call on Linux — and it is also the only place the `on_action` click callback
+# exists, which ADR 0015 §6 requires to be registered before any toast is shown.
+tauri-plugin-notification = { version = "2.6.0" }
 # The login item (PG-E1-13). It owns the per-OS mechanism — `SMAppService` on macOS, a
 # registry `Run` key on Windows, an XDG autostart entry on Linux — and registering it
 # creates nothing by itself, which is what keeps autostart off until the user asks.

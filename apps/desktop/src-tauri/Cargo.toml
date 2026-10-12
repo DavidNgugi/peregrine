@@ -27,9 +27,11 @@ peregrine-domain = { workspace = true }
 # entry is what makes it required rather than merely permitted.
 serde_json = { workspace = true }
 # `tray-icon` is what makes `tauri::tray` exist; the tray and its state-aware menu are
-# PG-E1-09. The window, the event loop, and the OS plugins are the only things this
-# feature reaches.
-tauri = { workspace = true, features = ["tray-icon"] }
+# PG-E1-09. `protocol-asset` is what makes the `asset:` protocol exist and what gives
+# `Manager::asset_protocol_scope` a scope to fill; the scope itself is PG-E2-08, and it is
+# deny-by-default, so the feature grants no directory on its own. The window, the event
+# loop, and the OS plugins are the only things these features reach.
+tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
 # A second launch has to find the first: the plugin owns the lock (a named mutex on
 # Windows, a D-Bus name on Linux, a Unix socket on macOS) and hands the second launch's
 # arguments to the running instance, which is the PG-E1-04 delivery and the seam PG-E1-11's
@@ -43,6 +45,11 @@ tauri-plugin-dialog = { workspace = true }
 # it here is what makes the OS hand a URL to this application at all, and its `on_open_url`
 # handler is the one delivery path the process's own argument vector cannot see.
 tauri-plugin-deep-link = { workspace = true }
+# Native notification delivery (PG-E1-14): the toast itself, the per-OS sound value it
+# carries, and the startup `on_action` handler a click arrives on. Registering the plugin
+# shows nothing; the core's notification service decides, and only its `OsNotifier`
+# adapter calls this crate.
+tauri-plugin-notification = { workspace = true }
 # The login item the settings toggle drives (PG-E1-13). Registering the plugin creates no
 # login item: autostart stays off until the user asks for it.
 tauri-plugin-autostart = { workspace = true }
@@ -61,6 +68,11 @@ tracing = { workspace = true }
 # (docs/DEPENDENCIES.md §4 treats dev-only crates as never redistributed), which is
 # what lets the menu be built against the mock runtime outside the event loop.
 tauri = { workspace = true, features = ["test"] }
+# PG-E2-08's scope tests need real files on both sides of the boundary — one inside the
+# cache and one outside it — and a symlink that escapes, so the scope is asserted rather
+# than asserted-about. AGENTS R14 still holds: the paths are throwaway and nothing depends
+# on the developer's machine.
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

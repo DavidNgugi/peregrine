@@ -59,6 +59,116 @@ pub const MAX_SUBJECT_LABEL_BYTES: usize = 120;
 /// The label used when the caller's subject label is refused by the scanner.
 pub const GENERIC_SUBJECT_LABEL: &str = "A title";
 
+/// The user's answer to the question AGENTS R31 requires us to ask.
+///
+/// Three values rather than a boolean because "never asked" and "asked and declined" are
+/// different facts with different consequences: the first may be asked again (a wizard the
+/// user closed without answering is resumable), the second never may, unprompted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConsentDecision {
+    /// Not asked, or asked and left unanswered — the wizard is resumable either way.
+    #[default]
+    Unanswered,
+    /// The user agreed to OS notifications.
+    Granted,
+    /// The user declined. The centre keeps every event regardless (R31).
+    Declined,
+}
+
+/// What the application knows about the user's consent to OS notifications.
+///
+/// The core owns this rather than the UI (AGENTS R7): the answer decides whether the
+/// planner may call the notifier, and "never ask again" is a decision the user made, not a
+/// React value that a remount could forget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Consent {
+    /// The user's answer.
+    pub decision: ConsentDecision,
+    /// Whether the user also asked not to be asked again.
+    pub dont_ask_again: bool,
+    /// What the OS reported about its own notification permission the last time it was
+    /// asked, when it has been.
+    ///
+    /// `Some(false)` beside a [`ConsentDecision::Granted`] is a revocation: the user agreed
+    /// in the app and the system no longer permits delivery. The OS is not ours to argue
+    /// with, so the settings screen has to say so and link to the system settings.
+    pub os_granted: Option<bool>,
+}
+
+impl Consent {
+    /// The state before the user has been asked anything.
+    pub const UNASKED: Self = Self {
+        decision: ConsentDecision::Unanswered,
+        dont_ask_again: false,
+        os_granted: None,
+    };
+
+    /// The user agreed, and the OS has not been probed yet.
+    #[must_use]
+    pub const fn granted() -> Self {
+        Self {
+            decision: ConsentDecision::Granted,
+            dont_ask_again: false,
+            os_granted: None,
+        }
+    }
+
+    /// The user declined, with or without asking us never to ask again.
+    #[must_use]
+    pub const fn declined(dont_ask_again: bool) -> Self {
+        Self {
+            decision: ConsentDecision::Declined,
+            dont_ask_again,
+            os_granted: None,
+        }
+    }
+
+    /// Whether the app may ask the user about OS notifications, unprompted.
+    ///
+    /// False once the user has answered at all, and false for a user who asked us not to
+    /// ask: ADR 0015 §2's "we never re-prompt unprompted, and we never nag". An unanswered
+    /// ask stays true, because a wizard the user closed has to be resumable, and asking
+    /// again after a crash is not nagging.
+    ///
+    /// The settings screen may still offer the question — this answers only whether the app
+    /// may raise it on its own.
+    #[must_use]
+    pub const fn should_prompt(&self) -> bool {
+        matches!(self.decision, ConsentDecision::Unanswered) && !self.dont_ask_again
+    }
+
+    /// Whether the user agreed to OS notifications.
+    #[must_use]
+    pub const fn consented(&self) -> bool {
+        matches!(self.decision, ConsentDecision::Granted)
+    }
+
+    /// Whether the OS may be asked to show a toast under this consent.
+    ///
+    /// False when the user has not agreed, and false when the OS itself last reported that
+    /// it will not deliver: a revoked permission does not become granted because we ask
+    /// again. The event still reaches the centre either way (R31).
+    #[must_use]
+    pub const fn permits_delivery(&self) -> bool {
+        self.consented() && !matches!(self.os_granted, Some(false))
+    }
+
+    /// Whether the user agreed and the OS has since withdrawn the permission.
+    #[must_use]
+    pub const fn revoked(&self) -> bool {
+        self.consented() && matches!(self.os_granted, Some(false))
+    }
+
+    /// The same consent with the OS's latest answer recorded.
+    #[must_use]
+    pub const fn with_os_permission(self, granted: bool) -> Self {
+        Self {
+            os_granted: Some(granted),
+            ..self
+        }
+    }
+}
+
 /// The severity of a catalogue event.
 ///
 /// Critical is about quiet hours, never about focus modes: a security or disk
@@ -1051,6 +1161,67 @@ mod tests {
                 reason: SuppressionReason::PermissionDenied
             }
         );
+    }
+
+    /// The decision separates "never asked" from "asked and declined": only the first may
+    /// be raised again, and only while the user has not asked us to stop.
+    #[test]
+    fn only_an_unanswered_consent_is_askable_and_a_refusal_is_final() {
+        assert!(
+            Consent::UNASKED.should_prompt(),
+            "the wizard may ask a user who has never answered"
+        );
+        assert!(
+            Consent::UNASKED.with_os_permission(false).should_prompt(),
+            "an OS that says no is not an app-level answer, so the question is still ours to ask"
+        );
+        assert!(
+            !Consent::granted().should_prompt(),
+            "a granted user is never asked unprompted"
+        );
+        assert!(
+            !Consent::declined(false).should_prompt(),
+            "a decline is respected: never asked again unprompted (AGENTS R31)"
+        );
+        assert!(
+            !Consent::declined(true).should_prompt(),
+            "and a user who asked us not to ask is not asked at all"
+        );
+        assert!(
+            !Consent {
+                decision: ConsentDecision::Unanswered,
+                dont_ask_again: true,
+                os_granted: None,
+            }
+            .should_prompt()
+        );
+    }
+
+    /// Consent gates OS delivery, and the OS's own answer is part of the gate: a
+    /// permission the user revoked in System Settings is not re-asked by us.
+    #[test]
+    fn only_a_granted_and_unrevoked_consent_permits_delivery() {
+        assert!(!Consent::UNASKED.permits_delivery());
+        assert!(Consent::granted().permits_delivery());
+        assert!(
+            Consent::granted()
+                .with_os_permission(true)
+                .permits_delivery()
+        );
+        assert!(
+            !Consent::declined(false)
+                .with_os_permission(true)
+                .permits_delivery(),
+            "the OS granting is not the user agreeing"
+        );
+
+        let revoked = Consent::granted().with_os_permission(false);
+        assert!(revoked.revoked(), "the probe contradicts the stored answer");
+        assert!(
+            !revoked.permits_delivery(),
+            "asking the OS again cannot undo its refusal"
+        );
+        assert!(!Consent::UNASKED.with_os_permission(false).revoked());
     }
 
     #[test]

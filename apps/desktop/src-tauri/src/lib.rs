@@ -11,7 +11,9 @@
 use tauri::Manager as _;
 
 mod external;
+mod media;
 mod menu;
+mod notifications;
 mod tray;
 
 /// Why the desktop shell could not start or had to stop.
@@ -62,6 +64,10 @@ pub fn run() -> Result<(), ShellError> {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // Native notification delivery (PG-E1-14). Registering it shows nothing: the
+        // core's notification service decides, the shell's `OsNotifier` adapter calls it,
+        // and the click handler is registered in `setup` before any toast can exist.
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(ipc.invoke_handler())
         // The document loads after `setup` has run, and an event emitted into a webview
         // with no listener is gone. This is where a link that arrived on a cold start is
@@ -78,6 +84,16 @@ pub fn run() -> Result<(), ShellError> {
             // deep-link listener both run on the event loop, and this is the state that
             // holds a link until the window can receive it.
             app.manage(external::Delivery::default());
+            // After the delivery state, because the click handler reads it, and before
+            // anything could raise an event: a notification shown while no handler is
+            // registered reports no click at all, ever (ADR 0015 §6, PG-E1-14).
+            if let Err(error) = notifications::install(app.handle()) {
+                eprintln!("peregrine: {error}");
+                tracing::warn!(
+                    %error,
+                    "native notifications are unavailable; the in-app centre is unaffected"
+                );
+            }
             // A menu the user cannot use is worse than no menu, so a failure to install
             // one is reported and the app keeps running with the platform default.
             if let Err(error) = menu::install(app.handle()) {
@@ -97,6 +113,17 @@ pub fn run() -> Result<(), ShellError> {
             route_own_arguments(app);
             listen_for_opened_urls(app);
             start_tray(app);
+            // Before the document loads: an `<img>` pointing at a cached image is answered
+            // by the asset protocol, and the scope has to be filled before the first one is
+            // requested. A failure is reported and not fatal — images stay at their
+            // placeholder, and no other surface depends on this (PG-E2-08).
+            if let Err(error) = media::install(app.handle()) {
+                eprintln!("peregrine: {error}");
+                tracing::warn!(
+                    %error,
+                    "the asset protocol was not scoped, so cached images will not load"
+                );
+            }
             // After the window-state plugin has restored the geometry, which is what can
             // leave the window hidden; see the function.
             ensure_main_window_visible(app.handle());

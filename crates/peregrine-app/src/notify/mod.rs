@@ -29,6 +29,7 @@ pub use peregrine_domain::centre::{
     NotificationCentre, NotificationId, RecentNotification, RecentQuery, RecentWindow, Recorded,
     SubjectKind, SubjectNaming,
 };
+pub use peregrine_domain::notify::{Consent, ConsentDecision};
 pub use service::{NotificationService, ServiceError};
 
 /// Where the user's notification choices are stored.
@@ -71,8 +72,9 @@ pub enum PreferencesError {
 /// The user's notification choices, with the catalogue defaults filled in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preferences {
-    /// Whether the user agreed to OS notifications at all.
-    pub consented: bool,
+    /// The user's answer to "may we notify you?", which is core state rather than a UI
+    /// value: no renderer can lose it, and the planner reads it before every attempt.
+    pub consent: Consent,
     /// Whether the master sound switch is on.
     pub sounds_enabled: bool,
     /// Whether subjects are replaced by a generic string.
@@ -88,7 +90,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             // Declining is the default: we do not notify before we are asked.
-            consented: false,
+            consent: Consent::UNASKED,
             sounds_enabled: true,
             hide_titles: false,
             quiet_hours: None,
@@ -105,6 +107,18 @@ impl Preferences {
     #[must_use]
     pub fn event(&self, event: NotificationEvent) -> Option<&EventPreference> {
         self.events.iter().find(|row| row.event == event)
+    }
+
+    /// Whether the app may ask the user about OS notifications, unprompted (PG-E1-20).
+    #[must_use]
+    pub const fn should_prompt(&self) -> bool {
+        self.consent.should_prompt()
+    }
+
+    /// Whether the OS may be asked to show a toast under the stored consent.
+    #[must_use]
+    pub const fn permits_delivery(&self) -> bool {
+        self.consent.permits_delivery()
     }
 
     /// The planner's view of one event.
@@ -236,9 +250,18 @@ mod tests {
     #[test]
     fn the_default_is_to_ask_before_notifying() {
         let preferences = Preferences::default();
-        assert!(
-            !preferences.consented,
+        assert_eq!(
+            preferences.consent,
+            Consent::UNASKED,
             "R31: the user is asked before we notify them"
+        );
+        assert!(
+            !preferences.permits_delivery(),
+            "an unasked user is not notified"
+        );
+        assert!(
+            preferences.should_prompt(),
+            "and is the one case the wizard may ask"
         );
         assert_eq!(
             preferences
@@ -252,7 +275,7 @@ mod tests {
     #[test]
     fn a_stored_switch_cannot_turn_off_a_critical_event() {
         let mut preferences = Preferences {
-            consented: true,
+            consent: Consent::granted(),
             ..Preferences::default()
         };
         if let Some(row) = preferences
