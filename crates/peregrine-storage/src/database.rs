@@ -640,6 +640,66 @@ impl Database {
         crate::library::list_library_titles(&self.readers, scope, request).await
     }
 
+    /// Inserts one season and answers the id `SQLite` assigned.
+    ///
+    /// A stub, like [`Database::insert_stub_title`]: the library creates the row so episodes have
+    /// somewhere to go, and a provider sync fills in its name, overview, and artwork later.
+    pub async fn insert_stub_season(
+        &self,
+        season: crate::catalogue::StubSeason,
+    ) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertStubSeason(Box::new(season)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_stub_season", &other)),
+        }
+    }
+
+    /// Inserts one episode and answers the id `SQLite` assigned.
+    pub async fn insert_stub_episode(
+        &self,
+        episode: crate::catalogue::StubEpisode,
+    ) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertStubEpisode(Box::new(episode)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_stub_episode", &other)),
+        }
+    }
+
+    /// The id of the season a title and number already name, or `None`.
+    ///
+    /// Part of the **scanner's** surface: a season row is created by a scan, so the scan is what has
+    /// to find it again (`crate::library`'s module doc states why the scanner's reads take no
+    /// `AccountScope`).
+    pub async fn season_id_for(
+        &self,
+        title_id: i64,
+        season_number: u32,
+    ) -> Result<Option<i64>, StorageError> {
+        crate::catalogue::season_id_for(&self.readers, title_id, season_number).await
+    }
+
+    /// The id of the episode a title, season, and number already name, or `None`.
+    ///
+    /// The scanner's, for the reason above, and the lookup that keeps a re-scan from creating a
+    /// second episode for one number.
+    pub async fn episode_id_for(
+        &self,
+        title_id: i64,
+        season_number: u32,
+        episode_number: u32,
+    ) -> Result<Option<i64>, StorageError> {
+        crate::catalogue::episode_id_for(&self.readers, title_id, season_number, episode_number)
+            .await
+    }
+
     /// The file at `path` and the numbers a scan compares, whatever account may see it.
     ///
     /// Part of the **scanner's** surface rather than a general read: the module doc in

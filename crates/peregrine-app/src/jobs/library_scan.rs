@@ -76,6 +76,8 @@ impl ScanSummary {
         self.marked_missing += report.marked_missing.len();
         self.restored += report.restored.len();
         self.indexed.created_titles += indexed.created_titles;
+        self.indexed.created_seasons += indexed.created_seasons;
+        self.indexed.created_episodes += indexed.created_episodes;
         self.indexed.created_items += indexed.created_items;
         self.indexed.created_files += indexed.created_files;
         self.indexed.refreshed_files += indexed.refreshed_files;
@@ -100,7 +102,7 @@ pub struct ScanSummary {
     pub marked_missing: usize,
     /// How many files it found again and cleared.
     pub restored: usize,
-    /// What the indexing wrote for the roots it walked.
+    /// What the indexing wrote for the roots it walked, seasons and episodes included.
     pub indexed: IndexReport,
 }
 

@@ -80,6 +80,10 @@ pub struct IndexReport {
     pub created_titles: usize,
     /// Items created — one per title, or per episode once `PG-E14-07` lands.
     pub created_items: usize,
+    /// Seasons created for episode numbers the library did not hold.
+    pub created_seasons: usize,
+    /// Episodes created for numbers it did not hold.
+    pub created_episodes: usize,
     /// Files written for candidates the library had never seen.
     pub created_files: usize,
     /// Files whose size, mtime, or root was refreshed because the library had them.
@@ -92,7 +96,11 @@ impl IndexReport {
     /// Whether the pass found anything new to record.
     #[must_use]
     pub const fn is_unchanged(&self) -> bool {
-        self.created_titles == 0 && self.created_items == 0 && self.created_files == 0
+        self.created_titles == 0
+            && self.created_seasons == 0
+            && self.created_episodes == 0
+            && self.created_items == 0
+            && self.created_files == 0
     }
 }
 
@@ -183,6 +191,8 @@ impl IndexReport {
     /// Folds one candidate's contribution in.
     fn absorb(&mut self, other: &Self) {
         self.created_titles += other.created_titles;
+        self.created_seasons += other.created_seasons;
+        self.created_episodes += other.created_episodes;
         self.created_items += other.created_items;
         self.created_files += other.created_files;
         self.refreshed_files += other.refreshed_files;
@@ -201,9 +211,30 @@ async fn index_parsed(
 ) -> Result<IndexReport, IndexError> {
     let mut report = IndexReport::default();
 
-    // An episode-shaped name is parked, not guessed at: which title it belongs to and where in the
-    // season it sits both need the numbering rules PG-E14-07 owns.
-    if parsed.season().is_some() || parsed.episodes().is_some() {
+    // A name that states a season *and* exactly one episode is the unambiguous case, and placing it
+    // is what turns a show from one title with sixty parked files into episodes. Everything else —
+    // a range, an absolute number with no season, a bare season — is parked with the reason, because
+    // which episode it is needs the numbering rules PG-E14-07 owns: a range is several episodes or
+    // one file that holds them, an absolute number may or may not be the aired one, and a special
+    // belongs in season zero by a convention the parser states and this task does not own.
+    let (Some(season_number), Some(span)) = (parsed.season(), parsed.episodes()) else {
+        if parsed.season().is_some() || parsed.episodes().is_some() || parsed.absolute().is_some() {
+            park(
+                database,
+                path,
+                candidate,
+                parsed,
+                Some(EPISODES_ARE_PG_E14_07.to_owned()),
+                at,
+            )
+            .await?;
+            report.unmatched += 1;
+        } else {
+            report.absorb(&movie(database, root_id, path, parsed, candidate, at).await?);
+        }
+        return Ok(report);
+    };
+    if span.is_multi() {
         park(
             database,
             path,
@@ -216,6 +247,48 @@ async fn index_parsed(
         report.unmatched += 1;
         return Ok(report);
     }
+
+    let Some(title_name) = parsed.title() else {
+        park(
+            database,
+            path,
+            candidate,
+            parsed,
+            Some("the name states no title".to_owned()),
+            at,
+        )
+        .await?;
+        report.unmatched += 1;
+        return Ok(report);
+    };
+    report.absorb(
+        &episode(
+            database,
+            root_id,
+            path,
+            Placement {
+                title_name,
+                season_number,
+                episode_number: span.first(),
+            },
+            candidate,
+            at,
+        )
+        .await?,
+    );
+    Ok(report)
+}
+
+/// Indexes one film: its title, its single item, and its file.
+async fn movie(
+    database: &Arc<Database>,
+    root_id: i64,
+    path: &str,
+    parsed: &LibraryName,
+    candidate: &CandidateFile,
+    at: jiff::Timestamp,
+) -> Result<IndexReport, IndexError> {
+    let mut report = IndexReport::default();
 
     let Some(title_name) = parsed.title() else {
         // `parse` guarantees a title on `Ok`, so this is a shape guard rather than a case.
@@ -237,6 +310,134 @@ async fn index_parsed(
     report.created_titles += created.titles;
     report.created_items += created.items;
 
+    write_file(database, root_id, path, item_id, candidate, at).await?;
+    report.created_files += 1;
+    Ok(report)
+}
+
+/// Where a name says an episode sits: the show, the season, and the number.
+///
+/// One value rather than three parameters because the three arrive together from one parse and mean
+/// nothing apart: a season number with no title is not a placement, and passing them separately
+/// invites a call that swaps two numbers the compiler cannot tell apart.
+#[derive(Debug, Clone, Copy)]
+struct Placement<'a> {
+    /// The show's name, as the file stated it.
+    title_name: &'a str,
+    /// The season number the name stated.
+    season_number: u32,
+    /// The episode number the name stated.
+    episode_number: u32,
+}
+
+/// Indexes one episode: its show's title, the season, the episode, the item, and the file.
+///
+/// The order matters and is the schema's: an episode's row needs its season's id, and its item needs
+/// the episode's, so each step is the next one's input. Every step is a lookup before an insert,
+/// which is what makes a second pass over the same folder create nothing.
+async fn episode(
+    database: &Arc<Database>,
+    root_id: i64,
+    path: &str,
+    placement: Placement<'_>,
+    candidate: &CandidateFile,
+    at: jiff::Timestamp,
+) -> Result<IndexReport, IndexError> {
+    let Placement {
+        title_name,
+        season_number,
+        episode_number,
+    } = placement;
+    let mut report = IndexReport::default();
+    let sort_name = sort_name_of(title_name);
+
+    let title_id = if let Some(id) = database
+        .title_id_for_sort_name(TitleKind::Show.as_str(), &sort_name)
+        .await?
+    {
+        id
+    } else {
+        let id = database
+            .insert_stub_title(StubTitle {
+                kind: TitleKind::Show,
+                subtype: TitleSubtype::Standard,
+                name: title_name.to_owned(),
+                original_name: None,
+                sort_name: sort_name.clone(),
+                at: at.as_millisecond(),
+            })
+            .await?;
+        report.created_titles += 1;
+        id
+    };
+
+    let season_id = if let Some(id) = database.season_id_for(title_id, season_number).await? {
+        id
+    } else {
+        let id = database
+            .insert_stub_season(peregrine_storage::StubSeason {
+                title_id,
+                season_number,
+                at: at.as_millisecond(),
+            })
+            .await?;
+        report.created_seasons += 1;
+        id
+    };
+
+    let episode_id = if let Some(id) = database
+        .episode_id_for(title_id, season_number, episode_number)
+        .await?
+    {
+        id
+    } else {
+        let id = database
+            .insert_stub_episode(peregrine_storage::StubEpisode {
+                title_id,
+                season_id,
+                season_number,
+                episode_number,
+                at: at.as_millisecond(),
+            })
+            .await?;
+        report.created_episodes += 1;
+        id
+    };
+
+    let item_id = if let Some(id) = database.item_id_for(title_id, Some(episode_id)).await? {
+        id
+    } else {
+        let id = database
+            .insert_media_item(MediaItem {
+                id: 0,
+                title_id,
+                episode_id: Some(episode_id),
+                state: MediaItemState::Available,
+                origin: MediaOrigin::Scan,
+                preferred_file_id: None,
+                quality_label: None,
+                created_at: at,
+                updated_at: at,
+            })
+            .await?;
+        report.created_items += 1;
+        id
+    };
+
+    write_file(database, root_id, path, item_id, candidate, at).await?;
+    report.created_files += 1;
+    Ok(report)
+}
+
+/// Writes one file row, which is the same row for a film and for an episode.
+async fn write_file(
+    database: &Arc<Database>,
+    root_id: i64,
+    path: &str,
+    item_id: i64,
+    candidate: &CandidateFile,
+    at: jiff::Timestamp,
+) -> Result<(), IndexError> {
     database
         .insert_media_file(MediaFile {
             id: 0,
@@ -271,8 +472,7 @@ async fn index_parsed(
             updated_at: at,
         })
         .await?;
-    report.created_files += 1;
-    Ok(report)
+    Ok(())
 }
 
 /// What resolving a title and its item created.
@@ -497,6 +697,20 @@ mod tests {
                 .collect()
         }
 
+        /// The one title the corpus holds, for a test that needs its id.
+        async fn only_title(&self) -> i64 {
+            self.database
+                .list_titles(
+                    AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                    PageRequest::first(10),
+                )
+                .await
+                .unwrap()
+                .first()
+                .expect("the corpus holds one title")
+                .id
+        }
+
         async fn unmatched(&self) -> Vec<String> {
             self.database
                 .list_unmatched_files(
@@ -600,18 +814,93 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_name_that_states_an_episode_is_parked_rather_than_guessed_at() {
-        // Placing an episode needs the numbering rules PG-E14-07 owns, so the file is parked with
-        // the reason and everything the parse read. Parking loses nothing: the parse is stored
-        // beside the path, which is what makes the queue workable.
+    async fn a_single_episode_is_placed_in_its_season() {
+        // The unambiguous case, and the one that turns a show from one title with sixty parked
+        // files into episodes: a name that states a season *and* exactly one episode. It creates the
+        // show, the season, the episode, the item, and the file, in that order, because each row's
+        // id is the next one's foreign key.
         let corpus = corpus("episode", &["Breaking Bad S01E01.mkv"]).await;
 
         let report = corpus.index().await;
 
+        assert_eq!(report.created_titles, 1, "{report:?}");
+        assert_eq!(report.created_seasons, 1, "{report:?}");
+        assert_eq!(report.created_episodes, 1, "{report:?}");
+        assert_eq!(report.created_items, 1, "{report:?}");
+        assert_eq!(report.created_files, 1, "{report:?}");
+        assert_eq!(report.unmatched, 0, "{report:?}");
+        assert_eq!(corpus.titles().await.len(), 1);
+        let title_id = corpus.only_title().await;
+        assert!(
+            corpus
+                .database
+                .episode_id_for(title_id, 1, 1)
+                .await
+                .unwrap()
+                .is_some(),
+            "the episode is findable by the numbers its name stated"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_episodes_of_one_show_share_a_season_and_have_an_item_each() {
+        let corpus = corpus(
+            "two-episodes",
+            &["Breaking Bad S01E01.mkv", "Breaking Bad S01E02.mkv"],
+        )
+        .await;
+
+        let report = corpus.index().await;
+
+        assert_eq!(report.created_titles, 1, "{report:?}");
+        assert_eq!(report.created_seasons, 1, "{report:?}");
+        assert_eq!(report.created_episodes, 2, "{report:?}");
+        assert_eq!(report.created_items, 2, "{report:?}");
+        assert_eq!(report.created_files, 2, "{report:?}");
+    }
+
+    #[tokio::test]
+    async fn a_multi_episode_file_is_parked_rather_than_placed() {
+        // `S01E01E02` is one file holding two episodes or a naming mistake, and which one it is needs
+        // the numbering rules PG-E14-07 owns. Parking loses nothing: the parse is stored beside the
+        // path, so the queue has everything a human needs to decide.
+        let corpus = corpus("range", &["Breaking Bad S01E01E02.mkv"]).await;
+
+        let report = corpus.index().await;
+
         assert_eq!(report.unmatched, 1, "{report:?}");
-        assert_eq!(report.created_titles, 0);
+        assert_eq!(report.created_episodes, 0, "{report:?}");
         assert_eq!(corpus.titles().await, Vec::<String>::new());
         assert_eq!(corpus.unmatched().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_season_with_no_episode_is_parked_rather_than_guessed_at() {
+        // A name that states a season and no episode is a season pack or a folder, and placing it
+        // would mean inventing which episode it is.
+        let corpus = corpus("season-only", &["Breaking Bad Season 1.mkv"]).await;
+
+        let report = corpus.index().await;
+
+        assert_eq!(report.unmatched, 1, "{report:?}");
+        assert_eq!(report.created_episodes, 0, "{report:?}");
+    }
+
+    #[tokio::test]
+    async fn a_second_pass_over_episodes_creates_nothing() {
+        let corpus = corpus(
+            "episodes-idempotent",
+            &["Breaking Bad S01E01.mkv", "Breaking Bad S02E01.mkv"],
+        )
+        .await;
+        corpus.index().await;
+
+        let second = corpus.index().await;
+
+        assert!(second.is_unchanged(), "{second:?}");
+        assert_eq!(second.refreshed_files, 2, "{second:?}");
+        assert_eq!(second.created_episodes, 0, "{second:?}");
+        assert_eq!(second.created_seasons, 0, "{second:?}");
     }
 
     #[tokio::test]

@@ -51,6 +51,117 @@ pub struct StubTitle {
     pub at: i64,
 }
 
+/// Inserts one season row and answers its id.
+///
+/// No search index row: `episode` and `season` are not searched, and FTS5 is what the title and its
+/// aliases are for. The statement is the whole transaction because there is nothing to keep in step
+/// with it.
+pub(crate) async fn insert_season(
+    connection: &mut sqlx::SqliteConnection,
+    season: &StubSeason,
+) -> Result<i64, StorageError> {
+    let result = sqlx::query(
+        "INSERT INTO season (title_id, season_number, is_specials, updated_at) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(season.title_id)
+    .bind(i64::from(season.season_number))
+    // Season zero is where a show's specials live, and it is the one number whose meaning is fixed
+    // rather than a convention: `DATA_MODEL` stores `is_specials` so a read does not have to know it.
+    .bind(i64::from(season.season_number == 0))
+    .bind(season.at)
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.last_insert_rowid())
+}
+
+/// Inserts one episode row and answers its id.
+pub(crate) async fn insert_episode(
+    connection: &mut sqlx::SqliteConnection,
+    episode: &StubEpisode,
+) -> Result<i64, StorageError> {
+    let result = sqlx::query(
+        "INSERT INTO episode (title_id, season_id, season_number, episode_number, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(episode.title_id)
+    .bind(episode.season_id)
+    .bind(i64::from(episode.season_number))
+    .bind(i64::from(episode.episode_number))
+    .bind(episode.at)
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.last_insert_rowid())
+}
+
+/// The id of the season a title and number already name, or `None`.
+pub(crate) async fn season_id_for(
+    pool: &sqlx::SqlitePool,
+    title_id: i64,
+    season_number: u32,
+) -> Result<Option<i64>, StorageError> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM season WHERE title_id = ?1 AND season_number = ?2")
+            .bind(title_id)
+            .bind(i64::from(season_number))
+            .fetch_optional(pool)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|row| row.0))
+}
+
+/// The id of the episode a title, season, and number already name, or `None`.
+pub(crate) async fn episode_id_for(
+    pool: &sqlx::SqlitePool,
+    title_id: i64,
+    season_number: u32,
+    episode_number: u32,
+) -> Result<Option<i64>, StorageError> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM episode WHERE title_id = ?1 AND season_number = ?2 AND episode_number = ?3",
+    )
+    .bind(title_id)
+    .bind(i64::from(season_number))
+    .bind(i64::from(episode_number))
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|row| row.0))
+}
+
+/// The identity a stub season needs, and nothing more.
+///
+/// A season is a row the library creates to hang episodes off; a provider sync fills in its name,
+/// overview, air date, and artwork later (`PG-E5-06`). It exists because `episode.season_id` is a
+/// foreign key rather than a number: a placement that had the season wrong would put the episode
+/// under the wrong set of rows, and the schema's `UNIQUE (title_id, season_number)` is what stops
+/// two seasons existing for one number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StubSeason {
+    /// The title the season belongs to.
+    pub title_id: i64,
+    /// The season number, which zero is for a show's specials.
+    pub season_number: u32,
+    /// Unix milliseconds, for `updated_at`; the table has no `created_at`.
+    pub at: i64,
+}
+
+/// The identity a stub episode needs, and nothing more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StubEpisode {
+    /// The title the episode belongs to, which the schema denormalises beside the season.
+    pub title_id: i64,
+    /// The season it sits in.
+    pub season_id: i64,
+    /// The season number, denormalised by the schema for the read that lists a title's episodes.
+    pub season_number: u32,
+    /// The episode number within the season.
+    pub episode_number: u32,
+    /// Unix milliseconds, for `updated_at`.
+    pub at: i64,
+}
+
 /// What a read of a title's identity returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitleIdentity {
@@ -307,6 +418,154 @@ impl TryFrom<IdentityRow> for TitleIdentity {
             })?,
             adult: row.adult != 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod episode_tests {
+    use tempfile::TempDir;
+
+    use crate::{Database, StubSeason, StubTitle, TitleKind, TitleSubtype};
+
+    use super::StubEpisode;
+
+    const NOW: i64 = 1_700_000_000_000;
+
+    async fn database(directory: &TempDir) -> (Database, i64) {
+        let database = Database::open(directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        let title = database
+            .insert_stub_title(StubTitle {
+                kind: TitleKind::Show,
+                subtype: TitleSubtype::Standard,
+                name: "Breaking Bad".to_owned(),
+                original_name: None,
+                sort_name: "breaking bad".to_owned(),
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        (database, title)
+    }
+
+    #[tokio::test]
+    async fn a_season_and_its_episodes_round_trip_by_number() {
+        // What a placement needs: create the rows once, find them again by the numbers the
+        // filenames stated, and never create a second one for the same number.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+
+        let season = database
+            .insert_stub_season(StubSeason {
+                title_id: title,
+                season_number: 1,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        let episode = database
+            .insert_stub_episode(StubEpisode {
+                title_id: title,
+                season_id: season,
+                season_number: 1,
+                episode_number: 2,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            database.season_id_for(title, 1).await.unwrap(),
+            Some(season)
+        );
+        assert_eq!(
+            database.episode_id_for(title, 1, 2).await.unwrap(),
+            Some(episode)
+        );
+        assert_eq!(database.season_id_for(title, 2).await.unwrap(), None);
+        assert_eq!(database.episode_id_for(title, 1, 3).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn the_schema_refuses_a_second_season_or_episode_for_one_number() {
+        // The unique indices (I2's neighbours) are what stop a placement that lost its lookup from
+        // writing a duplicate: the second insert fails rather than the library quietly holding two
+        // seasons numbered one.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        let season = database
+            .insert_stub_season(StubSeason {
+                title_id: title,
+                season_number: 1,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        database
+            .insert_stub_episode(StubEpisode {
+                title_id: title,
+                season_id: season,
+                season_number: 1,
+                episode_number: 1,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            database
+                .insert_stub_season(StubSeason {
+                    title_id: title,
+                    season_number: 1,
+                    at: NOW,
+                })
+                .await
+                .is_err()
+        );
+        assert!(
+            database
+                .insert_stub_episode(StubEpisode {
+                    title_id: title,
+                    season_id: season,
+                    season_number: 1,
+                    episode_number: 1,
+                    at: NOW,
+                })
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn season_zero_is_marked_as_specials() {
+        // Season zero is where a show's specials live, and the schema stores a flag so a read does
+        // not have to know that convention. A row written without it would sort specials among the
+        // seasons as if they were one.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        let season = database
+            .insert_stub_season(StubSeason {
+                title_id: title,
+                season_number: 0,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("peregrine.sqlite").display()
+        ))
+        .await
+        .unwrap();
+        let (specials,): (i64,) = sqlx::query_as("SELECT is_specials FROM season WHERE id = ?1")
+            .bind(season)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(specials, 1);
     }
 }
 

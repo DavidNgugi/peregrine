@@ -40,6 +40,10 @@ pub(crate) enum WriteRequest {
     },
     /// Insert one title in its `stub` state.
     InsertStubTitle(Box<StubTitle>),
+    /// Insert one `season` row.
+    InsertStubSeason(Box<crate::catalogue::StubSeason>),
+    /// Insert one `episode` row.
+    InsertStubEpisode(Box<crate::catalogue::StubEpisode>),
     /// Attach external ids to one title.
     AttachExternalIds {
         title_id: i64,
@@ -419,6 +423,16 @@ async fn apply(
         WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
             .await
             .map(|id| WriteResponse::TitleInserted { id }),
+        WriteRequest::InsertStubSeason(season) => {
+            crate::catalogue::insert_season(connection, &season)
+                .await
+                .map(|id| WriteResponse::RowInserted { id })
+        }
+        WriteRequest::InsertStubEpisode(episode) => {
+            crate::catalogue::insert_episode(connection, &episode)
+                .await
+                .map(|id| WriteResponse::RowInserted { id })
+        }
         WriteRequest::AttachExternalIds { title_id, ids } => {
             crate::catalogue::attach_external_ids(connection, title_id, &ids)
                 .await
