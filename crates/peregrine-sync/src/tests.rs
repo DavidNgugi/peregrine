@@ -8,14 +8,12 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use jiff::Timestamp;
-use peregrine_domain::{Clock, IdGenerator};
+use peregrine_domain::Clock;
+use peregrine_testkit::{CountingIds, FakeClock};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
-use ulid::Ulid;
 
 use crate::backoff::Backoff;
 use crate::core::{Scheduler, SchedulerConfig, Submission};
@@ -26,32 +24,9 @@ use crate::job::{
     JobStateKind,
 };
 
-/// A clock pinned to one instant, so a deferral's recorded time is predictable.
-struct FrozenClock(Timestamp);
-
-impl Clock for FrozenClock {
-    fn now(&self) -> Timestamp {
-        self.0
-    }
-}
-
-/// Identities handed out in a predictable order.
-struct CountingIds(AtomicUsize);
-
-impl IdGenerator for CountingIds {
-    fn next_id(&self) -> Ulid {
-        let issued = self.0.fetch_add(1, Ordering::Relaxed);
-        Ulid::from_parts(
-            1_700_000_000_000,
-            u128::try_from(issued).unwrap_or_default(),
-        )
-    }
-}
-
+/// A pinned clock, so a deferral's recorded time is predictable.
 fn clock() -> Arc<dyn Clock + Send + Sync> {
-    Arc::new(FrozenClock(
-        Timestamp::from_millisecond(1_700_000_000_000).unwrap(),
-    ))
+    Arc::new(FakeClock::default())
 }
 
 /// A scheduler with deterministic identifiers, a frozen clock, and one worker.
@@ -60,7 +35,7 @@ fn clock() -> Arc<dyn Clock + Send + Sync> {
 /// jobs both start and their order stops being a property of the queue.
 fn scheduler_with_one_worker() -> Scheduler {
     Scheduler::new(
-        SchedulerConfig::new(clock(), Arc::new(CountingIds(AtomicUsize::new(0))))
+        SchedulerConfig::new(clock(), Arc::new(CountingIds::default()))
             .with_max_concurrency(NonZeroUsize::MIN),
     )
 }
@@ -588,7 +563,7 @@ async fn a_job_that_always_defers_is_abandoned_when_its_retry_budget_runs_out() 
                 initial: Duration::from_millis(1),
                 ..Backoff::default()
             }),
-            ..SchedulerConfig::new(clock(), Arc::new(CountingIds(AtomicUsize::new(0))))
+            ..SchedulerConfig::new(clock(), Arc::new(CountingIds::default()))
         }
         .with_max_concurrency(NonZeroUsize::MIN),
     );

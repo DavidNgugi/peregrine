@@ -9,5 +9,15 @@ repository.workspace = true
 description = "Peregrine test doubles."
 publish = false
 
+[dependencies]
+peregrine-domain = { workspace = true }
+# `FakeClock` and the conformance suite name `jiff::Timestamp` in their signatures,
+# and `CountingIds` mints `ulid::Ulid`, so both must be runtime dependencies rather
+# than test-only ones: a dev-dependency of an unpublished crate is not re-exported
+# to the crates that run the suite. See the `[crates.peregrine-testkit]` entry in
+# arch-allowlist.toml for the reason.
+jiff = { workspace = true }
+ulid = { workspace = true }
+
 [lints]
 workspace = true

@@ -1,12 +1,30 @@
 #![forbid(unsafe_code)]
-//! Test doubles for the ports.
+//! Test doubles for the ports, and the conformance suite they must pass.
 //!
-//! **Nothing is here yet.** The crate is declared so the fakes have one agreed home, and
-//! `PG-E4-19` owns filling it: a fake clock, a deterministic id generator, in-memory
-//! repositories, and a scripted metadata provider. Until that lands, the doubles live beside
-//! the tests that use them.
+//! The crate holds a frozen [`FakeClock`] and a deterministic [`CountingIds`], plus
+//! [`clock_satisfies_the_port`] and [`id_generator_satisfies_the_port`], which assert the
+//! contract `peregrine-domain` states for `Clock` and `IdGenerator`. The suite is written
+//! once and run twice — against the fake here, and against the production adapters in
+//! `peregrine-platform` — so the fake and the adapter cannot drift apart in silence.
 //!
-//! The reason it exists at all is determinism: a fake in one shared crate is a fake every
-//! crate can use, so no test anywhere has to reach the network or the wall clock to exercise
-//! a rule. The doc above used to claim those doubles were already here, which sent a reader
-//! looking for a `FrozenClock` that did not exist.
+//! That is the whole reason for the crate: a fake every test crate shares is a fake that
+//! cannot quietly disagree with the adapter it stands in for, and a test that injects one
+//! never has to reach the wall clock or the network to exercise a rule (AGENTS R14).
+//!
+//! This crate is `unpublished` in `arch-allowlist.toml`, which is what lets [`FakeClock`]
+//! advance: `cargo xtask check-determinism` skips a crate that never ships, so a clock
+//! under a test's control is permitted here by design rather than by exemption. Nothing in
+//! this crate reads the machine's clock — the point of a fake is that it does not.
+//!
+//! The fakes cover the two ports that exist. In-repertoire HTTP fakes, in-memory
+//! repositories, and a scripted metadata provider are deliberately absent: the ports for
+//! them have not been written, and a double for a trait that does not exist is speculative
+//! work (AGENTS R3).
+
+mod clock;
+mod conformance;
+mod ids;
+
+pub use clock::{DEFAULT_EPOCH_MILLISECONDS, FakeClock};
+pub use conformance::{clock_satisfies_the_port, id_generator_satisfies_the_port};
+pub use ids::CountingIds;

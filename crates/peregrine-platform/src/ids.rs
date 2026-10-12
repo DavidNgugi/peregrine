@@ -28,12 +28,11 @@ mod tests {
     use super::*;
 
     /// Two draws must differ. The generator is called by the scheduler for every
-    /// submission, and a repeated identifier would collide in the dedupe index.
+    /// submission, and a repeated identifier would collide in the dedupe index. The
+    /// assertion lives in `peregrine-testkit` because the fake generator answers to it
+    /// too, so the two implementations cannot drift apart unobserved (PG-E4-19).
     #[test]
-    fn generated_identifiers_differ() {
-        let generator = UlidGenerator;
-        let first = generator.next_id();
-        let second = generator.next_id();
-        assert_ne!(first, second);
+    fn the_ulid_generator_satisfies_the_port() {
+        peregrine_testkit::id_generator_satisfies_the_port(|| UlidGenerator.next_id());
     }
 }
