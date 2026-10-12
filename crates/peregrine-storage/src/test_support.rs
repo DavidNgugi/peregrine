@@ -52,6 +52,22 @@ pub(crate) async fn execute(path: &Path, sql: &str) -> i64 {
     id
 }
 
+/// Runs `statements` on their own writer connection, in order.
+///
+/// A suite that seeds a dozen tables — retention seeds every eligible table and the user-data
+/// tables its guard compares — should not open a connection per row, and the connection
+/// discipline is the same as [`execute`]'s: one writer, closed before the assertions run.
+pub(crate) async fn seed(path: &Path, statements: &[String]) {
+    let mut connection = crate::database::open_writer_connection(path).await.unwrap();
+    for statement in statements {
+        sqlx::query(sqlx::AssertSqlSafe(statement.clone()))
+            .execute(&mut connection)
+            .await
+            .unwrap();
+    }
+    connection.close().await.unwrap();
+}
+
 /// An account with `id`, created once however many tests ask for it.
 pub(crate) async fn account(path: &Path, id: i64, name: &str) {
     let _ = execute(

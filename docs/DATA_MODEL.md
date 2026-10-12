@@ -1184,3 +1184,17 @@ Used by the storage screen and by the free-space floor guard.
 | Logs | ≤ 20 MB | Rotated |
 
 `GET /diagnostics`-equivalent surfaces per-component usage with a clear button for each disposable tier, and the deletion path never touches user media.
+
+`peregrine-storage`'s `usage` module answers the table above from the database's side, and each
+number records which side it came from. The **database** tier is the database's own page
+geometry: `page_count * page_size`, which is the main file once the write-ahead log has been
+checkpointed and the logical size the main file and the log together cover until then. The
+**cache** and **artwork** tiers are byte columns a writer recorded when it stored the row
+(`provider_cache.size_bytes`, `image_cache.bytes`), so they are as accurate as that writer was.
+The **sidecars** tier is a row count, because `subtitle_track` records a path and no size. The
+**logs** tier has no row at all. The filesystem is the authority for what is on disk, so a
+directory walk is what a total means here; the tiers are not disjoint — the cache's bytes live
+inside the database file — and summing them would count those bytes twice. §4's library usage
+read is the one place both sides describe the same bytes, because a `media_file` row records a
+size measured from the file it names, and it is served by the covering index migration 0011
+adds.

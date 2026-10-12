@@ -27,8 +27,10 @@ mod migrations;
 mod notify;
 mod page;
 mod pragmas;
+mod retention;
 #[cfg(test)]
 mod test_support;
+mod usage;
 mod watch;
 mod writer;
 
@@ -42,5 +44,10 @@ pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{LibraryRootRow, MediaFileRow, MediaItemRow, SubtitleTrackRow, UnmatchedFileRow};
 pub use notify::NotificationRepository;
 pub use page::{Cursor, MAX_PAGE_ROWS, PageRequest};
+pub use retention::{
+    RETENTION_POLICY, Requirement, RetentionFailure, RetentionOutcome, RetentionPlan,
+    RetentionPolicyEntry, RetentionRule, TableRemoval, TimeWindow,
+};
+pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
 pub use watch::{WatchProgressRow, WatchlistRow};
 pub use writer::NewEvent;
