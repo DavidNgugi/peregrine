@@ -38,6 +38,8 @@
 //! ask for.
 
 use crate::error::StorageError;
+// `begin` is `sqlx::Connection`'s, and `remove_root` is the one statement pair here that needs a
+// transaction of its own.
 use crate::json::{decode_string_array, encode_string_array};
 use crate::page::PageRequest;
 use jiff::Timestamp;
@@ -46,6 +48,7 @@ use peregrine_domain::{
     MediaItemState, MediaOrigin, NonEmptyText, ScanMode, SeasonNumber, SubtitleFormat,
     SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile,
 };
+use sqlx::Connection as _;
 
 /// One row of `library_root`, with the id a page resumes below.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,10 +324,25 @@ pub(crate) async fn remove_root(
     connection: &mut sqlx::SqliteConnection,
     id: i64,
 ) -> Result<bool, sqlx::Error> {
+    // Two statements, so one transaction: the file rows keep their contents and lose their root,
+    // and a root cannot be deleted while they still point at it (`media_file.root_id` is a foreign
+    // key, and SQLite's default action is to refuse). Leaving them pointing at a deleted row is not
+    // an option the schema has, and deleting them is not an option this product has — the whole
+    // point of PG-E14-01 is that removing a root removes a configuration entry and nothing else.
+    //
+    // `root_id` is nullable for exactly this: a file the library indexed under a root the user has
+    // since removed. Re-adding that root is what adopts it back, which the indexing step owes
+    // (`PG-E14-10`), because `media_file.path` is unique and a second row for it cannot exist.
+    let mut transaction = connection.begin().await?;
+    sqlx::query("UPDATE media_file SET root_id = NULL WHERE root_id = ?1")
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
     let result = sqlx::query("DELETE FROM library_root WHERE id = ?1")
         .bind(id)
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await?;
+    transaction.commit().await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -1196,7 +1214,6 @@ mod tests {
     use crate::test_support::{NOW, account, database, episode, path_of, season, title};
     use peregrine_domain::{AccountId, HdrFormat, SeasonNumber};
     use proptest::prelude::*;
-    use sqlx::Connection as _;
     use tempfile::TempDir;
 
     /// The scope the fixtures are read with: an account with no ceiling and no curation.
@@ -1370,10 +1387,13 @@ mod tests {
             .await
             .unwrap();
         let item_id = database.insert_media_item(item(1, None)).await.unwrap();
-        let file_id = database
-            .insert_media_file(file(item_id, on_disk.to_str().unwrap()))
-            .await
-            .unwrap();
+        // The row points at its root, which is what makes this the case that matters: with the
+        // foreign key in place, a root that has files cannot simply be deleted, and the first
+        // version of this test used a fixture whose `root_id` was `None` — so it never removed a
+        // root that had anything under it, and the defect it was written to prevent went unnoticed.
+        let mut pointed = file(item_id, on_disk.to_str().unwrap());
+        pointed.root_id = Some(root_id);
+        let file_id = database.insert_media_file(pointed).await.unwrap();
         database
             .record_watch_progress(WatchProgress::record(
                 AccountId::new(1).unwrap(),
@@ -1398,13 +1418,14 @@ mod tests {
             on_disk.is_file(),
             "removing a root from Peregrine is not deleting the user's files"
         );
-        assert!(
-            database
-                .media_file(any_account(), file_id)
-                .await
-                .unwrap()
-                .is_some(),
-            "the file row survives, so the library still knows what it has"
+        let kept = database
+            .media_file(any_account(), file_id)
+            .await
+            .unwrap()
+            .expect("the file row survives, so the library still knows what it has");
+        assert_eq!(
+            kept.root_id, None,
+            "and it no longer points at the root that was removed"
         );
         assert!(
             database
