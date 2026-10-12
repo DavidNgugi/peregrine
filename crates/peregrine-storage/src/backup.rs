@@ -328,6 +328,6 @@ mod tests {
         assert!(!leftover.exists(), "the leftover must not survive the run");
         assert!(copy.is_file());
         let mut restored = open_writer_connection(&copy).await.unwrap();
-        assert_eq!(versions(&mut restored).await, (1..=10).collect::<Vec<_>>());
+        assert_eq!(versions(&mut restored).await, (1..=11).collect::<Vec<_>>());
     }
 }

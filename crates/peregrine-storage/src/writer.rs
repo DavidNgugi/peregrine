@@ -88,6 +88,19 @@ pub(crate) enum WriteRequest {
     RemoveTitleIndex { title_id: i64 },
     /// Rebuild the whole search index from the source tables.
     RebuildSearchIndex,
+    /// Prune one bounded batch of the rows a retention rule makes eligible.
+    ///
+    /// The instant comes from the plan rather than from a caller's clock read, and the limit
+    /// is what bounds the statement, so a retention sweep arrives as a series of short writes
+    /// rather than one long one (PG-E3-15).
+    PruneRetention {
+        /// The rule the batch prunes.
+        rule: &'static crate::retention::RetentionRule,
+        /// The instant the plan was taken at.
+        at_millis: i64,
+        /// The most rows this statement may remove.
+        limit: u64,
+    },
 }
 
 /// The writer's answer to a [`WriteRequest`].
@@ -121,6 +134,8 @@ pub(crate) enum WriteResponse {
     TitleIndexRemoved { removed: bool },
     /// How many titles the rebuild indexed.
     SearchIndexRebuilt { indexed: u64 },
+    /// How many rows a retention batch removed.
+    RetentionPruned { rows: u64 },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -347,6 +362,14 @@ async fn apply(
         WriteRequest::RebuildSearchIndex => crate::fts::rebuild(connection)
             .await
             .map(|indexed| WriteResponse::SearchIndexRebuilt { indexed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::PruneRetention {
+            rule,
+            at_millis,
+            limit,
+        } => crate::retention::delete_batch(connection, rule, at_millis, limit)
+            .await
+            .map(|rows| WriteResponse::RetentionPruned { rows })
             .map_err(StorageError::from_sqlx),
         other => apply_library_write(connection, other).await,
     }

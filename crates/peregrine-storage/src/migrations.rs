@@ -932,7 +932,7 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 38] = [
+    const DOCUMENTED_INDICES: [&str; 40] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "download_job_active_idx",
@@ -949,6 +949,7 @@ mod tests {
         "job_ready_idx",
         "media_file_item_idx",
         "media_file_missing_idx",
+        "media_file_usage_idx",
         "media_item_episode_uq",
         "media_item_movie_uq",
         "notification_centre_idx",
@@ -958,6 +959,7 @@ mod tests {
         "person_name_idx",
         "provider_cache_expiry_idx",
         "provider_cache_resource_idx",
+        "provider_cache_size_idx",
         "release_decision_title_idx",
         "subtitle_download_uq",
         "subtitle_track_episode_idx",
@@ -1025,6 +1027,11 @@ mod tests {
             "media_file_missing_idx",
             "(missing_since) WHERE missing_since IS NOT NULL",
         ),
+        (
+            "media_file_usage_idx",
+            "(root_id, quality_label, media_item_id, size_bytes)",
+        ),
+        ("media_file_usage_idx", "WHERE missing_since IS NULL"),
         ("subtitle_track_file_idx", "(media_file_id, language)"),
         ("subtitle_track_episode_idx", "(episode_id, language)"),
         ("subtitle_download_uq", "UNIQUE INDEX subtitle_download_uq"),
@@ -1057,6 +1064,7 @@ mod tests {
         ("release_decision_title_idx", "(title_id, created_at DESC)"),
         ("provider_cache_expiry_idx", "(expires_at)"),
         ("provider_cache_resource_idx", "(provider, resource)"),
+        ("provider_cache_size_idx", "(size_bytes)"),
         ("image_cache_lru_idx", "(last_used_at)"),
         (
             "notification_centre_idx",
@@ -1269,8 +1277,8 @@ mod tests {
         let applied = apply(&mut connection, &path).await.unwrap();
 
         assert_eq!(
-            applied, 10,
-            "the embedded set is 0001–0010, one migration per file"
+            applied, 11,
+            "the embedded set is 0001–0011, one migration per file"
         );
         assert_eq!(
             documented_tables(&mut connection).await,
@@ -1279,7 +1287,7 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            (1..=10).collect::<Vec<_>>(),
+            (1..=11).collect::<Vec<_>>(),
             "every applied migration must be recorded, in order"
         );
     }
@@ -1716,10 +1724,10 @@ mod tests {
         let mut second = open_writer_connection(&path).await.unwrap();
         let applied = apply(&mut second, &path).await.unwrap();
 
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
         assert_eq!(
             versions(&mut second).await,
-            (1..=10).collect::<Vec<_>>(),
+            (1..=11).collect::<Vec<_>>(),
             "a second run must not record the migrations twice"
         );
     }
@@ -2697,7 +2705,7 @@ mod tests {
     /// The version the fixture takes, past every merged migration.
     /// The version after the embedded set: this fixture migration is appended to the real
     /// ones, so it moves whenever a migration is added.
-    const FAILING_VERSION: i64 = 11;
+    const FAILING_VERSION: i64 = 12;
 
     /// A corrected version of the fixture, used to prove a failed run can be retried.
     const FIXED_MIGRATION: &str = "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY, note TEXT NOT NULL); \
@@ -2777,7 +2785,7 @@ mod tests {
         assert_eq!(description, "deliberately_failing");
         let message = error.to_string();
         assert!(
-            message.contains("0011_deliberately_failing"),
+            message.contains("0012_deliberately_failing"),
             "the error must name the migration: {message}"
         );
         assert!(
@@ -2803,7 +2811,7 @@ mod tests {
         assert_eq!(schema(&mut connection).await, before);
         assert_eq!(
             versions(&mut connection).await,
-            (1..=10).collect::<Vec<_>>(),
+            (1..=11).collect::<Vec<_>>(),
             "a failed migration must not be recorded"
         );
         let titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
@@ -2816,7 +2824,7 @@ mod tests {
         // no record of the version that failed.
         let mut copy = open_writer_connection(&backup).await.unwrap();
         assert!(!table_exists(&mut copy, "migration_probe").await);
-        assert_eq!(versions(&mut copy).await, (1..=10).collect::<Vec<_>>());
+        assert_eq!(versions(&mut copy).await, (1..=11).collect::<Vec<_>>());
         let copied_titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
             .fetch_one(&mut copy)
             .await
@@ -2845,10 +2853,10 @@ mod tests {
         ));
         let applied = run(&mut connection, &path, &fixed).await.unwrap();
 
-        assert_eq!(applied, 11);
+        assert_eq!(applied, 12);
         assert_eq!(
             versions(&mut connection).await,
-            (1..=11).collect::<Vec<_>>()
+            (1..=12).collect::<Vec<_>>()
         );
         assert!(table_exists(&mut connection, "migration_probe").await);
     }
@@ -2864,7 +2872,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
         let copies = copies(&directory).await;
         assert_eq!(
             copies,
@@ -2881,7 +2889,7 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            (1..=10).collect::<Vec<_>>()
+            (1..=11).collect::<Vec<_>>()
         );
     }
 

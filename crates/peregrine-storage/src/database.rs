@@ -18,6 +18,8 @@ use crate::integrity::Recovery;
 use crate::jobs::{JobChange, JobRecord, NewJob};
 use crate::page::PageRequest;
 use crate::pragmas;
+use crate::retention::{RetentionOutcome, RetentionPlan};
+use crate::usage::{DiskUsage, LibraryUsageRow};
 use crate::writer::{NewEvent, WriteRequest, WriteResponse, WriterHandle};
 
 /// ARCHITECTURE §10: readers use a pool sized to `min(4, cores)`.
@@ -289,6 +291,46 @@ impl Database {
             WriteResponse::SearchIndexRebuilt { indexed } => Ok(indexed),
             other => Err(unexpected_response("rebuild_search_index", &other)),
         }
+    }
+
+    /// What a retention run at `at_millis` would remove, before anything is removed.
+    ///
+    /// The instant arrives as a value (AGENTS R14) and the answer is a plan the caller can log
+    /// or show (AGENTS R22); nothing is deleted until [`Database::apply_retention`] is handed
+    /// that plan.
+    pub async fn plan_retention(&self, at_millis: i64) -> Result<RetentionPlan, StorageError> {
+        crate::retention::plan(&self.readers, at_millis).await
+    }
+
+    /// Applies a retention plan through the single writer.
+    ///
+    /// Best-effort per table, like the pre-migration copy rotation: a table whose statement
+    /// fails is reported in the outcome and the remaining tables still run. The one error
+    /// returned is a stopped writer, when nothing can be applied at all.
+    pub async fn apply_retention(
+        &self,
+        plan: &RetentionPlan,
+    ) -> Result<RetentionOutcome, StorageError> {
+        crate::retention::apply(&self.writer, plan).await
+    }
+
+    /// The bytes the database can account for, per `DATA_MODEL` §7 tier.
+    ///
+    /// Every number is the database's own, and each entry names the side of the
+    /// database/filesystem line it came from ([`crate::MeasuredFrom`]); the filesystem's answer
+    /// is a directory walk this crate does not do.
+    pub async fn disk_usage(&self) -> Result<DiskUsage, StorageError> {
+        crate::usage::disk_usage(&self.readers).await
+    }
+
+    /// The library's recorded bytes by root and quality label, for the `scope` that may see them.
+    ///
+    /// This is the §4 query the storage screen and the free-space floor guard read.
+    pub async fn library_storage_usage(
+        &self,
+        scope: AccountScope,
+    ) -> Result<Vec<LibraryUsageRow>, StorageError> {
+        crate::usage::library_storage_usage(&self.readers, scope).await
     }
 
     /// Inserts one library root and reports the id `SQLite` assigned.
