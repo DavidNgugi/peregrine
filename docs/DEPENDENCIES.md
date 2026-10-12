@@ -126,6 +126,10 @@ Dropped: `framer-motion` (alias of `motion`), `suspend-react` (abandoned 2023), 
 | `cargo-deny` | 0.20.2 | MIT OR Apache-2.0 | Licence allowlist, bans, advisories — the primary supply-chain gate |
 | `cargo-audit` | 0.22.2 | Apache-2.0 OR MIT | Secondary advisory check; overlaps `cargo-deny`, run weekly rather than per-commit |
 | `cargo-llvm-cov` | 0.9.1 | Apache-2.0 OR MIT | Coverage with per-crate thresholds |
+| `cargo-cyclonedx` | 0.5.9 | Apache-2.0 | The CycloneDX SBOM the release attaches (ADR 0009 §Decision 7). CI-only, never shipped |
+| `minisign` | 0.12 | ISC | Signs the release manifest. CI-only, never shipped; the secret key is a repository secret and the public half is published |
+
+CI also uses two actions, pinned by version and digest in `.github/workflows/release.yml`: `softprops/action-gh-release` (MIT) to publish the release, and the `minisign` release archive itself, which the workflow verifies against a recorded SHA-256 before running it.
 | `git-cliff` | 2.14.2 | MIT OR Apache-2.0 | Changelog generation |
 | `release-plz` | 0.3.170 | MIT OR Apache-2.0 | Release PRs |
 | `vergen` | 10.0.3 | MIT OR Apache-2.0 | Git metadata in the About box and diagnostics |
@@ -149,6 +153,15 @@ Only `cargo-dist` (renamed upstream to `dist`) was considered and is **not** ado
 Payload cost and how we avoid it: **mpv plus a minimal ffprobe ship in the base install** (roughly 35–45 MB and 10–15 MB respectively). A **full ffmpeg build is 40–60 MB per platform** and is therefore an on-demand component pack, downloaded only when a feature needs it (casting transcode, bitmap subtitle extraction), verified against a pinned checksum and signature before use, and documented in Settings with its size shown before download. macOS notarization and Windows signing must cover each binary we ship, including the base sidecars.
 
 Obligations, checked per release by `xtask check-notices`:
+
+The release copies the licence text for each shipped binary and the written source
+offer into every bundle through `bundle.resources` in
+[tauri.conf.json](../apps/desktop/src-tauri/tauri.conf.json), which carries
+[`notices/`](../notices/README.md) and [`NOTICE`](../NOTICE). The sidecar licence
+texts and the generated attribution file land in that directory as the sidecars
+are pinned; the written offer is
+[`notices/SOURCE-OFFER.md`](../notices/SOURCE-OFFER.md). A release in which any of
+them is missing fails rather than publishing.
 
 1. Licence text for the exact binary shipped, inside the bundle.
 2. A written offer of corresponding source, on the same distribution channel as the binary.

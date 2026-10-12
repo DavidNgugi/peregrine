@@ -113,7 +113,7 @@ graph LR
   - Acceptance: Build fails on an advisory fixture
 - [ ] **PG-E0-15** *(doing)* `XS` · deps PG-E0-13 · Dead-dependency gate: `knip`, `cargo-machete`
   - Acceptance: Build fails on an unused fixture dependency
-- [ ] **PG-E0-16** `M` · deps PG-E0-13 · Release workflow: bundles, SBOM, signed manifest, changelog
+- [ ] **PG-E0-16** `M` · deps PG-E0-13 · Release workflow: bundles, SBOM, signed manifest, changelog **Remaining:** `.github/workflows/release.yml` is written and parses (`actionlint` 1.7.12 clean), but no tagged run has been executed: the acceptance needs a real `v*` tag to publish artefacts and a manifest, and the signing secrets plus the `RELEASE_SIGNING_CONFIGURED` repository variable must exist first. The job also calls `cargo xtask check-notices`, which PG-E0-18 has not yet added, so the first run fails by design.
   - Acceptance: A tagged pre-release publishes artifacts and a manifest
 - [ ] **PG-E0-17** *(review)* `XS` · deps PG-E0-13 · Automated dependency updates, grouped weekly
   - Acceptance: A grouped PR opens on schedule
