@@ -175,8 +175,11 @@ impl Delivery {
     }
 
     /// The link waiting for the first page load, for the tests.
+    ///
+    /// `pub(crate)` rather than private because the notification click handler's tests
+    /// assert that a click reaches this same state (PG-E1-14).
     #[cfg(test)]
-    fn pending(&self) -> Option<String> {
+    pub(crate) fn pending(&self) -> Option<String> {
         self.before_load
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

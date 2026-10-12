@@ -164,6 +164,14 @@ runtime = [
   # Without it the OS has nothing that maps the scheme to this application, and the URL a
   # macOS launch carries is not in the process's argument vector at all.
   "tauri-plugin-deep-link",
+  # Native notification delivery (PG-E1-14). The plugin owns three platform bindings that
+  # would otherwise be three hand-written ones — `UNUserNotificationCenter` with a system
+  # sound on macOS, a Windows toast, a D-Bus `Notify` call with an XDG sound name on
+  # Linux — and it is the only implementation of the startup `on_action` click callback
+  # that ADR 0015 §6 requires to exist before the first toast is shown. The core still
+  # decides *whether* to notify (AGENTS R31, `peregrine-domain::notify::plan`); this edge
+  # is the adapter that carries out the decision.
+  "tauri-plugin-notification",
   # The login item (PG-E1-13). Registering the plugin creates none; the settings toggle
   # is the only thing that does, and reimplementing a `SMAppService` registration, a
   # registry `Run` key, and an XDG autostart entry here would be three mechanisms.

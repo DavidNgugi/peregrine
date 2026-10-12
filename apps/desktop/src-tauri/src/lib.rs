@@ -13,6 +13,7 @@ use tauri::Manager as _;
 mod external;
 mod media;
 mod menu;
+mod notifications;
 mod tray;
 
 /// Why the desktop shell could not start or had to stop.
@@ -63,6 +64,10 @@ pub fn run() -> Result<(), ShellError> {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // Native notification delivery (PG-E1-14). Registering it shows nothing: the
+        // core's notification service decides, the shell's `OsNotifier` adapter calls it,
+        // and the click handler is registered in `setup` before any toast can exist.
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(ipc.invoke_handler())
         // The document loads after `setup` has run, and an event emitted into a webview
         // with no listener is gone. This is where a link that arrived on a cold start is
@@ -79,6 +84,16 @@ pub fn run() -> Result<(), ShellError> {
             // deep-link listener both run on the event loop, and this is the state that
             // holds a link until the window can receive it.
             app.manage(external::Delivery::default());
+            // After the delivery state, because the click handler reads it, and before
+            // anything could raise an event: a notification shown while no handler is
+            // registered reports no click at all, ever (ADR 0015 §6, PG-E1-14).
+            if let Err(error) = notifications::install(app.handle()) {
+                eprintln!("peregrine: {error}");
+                tracing::warn!(
+                    %error,
+                    "native notifications are unavailable; the in-app centre is unaffected"
+                );
+            }
             // A menu the user cannot use is worse than no menu, so a failure to install
             // one is reported and the app keeps running with the platform default.
             if let Err(error) = menu::install(app.handle()) {

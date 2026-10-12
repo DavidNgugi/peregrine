@@ -45,6 +45,11 @@ tauri-plugin-dialog = { workspace = true }
 # it here is what makes the OS hand a URL to this application at all, and its `on_open_url`
 # handler is the one delivery path the process's own argument vector cannot see.
 tauri-plugin-deep-link = { workspace = true }
+# Native notification delivery (PG-E1-14): the toast itself, the per-OS sound value it
+# carries, and the startup `on_action` handler a click arrives on. Registering the plugin
+# shows nothing; the core's notification service decides, and only its `OsNotifier`
+# adapter calls this crate.
+tauri-plugin-notification = { workspace = true }
 # The login item the settings toggle drives (PG-E1-13). Registering the plugin creates no
 # login item: autostart stays off until the user asks for it.
 tauri-plugin-autostart = { workspace = true }
