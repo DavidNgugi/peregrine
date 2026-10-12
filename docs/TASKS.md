@@ -299,7 +299,7 @@ graph LR
   - Acceptance: 24 h fuzz run without panic in Phase 4
 - [ ] **PG-E4-19** `M` · deps PG-E4-17 · `Conformance`-friendly fake implementations for all ports
   - Acceptance: Fakes live in `testkit`, usable from any crate's tests
-- [ ] **PG-E4-20** `S` · deps PG-E4-01 · Domain documentation pass: invariants stated where enforced
+- [ ] **PG-E4-20** `S` · deps PG-E4-01 · Domain documentation pass: invariants stated where enforced. **Progress:** `RUSTDOCFLAGS="-D warnings" cargo doc -p peregrine-domain --no-deps` was red on the crate — two public docs linked a private item (`DownloadEvent::name` and `SessionEvent::name`) and `subtitle/mod.rs` linked `format`, which is both a module and a macro. All three are fixed and the command is clean, so a doc gate could be added without tripping on this crate. **Remaining:** the acceptance itself — each invariant in DATA_MODEL §3 mapped to a named test — has not been audited; `I6`, `I4`, `I11` and the four `CHECK` families have named tests today but nothing mechanically states the mapping, and the invariants with no test have not been enumerated.
   - Acceptance: Each invariant in DATA_MODEL §3 maps to a named test
 
 ---

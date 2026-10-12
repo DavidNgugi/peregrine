@@ -264,8 +264,10 @@ impl SessionEvent {
 }
 
 impl fmt::Display for SessionEvent {
-    /// The same name [`SessionEvent::name`] gives, so an event can be interpolated into a
+    /// The same name `SessionEvent::name` gives, so an event can be interpolated into a
     /// message without its payload coming with it.
+    ///
+    /// Not a link: `name` is private, and rustdoc refuses a public doc that points at one.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.name())
     }

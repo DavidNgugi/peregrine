@@ -175,8 +175,10 @@ impl DownloadEvent {
 }
 
 impl fmt::Display for DownloadEvent {
-    /// The same name [`DownloadEvent::name`] gives, so an event can be interpolated into a
+    /// The same name `DownloadEvent::name` gives, so an event can be interpolated into a
     /// message without its report coming with it.
+    ///
+    /// Not a link: `name` is private, and rustdoc refuses a public doc that points at one.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.name())
     }
