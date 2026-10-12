@@ -10,9 +10,9 @@ Pinned versions, licences, and the obligations that come with redistributing the
 | Rust ranges | `"2"`-style ranges for Tauri and its plugins (cargo does not select the published `3.0.0-alpha.x` prereleases for a `"2"` requirement), exact pins for anything whose API we depend on closely. |
 | Exact pins | `specta` and `tauri-specta` at `=2.0.0-rc.25`: no stable 2.x exists, so the RC is deliberate and pinned exactly. |
 | MSRV | Stable Rust minus two releases, declared in `Cargo.toml` and enforced in CI. |
-| Node | Node 22 LTS or newer, pnpm 10 or newer, declared in `engines` and used in CI. |
+| Node | Node 22 LTS or newer, pnpm 10 or newer, declared in `engines`. CI and the release workflow both pin the newer end of that range — Node 24 and pnpm 11 — so a local run on the declared floor is supported but is not what the gates execute. |
 | Updates | Renovate, grouped weekly. A major needs a PR with a CI pass plus a visual regression run for frontend majors. |
-| Sidecars | Exact version plus SHA-256 per OS, upgraded by a scheduled PR that runs the media fixture suite. |
+| Sidecars | Exact version plus SHA-256 per OS, upgraded by a scheduled PR that runs the media fixture suite. The mechanism that consumes these pins is [adr/0022](./adr/0022-component-packs-and-sidecar-verification.md); until PG-E26-01 lands them, `sidecars.toml` records the `pinned-per-os` rule instead of a version. |
 | New dependency | Needs a stated reason in the PR and a licence check against the `cargo-deny` allowlist. |
 
 ## 2. Rust runtime dependencies
@@ -142,7 +142,7 @@ CI also uses two actions, pinned by version and digest in `.github/workflows/rel
 
 `toml` and `sha2` were resolved and licence-checked live against crates.io on **2026-10-09** with `User-Agent: peregrine-plan`; both are dev-only and appear in no shipped binary. Every other version above was resolved on **2026-10-08**.
 
-Only `cargo-dist` (renamed upstream to `dist`) was considered and is **not** adopted: `tauri-action` plus the Tauri bundler already produces every artifact we ship, and a second release tool would duplicate it.
+Only `cargo-dist` (renamed upstream to `dist`) was considered and is **not** adopted: the Tauri bundler, driven by `pnpm tauri build` in `.github/workflows/release.yml`, already produces every artifact we ship, and a second release tool would duplicate it. That workflow does not use `tauri-action`, so nothing here depends on it.
 
 ## 5. Bundled sidecars
 

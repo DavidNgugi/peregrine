@@ -186,7 +186,7 @@ Operational rules are in [DATA_MODEL.md](./DATA_MODEL.md) §5: one writer connec
 | Fuzzing | `cargo-fuzz` targets for the parsers |
 | Lint and supply chain | `clippy -D warnings`, `cargo-deny`, `cargo-audit`, `osv-scanner`, `cargo-machete`, `knip` |
 | UI tests | `vitest`, Testing Library, `msw`, Playwright, `tauri-driver` where supported |
-| Release | `tauri-action`, `git-cliff` for changelogs, CycloneDX SBOM, signed update manifests |
+| Release | `pnpm tauri build` per target plus the Tauri bundler, `git-cliff` for changelogs, `cargo-cyclonedx` and a Node licence inventory for the SBOM, and a minisign-signed manifest (PG-E0-16) |
 | Formatting | `rustfmt`, Prettier, EditorConfig |
 
 ---
