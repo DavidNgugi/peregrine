@@ -1065,6 +1065,17 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I36 | Artwork has at most one row per owner, role, provider, path, and language, where "no language" is the empty string rather than NULL; and at most one *live* download job exists per info hash, while terminal jobs may repeat. | `artwork_language_is_a_sentinel_and_never_null`, `the_info_hash_index_is_unique_among_live_jobs_only`, and the two upgrade tests in `peregrine-storage`'s `migrations` module |
 | I37 | Content outside an account's scope is indistinguishable from content that does not exist: a restricted scope cannot see an adult-flagged title or one with no certification, and a read returns the same answer for a hidden title as for an absent one. | `a_restricted_scope_hides_adult_and_unrated_content`, `a_restricted_page_is_still_a_full_page`, `a_fresh_stub_is_not_visible_to_a_restricted_scope`, and `an_unrestricted_scope_sees_every_title` in `peregrine-storage`'s `catalogue` module; the scope itself is `peregrine-domain`'s `AccountScope` |
 
+### What each invariant is enforced by today
+
+The "Enforced by" column above states the *mechanism* an invariant is meant to have, which is not the same question as whether that mechanism exists. Audited against the tree (PG-E4-20):
+
+- **Enforced, with a test that names it:** I1, I2, I3, I4, I6, I7, I9, I11, I12, I13, I28, I35, I36, I37.
+- **Enforced, by tests that do not cite the identifier:** I14 and I15 by the notification-policy and redaction suites; I25, I26 and I27 by the scoped-read tests in `peregrine-storage`'s `catalogue` module. The enforcement is real; only the cross-reference is missing, and adding it is cheaper than the alternative of the reader having to trust the column.
+- **Stated for a table that exists, with no enforcement anywhere:** **I5** (`download_file.path` containment — the column exists and nothing validates it because no repository writes `download_file` yet), **I8** (a plaintext secret must never coexist with a `secret_ref` in `settings` — the test the column promises does not exist), and **I10** (deleting a title cascades to rows but never to files — deletion is PG-E15's, and until it lands nothing deletes a title). These three are the real gaps: a rule the schema can see and no code enforces. I5 and I10 are owed by the acquisition and deletion work; I8 by the secrets work. I25's wider read set — library, episode, progress, watchlist, notification and search reads — is the same kind of gap for the reads that do not exist yet.
+- **Owed by a phase whose tables do not exist:** I16–I24 and I29–I34 belong to monitoring, agent access, the media server, and local accounts. Their tables are not in any migration, so no test is possible and their absence from the code is correct rather than a defect.
+
+An invariant in the third group is the one to watch: the document promises a mechanism, the schema has the columns for it, and nothing enforces it.
+
 ---
 
 ## 4. Query patterns that the schema is shaped for
