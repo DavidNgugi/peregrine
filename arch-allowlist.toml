@@ -430,6 +430,13 @@ pure = false
 [crates.peregrine-testkit]
 may_depend_on = [
   "peregrine-domain",
+  # Added for PG-E5-01. The metadata provider conformance suite has to name the port it
+  # asserts against, and the port lives in the crate that also holds the adapters — the same
+  # shape `peregrine-torrent` and `peregrine-indexers` have, where the trait and its
+  # implementations ship together. Writing the suite against a copy of the port would make it
+  # assert a copy's contract. The edge points from a test crate to a leaf, never the other
+  # way, so it is not a cycle and no shipping build changes.
+  "peregrine-providers",
 ]
 runtime = [
   # Both are the vocabulary of the ports: a fake clock answers with `jiff::Timestamp`

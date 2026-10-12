@@ -3015,6 +3015,11 @@ version = "0.1.0"
 [[package]]
 name = "peregrine-providers"
 version = "0.1.0"
+dependencies = [
+ "jiff",
+ "peregrine-domain",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "peregrine-secrets"
@@ -3067,8 +3072,10 @@ dependencies = [
 name = "peregrine-testkit"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "jiff",
  "peregrine-domain",
+ "peregrine-providers",
  "ulid",
 ]
 

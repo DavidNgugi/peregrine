@@ -9,5 +9,14 @@ repository.workspace = true
 description = "Peregrine component crate."
 publish = false
 
+[dependencies]
+# The port names `Provider`, which is the same seven-variant vocabulary the `external_id`
+# table and every `ExternalId` in the catalogue already use. A second provider enum here
+# would be a second spelling of the same fact (AGENTS R3). `jiff` is the domain's own date
+# type, which a search candidate carries so a remake can be told from its original.
+peregrine-domain = { workspace = true }
+jiff = { workspace = true }
+thiserror = { workspace = true }
+
 [lints]
 workspace = true
