@@ -627,6 +627,69 @@ impl Database {
         }
     }
 
+    /// The file at `path` and the numbers a scan compares, whatever account may see it.
+    ///
+    /// Part of the **scanner's** surface rather than a general read: the module doc in
+    /// `crate::library` says why it takes no `AccountScope`. A caller acting for an account wants
+    /// [`Database::media_file_by_path`].
+    pub async fn recorded_file_at_path(
+        &self,
+        path: &str,
+    ) -> Result<Option<crate::library::RecordedFile>, StorageError> {
+        crate::library::recorded_file_at_path(&self.readers, path).await
+    }
+
+    /// The item a title and episode pair already has, whatever account may see it.
+    ///
+    /// The scanner's, and the lookup that keeps a re-scan from creating a second item for a title
+    /// it already holds.
+    pub async fn item_id_for(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Option<i64>, StorageError> {
+        crate::library::item_id_for(&self.readers, title_id, episode_id).await
+    }
+
+    /// The title a kind and sort name already name, whatever account may see it.
+    ///
+    /// The scanner's, and the lookup that keeps a show's episodes under one title.
+    pub async fn title_id_for_sort_name(
+        &self,
+        kind: &str,
+        sort_name: &str,
+    ) -> Result<Option<i64>, StorageError> {
+        crate::library::title_id_for_sort_name(&self.readers, kind, sort_name).await
+    }
+
+    /// Refreshes one file's stamp and root, reporting whether the row was there.
+    ///
+    /// What a scan does with a file it has seen before: the bytes it read are the same file, and
+    /// what changed is what the library knows about it.
+    pub async fn refresh_file_stamp(
+        &self,
+        id: i64,
+        size_bytes: i64,
+        mtime_ms: i64,
+        root_id: i64,
+        updated_at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RefreshFileStamp {
+                id,
+                size_bytes,
+                mtime_ms,
+                root_id,
+                updated_at,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("refresh_file_stamp", &other)),
+        }
+    }
+
     /// Marks one file absent at scan time, or present again.
     ///
     /// The instant is the caller's — [`MediaFile::mark_missing`] keeps the *first* one, so a

@@ -85,6 +85,14 @@ pub(crate) enum WriteRequest {
         account_id: peregrine_domain::AccountId,
         title_id: i64,
     },
+    /// Refresh one file's stamp and root.
+    RefreshFileStamp {
+        id: i64,
+        size_bytes: i64,
+        mtime_ms: i64,
+        root_id: i64,
+        updated_at: i64,
+    },
     /// Insert or refresh one `image_cache` row.
     RecordImageCache(Box<crate::image_cache::ImageCacheEntry>),
     /// Report that one cached image was read.
@@ -318,6 +326,13 @@ async fn apply_library_write(
             .await
             .map(|changed| WriteResponse::RowChanged { changed })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::RefreshFileStamp {
+            id,
+            size_bytes,
+            mtime_ms,
+            root_id,
+            updated_at,
+        } => refresh_file_stamp(connection, id, size_bytes, mtime_ms, root_id, updated_at).await,
         WriteRequest::RecordImageCache(entry) => crate::image_cache::record(connection, &entry)
             .await
             .map(|()| WriteResponse::Applied)
@@ -366,6 +381,21 @@ async fn run(mut connection: sqlx::SqliteConnection, mut requests: mpsc::Receive
         // caller still needs a writer.
         let _ = envelope.reply.send(outcome);
     }
+}
+
+/// Refreshes one file's stamp, mapping the statement onto the response the caller expects.
+async fn refresh_file_stamp(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    size_bytes: i64,
+    mtime_ms: i64,
+    root_id: i64,
+    updated_at: i64,
+) -> Result<WriteResponse, StorageError> {
+    crate::library::refresh_file_stamp(connection, id, size_bytes, mtime_ms, root_id, updated_at)
+        .await
+        .map(|changed| WriteResponse::RowChanged { changed })
+        .map_err(StorageError::from_sqlx)
 }
 
 /// Applies one request on the writer's connection.

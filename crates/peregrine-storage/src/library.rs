@@ -544,6 +544,112 @@ pub(crate) async fn item(
     row.map(TryInto::try_into).transpose()
 }
 
+// ---------------------------------------------------------------------------------------------
+// The scanner's surface: the reads an indexer makes, which take no `AccountScope` on purpose.
+//
+// I25 makes the scope a parameter of every library read a *caller* makes, and I37 says content
+// outside a scope is indistinguishable from content that does not exist. Neither can hold for the
+// scanner, and the reasons are structural rather than a preference:
+//
+// * A fresh installation may hold **no account row at all** — accounts are `PG-E35`'s epic and the
+//   migrations seed none — so there is no account for a scan to name. A scope built from an id that
+//   names nothing is a scope in name only, which is worse than not having one.
+// * The files on disk exist whether or not any account may see them. A scanner that indexed only
+//   what an unrestricted account sees would leave an adult-flagged title's files permanently
+//   unindexed, and no later change to a rating ceiling could repair it: the rows would never have
+//   been written. That is a data-loss-shaped outcome produced by a read filter.
+// * I37 presumes the row exists to be hidden. Gating belongs on the way *out* — the scoped reads a
+//   user-facing caller makes — not on the way in.
+//
+// The surface is kept separate and named so that an account-scoped caller cannot reach it by
+// accident: these functions sit beside `present_files` and `missing_files`, which the scanner's
+// reconciliation already uses, and the `Database` methods that expose them are documented as the
+// scanner's rather than as general reads.
+// ---------------------------------------------------------------------------------------------
+
+/// The file at `path`, whatever account may see it, with the two numbers a scan compares.
+///
+/// `path` is `UNIQUE`, so this is an index lookup rather than a scan.
+pub(crate) async fn recorded_file_at_path(
+    pool: &sqlx::SqlitePool,
+    path: &str,
+) -> Result<Option<RecordedFile>, StorageError> {
+    let row = sqlx::query_as::<_, RecordedFileRow>(
+        "SELECT id, path, size_bytes, mtime_ms FROM media_file WHERE path = ?1",
+    )
+    .bind(path)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(Into::into))
+}
+
+/// The item a title and episode pair already has, whatever account may see it.
+pub(crate) async fn item_id_for(
+    pool: &sqlx::SqlitePool,
+    title_id: i64,
+    episode_id: Option<i64>,
+) -> Result<Option<i64>, StorageError> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM media_item WHERE title_id = ?1 AND episode_id IS ?2")
+            .bind(title_id)
+            .bind(episode_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|row| row.0))
+}
+
+/// The id of the title a kind and sort name already name, whatever account may see it.
+///
+/// Served by `title_sort_name_idx`: the indexer asks this once per parsed name, so a scan of a
+/// twenty-thousand-file library makes at most that many index lookups, and the ones that hit are
+/// how a show's episodes end up under one title instead of one each.
+pub(crate) async fn title_id_for_sort_name(
+    pool: &sqlx::SqlitePool,
+    kind: &str,
+    sort_name: &str,
+) -> Result<Option<i64>, StorageError> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM title WHERE kind = ?1 AND sort_name = ?2 ORDER BY id LIMIT 1",
+    )
+    .bind(kind)
+    .bind(sort_name)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|row| row.0))
+}
+
+/// Refreshes one file's stamp and root, reporting whether the row was there.
+///
+/// The scan's answer for a file it has seen before: the bytes it read are the same file, and what
+/// changed is what the library knows about it. `missing_since` is cleared in the same statement,
+/// because a file a scan just walked is not missing — a restore and a re-scan are the same
+/// observation, and leaving the stamp for the reconciliation to clear later would report a file as
+/// gone while the walk that found it is still running.
+pub(crate) async fn refresh_file_stamp(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    size_bytes: i64,
+    mtime_ms: i64,
+    root_id: i64,
+    updated_at: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE media_file SET size_bytes = ?1, mtime_ms = ?2, root_id = ?3, missing_since = NULL, \
+         updated_at = ?4 WHERE id = ?5",
+    )
+    .bind(size_bytes)
+    .bind(mtime_ms)
+    .bind(root_id)
+    .bind(updated_at)
+    .bind(id)
+    .execute(&mut *connection)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Reads the item for one title, or for one episode, when `scope` may see it.
 ///
 /// The two partial unique indices make this at most one row (I2), which is why the answer is

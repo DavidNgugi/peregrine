@@ -35,7 +35,7 @@ use ulid::Ulid;
 
 use crate::events::{Event, EventBus, JOB_PROGRESS, JOB_STATE};
 use crate::jobs::{self, CANCELLED_CODE};
-use crate::library::{LibraryService, ScanError, Scanner};
+use crate::library::{IndexReport, LibraryService, ScanError, Scanner, index_candidates};
 
 /// The kind this job registers under, in the scheduler and in the journal.
 ///
@@ -63,6 +63,26 @@ pub const WALK_CONCURRENCY: usize = 8;
 /// scanned by the next job.
 pub const ROOT_PAGE: u32 = 100;
 
+impl ScanSummary {
+    /// Folds one root's finished work in.
+    fn record(
+        &mut self,
+        files: usize,
+        report: &crate::library::Reconciliation,
+        indexed: &IndexReport,
+    ) {
+        self.roots_scanned += 1;
+        self.files_found += files;
+        self.marked_missing += report.marked_missing.len();
+        self.restored += report.restored.len();
+        self.indexed.created_titles += indexed.created_titles;
+        self.indexed.created_items += indexed.created_items;
+        self.indexed.created_files += indexed.created_files;
+        self.indexed.refreshed_files += indexed.refreshed_files;
+        self.indexed.unmatched += indexed.unmatched;
+    }
+}
+
 /// What one finished scan found.
 ///
 /// The payload a caller reads from the job, and what a summary line is built from. Roots are
@@ -80,6 +100,8 @@ pub struct ScanSummary {
     pub marked_missing: usize,
     /// How many files it found again and cleared.
     pub restored: usize,
+    /// What the indexing wrote for the roots it walked.
+    pub indexed: IndexReport,
 }
 
 /// What one root contributed to the summary.
@@ -90,6 +112,8 @@ enum RootOutcome {
         files: usize,
         /// What the reconciliation changed.
         report: crate::library::Reconciliation,
+        /// What the indexing wrote.
+        indexed: IndexReport,
     },
     /// The root was not scanned, with the reason a log line carries.
     Failed(String),
@@ -193,12 +217,11 @@ impl LibraryScanJob {
                 )
                 .await
             {
-                RootOutcome::Scanned { files, report } => {
-                    summary.roots_scanned += 1;
-                    summary.files_found += files;
-                    summary.marked_missing += report.marked_missing.len();
-                    summary.restored += report.restored.len();
-                }
+                RootOutcome::Scanned {
+                    files,
+                    report,
+                    indexed,
+                } => summary.record(files, &report, &indexed),
                 RootOutcome::Failed(reason) => {
                     warn!(job = %job, root_id = row.id, %reason, "a root was not scanned");
                     summary.roots_failed.push((row.id, reason));
@@ -229,6 +252,9 @@ impl LibraryScanJob {
             roots = summary.roots_scanned,
             failed = summary.roots_failed.len(),
             files = summary.files_found,
+            indexed = summary.indexed.created_files,
+            titles = summary.indexed.created_titles,
+            unmatched = summary.indexed.unmatched,
             missing = summary.marked_missing,
             restored = summary.restored,
             "the library scan finished"
@@ -260,6 +286,21 @@ impl LibraryScanJob {
             Err(error) => return RootOutcome::Failed(error.to_string()),
         };
 
+        // Index first, reconcile second: the reconciliation is a statement about the rows the
+        // indexing writes, and running it the other way round would mark a file missing and then
+        // index it in the same pass.
+        let indexed = match index_candidates(
+            &self.database,
+            root_id,
+            &outcome.candidates,
+            self.clock.now(),
+        )
+        .await
+        {
+            Ok(report) => report,
+            Err(error) => return RootOutcome::Failed(error.to_string()),
+        };
+
         match service
             .reconcile(root_id, &outcome.candidates, self.clock.now())
             .await
@@ -267,6 +308,7 @@ impl LibraryScanJob {
             Ok(report) => RootOutcome::Scanned {
                 files: outcome.candidates.len(),
                 report,
+                indexed,
             },
             Err(error) => RootOutcome::Failed(error.to_string()),
         }
