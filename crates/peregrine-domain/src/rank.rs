@@ -9,10 +9,13 @@
 //! Two decisions keep the arithmetic trustworthy:
 //!
 //! * Every score is an integer. A candidate loses one step for each entry a
-//!   profile's preference list ranks above the value it declares, and the steps are
-//!   weighted so that the resolution outranks every source, the source every video
-//!   codec, and the video codec every audio codec. No step of that comparison
-//!   involves a float, so no rounding decides a winner.
+//!   profile's preference list ranks above the value it declares — or, for audio,
+//!   above the best position any of the codecs the *whole name* mentions holds,
+//!   because the release parser reads a codec tag wherever it appears, including in
+//!   a group called `dd`. The steps are weighted so that the resolution outranks
+//!   every source, the source every video codec, and the video codec every audio
+//!   codec. No step of that comparison involves a float, so no rounding decides a
+//!   winner.
 //! * A candidate the profile does not accept is a typed [`Rejection`] naming the
 //!   rule that refused it, never a low score. A silent zero would look like a
 //!   legitimate result to the caller and to the audit trail.
@@ -1755,10 +1758,18 @@ mod tests {
                 better.video_codec = rules.video_codecs()[above];
             }
             Criterion::Audio => {
+                // The position to improve is the one the *scorer* sees, which is not the fixture's
+                // list: the release parser reads a codec tag anywhere in the name, so a group that
+                // happens to spell one — PG-E4-06's counterexample has `group: Some("dd")`, and
+                // `dd` is Dolby Digital — puts that codec in the candidate's audio set as well.
+                // Reading `parts.audio` here asked the generator to raise a position the scorer
+                // was already holding: `[Eac3]` with a group of `dd` scores at `AC3`'s position,
+                // and swapping the stated codec for `AC3` changes nothing.
+                let declared = name_of(parts).audio().to_vec();
                 let at = rules
                     .audio_codecs()
                     .iter()
-                    .position(|value| parts.audio.contains(value))
+                    .position(|value| declared.contains(value))
                     .expect("the preference list covers every audio codec");
                 let above = at.checked_sub(1)?;
                 better.audio = vec![rules.audio_codecs()[above]];
@@ -1804,6 +1815,88 @@ mod tests {
                 audio: vec![audio],
                 group: Some(GOLDEN_GROUP.to_owned()),
             })
+    }
+
+    /// PG-E4-06's counterexample, kept as a test because what it found is surprising and correct,
+    /// and the next reader deserves to meet it here rather than in a property failure.
+    ///
+    /// The scorer's audio position is the best position held by any codec the **name** mentions,
+    /// and the release parser reads a codec tag wherever it appears — including in the group. The
+    /// counterexample's candidate is `Movie.2024.2160p.REMUX.x264.EAC3-dd`, whose group `dd` is
+    /// also how a release name spells Dolby Digital, so the candidate holds `EAC3` *and* `AC3` and
+    /// is scored at whichever this profile ranks higher. Under this profile that is `AC3`, which is
+    /// why the property's `improve` could not raise the score by swapping the stated codec: the
+    /// position it was trying to improve was already held.
+    ///
+    /// What was wrong was the generator, not the scorer: `improve` read the fixture's own list and
+    /// asked for one step better, which is not necessarily a step the *parsed* name can take. It now
+    /// measures against the parsed set, and this test holds the model still either way.
+    #[test]
+    fn a_codec_the_group_spells_still_decides_the_audio_position() {
+        let profile = preference_profile();
+        let list = profile.rules().audio_codecs();
+        let position = |codec: AudioCodec| {
+            list.iter()
+                .position(|entry| *entry == codec)
+                .expect("the preference profile lists every audio codec")
+        };
+        let ac3 = position(AudioCodec::Ac3);
+        let eac3 = position(AudioCodec::Eac3);
+        assert!(
+            ac3 < eac3,
+            "this test's premise is that the fixture profile ranks AC3 above EAC3"
+        );
+
+        let named = |group: &str| Parts {
+            resolution: Resolution::UltraHd,
+            source: ReleaseSource::Remux,
+            video_codec: VideoCodec::H264,
+            audio: vec![AudioCodec::Eac3],
+            group: Some(group.to_owned()),
+        };
+        let score = |parts: &Parts| {
+            let candidate = candidate(parts, 0);
+            let ranking = ReleaseRanker::rank(&candidate, &profile);
+            let audio = ranking
+                .reasons()
+                .iter()
+                .find(|reason| reason.kind() == ReasonKind::Audio)
+                .and_then(RankReason::position)
+                .expect("the profile accepts the fixture's audio");
+            (
+                candidate.name.audio().to_vec(),
+                audio.index(),
+                ranking.score(),
+            )
+        };
+
+        let (parsed, at, with_group) = score(&named("dd"));
+        let (_, _, without) = score(&named(GOLDEN_GROUP));
+
+        assert_eq!(
+            parsed,
+            vec![AudioCodec::Eac3, AudioCodec::Ac3],
+            "the group's spelling is read as a codec, so the name declares both"
+        );
+        assert_eq!(
+            at,
+            u32::try_from(ac3).expect("an index fits"),
+            "and the position is the better of the two, not the stated one"
+        );
+        assert_ne!(
+            with_group, without,
+            "so the group's spelling reaches the score, not only the candidate's tags"
+        );
+        assert!(
+            with_group > without,
+            "and it *helps* here only because this fixture profile happens to rank AC3 above EAC3: \
+             the direction is the profile's, not a rule about groups"
+        );
+        assert_eq!(
+            parsed.first(),
+            Some(&AudioCodec::Eac3),
+            "whatever the position, the stated codec is still the first one parsed"
+        );
     }
 
     proptest! {
