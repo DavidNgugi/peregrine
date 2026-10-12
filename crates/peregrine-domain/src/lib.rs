@@ -10,6 +10,7 @@
 //! invent its own.
 
 pub mod account;
+pub mod availability;
 pub mod catalogue;
 pub mod download;
 pub mod id;
@@ -28,6 +29,7 @@ pub mod text;
 pub mod watch;
 
 pub use account::{AccountError, AccountId, AccountScope, Visibility};
+pub use availability::{Asked, Availability, ItemJob, availability};
 pub use catalogue::{
     AliasKind, CatalogueError, Company, CompanyRole, Credit, CreditKind, Episode, EpisodeNumber,
     EpisodeOrdering, EpisodePosition, EpisodeType, Genre, Keyword, MetadataState, OrderingScheme,

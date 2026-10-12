@@ -871,7 +871,7 @@ stateDiagram-v2
     removed --> [*]
 ```
 
-This state is what the poster overlays, badges, and the availability filter read. It is derived from `media_item` plus the job set, and computed once per invalidation rather than per render.
+This state is what the poster overlays, badges, and the availability filter read. It is derived from `media_item`, the item's job set, and its file set (`availability::availability`, PG-E4-12) rather than read back out of the column it caches, and it is computed once per invalidation rather than per render. Evidence decides in a fixed order: a file row answers first (every row present `available`, some present `partial`, none present `missing`), because a present copy is playable whatever a transfer is doing; with no file row at all, a job that is not terminal answers `acquiring`; then the newest terminal job (`failed` is `unavailable`, `completed` with the rows gone is `removed`); then `media_item.state` as the record of what happened before; and last what was asked for. "Newest" is the greatest `(added_at, id)` the caller supplies, because the domain reads no clock, so the instant arrives as a value and the row id breaks a same-millisecond tie. Availability is a superset of `media_item.state`, which has no spelling for `missing`, `removed`, `acquiring`, `unavailable`, `discovered`, or `watchlisted` and collapses the last three of those with `wanted` into one `wanted`; the watchlist is title-scoped, so the state before a file or a job exists arrives as a parameter rather than being guessed from a row that does not record it.
 
 ### SM3 — Player session
 
