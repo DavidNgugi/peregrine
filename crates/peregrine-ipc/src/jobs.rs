@@ -355,11 +355,21 @@ mod tests {
         assert!(object.contains_key("progressPermille"));
     }
 
-    /// The error mapping, pinned per variant: a retryable condition must not become a
-    /// permanent one and a path must never reach the payload.
-    #[test]
-    fn runtime_failures_map_to_stable_codes() {
-        let cases: Vec<(RuntimeError, ErrorCode, bool)> = vec![
+    /// A path can be rendered in three shapes depending on the machine that produced it, and the
+    /// fixtures below cover all three. Checking only `/home/` and `.local` — which is what this
+    /// test did before — passes on macOS and Windows no matter what leaks, because neither string
+    /// can appear in a path there. The canary is the part that matters: it is in every fixture
+    /// path, so it appears in the payload if any of them is interpolated, whatever the separator.
+    /// The roots are a second net for a future variant that forgets the canary.
+    const PATH_CANARY: &str = "peregrine-leak-canary";
+    const PATH_ROOTS: [&str; 5] = ["/home/", "/Users/", ".local", "AppData", "\\Users\\"];
+
+    /// Every mapped runtime failure, with the code and the retryability it must produce.
+    ///
+    /// The table is separate from the assertion below because it is most of the line count, and a
+    /// test that trips `too_many_lines` hides the logic it exists to show.
+    fn runtime_failure_cases() -> Vec<(RuntimeError, ErrorCode, bool)> {
+        vec![
             (
                 RuntimeError::InvalidRequest {
                     detail: "steps must be between 1 and 600".to_owned(),
@@ -437,19 +447,14 @@ mod tests {
                 ErrorCode::PermissionDenied,
                 false,
             ),
-        ];
+        ]
+    }
 
-        // A path can be rendered in three shapes depending on the machine that produced it, and
-        // the fixture set above covers all three. Checking only `/home/` and `.local` — which is
-        // what this test did — passes on macOS and Windows no matter what leaks, because
-        // neither string can appear in a path there. The canary is the part that matters: it
-        // is in every fixture path above, so it appears in the payload if any of them is
-        // interpolated, whatever the separator. The roots are a second net for a future
-        // variant that forgets the canary.
-        const PATH_CANARY: &str = "peregrine-leak-canary";
-        const PATH_ROOTS: [&str; 5] = ["/home/", "/Users/", ".local", "AppData", "\\Users\\"];
-
-        for (error, code, retryable) in cases {
+    /// The error mapping, pinned per variant: a retryable condition must not become a permanent
+    /// one and a path must never reach the payload.
+    #[test]
+    fn runtime_failures_map_to_stable_codes() {
+        for (error, code, retryable) in runtime_failure_cases() {
             let mapped = AppError::from(error);
             assert_eq!(mapped.code, code, "{}", mapped.message);
             assert_eq!(mapped.retryable, retryable, "{}", mapped.message);
