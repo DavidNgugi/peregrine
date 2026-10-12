@@ -12,6 +12,15 @@ publish = false
 [dependencies]
 peregrine-domain = { workspace = true }
 jiff = { workspace = true }
+# Verification hashes the artefact the pinned manifest describes (adr/0022 §3).
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# The verifier and the installer run against fixture files, including one that is
+# rewritten in the window between two verification steps.
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
