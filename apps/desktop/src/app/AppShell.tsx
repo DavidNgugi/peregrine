@@ -1,5 +1,5 @@
 import { NowPlayingBar } from "@peregrine/player-ui";
-import { Button } from "@peregrine/ui";
+import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
 import type { ReactElement } from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,26 +7,9 @@ import { DiscoverScreen } from "../features/discover/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
 import { SettingsScreen, useShortcutDispatch, useShortcuts } from "../features/settings/index.js";
 import type { Platform } from "../lib/platform.js";
+import { SCREENS, SCREEN_FOR_ACTION, type Screen } from "./screens.js";
 import { useTheme } from "./useTheme.js";
 import { WindowChrome } from "./WindowChrome.js";
-
-/** Which screen the content area shows. */
-type Screen = "discover" | "jobs" | "settings";
-
-/**
- * The screen a registered shortcut opens, or `null` for an action this shell has no
- * screen for.
- *
- * The mapping lives here rather than in the registry because it is routing: the core
- * knows an action's id and nothing about which component shows it (AGENTS R7). An id
- * with no screen is ignored rather than guessed at, so a registry entry added before its
- * screen appears does nothing instead of opening the wrong one.
- */
-const SCREEN_FOR_ACTION: Readonly<Record<string, Screen>> = {
-  "navigation.discover": "discover",
-  "navigation.jobs": "jobs",
-  "navigation.settings": "settings",
-};
 
 interface AppShellProps {
   /** Which platform's window chrome to present; `null` when the core could not be asked. */
@@ -34,17 +17,25 @@ interface AppShellProps {
 }
 
 /**
- * The chrome that persists across navigation: the window chrome, the current screen, and
- * the player bar (docs/ARCHITECTURE.md §6 rule 6).
+ * The chrome that persists across navigation: the window chrome, the sidebar, the current
+ * screen, and the player bar (docs/ARCHITECTURE.md §6 rule 6, docs/DESIGN_SYSTEM.md §6).
  *
- * The screen switch is temporary. Typed routing arrives with PG-E7-02 and the sidebar with
- * PG-E7-01; until then the header exposes the screens that exist, because the diagnostics
- * and settings surfaces have to be reachable to be deliverables at all (PLAN §8 item 1).
+ * Only the content area is swapped when the screen changes. The chrome sits above the
+ * sidebar and the player bar below it, both outside the element the screen renders into, so
+ * a screen that mounts or unmounts cannot take the navigation or the player with it — which
+ * is the property PG-E7-01's acceptance names, and the reason the screen switch is a
+ * ternary inside one `main` rather than a component that replaces the whole tree.
+ *
+ * The screen switch is still state rather than a route: typed routing is PG-E7-02, and the
+ * sidebar rows become links when it lands.
  */
 export function AppShell({ platform }: AppShellProps): ReactElement {
   const { t } = useTranslation();
   const { resolved, setPreference } = useTheme();
   const [screen, setScreen] = useState<Screen>("discover");
+
+  // The icon and the name describe the same action — what the button would switch *to* —
+  // so a sighted user and a screen reader are told the same thing.
   const nextTheme = resolved === "dark" ? "light" : "dark";
   const themeLabel = t(
     nextTheme === "light" ? "shell.theme.switchToLight" : "shell.theme.switchToDark",
@@ -67,54 +58,35 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
   return (
     <div className="flex h-full flex-col bg-surface-0 text-text-primary">
       <WindowChrome platform={platform}>
-        <nav aria-label={t("shell.nav.label")} className="flex items-center gap-1">
-          <Button
-            aria-current={screen === "discover" ? "page" : undefined}
-            onClick={() => {
-              setScreen("discover");
-            }}
-            size="sm"
-            variant={screen === "discover" ? "secondary" : "ghost"}
-          >
-            {t("discover.title")}
-          </Button>
-          <Button
-            aria-current={screen === "jobs" ? "page" : undefined}
-            onClick={() => {
-              setScreen("jobs");
-            }}
-            size="sm"
-            variant={screen === "jobs" ? "secondary" : "ghost"}
-          >
-            {t("jobs.title")}
-          </Button>
-          <Button
-            aria-current={screen === "settings" ? "page" : undefined}
-            onClick={() => {
-              setScreen("settings");
-            }}
-            size="sm"
-            variant={screen === "settings" ? "secondary" : "ghost"}
-          >
-            {t("settings.title")}
-          </Button>
-          <Button
-            aria-label={themeLabel}
-            onClick={() => {
-              setPreference(nextTheme);
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            {themeLabel}
-          </Button>
-        </nav>
+        <IconButton
+          icon={nextTheme === "light" ? "sun" : "moon"}
+          label={themeLabel}
+          onClick={() => {
+            setPreference(nextTheme);
+          }}
+          size="sm"
+        />
       </WindowChrome>
-      <main className="min-h-0 flex-1 overflow-hidden">
-        {screen === "discover" ? <DiscoverScreen /> : null}
-        {screen === "jobs" ? <JobsScreen /> : null}
-        {screen === "settings" ? <SettingsScreen bindings={shortcuts} /> : null}
-      </main>
+      <div className="flex min-h-0 flex-1">
+        <Sidebar label={t("shell.nav.label")}>
+          {SCREENS.map((entry) => (
+            <SidebarItem
+              current={entry.id === screen}
+              icon={entry.icon}
+              key={entry.id}
+              label={t(entry.labelKey)}
+              onSelect={() => {
+                setScreen(entry.id);
+              }}
+            />
+          ))}
+        </Sidebar>
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          {screen === "discover" ? <DiscoverScreen /> : null}
+          {screen === "jobs" ? <JobsScreen /> : null}
+          {screen === "settings" ? <SettingsScreen bindings={shortcuts} /> : null}
+        </main>
+      </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />
     </div>
   );
