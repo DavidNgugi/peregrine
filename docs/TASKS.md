@@ -282,9 +282,9 @@ graph LR
   - Acceptance: Table-driven test over item and job combinations
 - [ ] **PG-E4-13** `M` · deps PG-E4-01 · Player session state machine
   - Acceptance: Every transition and failure path covered
-- [ ] **PG-E4-14** `S` · deps PG-E4-01 · Subtitle timing math: offset, frame-rate conversion, PAL speedup
+- [x] **PG-E4-14** `S` · deps PG-E4-01 · Subtitle timing math: offset, frame-rate conversion, PAL speedup
   - Acceptance: Property test: offset then reverse offset is identity
-- [ ] **PG-E4-15** `M` · deps PG-E4-14 · Subtitle format model and SRT/VTT/ASS writers
+- [x] **PG-E4-15** `M` · deps PG-E4-14 · Subtitle format model and SRT/VTT/ASS writers
   - Acceptance: Round-trip of styling-bearing ASS preserves italics and positioning
 - [ ] **PG-E4-16** `S` · deps PG-E4-11, PG-E4-13 · Domain event enum covering every state-changing operation
   - Acceptance: Repository layer emits only declared events

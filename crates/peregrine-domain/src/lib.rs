@@ -22,6 +22,7 @@ pub mod quality;
 pub mod rank;
 pub mod redaction;
 pub mod release;
+pub mod subtitle;
 pub mod text;
 pub mod watch;
 
@@ -63,6 +64,10 @@ pub use redaction::{RedactionError, check_elements, check_text, is_safe};
 pub use release::{
     AudioCodec, EpisodeSpan, HdrFormat, ReleaseName, ReleaseSource, RepackKind, Resolution,
     VideoCodec,
+};
+pub use subtitle::{
+    AssFields, Conversion, FormatError, FrameRate, MAX_MILLIS, MicrosPerFrame, Millis, SubtitleCue,
+    SubtitleDocument, SubtitleTiming, TimingError,
 };
 pub use text::{NonEmptyText, TextError};
 pub use watch::{
