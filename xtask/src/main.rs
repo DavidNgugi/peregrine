@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use xtask::{
-    arch, backlog, commands, deaddeps, genipc, migrations, offset, theme, todos, workspace,
+    arch, backlog, commands, deaddeps, genipc, migrations, notices, offset, theme, todos, workspace,
 };
 
 fn main() -> ExitCode {
@@ -92,6 +92,14 @@ fn run() -> Result<bool> {
         "backlog-stats" => backlog::run(&root),
         "check-dead-deps" => deaddeps::run(&root),
         "check-theme" => theme::run(&root),
+        "check-notices" => {
+            let mode = if update {
+                notices::Mode::Update
+            } else {
+                notices::Mode::Check
+            };
+            notices::run(&root, mode)
+        }
         "gen-ipc" => {
             let mode = if update {
                 genipc::Mode::Update
@@ -121,6 +129,8 @@ cargo xtask — repository gates
   check-offset               no query pages with OFFSET; list reads are keyset-paginated
   check-dead-deps            no manifest declares a dependency its sources never use
   check-theme                every shipped theme clears the DESIGN_SYSTEM §2.2 contrast matrix
+  check-notices              sidecar licences and source offers; THIRD_PARTY.md is current
+  check-notices --update     rewrite THIRD_PARTY.md from sidecars.toml and Cargo.lock
   gen-ipc                    the committed TS bindings match a fresh export
   gen-ipc --check            the same, stated explicitly
   gen-ipc --update           rewrite the TS bindings from the Rust command surface

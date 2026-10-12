@@ -2,43 +2,17 @@ Peregrine
 Copyright (c) 2026 The Peregrine Authors
 
 This product is dual-licensed under MIT OR Apache-2.0 (see LICENSE-MIT and
-LICENSE-APACHE). The notices below cover components redistributed with it.
+LICENSE-APACHE).
 
-================================================================================
-Bundled sidecar executables
-================================================================================
+THIRD_PARTY.md is the attribution inventory for the components redistributed with
+it: every bundled sidecar executable with its licence, version pin, source, and
+written source offer, and every Rust dependency the application links.
+`cargo xtask check-notices` fails when that file drifts from sidecars.toml or
+Cargo.lock, and `cargo xtask check-notices --update` regenerates it. The
+redistribution obligations the gate does not carry itself are enumerated in
+docs/DEPENDENCIES.md §5 and §6.
 
-These ship as separate executables. They are invoked as subprocesses and are
-never linked into the application binary. Each is accompanied, in the released
-bundle, by its licence text, the build configuration actually used, and a
-written offer of corresponding source on the same distribution channel.
-
-mpv
-  Licence: GPL-2.0-or-later
-  Role:    playback engine, out of process (docs/adr/0013)
-  Version: pinned per OS at release time; the pinned version, checksum, and
-           build configuration land here with the first bundling task (E0-16).
-
-ffmpeg, ffprobe
-  Licence: LGPL-2.1-or-later, built without --enable-gpl, --enable-nonfree,
-           and --enable-version3
-  Role:    probe and on-demand component pack (docs/adr/0014)
-  Version: pinned per OS at release time; recorded here with the first
-           bundling task (E0-16).
-
-Full redistribution obligations are enumerated in docs/DEPENDENCIES.md §5.
-
-================================================================================
-Statically linked Rust crates and npm packages
-================================================================================
-
-The complete, generated attribution list for the crates and npm packages we
-redistribute — with each licence text, and the upstream NOTICE files that
-Apache-2.0 requires — is produced at build time by `xtask check-notices` and
-shipped inside the bundle. It is generated rather than hand-maintained so it
-cannot drift from the lockfiles.
-
-Obligations already known to need special handling, per docs/DEPENDENCIES.md §6:
+Obligations for specific statically linked crates, from docs/DEPENDENCIES.md §6:
 
   encoding_rs       BSD-3-Clause notice, including the no-endorsement clause
   moka              attribution under both licence parts
@@ -46,4 +20,5 @@ Obligations already known to need special handling, per docs/DEPENDENCIES.md §6
   notify            CC0-1.0
   lucide-react      ISC, attribution required
 
-No MPL-2.0, GPL, or LGPL code is statically linked into this application.
+No MPL-2.0, GPL, or LGPL code is statically linked into this application. GPL and
+LGPL components run only as separate executables (docs/adr/0009).

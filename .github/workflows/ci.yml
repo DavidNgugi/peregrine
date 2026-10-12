@@ -50,6 +50,8 @@ jobs:
         run: cargo xtask check-offset
       - name: Every shipped theme passes its contrast matrix
         run: cargo xtask check-theme
+      - name: Sidecar licences and source offers, and the attribution artefact is current
+        run: cargo xtask check-notices
       # The binding gate builds `peregrine-ipc`'s generator binary, which pulls in
       # the Tauri stack; on Linux that is the same WebKitGTK prerequisite list the
       # `rust` job installs. Everything else in this job is pure text.

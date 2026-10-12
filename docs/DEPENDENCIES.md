@@ -153,7 +153,7 @@ Only `cargo-dist` (renamed upstream to `dist`) was considered and is **not** ado
 
 Payload cost and how we avoid it: **mpv plus a minimal ffprobe ship in the base install** (roughly 35–45 MB and 10–15 MB respectively). A **full ffmpeg build is 40–60 MB per platform** and is therefore an on-demand component pack, downloaded only when a feature needs it (casting transcode, bitmap subtitle extraction), verified against a pinned checksum and signature before use, and documented in Settings with its size shown before download. macOS notarization and Windows signing must cover each binary we ship, including the base sidecars.
 
-Obligations, checked per release by `xtask check-notices`:
+Obligations, checked per release by `xtask check-notices`. The declarations live in [`sidecars.toml`](../sidecars.toml), one entry per executable with its licence, version pin, source, source offer, and build configuration; the checked artefact is [`THIRD_PARTY.md`](../THIRD_PARTY.md), regenerated from those declarations and `Cargo.lock` by `cargo xtask check-notices --update`:
 
 The release copies the licence text for each shipped binary and the written source
 offer into every bundle through `bundle.resources` in
@@ -175,7 +175,7 @@ them is missing fails rather than publishing.
 
 | Situation | Obligation |
 | --- | --- |
-| MIT / Apache-2.0 crates and packages (the bulk) | Ship a generated third-party licence list. Apache-2.0 additionally requires including any upstream `NOTICE` file |
+| MIT / Apache-2.0 crates and packages (the bulk) | Ship a generated third-party licence list. Apache-2.0 additionally requires including any upstream `NOTICE` file. The Rust runtime inventory is [`THIRD_PARTY.md`](../THIRD_PARTY.md); the licence texts it does not carry belong to the release's bundled-licence manifest |
 | `encoding_rs` | Retain the BSD-3-Clause notice, including its no-endorsement clause |
 | `moka` | Attribution under both licence parts |
 | `walkdir`, `notify` | Attribution for `walkdir` under Unlicense/MIT; `notify` is CC0-1.0 |

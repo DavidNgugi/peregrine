@@ -1,0 +1,38 @@
+# Sidecar declarations, validated by `cargo xtask check-notices` (AGENTS.md §3).
+#
+# Only the facts no file in the tree can derive live here: which third-party
+# executables we redistribute, what each licence requires, the version pin rule,
+# where its source is, and the build configuration the source offer promises.
+# `THIRD_PARTY.md` is generated from this file plus `Cargo.lock`; editing the
+# artefact by hand turns the next gate run red.
+#
+# `version` is an exact version when every platform ships the same one, or the
+# literal `pinned-per-os`, which means docs/DEPENDENCIES.md §1: the release
+# records the exact version and SHA-256 per platform. A range is never a pin.
+
+[[sidecar]]
+name = "mpv"
+licence = "GPL-2.0-or-later"
+version = "pinned-per-os"
+source = "https://github.com/mpv-player/mpv"
+source_offer = "Written offer: the complete corresponding source for the exact binary shipped, with the recorded build configuration and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases"
+why_separate = "GPL-2.0-or-later, so linking it would put copyleft code inside our binary (docs/adr/0009). An LGPL-only build is not an escape: it disables Linux X11 video output (docs/adr/0013)."
+build = "Upstream release build, unpatched unless a patch is recorded with the pin. The exact meson configuration and any carried patch are recorded per OS beside the pinned version by the release bundling work (docs/DEPENDENCIES.md §5)."
+
+[[sidecar]]
+name = "ffmpeg"
+licence = "LGPL-2.1-or-later"
+version = "pinned-per-os"
+source = "https://github.com/FFmpeg/FFmpeg"
+source_offer = "Written offer: the complete corresponding source for the exact binary shipped, with the recorded `configure` line and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases"
+why_separate = "LGPL-2.1-or-later, so linking libav* would put copyleft code inside our binary (docs/adr/0009). Running it as a subprocess also gives crash isolation for codecs we do not control."
+build = "Built LGPL-only: no `--enable-gpl`, `--enable-nonfree`, or `--enable-version3` (docs/adr/0014). The exact `configure` line and any `git diff` ship beside the pinned version. Distributed as an on-demand component pack, not in the base install."
+
+[[sidecar]]
+name = "ffprobe"
+licence = "LGPL-2.1-or-later"
+version = "pinned-per-os"
+source = "https://github.com/FFmpeg/FFmpeg"
+source_offer = "Written offer: the complete corresponding source for the exact binary shipped, with the recorded `configure` line and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases"
+why_separate = "Same build and licence as `ffmpeg`; no in-process probe reports HDR mastering or dynamic metadata (docs/DEPENDENCIES.md §5), and LGPL code stays outside the process boundary (docs/adr/0009)."
+build = "The ffprobe binary of the same ffmpeg build declared above, so one `configure` line covers both. Ships in the base install."
