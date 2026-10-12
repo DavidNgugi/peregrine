@@ -40,9 +40,25 @@ pub use catalogue::{
     Person, Season, SeasonNumber, Title, TitleAlias, TitleKind, TitleStatus, TitleSubtype,
 };
 pub use centre::{
-    CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, NewCentreEntry,
-    NotificationCentre, NotificationId, RecentNotification, RecentQuery, RecentWindow, Recorded,
-    SubjectKind, SubjectNaming,
+    CentreCursor,
+    CentreEntry,
+    CentreError,
+    Delivery,
+    DeliveryState,
+    NewCentreEntry,
+    NotificationCentre,
+    NotificationId,
+    RecentNotification,
+    RecentQuery,
+    RecentWindow,
+    Recorded,
+    // The centre's kind names what a notification can *name* (`title`, `episode`); the event
+    // vocabulary's own `SubjectKind` is broader, because an `event_log` row can also be about a
+    // `download_job`. Two different sets, so two different names at the crate root: exporting
+    // both as `SubjectKind` is a collision, and it is one a text merge cannot see, which is how
+    // it reached this file from two work packages that never overlapped.
+    SubjectKind as NotificationSubjectKind,
+    SubjectNaming,
 };
 pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
 pub use event::{Event, SubjectKind, WatchSubject};
