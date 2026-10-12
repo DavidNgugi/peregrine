@@ -192,7 +192,9 @@ impl VideoCodec {
 }
 
 /// High dynamic range format, matching the `media_file.hdr_format` constraint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+// `Deserialize` is here as well as `Serialize` because a media file's row is read back into a
+// value, and the constraint has to be enforced on that path too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HdrFormat {
     /// Standard dynamic range.
     #[serde(rename = "sdr")]
