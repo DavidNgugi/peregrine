@@ -4,5 +4,7 @@
 //! PG-E14-02 to PG-E14-09, and each lands in this module as it does.
 
 pub mod roots;
+pub mod scan;
 
-pub use roots::{LibraryService, RootError};
+pub use roots::{LibraryRootRow, LibraryService, RootError};
+pub use scan::{CandidateFile, ScanError, ScanOutcome, Scanner, SkippedPath, UnreadableDirectory};
