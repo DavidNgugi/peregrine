@@ -276,6 +276,13 @@ fn storage_error(error: &StorageError) -> AppError {
         StorageError::UnexpectedValue { column, .. } => AppError::new(ErrorCode::StorageCorrupt)
             .with_detail("The library database holds a value this version cannot read.")
             .with_cause(format!("`{column}` is outside its allowed values")),
+        // A JSON column this version wrote and cannot parse is the same class as the arm
+        // above: the row is there and its content is unreadable, which is corruption rather
+        // than a bad request. `column` and the parse's own message stay in the log — the
+        // detail a user needs is that the file is damaged, not which field failed.
+        StorageError::InvalidJsonField { column, .. } => AppError::new(ErrorCode::StorageCorrupt)
+            .with_detail("The library database holds a value this version cannot read.")
+            .with_cause(format!("`{column}` is not the JSON this version wrote")),
     }
 }
 
