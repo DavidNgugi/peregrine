@@ -257,8 +257,9 @@ graph LR
 
 - [x] **PG-E4-01** `M` · deps PG-E0-01 · Core entities and value objects with validating constructors
   - Acceptance: Illegal states unrepresentable; construction failures are typed
-- [ ] **PG-E4-02** *(doing)* `S` · deps PG-E4-01 · `ExternalId` with provider prefixes and parsing
+- [x] **PG-E4-02** `S` · deps PG-E4-01 · `ExternalId` with provider prefixes and parsing
   - Acceptance: Round-trip property test over generated ID shapes
+  - Verified: `external_id_round_trips_through_its_text_form` generates a provider and a value and asserts `parse(to_string(id)) == id`, and `external_id_parse_never_panics_on_arbitrary_input` covers arbitrary text. The `*(doing)*` marker was stale rather than hiding a gap.
 - [ ] **PG-E4-03** *(doing)* `L` · deps PG-E4-01 · `ReleaseName` parser: resolution, source, codec, HDR, audio, group, repack, season pack, multi-episode. **Open defect found while building PG-E4-06:** a group preceded by a hyphenated audio token loses its group. `m.extract_group` takes the *last* hyphen, so `Movie.2024.2160p.BluRay.DTS-HD-GROUP` yields the candidate `HD-GROUP`, which fails the plain-group check and reports `group: None`. `x264-GROUP`, `FLAC-GROUP`, `9.1-GROUP`, `DTS:X-GROUP` and `x264.5.1-GROUP` all resolve correctly, so the hole is specific to an audio token whose own name contains a hyphen and whose suffix looks like a group. The ranker worked around it rather than touching this parser; the fix belongs here, with a corpus entry, before E4-03 is ticked.
   - Acceptance: ≥ 95% correct on a 200-name corpus; no panics on fuzz input
 - [ ] **PG-E4-04** `L` · deps PG-E4-03 · `NameParser` for library filenames and folders
@@ -269,8 +270,9 @@ graph LR
   - Acceptance: Monotonicity, determinism, and totality property tests
 - [x] **PG-E4-07** `L` · deps PG-E4-01 · `TorrentInspector` rules: extension allowlist, traversal, reserved names, caps, unicode spoofing
   - Acceptance: Each hostile fixture classified correctly, with reason strings
-- [ ] **PG-E4-08** *(doing)* `M` · deps PG-E4-01 · `PathGuard` policy model, pure containment logic
+- [x] **PG-E4-08** `M` · deps PG-E4-01 · `PathGuard` policy model, pure containment logic
   - Acceptance: Escape attempts rejected; property test over generated paths
+  - Verified: `a_parent_component_that_escapes_the_root_is_never_contained` and `appending_a_relative_component_to_the_root_stays_inside` both run as properties over generated paths, alongside the explicit hostile fixtures (traversal, absolute, device names, confusable separators, over-length components). The `*(doing)*` marker was stale.
 - [x] **PG-E4-09** `M` · deps PG-E4-01 · `WatchPolicy`: resume point, watched threshold, next-episode selection
   - Acceptance: Boundary tests at 0%, 2%, 50%, 92%, 95%, 99%, and zero-duration
 - [ ] **PG-E4-10** `M` · deps PG-E4-07, PG-E3-05 · `EpisodeOrderingStrategy` for aired, absolute, DVD, anime
