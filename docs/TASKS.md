@@ -117,7 +117,7 @@ graph LR
   - Acceptance: A tagged pre-release publishes artifacts and a manifest
 - [ ] **PG-E0-17** *(review)* `XS` · deps PG-E0-13 · Automated dependency updates, grouped weekly
   - Acceptance: A grouped PR opens on schedule
-- [ ] **PG-E0-18** *(doing)* `S` · `LICENSE`, `NOTICE`, third-party attribution scaffold
+- [x] **PG-E0-18** `S` · `LICENSE`, `NOTICE`, third-party attribution scaffold
   - Acceptance: Attribution file lists every runtime dependency and sidecar
 
 - [x] **PG-E0-19** `M` · deps PG-E0-03, PG-E2-02, PG-E2-06, PG-E2-07, PG-E3-02, PG-E6-01, PG-E25-01 · Connect the Phase 0 runtime: initialize and retain redacted logging, open SQLite, start the scheduler, and register a hello-job service through IPC
