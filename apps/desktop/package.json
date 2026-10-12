@@ -19,6 +19,7 @@
     "@peregrine/theme": "workspace:*",
     "@peregrine/ui": "workspace:*",
     "@tauri-apps/api": "2.12.1",
+    "@tauri-apps/plugin-dialog": "2.8.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-error-boundary": "6.1.6",

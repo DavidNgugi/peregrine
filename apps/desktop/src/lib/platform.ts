@@ -14,6 +14,26 @@ import { logUiError } from "./error-log.js";
 export type Platform = "macos" | "windows" | "linux";
 
 /**
+ * The OS segment of a `BuildInfo.target` value, or `null` for a target this shell has no
+ * chrome for.
+ */
+function osSegment(target: string): string | null {
+  const [os] = target.split("-", 1);
+  return os === undefined || os.length === 0 ? null : os;
+}
+
+/**
+ * Whether the running platform's dialogs put folders and files in the same picker.
+ *
+ * macOS and Linux use one dialog for both and change its mode with a flag, so asking for
+ * both is one interaction. Windows shows two different dialogs, and a call that asks for
+ * both returns a file, so a caller that wants a folder must say so (PG-E1-12).
+ */
+export function mergesFileAndFolderPickers(platform: Platform | null): boolean {
+  return platform !== "windows";
+}
+
+/**
  * Narrows a `BuildInfo.target` value (`"<os>-<arch>"`, from the generated bindings) to a
  * platform.
  *
@@ -23,7 +43,7 @@ export type Platform = "macos" | "windows" | "linux";
  * Windows, which is worse than a neutral bar.
  */
 export function parsePlatform(target: string): Platform | null {
-  const [os] = target.split("-", 1);
+  const os = osSegment(target);
   switch (os) {
     case "macos":
     case "windows":

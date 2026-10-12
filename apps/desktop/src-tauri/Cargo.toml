@@ -19,12 +19,27 @@ tauri-build = { workspace = true }
 [dependencies]
 peregrine-ipc = { workspace = true }
 tauri = { workspace = true }
+# A second launch has to find the first: the plugin owns the lock (a named mutex on
+# Windows, a D-Bus name on Linux, a Unix socket on macOS) and hands the second launch's
+# arguments to the running instance, which is the PG-E1-04 delivery and the seam PG-E1-11's
+# deep links arrive on.
+tauri-plugin-single-instance = { workspace = true }
+# The native file and folder pickers behind the typed frontend API (PG-E1-12). Registering
+# it here is what lets the webview's `plugin:dialog|open` call be answered at all; the ACL
+# decides whether it may be.
+tauri-plugin-dialog = { workspace = true }
 # The main window's size, position, and maximized state survive a restart because
 # this plugin owns them (docs/ARCHITECTURE.md §6), not because this crate writes a
 # geometry file of its own.
 tauri-plugin-window-state = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+# `tauri::test` is behind this feature and carries no production code
+# (docs/DEPENDENCIES.md §4 treats dev-only crates as never redistributed), which is
+# what lets the menu be built against the mock runtime outside the event loop.
+tauri = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true

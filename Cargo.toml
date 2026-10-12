@@ -79,6 +79,14 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 tauri = { version = "2.12.1" }
 tauri-build = { version = "2.7.1" }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+# The native file and folder pickers (PG-E1-12). The platform's own dialog is the only
+# one that behaves like the rest of the desktop, and it needs no window of ours to draw.
+tauri-plugin-dialog = { version = "2.8.2" }
+# Single-instance enforcement with argument forwarding (PG-E1-04). This is the
+# implementation the Tauri project maintains per OS; a hand-rolled lock would have to
+# reimplement a named mutex, a D-Bus name, and a Unix socket, and would be the only one
+# nobody else tests.
+tauri-plugin-single-instance = { version = "2.5.3" }
 # Window geometry belongs to this plugin rather than to hand-rolled persistence:
 # docs/ARCHITECTURE.md §6 puts "window geometry" in the plugin's row and lists
 # "Reimplemented" in the Never column.

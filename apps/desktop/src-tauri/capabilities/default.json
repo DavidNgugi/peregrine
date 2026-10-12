@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window. The shell reads the OS theme this way, and starts the OS window drag from the chrome's title-bar region; `core:window:default` is the read-only set plus the internal maximize toggle that the region's double-click uses, so `start_dragging` is the only command it lacks (PG-E1-03). The core's own commands are not listed because this ACL does not gate them, and neither `tauri-plugin-window-state` nor any other plugin is listed because the webview calls none of them.",
+  "description": "Permissions for the main window, granted one at a time. `core:window:default` is the read-only window set plus the internal maximize toggle that the chrome's double-click uses, so `core:window:allow-start-dragging` is the only window command it lacks (PG-E1-03). `core:event:allow-listen` and `core:event:allow-unlisten` are what the jobs bridge's `listen` and its cleanup invoke, because the core plugin commands are gated by this ACL and the bridge registered nothing before them (PG-E0-19, PG-E1-04). `dialog:allow-open` is the file and folder picker the typed wrapper calls (PG-E1-12); the plugin's `message`, `save`, and `confirm` commands, and the whole `core:default` set with the menu, tray, app, and image commands on it, are deliberately absent.",
   "windows": ["main"],
-  "permissions": ["core:window:default", "core:window:allow-start-dragging"]
+  "permissions": [
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "dialog:allow-open"
+  ]
 }

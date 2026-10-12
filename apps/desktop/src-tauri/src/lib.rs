@@ -10,12 +10,18 @@
 
 use tauri::Manager as _;
 
+mod external;
+mod menu;
+
 /// Why the desktop shell could not start or had to stop.
 #[derive(Debug, thiserror::Error)]
 pub enum ShellError {
     /// The Tauri runtime failed to initialise or exited with an error.
     #[error("the desktop shell could not start: {0}")]
     Runtime(#[from] tauri::Error),
+    /// The OS refused a menu, a submenu, or one of their items.
+    #[error("the application menu could not be installed: {0}")]
+    Menu(tauri::Error),
 }
 
 /// Starts the runtime and blocks until the last window closes.
@@ -28,16 +34,29 @@ pub fn run() -> Result<(), ShellError> {
     // from it, so a command cannot be invokable without also being exported.
     let ipc = peregrine_ipc::builder();
     let app = tauri::Builder::default()
+        // Registered before anything else, because the plugin's job begins and ends
+        // before `setup`: a second launch hands its arguments to the first instance and
+        // exits without ever reaching the event loop (PG-E1-04).
+        .plugin(single_instance())
         // The window is created `visible: false` and this plugin is what shows it, so the
         // saved size and position are in place before the first frame: the window never
         // appears at the config's default geometry and then jumps to the restored one.
         // Restoring, tracking, and saving geometry are the plugin's job and not this
         // shell's (docs/ARCHITECTURE.md §6 "State ownership").
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // The pickers are called from the webview, so the plugin answers on the frontend's
+        // behalf and the ACL is what decides whether it may (PG-E1-12).
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(ipc.invoke_handler())
         .setup(move |app| {
             ipc.mount_events(app);
             start_runtime(app);
+            // A menu the user cannot use is worse than no menu, so a failure to install
+            // one is reported and the app keeps running with the platform default.
+            if let Err(error) = menu::install(app.handle()) {
+                eprintln!("peregrine: {error}");
+                tracing::error!(%error, "the application menu was not installed");
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -52,6 +71,41 @@ pub fn run() -> Result<(), ShellError> {
         }
     });
     Ok(())
+}
+
+/// Single-instance enforcement: a second launch raises the window and forwards its
+/// arguments, and then exits without starting a runtime of its own.
+fn single_instance() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri_plugin_single_instance::init(|app, arguments, working_directory| {
+        let input = external::ExternalInput::new(arguments, working_directory);
+        tracing::debug!(
+            argc = input.arguments.len(),
+            "a second launch reached the running instance (PG-E1-04)"
+        );
+        focus_main_window(app);
+        external::forward(app, &input);
+    })
+}
+
+/// Raises and focuses the main window, which is the part of a second launch the user sees.
+///
+/// Unconditional rather than `if is_minimized()`: asking costs a round trip to the event
+/// loop, and this callback already runs on it, so the question would have to be asked from
+/// another thread and the answer would be stale by the time it arrived. Unminimizing a
+/// window that is not minimized is a no-op in the platform.
+///
+/// A failure is logged and not returned: the user launched the app to use the window that
+/// is already open, and a focus failure must not turn into a second instance or a crash.
+fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        // A second launch that arrives while the first is shutting its window down. There
+        // is nothing to focus and nothing to report to a user who is already exiting.
+        tracing::debug!("a second launch found no main window to focus");
+        return;
+    };
+    if let Err(error) = window.unminimize().and_then(|()| window.set_focus()) {
+        tracing::warn!(%error, "the main window could not be raised for a second launch");
+    }
 }
 
 /// Starts the application runtime, reporting a failure without crashing the event loop.
