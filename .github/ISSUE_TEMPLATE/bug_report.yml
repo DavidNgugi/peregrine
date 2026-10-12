@@ -1,6 +1,6 @@
 name: Bug report
 description: Something behaves incorrectly in the app.
-labels: ["kind/bug", "state/triage"]
+labels: ["kind/bug", "state/triage", "phase/0-foundations"]
 body:
   - type: markdown
     attributes:

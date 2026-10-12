@@ -11,6 +11,13 @@
 #   plat/*    platform-specific only. Omitted when a task is `all`.
 #   effort/*  the estimate shorthand from docs/TASKS.md conventions.
 #   prio/*    triage outcome. Exactly one.
+#
+# There is no epic label group: an epic maps to exactly one phase, and the
+# ranges in the roll-up table at the bottom of docs/TASKS.md are that mapping —
+# E0–E4 phase 0, E5–E9 phase 1, E10–E15 phase 2, E16–E18 phase 3, E19–E27
+# phase 4, E28–E29 phase 5, E30–E31 phase 6, E32–E34 phase 7, E35 phase 8,
+# E36–E37 phase 9. An issue that belongs to an epic carries that epic's phase
+# label plus the area label for what it touches.
 
 - name: "kind/bug"
   color: "d73a4a"
@@ -83,6 +90,9 @@
 - name: "phase/8-accounts"
   color: "d4c5f9"
   description: "Post-1.0: local accounts and parental gating."
+- name: "phase/9-homelab"
+  color: "d4c5f9"
+  description: "Post-1.0: homelab deployment."
 
 - name: "area/domain"
   color: "f9d0c4"
