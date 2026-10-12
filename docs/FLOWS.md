@@ -223,15 +223,17 @@ sequenceDiagram
         Idx-->>Acq: raw releases
     end
     Acq->>Acq: normalize, dedupe by info hash and normalized title
-    Acq->>Rank: rank(candidates, account, context)
-    Rank-->>Acq: scored list with per-rule reasons
+    Acq->>Rank: rank(candidate, profile)
+    Rank-->>Acq: score with per-rule reasons, or a named rejection
     Acq->>DB: persist release_decision rows
     Acq-->>UI: ranked releases with explanations
 
-    Note over Rank: Pure function. Inputs: resolution, source, codec, HDR,<br/>audio, size versus runtime and account caps, release group<br/>allow/block, seeder count, age, and upgrade cut-off rank.
+    Note over Rank: Pure function. Inputs as implemented: resolution, source,<br/>video codec, audio, size versus the profile's caps, and the release-group<br/>allow and block lists.
 ```
 
-Ranking is a pure domain function so it can be property-tested and unit-tested exhaustively: monotonicity (better resolution never lowers a score within a account), determinism (same inputs, same order), and totality (every candidate gets a finite score, no panics on malformed release names).
+Ranking is a pure domain function so it can be property-tested and unit-tested exhaustively: monotonicity (a candidate the profile ranks higher on one criterion never scores lower), determinism (same inputs, same score, same reason order), and totality (every candidate comes back ranked or rejected, with no panic on any release name).
+
+The score is an integer. A candidate loses one weighted step for each entry the profile's preference list ranks above the value it declares, and the weights are ordered resolution, source, video codec, audio, so one resolution step is worth more than every step below it combined. Size caps and the group rules gate rather than score: a candidate they refuse is a typed rejection naming the rule, never a low score, and it carries no reasons because scoring stopped at the first refusal. HDR, seeder count, and age are not scored yet — `QualityRules` has no input for them.
 
 Auto-selection requires all of: the top candidate above the account's minimum score, seeders above the configured floor, size within caps, and the indexer healthy. Otherwise the UI presents the list.
 

@@ -250,7 +250,7 @@ graph LR
   - Acceptance: Same corpus requirement as PG-E4-03 plus anime absolute and `1x01` forms
 - [ ] **PG-E4-05** *(doing)* `M` · deps PG-E4-01 · `QualityProfile` model with rules, caps, and cut-off rank
   - Acceptance: Serialization round-trip and validation of contradictory rules
-- [ ] **PG-E4-06** `L` · deps PG-E4-05, PG-E4-03 · `ReleaseRanker` pure scoring with per-rule reason output
+- [x] **PG-E4-06** `L` · deps PG-E4-05, PG-E4-03 · `ReleaseRanker` pure scoring with per-rule reason output
   - Acceptance: Monotonicity, determinism, and totality property tests
 - [ ] **PG-E4-07** `L` · deps PG-E4-01 · `TorrentInspector` rules: extension allowlist, traversal, reserved names, caps, unicode spoofing
   - Acceptance: Each hostile fixture classified correctly, with reason strings
