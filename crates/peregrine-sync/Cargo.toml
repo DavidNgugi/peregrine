@@ -20,6 +20,8 @@ thiserror = { workspace = true }
 ulid = { workspace = true }
 
 [dev-dependencies]
+# The scheduler's tests inject the shared fakes instead of declaring their own.
+peregrine-testkit = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 

@@ -96,6 +96,9 @@ may_depend_on = [
   "peregrine-storage",
   "peregrine-stream",
   "peregrine-sync",
+  # Test-only: `peregrine-app`'s job tests inject the shared fakes instead of
+  # declaring their own (PG-E4-19). The crate never ships this edge.
+  "peregrine-testkit",
   "peregrine-torrent",
 ]
 runtime = [
@@ -240,6 +243,11 @@ pure = false
 [crates.peregrine-platform]
 may_depend_on = [
   "peregrine-domain",
+  # Test-only: the adapter's tests run the shared conformance suite against
+  # `SystemClock` and `UlidGenerator`, so production and fake answer to one set of
+  # assertions (PG-E4-19). The edge points from an adapter to a test crate, never
+  # the other way, so it is not a cycle.
+  "peregrine-testkit",
 ]
 runtime = [
   "jiff",
@@ -359,6 +367,9 @@ may_depend_on = [
   "peregrine-domain",
   "peregrine-providers",
   "peregrine-storage",
+  # Test-only: the scheduler's tests inject the shared fakes rather than a local
+  # `FrozenClock` and `CountingIds` (PG-E4-19).
+  "peregrine-testkit",
 ]
 runtime = [
   "futures",
@@ -377,7 +388,14 @@ pure = false
 may_depend_on = [
   "peregrine-domain",
 ]
-runtime = []
+runtime = [
+  # Both are the vocabulary of the ports: a fake clock answers with `jiff::Timestamp`
+  # and a deterministic generator mints `ulid::Ulid`, and the conformance suite names
+  # both in its signatures. They cannot be dev-dependencies, because a dev-dependency
+  # of an unpublished crate is not re-exported to the crates that run the suite.
+  "jiff",
+  "ulid",
+]
 build = []
 pure = false
 

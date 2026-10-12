@@ -2517,6 +2517,7 @@ dependencies = [
  "peregrine-secrets",
  "peregrine-storage",
  "peregrine-sync",
+ "peregrine-testkit",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
@@ -2592,6 +2593,7 @@ version = "0.1.0"
 dependencies = [
  "jiff",
  "peregrine-domain",
+ "peregrine-testkit",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
@@ -2642,6 +2644,7 @@ dependencies = [
  "futures",
  "jiff",
  "peregrine-domain",
+ "peregrine-testkit",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -2653,6 +2656,11 @@ dependencies = [
 [[package]]
 name = "peregrine-testkit"
 version = "0.1.0"
+dependencies = [
+ "jiff",
+ "peregrine-domain",
+ "ulid",
+]
 
 [[package]]
 name = "peregrine-torrent"

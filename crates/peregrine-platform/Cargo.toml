@@ -21,6 +21,9 @@ tracing = { workspace = true }
 ulid = { workspace = true }
 
 [dev-dependencies]
+# The adapter and the fake answer to one set of assertions: these tests run the shared
+# conformance suite against `SystemClock` and `UlidGenerator`.
+peregrine-testkit = { workspace = true }
 # The verifier and the installer run against fixture files, including one that is
 # rewritten in the window between two verification steps.
 tempfile = { workspace = true }

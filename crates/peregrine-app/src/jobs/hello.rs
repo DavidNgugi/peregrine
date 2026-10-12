@@ -245,35 +245,17 @@ mod tests {
     use super::*;
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
-    use peregrine_domain::IdGenerator;
     use peregrine_storage::{JobRecord, NewJob};
     use peregrine_sync::{JobHandle, JobOutcome, Scheduler, SchedulerConfig};
+    use peregrine_testkit::{CountingIds, FakeClock};
     use serde_json::Value;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
     const NOW: i64 = 1_700_000_000_000;
 
-    /// A clock pinned to one instant, so every journal timestamp is predictable.
-    struct FrozenClock;
-
-    impl Clock for FrozenClock {
-        fn now(&self) -> jiff::Timestamp {
-            jiff::Timestamp::from_millisecond(NOW).unwrap()
-        }
-    }
-
-    /// Identities handed out in a predictable order.
-    struct CountingIds(AtomicUsize);
-
-    impl IdGenerator for CountingIds {
-        fn next_id(&self) -> Ulid {
-            let issued = self.0.fetch_add(1, Ordering::Relaxed);
-            Ulid::from_parts(
-                1_700_000_000_000,
-                u128::try_from(issued).unwrap_or_default(),
-            )
-        }
+    /// A clock pinned to [`NOW`], so every journal timestamp is predictable.
+    fn clock() -> Arc<dyn Clock + Send + Sync> {
+        Arc::new(FakeClock::at(NOW))
     }
 
     async fn database(directory: &TempDir) -> Arc<Database> {
@@ -305,13 +287,13 @@ mod tests {
             .await
             .unwrap();
         let scheduler = Scheduler::new(SchedulerConfig::new(
-            Arc::new(FrozenClock),
-            Arc::new(CountingIds(AtomicUsize::new(0))),
+            clock(),
+            Arc::new(CountingIds::default()),
         ));
         let job = HelloJob::new(
             Arc::clone(database),
             Arc::clone(bus),
-            Arc::new(FrozenClock),
+            clock(),
             journal_id,
             steps,
         );
