@@ -548,6 +548,18 @@ const PATTERNS: &[Pattern] = &[
         field: Field::Hdr(HdrFormat::DolbyVision),
     },
     Pattern {
+        // Ahead of `dts-hd` because the longer spelling wins: without it the masker leaves
+        // `MA` behind, and the letter then sits between the tag and the `-GROUP`, where
+        // `group_attaches` cannot see a tag boundary. `DTS-HD MA` is the profile's own name,
+        // not a variant of the codec, so it maps to the same field.
+        text: "dts-hd.ma",
+        field: Field::Audio(AudioCodec::DtsHd),
+    },
+    Pattern {
+        text: "dts-hd ma",
+        field: Field::Audio(AudioCodec::DtsHd),
+    },
+    Pattern {
         text: "hdr10plus",
         field: Field::Hdr(HdrFormat::Hdr10Plus),
     },
@@ -574,6 +586,12 @@ const PATTERNS: &[Pattern] = &[
     Pattern {
         text: "dts-hd",
         field: Field::Audio(AudioCodec::DtsHd),
+    },
+    Pattern {
+        // The `-ES` matrix variant of DTS: the same codec, a longer spelling that would
+        // otherwise leave `ES` between the tag and the group.
+        text: "dts-es",
+        field: Field::Audio(AudioCodec::Dts),
     },
     Pattern {
         text: "bluray",
@@ -892,20 +910,37 @@ fn matches_at_exact(bytes: &[u8], index: usize, pattern: &[u8]) -> bool {
     token_window(bytes, index, pattern) == Some(pattern)
 }
 
+/// Tags the parser consumes but does not model.
+///
+/// Bit depth is not something the ranking reads, so there is no field to apply — but the token
+/// still has to be masked, because it sits exactly where a release puts the tag that precedes
+/// its group (`1080p.BluRay.x264.10bit-GROUP`). A letter left there hides the group from
+/// [`group_attaches`], which is how `10bit-GROUP` used to lose its group entirely.
+const UNMODELLED_TAGS: &[&str] = &["10bit", "8bit", "12bit", "hi10p"];
+
 /// Scans the raw text for resolution, source, codec, HDR, and audio tags.
 fn scan_fields(bytes: &[u8], masked: &mut [u8], fields: &mut ReleaseFields) {
     let mut index = 0;
     while index < bytes.len() {
-        let Some(pattern) = PATTERNS
+        if let Some(pattern) = PATTERNS
             .iter()
             .find(|pattern| matches_at(bytes, index, pattern.text))
-        else {
-            index += 1;
+        {
+            apply(fields, pattern.field);
+            mask_range(masked, index, index + pattern.text.len());
+            index += pattern.text.len();
             continue;
-        };
-        apply(fields, pattern.field);
-        mask_range(masked, index, index + pattern.text.len());
-        index += pattern.text.len();
+        }
+        match UNMODELLED_TAGS
+            .iter()
+            .find(|tag| matches_at(bytes, index, tag))
+        {
+            Some(tag) => {
+                mask_range(masked, index, index + tag.len());
+                index += tag.len();
+            }
+            None => index += 1,
+        }
     }
 }
 
@@ -1457,6 +1492,44 @@ mod tests {
     fn a_hyphenated_title_does_not_become_a_group() {
         assert_eq!(parsed("Spider-Man.2002.1080p.BluRay.x264").group(), None);
         assert_eq!(parsed("The-Office.S01E01.1080p.BluRay.x264").group(), None);
+    }
+
+    /// A longer codec or bit-depth spelling must not sit between the tag and the group.
+    ///
+    /// Each of these lost its group before the spellings were recognized: the masker left a
+    /// letter immediately before the group's hyphen, and [`group_attaches`] needs a tag
+    /// boundary (`#`) or a channel layout there. The codec spellings are real — `DTS-HD MA` is
+    /// the profile's own name and `DTS-ES` is the matrix variant — and a bit depth is a tag
+    /// the ranking does not read but the name still carries.
+    #[test]
+    fn a_group_after_a_longer_tag_spelling_is_reported() {
+        for name in [
+            "Movie.2024.2160p.BluRay.DTS-HD.MA-GROUP",
+            "Movie.2024.2160p.BluRay.DTS-HD MA-GROUP",
+            "Movie.2024.2160p.BluRay.DTS-ES-GROUP",
+            "Movie.2024.1080p.BluRay.x264.10bit-GROUP",
+            "Movie.2024.1080p.BluRay.x264.8bit-GROUP",
+            "Movie.2024.1080p.BluRay.x265.12bit-GROUP",
+        ] {
+            assert_eq!(
+                parsed(name).group(),
+                Some("GROUP"),
+                "`{name}` lost the group the tag before it should not hide"
+            );
+        }
+    }
+
+    /// The longer spellings are still read as the codec they name, not merely masked.
+    #[test]
+    fn a_longer_audio_spelling_still_reports_its_codec() {
+        assert_eq!(
+            parsed("Movie.2024.2160p.BluRay.DTS-HD.MA-GROUP").audio(),
+            &[AudioCodec::DtsHd]
+        );
+        assert_eq!(
+            parsed("Movie.2024.2160p.BluRay.DTS-ES-GROUP").audio(),
+            &[AudioCodec::Dts]
+        );
     }
 
     #[test]
