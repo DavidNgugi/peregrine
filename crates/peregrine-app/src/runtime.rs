@@ -349,6 +349,21 @@ impl Runtime {
                 .ok_or(RuntimeError::UnknownJob { job })?
         };
 
+        // The row is the authority on whether a job is still a job. A job writes its own terminal
+        // row and the scheduler resolves its handle afterwards, so there is a window in which the
+        // journal says `canceled` and the handle still looks live — and asking to cancel in that
+        // window used to answer "ok" about a job that had already stopped, which is the one answer
+        // a caller cannot tell apart from a real cancellation. Reading the phase closes the window
+        // at the point where the two sources of truth meet. A read that fails leaves the handle as
+        // the only answer rather than failing the request: refusing to cancel because a journal
+        // read failed would be strictly worse.
+        if let Ok(Some(row)) = self.database.job(journal_id).await
+            && row.state.is_terminal()
+        {
+            self.live().remove(&job);
+            return Err(RuntimeError::UnknownJob { job });
+        }
+
         if let Err(error) = self
             .database
             .update_job(journal_id, JobChange::CancelRequested)
@@ -701,6 +716,47 @@ mod tests {
         );
 
         // Idempotent: a second shutdown must not hang or double-close anything.
+        runtime.shutdown().await;
+    }
+
+    /// A row that has reached a terminal phase means the job is gone, whatever the handle says.
+    ///
+    /// A job writes its own terminal row and the scheduler resolves the handle afterwards, so
+    /// there is a window in which the journal is honest and the handle is not yet: a cancel
+    /// arriving there used to answer `ok` about a job that had already stopped, which is the one
+    /// answer a caller cannot tell apart from a real cancellation. This test stages that window by
+    /// writing the row by hand, where racing a real job staged it about one run in ten.
+    #[tokio::test]
+    async fn cancelling_a_job_whose_row_is_already_terminal_reports_it_unknown() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let started = runtime.start_hello(hello::MAX_STEPS).await.unwrap();
+
+        // What the job itself writes as its last act, before the scheduler sees its outcome.
+        let closed = runtime
+            .database
+            .update_job(
+                started.journal_id,
+                JobChange::Finished {
+                    at: runtime.clock.now().as_millisecond(),
+                    phase: JobPhase::Canceled,
+                    error_code: Some(CANCELLED_CODE.to_owned()),
+                    error: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(closed, "the row was open");
+
+        let error = runtime
+            .cancel(started.job)
+            .await
+            .expect_err("a job whose row is terminal is not live");
+        assert!(
+            matches!(error, RuntimeError::UnknownJob { .. }),
+            "{error:?}"
+        );
+
         runtime.shutdown().await;
     }
 
