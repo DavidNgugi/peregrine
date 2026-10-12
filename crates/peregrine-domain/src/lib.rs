@@ -19,6 +19,7 @@ pub mod ports;
 pub mod quality;
 pub mod redaction;
 pub mod release;
+pub mod subtitle;
 pub mod text;
 
 pub use account::{AccountError, AccountId, AccountScope, Visibility};
@@ -51,6 +52,10 @@ pub use redaction::{RedactionError, check_elements, check_text, is_safe};
 pub use release::{
     AudioCodec, EpisodeSpan, HdrFormat, ReleaseName, ReleaseSource, RepackKind, Resolution,
     VideoCodec,
+};
+pub use subtitle::{
+    AssFields, Conversion, FormatError, FrameRate, MAX_MILLIS, MicrosPerFrame, Millis, SubtitleCue,
+    SubtitleDocument, SubtitleTiming, TimingError,
 };
 pub use text::{NonEmptyText, TextError};
 
