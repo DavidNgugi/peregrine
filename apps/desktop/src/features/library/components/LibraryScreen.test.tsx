@@ -1,10 +1,11 @@
 import { createI18n } from "@peregrine/i18n";
-import type { LibraryTitleDto } from "@peregrine/ipc-client";
+import type { LibraryTitleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { ScanControl } from "../hooks/useScan.js";
+import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
 import { LibraryScreen } from "./LibraryScreen.js";
 
 const i18n = createI18n();
@@ -26,6 +27,42 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
 
 function library(state: Partial<LibraryTitles> = {}): LibraryTitles {
   return { titles: [], loading: false, failed: false, refresh: () => Promise.resolve(), ...state };
+}
+
+/** One parked file as the core sends it. */
+function parked(overrides: Partial<UnmatchedFileDto> = {}): UnmatchedFileDto {
+  return {
+    id: 7,
+    name: "The Matrix 2049.mkv",
+    parsedTitle: "The Matrix",
+    parsedYear: 2049,
+    parsedSeason: null,
+    parsedEpisode: null,
+    reason: "`2049` could be a year or part of the title",
+    sizeBytes: 2_000_000_000,
+    ...overrides,
+  };
+}
+
+/** The queue as a state, with its action recorded rather than performed. */
+function queue(
+  state: Partial<UnmatchedQueue> = {},
+): UnmatchedQueue & { readonly matched: number[] } {
+  const record = { matched: [] as number[] };
+  return {
+    files: [],
+    loading: false,
+    failed: false,
+    busy: false,
+    error: null,
+    match: (id: number) => {
+      record.matched.push(id);
+      return Promise.resolve();
+    },
+    refresh: () => Promise.resolve(),
+    ...state,
+    ...record,
+  };
 }
 
 /** The scan control as a state, with its action recorded rather than performed. */
@@ -55,10 +92,14 @@ function scanControl(state: Partial<ScanControl> = {}): ScanControl & { readonly
  * what this screen has to get right: the read, the empty case, and the failed case are three
  * different screens and the test asserts they say three different things.
  */
-function markup(state: LibraryTitles, scan: ScanControl = scanControl()): string {
+function markup(
+  state: LibraryTitles,
+  scan: ScanControl = scanControl(),
+  unmatched: UnmatchedQueue = queue(),
+): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <LibraryScreen scan={scan} titles={state} />
+      <LibraryScreen scan={scan} titles={state} unmatched={unmatched} />
     </I18nextProvider>,
   );
 }
@@ -149,6 +190,54 @@ describe("LibraryScreen", () => {
     expect(succeeded).toContain("Scan finished.");
     expect(failed).toContain("The last scan did not finish.");
     expect(succeeded).not.toContain("Scanning");
+  });
+
+  it("shows a parked file with what its name read and why it could not be placed", () => {
+    // The question a person is answering is which of those values to trust, so both halves are on
+    // the row: the parse's reading above, and the reason below.
+    const html = markup(library(), scanControl(), queue({ files: [parked()] }));
+
+    expect(html).toContain("The Matrix 2049.mkv");
+    expect(html).toContain("The Matrix (2049)");
+    expect(html).toContain("could be a year or part of the title");
+    expect(html).toContain("Match");
+  });
+
+  it("offers nothing to match when the name read no title", () => {
+    // `1080p.mkv` reads a resolution and no title, so there is nothing to place it as: the button is
+    // there and disabled, which says why rather than hiding the row.
+    const html = markup(
+      library(),
+      scanControl(),
+      queue({
+        files: [
+          parked({
+            name: "1080p.mkv",
+            parsedTitle: null,
+            parsedYear: null,
+            reason: "no title could be read",
+          }),
+        ],
+      }),
+    );
+
+    expect(html).toContain("Nothing was read from this name");
+    expect(html).toContain(`disabled=""`);
+  });
+
+  it("says a queue is empty only when the read answered", () => {
+    const empty = markup(library(), scanControl(), queue());
+    const failed = markup(library(), scanControl(), queue({ failed: true }));
+
+    expect(empty).toContain("Nothing is waiting.");
+    expect(failed).not.toContain("Nothing is waiting.");
+    expect(failed).not.toContain("Needs a decision");
+  });
+
+  it("disables every match while one is in flight", () => {
+    const busy = markup(library(), scanControl(), queue({ files: [parked()], busy: true }));
+
+    expect(busy).toContain(`disabled=""`);
   });
 
   it("shows why a scan was refused, in the core's own words", () => {

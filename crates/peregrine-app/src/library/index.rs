@@ -200,6 +200,90 @@ impl IndexReport {
     }
 }
 
+/// What answering a parked file did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Matched {
+    /// The file was placed: its title, item, and file rows now exist, and the parked row is gone.
+    Placed,
+    /// The file was already indexed — a scan reached it between the row being parked and the answer —
+    /// so the parked row was cleared and nothing was written.
+    AlreadyIndexed,
+    /// The parse read no title, so there is nothing to place it as. The row stays.
+    NoTitle,
+}
+
+/// Answers one parked file by placing it as the title its parse read.
+///
+/// `PG-E14-08`'s manual match, at the size this build can honestly offer: a file the scan could not
+/// place is offered to a person with what the parse read, and confirming it writes the same rows a
+/// scan would have. It deliberately does **not** re-parse the path to do it: the row exists because
+/// the parse *failed*, so re-parsing would fail again. What it places from is what the parse managed
+/// to read before it stopped, which is the whole reason `unmatched_file` stores those fields.
+///
+/// Deciding *which* title a file belongs to when the parse read the wrong one is `PG-E14-09`'s
+/// memory of user corrections; this is the confirmation half.
+///
+/// The placed file carries no root, because the parked row does not record one — a scan is what
+/// knows which folder a file came from. That is not a gap: the next scan of that root finds the path,
+/// refreshes its stamp, and adopts it.
+///
+/// # Errors
+///
+/// [`IndexError::Storage`] when a read or a write fails, and [`IndexError::NotText`] for a path the
+/// schema cannot hold.
+pub async fn match_unmatched(
+    database: &Arc<Database>,
+    scope: peregrine_domain::AccountScope,
+    id: i64,
+    at: jiff::Timestamp,
+) -> Result<Matched, IndexError> {
+    let Some(row) = database.unmatched_file(scope, id).await? else {
+        return Ok(Matched::NoTitle);
+    };
+    let path = row.path.as_str();
+
+    // A scan may have reached the file while the row waited, in which case the row is stale rather
+    // than wrong: clearing it is the whole answer, and writing again would collide on the path's
+    // unique index.
+    if database.recorded_file_at_path(path).await?.is_some() {
+        database.remove_unmatched_file(id).await?;
+        return Ok(Matched::AlreadyIndexed);
+    }
+
+    let Some(title_name) = row.parsed_title.as_deref() else {
+        return Ok(Matched::NoTitle);
+    };
+    let candidate = CandidateFile {
+        path: std::path::PathBuf::from(path),
+        size_bytes: row.size_bytes,
+        mtime_ms: row.mtime_ms.as_millisecond(),
+    };
+
+    match (row.parsed_season, row.parsed_episode) {
+        (Some(season_number), Some(episode_number)) => {
+            episode(
+                database,
+                None,
+                path,
+                Placement {
+                    title_name,
+                    season_number: season_number.get(),
+                    episode_number: episode_number.get(),
+                },
+                &candidate,
+                at,
+            )
+            .await?;
+        }
+        _ => {
+            movie_from_title(database, None, path, title_name, &candidate, at).await?;
+        }
+    }
+
+    database.remove_unmatched_file(id).await?;
+    Ok(Matched::Placed)
+}
+
 /// Indexes one parsed name.
 async fn index_parsed(
     database: &Arc<Database>,
@@ -264,7 +348,7 @@ async fn index_parsed(
     report.absorb(
         &episode(
             database,
-            root_id,
+            Some(root_id),
             path,
             Placement {
                 title_name,
@@ -304,6 +388,28 @@ async fn movie(
         report.unmatched += 1;
         return Ok(report);
     };
+
+    let placed = movie_from_title(database, Some(root_id), path, title_name, candidate, at).await?;
+    report.created_titles += placed.created_titles;
+    report.created_items += placed.created_items;
+    report.created_files += placed.created_files;
+    Ok(report)
+}
+
+/// Places one film from the title name a parse read, whatever read it.
+///
+/// The shared half of a scanned film and a hand-matched one, and the reason it takes a name rather
+/// than a `LibraryName`: a parked row exists because the parse *failed*, so what it can be placed as
+/// is the title the parse managed to read before it stopped.
+async fn movie_from_title(
+    database: &Arc<Database>,
+    root_id: Option<i64>,
+    path: &str,
+    title_name: &str,
+    candidate: &CandidateFile,
+    at: jiff::Timestamp,
+) -> Result<IndexReport, IndexError> {
+    let mut report = IndexReport::default();
     let sort_name = sort_name_of(title_name);
 
     let (item_id, created) = movie_item(database, title_name, &sort_name, at).await?;
@@ -337,7 +443,7 @@ struct Placement<'a> {
 /// which is what makes a second pass over the same folder create nothing.
 async fn episode(
     database: &Arc<Database>,
-    root_id: i64,
+    root_id: Option<i64>,
     path: &str,
     placement: Placement<'_>,
     candidate: &CandidateFile,
@@ -432,7 +538,7 @@ async fn episode(
 /// Writes one file row, which is the same row for a film and for an episode.
 async fn write_file(
     database: &Arc<Database>,
-    root_id: i64,
+    root_id: Option<i64>,
     path: &str,
     item_id: i64,
     candidate: &CandidateFile,
@@ -443,7 +549,7 @@ async fn write_file(
             id: 0,
             media_item_id: item_id,
             path: text(path)?,
-            root_id: Some(root_id),
+            root_id,
             size_bytes: candidate.size_bytes,
             // The file's own modification time, not the scan's instant: the incremental rule
             // compares what the library recorded against what the filesystem now says, and storing
@@ -711,6 +817,17 @@ mod tests {
                 .id
         }
 
+        /// The parked rows themselves, for a test that answers one.
+        async fn unmatched_rows(&self) -> Vec<peregrine_storage::UnmatchedFileRow> {
+            self.database
+                .list_unmatched_files(
+                    AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                    PageRequest::first(50),
+                )
+                .await
+                .unwrap()
+        }
+
         async fn unmatched(&self) -> Vec<String> {
             self.database
                 .list_unmatched_files(
@@ -911,6 +1028,107 @@ mod tests {
 
         assert_eq!(report.unmatched, 1, "{report:?}");
         assert_eq!(corpus.unmatched().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn matching_a_parked_file_places_it_as_the_title_its_parse_read() {
+        // PG-E14-08's first half. The row exists because the parse failed, so what it is placed as is
+        // the title the parse managed to read: `The Matrix 2049` is ambiguous about which number is
+        // the year, and a person saying "it is the title" is the answer.
+        let corpus = corpus("match", &["The Matrix 2049.mkv"]).await;
+        let parked = corpus.index().await;
+        assert_eq!(parked.unmatched, 1, "the fixture must park: {parked:?}");
+        let rows = corpus.unmatched_rows().await;
+        assert_eq!(rows.len(), 1);
+        let (id, parsed_title) = (rows[0].id, rows[0].file.parsed_title.clone());
+        let scope = AccountScope::unrestricted(AccountId::new(1).expect("account one"));
+
+        match_unmatched(&corpus.database, scope, id, at(NOW + 1_000))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            corpus.titles().await,
+            vec![parsed_title.expect("the fixture's parse read a title")],
+            "the file became the title the parse read"
+        );
+        assert_eq!(
+            corpus.unmatched_rows().await.len(),
+            0,
+            "and it is no longer waiting for an answer"
+        );
+    }
+
+    #[tokio::test]
+    async fn matching_a_file_a_scan_already_reached_clears_the_row_and_writes_nothing() {
+        // The stale-row case: a scan reached the file while the row waited. Writing again would
+        // collide on the path's unique index, so the answer is to clear the row.
+        let corpus = corpus("stale", &["Alien (1979).mkv"]).await;
+        corpus.index().await;
+        let row = corpus
+            .database
+            .insert_unmatched_file(
+                peregrine_domain::UnmatchedFile {
+                    id: 0,
+                    path: peregrine_domain::NonEmptyText::new(
+                        corpus
+                            .database_root_path()
+                            .join("Alien (1979).mkv")
+                            .to_str()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                    size_bytes: 17,
+                    mtime_ms: at(NOW),
+                    parsed_title: Some("Alien".to_owned()),
+                    parsed_year: Some(1979),
+                    parsed_season: None,
+                    parsed_episode: None,
+                    confidence: None,
+                    reason: Some("stale".to_owned()),
+                    suggested_title_id: None,
+                    suggested_episode_id: None,
+                    first_seen_at: at(NOW),
+                },
+                true,
+            )
+            .await
+            .unwrap()
+            .expect("the row is new");
+
+        let matched = match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            row,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(matched, Matched::AlreadyIndexed);
+        assert_eq!(corpus.unmatched_rows().await.len(), 0);
+        assert_eq!(corpus.titles().await.len(), 1, "nothing was written twice");
+    }
+
+    #[tokio::test]
+    async fn matching_a_row_whose_parse_read_no_title_leaves_it_alone() {
+        // `1080p.mkv` reads a resolution and no title, and there is nothing to place it as. The row
+        // stays so it can be answered by something that does know, which is PG-E14-09's memory.
+        let corpus = corpus("no-title", &["1080p.mkv"]).await;
+        corpus.index().await;
+        let id = corpus.unmatched_rows().await[0].id;
+
+        let matched = match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            id,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(matched, Matched::NoTitle);
+        assert_eq!(corpus.unmatched_rows().await.len(), 1, "the row stays");
     }
 
     #[tokio::test]

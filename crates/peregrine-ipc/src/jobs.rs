@@ -231,6 +231,14 @@ impl From<RuntimeError> for AppError {
                 .with_detail("A scan is already running.")
                 .with_cause(format!("the running scan is {job}")),
             RuntimeError::Library(inner) => library_error(inner),
+            // A hand-match fails for two reasons: the database refused, or a path cannot be stored
+            // as text. The first is the storage codes; the second is the caller's input.
+            RuntimeError::Index(inner) => match inner {
+                peregrine_app::IndexError::Storage(storage) => storage_error(storage),
+                peregrine_app::IndexError::NotText { .. } => AppError::new(ErrorCode::InvalidInput)
+                    .with_detail("That file's path cannot be stored.")
+                    .with_cause(inner.to_string()),
+            },
         }
     }
 }

@@ -405,6 +405,36 @@ impl Runtime {
         Ok(())
     }
 
+    /// A page of the files a scan could not place, newest first.
+    ///
+    /// Read under [`installation_scope`], like every user-facing read: this is a list a person
+    /// answers, so a file belonging to a title an account may not see is not offered to it.
+    pub async fn unmatched_files(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<peregrine_storage::UnmatchedFileRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_unmatched_files(installation_scope(), PageRequest::first(limit))
+            .await?)
+    }
+
+    /// Answers one parked file by placing it as the title its parse read.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn match_unmatched_file(&self, id: i64) -> Result<bool, RuntimeError> {
+        let matched = crate::library::match_unmatched(
+            &self.database,
+            installation_scope(),
+            id,
+            self.clock.now(),
+        )
+        .await?;
+        Ok(matches!(matched, crate::library::Matched::Placed))
+    }
+
     /// A page of the titles the library holds, newest first.
     ///
     /// Read under [`installation_scope`], which is the whole of this build's account story: the
@@ -803,6 +833,10 @@ pub enum RuntimeError {
         /// The job that is already scanning, so a caller can watch that one instead.
         job: Ulid,
     },
+
+    /// Indexing refused the operation, with the reason a caller can map.
+    #[error(transparent)]
+    Index(#[from] crate::library::IndexError),
 
     /// The library refused the operation, with the reason a user can read.
     #[error(transparent)]

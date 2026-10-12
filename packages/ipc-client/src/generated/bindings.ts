@@ -134,6 +134,15 @@ export const commands = {
 	 *  in, which the DTO says plainly: a screen can then show what it has without implying it has more.
 	 */
 	listTitles: (limit: number | null) => typedError<LibraryTitleDto[], AppError_Serialize>(__TAURI_INVOKE("list_titles", { limit })),
+	/**  A page of the files a scan could not place, newest first. */
+	listUnmatched: (limit: number | null) => typedError<UnmatchedFileDto[], AppError_Serialize>(__TAURI_INVOKE("list_unmatched", { limit })),
+	/**
+	 *  Answers one parked file by placing it as the title its parse read.
+	 * 
+	 *  Answers whether it placed anything: a file a scan reached while the row waited is already
+	 *  indexed, and clearing the stale row is the whole of that answer rather than a failure.
+	 */
+	matchUnmatched: (file: UnmatchedRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("match_unmatched", { file })),
 };
 
 /* Types */
@@ -515,6 +524,44 @@ export type ShortcutBinding = {
 	alt: boolean,
 	/**  Whether Shift is held. */
 	shift: boolean,
+};
+
+/**
+ *  One file a scan could not place, as the queue shows it.
+ * 
+ *  The parse's own fields are here rather than a re-derivation of them: this row exists because the
+ *  parse *failed*, so what a person is being asked is which of the values it managed to read should
+ *  be trusted. Showing the file's own name beside them is what makes that answerable.
+ */
+export type UnmatchedFileDto = {
+	/**  The row id, which is what a match names. */
+	id: number,
+	/**  The file's name, without the directories it sits in. */
+	name: string,
+	/**  The title the parse read out of it, when it read one. */
+	parsedTitle: string | null,
+	/**  The year it read, when the name stated one. */
+	parsedYear: number | null,
+	/**  The season it read, when the name stated one. */
+	parsedSeason: number | null,
+	/**  The episode it read, when the name stated one. */
+	parsedEpisode: number | null,
+	/**  Why the scan could not place it. */
+	reason: string | null,
+	/**  What the file weighs, in bytes. */
+	sizeBytes: number,
+};
+
+/**
+ *  The parked file a command acts on.
+ * 
+ *  A DTO rather than a bare `i64` argument, for the reason `RootRef` gives: specta refuses to export
+ *  a large integer as a command argument, so a bare id would be the one thing in the contract with
+ *  no type on the other side.
+ */
+export type UnmatchedRef = {
+	/**  The row id, as the queue returned it. */
+	id: number,
 };
 
 /* Tauri Specta runtime */

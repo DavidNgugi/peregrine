@@ -238,6 +238,27 @@ fn list_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `list_unmatched` reads the queue through the runtime, so it fails the same way.
+fn list_unmatched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::list_unmatched(harness.dead_state(), None)
+            .await
+            .map(drop)
+    })
+}
+
+/// `match_unmatched` writes through the runtime, so a dead runtime is the failure it has.
+fn match_unmatched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::match_unmatched(
+            harness.dead_state(),
+            crate::library::UnmatchedRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -401,6 +422,22 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: list_titles_without_a_runtime,
+        },
+        ContractCase {
+            command: "list_unmatched",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_unmatched_without_a_runtime,
+        },
+        ContractCase {
+            command: "match_unmatched",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: match_unmatched_without_a_runtime,
         },
         ContractCase {
             command: "list_shortcuts",

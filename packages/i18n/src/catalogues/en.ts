@@ -84,6 +84,23 @@ export const en = {
         failed: "The last scan did not finish.",
         refused: "That scan could not be started.",
       },
+      queue: {
+        title: "Needs a decision",
+        description:
+          "Files a scan found but could not place, with what their names said. Matching one files it under the title its name read.",
+        column: {
+          file: "File",
+          why: "Why not",
+        },
+        match: "Match",
+        noReason: "—",
+        nothingRead: "Nothing was read from this name",
+        refused: "That file could not be matched.",
+        empty: {
+          title: "Nothing is waiting.",
+          body: "Every file a scan found has been placed.",
+        },
+      },
       column: {
         title: "Title",
         kind: "Kind",

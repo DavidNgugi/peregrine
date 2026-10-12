@@ -8,7 +8,7 @@ pub mod reconcile;
 pub mod roots;
 pub mod scan;
 
-pub use index::{IndexError, IndexReport, index_candidates};
+pub use index::{IndexError, IndexReport, Matched, index_candidates, match_unmatched};
 pub use reconcile::Reconciliation;
 pub use roots::{LibraryError, LibraryRootRow, LibraryService};
 pub use scan::{CandidateFile, ScanError, ScanOutcome, Scanner, SkippedPath, UnreadableDirectory};

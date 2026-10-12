@@ -97,6 +97,10 @@ pub(crate) enum WriteRequest {
         root_id: i64,
         updated_at: i64,
     },
+    /// Remove one `unmatched_file` row.
+    RemoveUnmatchedFile {
+        id: i64,
+    },
     /// Insert or refresh one `image_cache` row.
     RecordImageCache(Box<crate::image_cache::ImageCacheEntry>),
     /// Report that one cached image was read.
@@ -290,6 +294,7 @@ async fn apply_library_write(
             .await
             .map(|id| WriteResponse::RowInserted { id })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::RemoveUnmatchedFile { id } => remove_unmatched_file(connection, id).await,
         WriteRequest::InsertUnmatchedFile {
             file,
             ignore_conflict,
@@ -399,6 +404,17 @@ async fn refresh_file_stamp(
     crate::library::refresh_file_stamp(connection, id, size_bytes, mtime_ms, root_id, updated_at)
         .await
         .map(|changed| WriteResponse::RowChanged { changed })
+        .map_err(StorageError::from_sqlx)
+}
+
+/// Removes one `unmatched_file` row, mapping the statement onto the response the caller expects.
+async fn remove_unmatched_file(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<WriteResponse, StorageError> {
+    crate::library::remove_unmatched_file(connection, id)
+        .await
+        .map(|removed| WriteResponse::RowChanged { changed: removed })
         .map_err(StorageError::from_sqlx)
 }
 

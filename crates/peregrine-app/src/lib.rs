@@ -15,7 +15,7 @@ pub mod runtime;
 mod testing;
 
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
-pub use library::{LibraryError, LibraryService, ScanError, ScanOutcome, Scanner};
+pub use library::{IndexError, LibraryError, LibraryService, ScanError, ScanOutcome, Scanner};
 pub use notify::{
     CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, EventPreference,
     NewCentreEntry, NotificationCentre, NotificationId, NotificationPreferences,
@@ -31,8 +31,8 @@ pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, ShellStatus, Sta
 // The command surface speaks these too, and `peregrine-ipc` may depend on this crate and not
 // on `peregrine-domain` (AGENTS R6): re-exported rather than duplicated so a kind added to the
 // domain cannot reach the wire in a form the domain does not have.
-pub use peregrine_domain::{LibraryRoot, LibraryRootKind, ScanMode};
-pub use peregrine_storage::{LibraryTitleRow, MetadataState, TitleKind};
+pub use peregrine_domain::{EpisodeNumber, LibraryRoot, LibraryRootKind, ScanMode, SeasonNumber};
+pub use peregrine_storage::{LibraryTitleRow, MetadataState, TitleKind, UnmatchedFileRow};
 // And the instant a root's fields carry, for the same reason: the command surface has to name
 // the type it converts, and `jiff` is not a dependency it may take (AGENTS R6).
 pub use jiff::Timestamp;

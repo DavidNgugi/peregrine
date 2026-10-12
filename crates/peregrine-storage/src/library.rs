@@ -318,6 +318,23 @@ pub(crate) async fn record_root_scan(
     Ok(result.rows_affected() > 0)
 }
 
+/// Removes one `unmatched_file` row, reporting whether it was there.
+///
+/// What a match does last: the row exists while the file is waiting for an answer, and a file that
+/// has been placed is not waiting for anything. Removing it *after* the file row is written is the
+/// order that fails safe — a crash in between leaves a row for a file that is already indexed, which
+/// the next match of that row clears, rather than a placed file with nothing to say it was.
+pub(crate) async fn remove_unmatched_file(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM unmatched_file WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *connection)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Removes one row of `library_root`, reporting whether the row was there.
 ///
 /// This is the only statement a root removal runs. Everything the root produced — media items,

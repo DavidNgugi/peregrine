@@ -17,12 +17,13 @@
 
 import { Button, EmptyState, ErrorState, Progress, Screen, Section, Table } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
-import type { LibraryTitleDto } from "@peregrine/ipc-client";
+import type { LibraryTitleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
+import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
 import type { ScanControl } from "../hooks/useScan.js";
 
 interface LibraryScreenProps {
@@ -36,6 +37,13 @@ interface LibraryScreenProps {
    * scan with one story.
    */
   readonly scan: ScanControl;
+  /**
+   * The files the scans could not place, and the action that answers one.
+   *
+   * Passed in like the rest: the shell owns the read, and a second one here could disagree with the
+   * count the user has already been shown.
+   */
+  readonly unmatched: UnmatchedQueue;
 }
 
 /** What `useTranslation` hands a component, so the column builder can take it by name. */
@@ -105,8 +113,66 @@ function columnsOf(t: Translate): readonly TableColumn<LibraryTitleDto>[] {
   ];
 }
 
+/** What the parse read, as the line under a parked file's name. */
+function parsedLabel(row: UnmatchedFileDto, t: Translate): string {
+  const parts = [
+    row.parsedTitle,
+    row.parsedYear === null ? null : `(${String(row.parsedYear)})`,
+    row.parsedSeason === null ? null : `S${String(row.parsedSeason)}`,
+    row.parsedEpisode === null ? null : `E${String(row.parsedEpisode)}`,
+  ].filter((part): part is string => part !== null && part !== "");
+  return parts.length === 0 ? t("library.queue.nothingRead") : parts.join(" ");
+}
+
+/**
+ * The columns of the queue.
+ *
+ * The parse's values are shown *beside* the reason rather than instead of it: the question a person
+ * is answering is which of the values the parse managed to read should be trusted, and hiding either
+ * half would make that unanswerable.
+ */
+function queueColumnsOf(
+  t: Translate,
+  match: (id: number) => void,
+  busy: boolean,
+): readonly TableColumn<UnmatchedFileDto>[] {
+  return [
+    {
+      id: "name",
+      header: t("library.queue.column.file"),
+      cell: (row) => (
+        <span className="flex flex-col">
+          <span>{row.name}</span>
+          <span className="text-caption text-text-tertiary">{parsedLabel(row, t)}</span>
+        </span>
+      ),
+    },
+    {
+      id: "reason",
+      header: t("library.queue.column.why"),
+      cell: (row) => row.reason ?? t("library.queue.noReason"),
+    },
+    {
+      id: "match",
+      header: "",
+      cell: (row) => (
+        <Button
+          disabled={busy || row.parsedTitle === null}
+          onClick={() => {
+            match(row.id);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t("library.queue.match")}
+        </Button>
+      ),
+    },
+  ];
+}
+
 /** The library screen. */
-export function LibraryScreen({ titles, scan }: LibraryScreenProps): ReactElement {
+export function LibraryScreen({ titles, scan, unmatched }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
   const columns = useMemo(() => columnsOf(t), [t]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
@@ -162,6 +228,27 @@ export function LibraryScreen({ titles, scan }: LibraryScreenProps): ReactElemen
           <Table columns={columns} rowKey={(row) => row.id} rows={titles.titles} />
         )}
       </Section>
+
+      {unmatched.failed || unmatched.loading ? null : (
+        <Section description={t("library.queue.description")} title={t("library.queue.title")}>
+          {unmatched.error === null ? null : (
+            <ErrorState body={unmatched.error} title={t("library.queue.refused")} />
+          )}
+          {unmatched.files.length === 0 ? (
+            <EmptyState
+              body={t("library.queue.empty.body")}
+              size="inline"
+              title={t("library.queue.empty.title")}
+            />
+          ) : (
+            <Table
+              columns={queueColumnsOf(t, (id) => void unmatched.match(id), unmatched.busy)}
+              rowKey={(row) => row.id}
+              rows={unmatched.files}
+            />
+          )}
+        </Section>
+      )}
     </Screen>
   );
 }

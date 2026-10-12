@@ -132,6 +132,75 @@ impl From<peregrine_app::LibraryTitleRow> for LibraryTitleDto {
     }
 }
 
+/// The parked file a command acts on.
+///
+/// A DTO rather than a bare `i64` argument, for the reason `RootRef` gives: specta refuses to export
+/// a large integer as a command argument, so a bare id would be the one thing in the contract with
+/// no type on the other side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmatchedRef {
+    /// The row id, as the queue returned it.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
+/// One file a scan could not place, as the queue shows it.
+///
+/// The parse's own fields are here rather than a re-derivation of them: this row exists because the
+/// parse *failed*, so what a person is being asked is which of the values it managed to read should
+/// be trusted. Showing the file's own name beside them is what makes that answerable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmatchedFileDto {
+    /// The row id, which is what a match names.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The file's name, without the directories it sits in.
+    pub name: String,
+    /// The title the parse read out of it, when it read one.
+    pub parsed_title: Option<String>,
+    /// The year it read, when the name stated one.
+    #[specta(type = Option<Number>)]
+    pub parsed_year: Option<u16>,
+    /// The season it read, when the name stated one.
+    #[specta(type = Option<Number>)]
+    pub parsed_season: Option<u32>,
+    /// The episode it read, when the name stated one.
+    #[specta(type = Option<Number>)]
+    pub parsed_episode: Option<u32>,
+    /// Why the scan could not place it.
+    pub reason: Option<String>,
+    /// What the file weighs, in bytes.
+    #[specta(type = Number)]
+    pub size_bytes: i64,
+}
+
+impl From<peregrine_app::UnmatchedFileRow> for UnmatchedFileDto {
+    fn from(row: peregrine_app::UnmatchedFileRow) -> Self {
+        let file = row.file;
+        // The name alone: the queue is a list of decisions about *files*, and two files in different
+        // folders with the same name are answered by the same reading of that name.
+        let name = file
+            .path
+            .as_str()
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(file.path.as_str())
+            .to_owned();
+        Self {
+            id: row.id,
+            name,
+            parsed_title: file.parsed_title,
+            parsed_year: file.parsed_year,
+            parsed_season: file.parsed_season.map(peregrine_app::SeasonNumber::get),
+            parsed_episode: file.parsed_episode.map(peregrine_app::EpisodeNumber::get),
+            reason: file.reason,
+            size_bytes: i64::try_from(file.size_bytes).unwrap_or(i64::MAX),
+        }
+    }
+}
+
 /// The root a command acts on.
 ///
 /// A DTO rather than a bare `i64` argument, because specta refuses to export a large integer as a
@@ -245,6 +314,35 @@ pub async fn list_titles(
         .await?;
     let titles = titles.into_iter().map(LibraryTitleDto::from).collect();
     Ok(guard_response("library::list_titles", titles))
+}
+
+/// A page of the files a scan could not place, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_unmatched(
+    state: State<'_, RuntimeState>,
+    limit: Option<u32>,
+) -> Result<Vec<UnmatchedFileDto>, AppError> {
+    let files = state
+        .runtime()?
+        .unmatched_files(limit.unwrap_or(100))
+        .await?;
+    let files = files.into_iter().map(UnmatchedFileDto::from).collect();
+    Ok(guard_response("library::list_unmatched", files))
+}
+
+/// Answers one parked file by placing it as the title its parse read.
+///
+/// Answers whether it placed anything: a file a scan reached while the row waited is already
+/// indexed, and clearing the stale row is the whole of that answer rather than a failure.
+#[tauri::command]
+#[specta::specta]
+pub async fn match_unmatched(
+    state: State<'_, RuntimeState>,
+    file: UnmatchedRef,
+) -> Result<bool, AppError> {
+    let placed = state.runtime()?.match_unmatched_file(file.id).await?;
+    Ok(guard_response("library::match_unmatched", placed))
 }
 
 /// Starts a scan of every library root.

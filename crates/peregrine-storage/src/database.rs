@@ -763,6 +763,18 @@ impl Database {
         }
     }
 
+    /// Removes one unmatched file, reporting whether the row was there.
+    pub async fn remove_unmatched_file(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RemoveUnmatchedFile { id })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("remove_unmatched_file", &other)),
+        }
+    }
+
     /// Marks one file absent at scan time, or present again.
     ///
     /// The instant is the caller's — [`MediaFile::mark_missing`] keeps the *first* one, so a

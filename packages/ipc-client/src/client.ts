@@ -17,6 +17,7 @@ import type {
   JobStarted,
   LibraryRootDto,
   LibraryTitleDto,
+  UnmatchedFileDto,
   RootKind,
   RootRef,
   RootScanMode,
@@ -98,6 +99,26 @@ export async function addLibraryRoot(
  */
 export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto[]> {
   return unwrap(commands.listTitles(limit ?? null));
+}
+
+/**
+ * A page of the files a scan could not place, newest first.
+ *
+ * The queue a person answers: each row carries what the parse read before it stopped, which is the
+ * only thing that can tell them which value to trust.
+ */
+export async function listUnmatchedFiles(limit?: number): Promise<UnmatchedFileDto[]> {
+  return unwrap(commands.listUnmatched(limit ?? null));
+}
+
+/**
+ * Answers one parked file by placing it as the title its parse read.
+ *
+ * Answers whether it placed anything: a file a scan reached while the row waited is already indexed,
+ * and clearing the stale row is the whole of that answer rather than a failure.
+ */
+export async function matchUnmatchedFile(id: number): Promise<boolean> {
+  return unwrap(commands.matchUnmatched({ id }));
 }
 
 /**
