@@ -608,7 +608,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 
 ## Frontend packages
 
-The compiled frontend (`apps/desktop/dist`) bundles the 15 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
+The compiled frontend (`apps/desktop/dist`) bundles the 16 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
 
 Development-only packages are not redistributed and cannot appear here: pnpm records a workspace project's development dependencies in the lockfile but never resolves their transitive dependencies, so the Vite, ESLint, and Vitest toolchains have no edge into this walk. An optional *peer* that pnpm auto-installed for another package's types (`typescript`, `@types/react`) is excluded for the same reason: the bundle imports no code from it.
 
@@ -619,6 +619,7 @@ Licence expressions and texts are not repeated here: `docs/DEPENDENCIES.md` §3 
 | `@babel/runtime` | 7.29.10 |
 | `@tauri-apps/api` | 2.12.1 |
 | `@tauri-apps/plugin-dialog` | 2.8.2 |
+| `@tauri-apps/plugin-notification` | 2.6.0 |
 | `class-variance-authority` | 0.7.1 |
 | `clsx` | 2.1.1 |
 | `html-parse-stringify` | 4.0.1 |
