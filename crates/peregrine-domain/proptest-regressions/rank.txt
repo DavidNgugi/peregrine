@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f16be64323ae23579d352cf52629b43484dd662f53ac9871894629f0267a5611 # shrinks to parts = Parts { resolution: UltraHd, source: Remux, video_codec: H264, audio: [Eac3], group: Some("dd") }, size = 0, criterion = Audio
