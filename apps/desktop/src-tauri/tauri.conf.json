@@ -34,7 +34,7 @@
     "shortDescription": "Media discovery, library management, and playback.",
     "copyright": "The Peregrine Authors",
     "license": "MIT OR Apache-2.0",
-    "resources": ["../NOTICE", "../notices/*"],
+    "resources": ["../../../NOTICE", "../../../notices/*"],
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
