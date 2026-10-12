@@ -21,14 +21,27 @@ version = 2
 # An advisory is a build failure, not a warning. A known-vulnerable dependency is
 # not something to ship and note later.
 yanked = "deny"
-ignore = []
+# Two unmaintained-crate advisories are accepted, and both are compile-time only:
+# a proc-macro expands into our code and is not present in the shipped binary, so
+# neither can carry a runtime defect into a release. They are ignored by exact
+# advisory id rather than by turning the `unmaintained` class off, because a
+# *third* unmaintained crate — especially a runtime one — must still fail here.
+ignore = [
+  # `paste` arrives through `specta`, which is pinned at 2.0.0-rc.25 and is the
+  # IPC type pipeline itself (PG-E0-06). No safe upgrade exists and there is no
+  # alternative until a stable specta drops it; docs/DEPENDENCIES.md §7 tracks it.
+  { id = "RUSTSEC-2024-0436", reason = "proc-macro through specta; compile-time only, and specta has no replacement (DEPENDENCIES §7)" },
+  # `proc-macro-error` arrives through `glib-macros` and `gtk3-macros`, which exist
+  # only on the Linux GTK stack, and again only as proc-macros. Both are upstream
+  # Tauri-stack crates we cannot substitute.
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro through the Linux-only glib/gtk3 macros; compile-time only (DEPENDENCIES §7)" },
+]
 
 [licenses]
 version = 2
-# The allowlist from docs/DEPENDENCIES.md §6. Copyleft is absent on purpose:
+# The allowlist from docs/DEPENDENCIES.md §6. Strong copyleft is absent on purpose:
 # GPL and LGPL code must stay outside the process boundary as a separate
-# executable (ADR 0009), and MPL file-level obligations are not accepted for
-# statically linked code.
+# executable (ADR 0009).
 allow = [
   "MIT",
   "Apache-2.0",
@@ -52,9 +65,48 @@ unused-allowed-license = "allow"
 # `encoding_rs` is (Apache-2.0 OR MIT) AND BSD-3-Clause; its notice is retained in
 # NOTICE. Both components are on the allowlist, so no exception is needed here.
 
+# MPL-2.0, accepted for five unmodified transitive crates of the Tauri webview
+# stack and recorded in docs/adr/0021-mpl-2-0-transitive-dependencies.md.
+#
+# Scoped per crate and version rather than added to `allow`: a sixth MPL crate,
+# direct or transitive, must still fail this gate and be argued for. The version
+# pin means a routine upgrade of one of them also fails until the record is
+# updated, which is deliberate friction on a licence question.
+[[licenses.exceptions]]
+name = "cssparser"
+version = "=0.37.0"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "cssparser-macros"
+version = "=0.7.1"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "dtoa-short"
+version = "=0.3.5"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "option-ext"
+version = "=0.2.0"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "selectors"
+version = "=0.38.0"
+allow = ["MPL-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Our own crates are declared as `{ path = "crates/..." }` in the workspace and
+# inherited as `{ workspace = true }`. Cargo resolves that to a wildcard version
+# requirement, which is exactly what this lint exists to catch for a *registry*
+# dependency and is meaningless for a path dependency inside this repository.
+# Without this, the gate reports eleven findings against our own manifests and
+# stops being readable; with it, a wildcard on a registry crate is still denied.
+allow-wildcard-paths = true
 # Deny by name rather than by licence as a second line of defence: these are the
 # specific mistakes the docs call out, and a name is unambiguous even when a
 # crate's licence metadata is wrong.

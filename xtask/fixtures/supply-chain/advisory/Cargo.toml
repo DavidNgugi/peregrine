@@ -1,0 +1,23 @@
+# Negative fixture for the advisory half of the supply-chain gate (PG-E0-14).
+#
+# The gate is only worth having if it can fail, and the real graph is clean, so
+# this directory deliberately depends on a crate that carries a permanent
+# advisory: `paste` 1.0.15 is RUSTSEC-2024-0436 (unmaintained, repository
+# archived). The CI step in `ci.yml` runs `cargo deny check advisories` here and
+# asserts a non-zero exit, because a passing run means the gate stopped working.
+#
+# The empty `[workspace]` table detaches this directory from Peregrine's
+# workspace: it is never built as part of the application, and its stale pin can
+# never be resolved into our own lockfile.
+[workspace]
+
+[package]
+name = "supply-chain-advisory-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Pinned exactly on purpose. `paste` is unmaintained, so a floating requirement
+# would eventually stop resolving and the fixture would fail for the wrong reason.
+paste = "=1.0.15"

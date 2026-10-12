@@ -1,0 +1,9 @@
+# The fixture's own policy, deliberately empty of exceptions.
+#
+# cargo-deny reads the configuration beside the manifest before any ancestor, so
+# this file exists to keep the repository's `ignore` list and licence exceptions
+# out of the fixture. The only rule left here is the one under test.
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []

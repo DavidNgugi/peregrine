@@ -24,5 +24,6 @@ One file per decision that constrains the architecture. Each records the context
 | [0018](./0018-media-server.md) | Media server: what is possible, in what order, and what we refuse | Accepted, post-1.0 (Phase 7) |
 | [0019](./0019-local-accounts-and-parental-gating.md) | Local accounts, avatars, and parental gating | Accepted, post-1.0 (Phase 8); the scope seam lands in 1.0 |
 | [0020](./0020-homelab-deployment.md) | Homelab deployment: the headless daemon in a container, and what we refuse to put in one | Accepted, post-1.0 (Phase 9); the browser console in §3 is scoped, not broken down |
+| [0021](./0021-mpl-2-0-transitive-dependencies.md) | MPL-2.0 transitively, and a licence exception scoped per crate | Accepted; refines 0009 §2 and DEPENDENCIES §6 |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.
