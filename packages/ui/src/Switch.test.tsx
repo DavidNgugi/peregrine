@@ -77,6 +77,16 @@ describe("Switch", () => {
     expect(markup).toContain("motion-reduce:transition-none");
   });
 
+  it("outlines the thumb so it stays visible on the light track", () => {
+    // In the light theme `--surface-0` on `--surface-2` is a 0.05 lightness difference, so
+    // without the outline the knob reads as part of the track. The checked state is what
+    // makes this assertion specific: there the track carries `border-accent`, so the only
+    // `--border-strong` in the markup is the thumb's.
+    const markup = renderToStaticMarkup(<Switch checked label="A" onChange={noop} />);
+    const thumb = /<span class="([^"]*translate-x-4[^"]*)"/u.exec(markup)?.[1] ?? "";
+    expect(thumb).toContain("border-border-strong");
+  });
+
   it("moves the thumb with one transform and no layout property", () => {
     const on = renderToStaticMarkup(<Switch checked label="A" onChange={noop} />);
     const off = renderToStaticMarkup(<Switch checked={false} label="A" onChange={noop} />);

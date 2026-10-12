@@ -80,7 +80,10 @@ export function Switch({
           <span
             className={twMerge(
               clsx(
-                "absolute top-0.5 left-0.5 block size-4 rounded-full bg-surface-0",
+                // The outline is what keeps the thumb visible in the light theme, where
+                // `--surface-0` on `--surface-2` is a 0.05 lightness difference and the
+                // knob would otherwise read as part of the track.
+                "absolute top-0.5 left-0.5 block size-4 rounded-full border border-border-strong bg-surface-0",
                 "transition-transform motion-reduce:transition-none",
                 checked ? "translate-x-4" : "translate-x-0",
               ),
