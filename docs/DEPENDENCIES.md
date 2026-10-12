@@ -124,6 +124,7 @@ Dropped: `framer-motion` (alias of `motion`), `suspend-react` (abandoned 2023), 
 | `toml` | 1.1.7 | MIT OR Apache-2.0 | Parsing `Cargo.toml` and the architecture allowlist in `xtask`. Dev-only, never shipped. Added with `PG-E0-04`: the arch gate has to read manifests, and a hand-rolled TOML parser in a gate is a correctness risk |
 | `sha2` | 0.11.0 | MIT OR Apache-2.0 | SHA-256 for the migration journal in `xtask`. Dev-only, never shipped. Added with `PG-E0-05`: a hand-rolled hash in a gate is a correctness risk |
 | `cargo-deny` | 0.20.2 | MIT OR Apache-2.0 | Licence allowlist, bans, advisories — the primary supply-chain gate |
+| `cargo-machete` | 0.9.2 | MIT | Unused-dependency gate for the Cargo workspace (`cargo xtask check-dead-deps`). CI-only, never shipped; verified against crates.io on 2026-10-12 |
 | `cargo-audit` | 0.22.2 | Apache-2.0 OR MIT | Secondary advisory check; overlaps `cargo-deny`, run weekly rather than per-commit |
 | `osv-scanner` | action `v2.7.0` | Apache-2.0 | The OSV database aggregates RustSec with GHSA and the ecosystem databases, and one scan covers both lockfiles. Run weekly in `audit.yml`, not per-commit, because `cargo-deny` already gates the Rust graph on every push |
 | `cargo-llvm-cov` | 0.9.1 | Apache-2.0 OR MIT | Coverage with per-crate thresholds |
