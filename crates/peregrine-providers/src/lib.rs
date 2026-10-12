@@ -17,19 +17,24 @@
 //! anything reads it — size-capped, content-type checked, and decoded into a validating model
 //! (PG-E5-05, `docs/ARCHITECTURE.md` §9).
 //!
+//! Rate limiting is here as well: [`RateLimiter`] turns the [`RatePolicy`] a provider declares
+//! into per-host token buckets, and answers with how long to wait rather than sleeping, so the
+//! crate stays synchronous and a test can drive an hour of traffic in microseconds (PG-E5-03).
+//!
 //! The adapters are not: TMDB is PG-E5-06, TVDB PG-E5-10, `OMDb` PG-E5-11. Neither is the HTTP
-//! stack (PG-E5-02), the token buckets (PG-E5-03), nor the conditional-request middleware
-//! (PG-E5-04) — and the port's data operations arrive with the first adapter, for the reason
-//! the [`provider`] module records.
+//! stack (PG-E5-02) nor the conditional-request middleware (PG-E5-04) — and the port's data
+//! operations arrive with the first adapter, for the reason the [`provider`] module records.
 
 pub mod capability;
 pub mod descriptor;
 pub mod error;
 pub mod hygiene;
 pub mod provider;
+pub mod rate;
 
 pub use capability::{Capabilities, Capability};
 pub use descriptor::{Attribution, CachePolicy, DescriptorError, ProviderDescriptor, RatePolicy};
 pub use error::{ProviderError, TransportFailure};
 pub use hygiene::{Body, BodyCap};
 pub use provider::{MetadataProvider, ProviderFuture, SearchCandidate, SearchQuery};
+pub use rate::RateLimiter;
