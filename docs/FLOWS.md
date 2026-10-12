@@ -883,16 +883,32 @@ stateDiagram-v2
     buffering --> playing: first frame rendered
     buffering --> stalled: no data
     stalled --> buffering: piece priority raised, data arrives
+    stalled --> playing: a frame arrives before the recovery is reported
     stalled --> failed: timeout beyond threshold
     playing --> paused: user pause
     paused --> playing: resume
     playing --> ended: end of stream
+    preparing --> ended: user stops
+    buffering --> ended: user stops
+    playing --> ended: user stops
+    stalled --> ended: user stops
+    paused --> ended: user stops
     playing --> failed: mpv exited unexpectedly
+    buffering --> failed: mpv exited while loading
+    paused --> failed: mpv exited while paused
     ended --> [*]: finalize progress
     failed --> [*]: report exit code, offer retry at last position
 ```
 
 `playing` is only entered on the first rendered frame, which is what makes the "time to first frame" metric meaningful for torrent streams. Every transition out of a live state writes progress, so a crash at any point loses at most 5 seconds.
+
+A stop reaches `ended` from **every** live state, because F7's "user quits" happens wherever the session is, and a torrent with no peers parks in `preparing` or `stalled` — a player that cannot be closed from there is not one. `ended` and `failed` are absorbing, so a duplicate stop, or an exit reported after the user closed the player and mpv was reaped, changes nothing rather than reinterpreting an ending that has already finalised progress. For the same reason `failed` is reachable from every live state: an mpv that dies is the same event whether it was loading, playing, or paused, and a session that could not report it would sit there with a dead child behind it.
+
+A retry after a failure is **a new session, not an edge of the failed one**: the mpv process the failed session owned is gone, and the state it reached is history. The failed session keeps the position it last held, so the retry resumes there instead of at the start — and that position is also what the exit path hands to the watched policy.
+
+Mid-playback starvation is not `stalled`. F7 shows a buffer-health indicator over a session that is still `playing`, and every progress write keys off `playing`, so leaving it would stop the writes exactly when the user is most likely to close the player. `stalled` is the load that produced no frame; a frame that arrives before the recovery is reported is stronger evidence that data arrived than the cache statistic is, and it is what leaves that state for `playing`.
+
+`peregrine-domain::session` implements this machine (PG-E4-13): `Session::apply` is the only function that computes a next state, the legal cells are declared once and pinned by its tests, and a frame-rendered event is the only entry into `playing` from a session that has not played.
 
 ### SM4 — Job scheduler
 
