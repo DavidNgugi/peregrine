@@ -257,7 +257,7 @@ graph LR
   - Acceptance: Each hostile fixture classified correctly, with reason strings
 - [ ] **PG-E4-08** *(doing)* `M` · deps PG-E4-01 · `PathGuard` policy model, pure containment logic
   - Acceptance: Escape attempts rejected; property test over generated paths
-- [ ] **PG-E4-09** `M` · deps PG-E4-01 · `WatchPolicy`: resume point, watched threshold, next-episode selection. **Inherited defect to settle here:** `WatchProgress::record` (PG-E4-01, `library.rs`) derives `watched` from `WATCHED_PERCENT = 0.92`, which is the *storage floor* in DATA_MODEL I6, not the playback threshold that FLOWS F10 sets at ≥ 0.95 or the credits. So a position reported at 0.93 is stored as `watched = 1` — a row the policy says should still be resumable — and every consumer that reads the flag rather than recomputing a percentage (the continue-watching rail, next-up, the resume button) inherits that disagreement. The policy owns the threshold, so `record` must stop deciding it: either it derives `percent` only and the policy marks watched when its own threshold is met, or it takes the decision from the caller. `mark_watched` then enforces I6's floor for a policy-driven mark and exempts a manual one. Both boundaries are this task's acceptance (92% is the floor, 95% is the policy), which is why it is written down here rather than changed silently in the entity.
+- [x] **PG-E4-09** `M` · deps PG-E4-01 · `WatchPolicy`: resume point, watched threshold, next-episode selection
   - Acceptance: Boundary tests at 0%, 2%, 50%, 92%, 95%, 99%, and zero-duration
 - [ ] **PG-E4-10** `M` · deps PG-E4-07, PG-E3-05 · `EpisodeOrderingStrategy` for aired, absolute, DVD, anime
   - Acceptance: Ordering fixtures reproduce expected lists
