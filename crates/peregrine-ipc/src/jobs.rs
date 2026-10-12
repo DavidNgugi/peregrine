@@ -227,6 +227,9 @@ impl From<RuntimeError> for AppError {
             // decides what to say about that. The service's own message is not passed through: it
             // contains the absolute path the user picked, and rule 3 of ARCHITECTURE §7 keeps paths
             // out of the payload.
+            RuntimeError::ScanAlreadyRunning { job } => AppError::new(ErrorCode::Conflict)
+                .with_detail("A scan is already running.")
+                .with_cause(format!("the running scan is {job}")),
             RuntimeError::Library(inner) => library_error(inner),
         }
     }

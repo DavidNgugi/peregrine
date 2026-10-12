@@ -108,6 +108,12 @@ export const en = {
           mixed: "Films and series",
           downloads: "Downloads",
         },
+        scan: {
+          label: "Scan now",
+          description:
+            "Walks every folder above and updates what Peregrine knows about them. Nothing is moved or renamed, and a folder that cannot be reached is reported rather than treated as empty.",
+          action: "Scan now",
+        },
         neverScanned: "{{kind}} · not scanned yet",
         scanned: "{{kind}} · scanned",
       },

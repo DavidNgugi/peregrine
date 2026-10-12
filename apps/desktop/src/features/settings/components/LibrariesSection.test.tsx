@@ -43,6 +43,7 @@ function libraries(
       record.removed.push(id);
       return Promise.resolve(true);
     },
+    scan: () => Promise.resolve(null),
     ...state,
     ...record,
   };
@@ -61,6 +62,22 @@ function markup(state: LibraryRoots): string {
       <LibrariesSection libraries={state} />
     </I18nextProvider>,
   );
+}
+
+/**
+ * Whether the button drawing `label` is disabled, read from the markup.
+ *
+ * The label appears twice per row — once as the row's label and once as the button's text — so
+ * counting occurrences says nothing about the control. This reads the one button instead.
+ */
+function disabledButton(html: string, label: string): boolean {
+  const end = html.indexOf(`>${label}</button>`);
+  if (end === -1) {
+    return false;
+  }
+  // The attribute, not the word: the button's class list carries Tailwind's `disabled:` variants,
+  // so a search for `disabled` matches every button ever drawn.
+  return html.slice(html.lastIndexOf("<button", end), end).includes(`disabled=""`);
 }
 
 describe("LibrariesSection", () => {
@@ -97,11 +114,23 @@ describe("LibrariesSection", () => {
     expect(html).not.toContain("Films and series");
   });
 
-  it("offers a folder to add and a removal per root", () => {
+  it("offers a folder to add, a removal per root, and a scan of them all", () => {
     const html = markup(libraries({ roots: [root(1, "/media/Movies")] }));
 
     expect(html).toContain("Add folder");
     expect(html).toContain("Remove");
+    expect(html).toContain("Scan now");
+  });
+
+  it("does not offer a scan when there is nothing to scan", () => {
+    // A button that would walk no folders is a button that does nothing, and the one state where
+    // that is certain is a library with no roots.
+    const empty = markup(libraries());
+    const withRoots = markup(libraries({ roots: [root(1, "/media/Movies")] }));
+
+    expect(disabledButton(empty, "Scan now")).toBe(true);
+    expect(disabledButton(withRoots, "Scan now")).toBe(false);
+    expect(disabledButton(empty, "Add folder")).toBe(false);
   });
 
   it("distinguishes an empty list from a read that failed", () => {
@@ -124,13 +153,16 @@ describe("LibrariesSection", () => {
     const busy = markup(libraries({ roots: [root(1, "/media/Movies")], busy: true }));
 
     expect(refused).toContain("That folder is already one of your libraries.");
-    expect(busy).toContain("disabled");
+    expect(disabledButton(busy, "Add folder")).toBe(true);
+    expect(disabledButton(busy, "Scan now")).toBe(true);
+    expect(disabledButton(busy, "Remove")).toBe(true);
   });
 
   it("does not offer to add a folder when the core could not be read", () => {
     // A button that would write into a list the screen cannot see is worse than no button.
-    const html = markup(libraries({ failed: true }));
+    const html = markup(libraries({ roots: [root(1, "/media/Movies")], failed: true }));
 
-    expect(html).toContain("disabled");
+    expect(disabledButton(html, "Add folder")).toBe(true);
+    expect(disabledButton(html, "Scan now")).toBe(true);
   });
 });

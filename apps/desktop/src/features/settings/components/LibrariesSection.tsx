@@ -110,6 +110,22 @@ export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactEle
           {t("settings.libraries.add.action")}
         </Button>
       </SettingsRow>
+
+      <SettingsRow
+        description={t("settings.libraries.scan.description")}
+        label={t("settings.libraries.scan.label")}
+      >
+        <Button
+          disabled={busy || libraries.failed || libraries.roots.length === 0}
+          onClick={() => {
+            void libraries.scan();
+          }}
+          size="sm"
+          variant="secondary"
+        >
+          {t("settings.libraries.scan.action")}
+        </Button>
+      </SettingsRow>
     </SettingsSection>
   );
 }

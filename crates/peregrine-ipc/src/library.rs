@@ -14,6 +14,7 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::guard::guard_response;
+use crate::jobs::JobStarted;
 use crate::runtime::RuntimeState;
 
 /// What a root is expected to hold, as the webview spells it.
@@ -176,6 +177,25 @@ pub async fn add_root(
             scan_mode: added.scan_mode.into(),
             last_scan_at: added.last_scan_at.map(Timestamp::as_millisecond),
             created_at: added.created_at.as_millisecond(),
+        },
+    ))
+}
+
+/// Starts a scan of every library root.
+///
+/// Answers with the job a caller watches, which is the same shape `jobs::start_hello` answers with,
+/// because it is the same thing: a journal row and the scheduler's identity for the work. A scan
+/// asked for while one is running is refused with `Conflict` rather than queued behind it — the
+/// walk is the expensive part and a queue of identical walks is not a feature.
+#[tauri::command]
+#[specta::specta]
+pub async fn scan_now(state: State<'_, RuntimeState>) -> Result<JobStarted, AppError> {
+    let started = state.runtime()?.start_library_scan().await?;
+    Ok(guard_response(
+        "library::scan_now",
+        JobStarted {
+            job_id: started.job.to_string(),
+            journal_id: started.journal_id,
         },
     ))
 }

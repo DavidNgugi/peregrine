@@ -117,6 +117,15 @@ export const commands = {
 	 *  item rather than a new one (PG-E14-01, PG-E14-13).
 	 */
 	removeRoot: (root: RootRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("remove_root", { root })),
+	/**
+	 *  Starts a scan of every library root.
+	 * 
+	 *  Answers with the job a caller watches, which is the same shape `jobs::start_hello` answers with,
+	 *  because it is the same thing: a journal row and the scheduler's identity for the work. A scan
+	 *  asked for while one is running is refused with `Conflict` rather than queued behind it — the
+	 *  walk is the expensive part and a queue of identical walks is not a feature.
+	 */
+	scanNow: () => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("scan_now")),
 };
 
 /* Types */

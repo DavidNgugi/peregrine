@@ -219,6 +219,16 @@ fn remove_root_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `scan_now` reaches the runtime like the root commands, and a dead runtime is the failure this
+/// suite can reach without starting a scan it would then have to wait for.
+fn scan_now_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::scan_now(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -367,6 +377,14 @@ fn library_cases() -> Vec<ContractCase> {
 /// The commands the shell's own chrome reaches.
 fn autostart_cases() -> Vec<ContractCase> {
     vec![
+        ContractCase {
+            command: "scan_now",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: scan_now_without_a_runtime,
+        },
         ContractCase {
             command: "list_shortcuts",
             expected: Expected::CannotFail {

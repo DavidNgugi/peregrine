@@ -19,8 +19,9 @@ import {
   listLibraryRoots,
   normalizeIpcError,
   removeLibraryRoot,
+  scanLibrary,
 } from "@peregrine/ipc-client";
-import type { IpcError, LibraryRootDto, RootKind } from "@peregrine/ipc-client";
+import type { IpcError, JobStarted, LibraryRootDto, RootKind } from "@peregrine/ipc-client";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 import { pickFolder } from "../../../lib/picker.js";
@@ -47,6 +48,14 @@ export interface LibraryRoots {
   readonly add: (kind: RootKind) => Promise<LibraryRootDto | null>;
   /** Removes one root, answering whether the core had it. */
   readonly remove: (id: number) => Promise<boolean>;
+  /**
+   * Asks the core to scan every root.
+   *
+   * Answers with the job it started, or `null` when the request was refused — a scan already
+   * running is the refusal a user will actually meet, and it arrives with the core's own sentence
+   * rather than as an exception the caller has to decode.
+   */
+  readonly scan: () => Promise<JobStarted | null>;
 }
 
 /**
@@ -139,5 +148,19 @@ export function useLibraryRoots(): LibraryRoots {
     [read],
   );
 
-  return { ...state, add, remove };
+  const scan = useCallback(async (): Promise<JobStarted | null> => {
+    setState((previous) => ({ ...previous, busy: true, error: null }));
+    try {
+      return await scanLibrary();
+    } catch (caught: unknown) {
+      const error = normalizeIpcError(caught);
+      logUiError("scanLibrary", error);
+      setState((previous) => ({ ...previous, error: messageOf(error) }));
+      return null;
+    } finally {
+      setState((previous) => ({ ...previous, busy: false }));
+    }
+  }, []);
+
+  return { ...state, add, remove, scan };
 }

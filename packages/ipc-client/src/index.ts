@@ -27,6 +27,7 @@ export {
   isSuccessful,
   listLibraryRoots,
   listShortcuts,
+  scanLibrary,
   removeLibraryRoot,
   setAutoStart,
   unwrap,

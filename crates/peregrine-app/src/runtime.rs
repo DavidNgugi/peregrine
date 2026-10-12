@@ -27,6 +27,7 @@ use peregrine_sync::{
 };
 use serde_json::json;
 
+use crate::jobs::library_scan::{self, LibraryScanJob};
 use crate::library::{LibraryRootRow, LibraryService};
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::time::Instant;
@@ -434,6 +435,97 @@ impl Runtime {
         LibraryService::new(Arc::clone(&self.database))
     }
 
+    /// Starts a scan of every library root, or says that one is already running.
+    ///
+    /// # Why this is not deduped by the scheduler
+    ///
+    /// `PG-E6-01`'s scheduler can coalesce a submission onto a live job that holds the same
+    /// `dedupe_key`, and that is the obvious way to say "only one scan at a time". It is not what
+    /// this does, because a coalesced handle's state never reaches a terminal one — the coalesce
+    /// path resolves the caller's completion but sends no state change — so a runtime that had
+    /// inserted a journal row for it would hold a row that stays `queued` forever and a live entry
+    /// that is pruned only when the shutdown sweep runs. The pre-check below is the honest version
+    /// of the same intention: a second request while a scan is live is refused by name.
+    ///
+    /// Two scans that did start together would not corrupt anything: each reconciles only on a
+    /// complete walk of a root, so their conclusions agree and the cost is duplicated IO. The check
+    /// is here to avoid paying it, not to keep the library consistent.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::ScanAlreadyRunning`] when a scan is live, and [`RuntimeError::Storage`] or
+    /// [`RuntimeError::Scheduler`] when the job cannot be journaled or accepted.
+    pub async fn start_library_scan(&self) -> Result<StartedJob, RuntimeError> {
+        if let Some(running) = self.live_scan() {
+            return Err(RuntimeError::ScanAlreadyRunning { job: running });
+        }
+
+        let now = self.clock.now().as_millisecond();
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: library_scan::KIND.to_owned(),
+                priority: library_scan::PRIORITY,
+                // No dedupe key, for the reason in this method's own doc.
+                dedupe_key: None,
+                payload_json: json!({ "roots": true }).to_string(),
+                max_attempts: 1,
+                created_at: now,
+            })
+            .await?;
+
+        let spec = JobSpec {
+            kind: library_scan::KIND.to_owned(),
+            priority: library_scan::PRIORITY,
+            dedupe_key: None,
+            max_attempts: 1,
+        };
+        let job = LibraryScanJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
+            journal_id,
+        );
+
+        let handle = match self.scheduler.submit(spec, job).await {
+            Ok(handle) => handle,
+            Err(error) => {
+                // The row exists and will never run, so leaving it `queued` would show a scan
+                // waiting forever in the UI. Closed here for the same reason the hello job closes
+                // its own row on a refused submission.
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some(INTERNAL_CODE.to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                return Err(RuntimeError::Scheduler(error));
+            }
+        };
+
+        let started = StartedJob {
+            job: handle.id(),
+            journal_id,
+        };
+        info!(job = %started.job, journal_id, "accepted the library scan");
+        self.remember(handle, journal_id);
+        Ok(started)
+    }
+
+    /// The live scan job's id, when one is running.
+    fn live_scan(&self) -> Option<Ulid> {
+        self.live()
+            .values()
+            .find(|entry| entry.handle.state().kind() == library_scan::KIND)
+            .map(|entry| entry.handle.id())
+    }
+
     /// One page of journal rows, newest first.
     ///
     /// `after` is the id of the previous page's last row; `None` reads the newest page. The
@@ -665,6 +757,13 @@ pub enum RuntimeError {
         detail: String,
     },
 
+    /// A scan was asked for while one was already running.
+    #[error("a library scan is already running")]
+    ScanAlreadyRunning {
+        /// The job that is already scanning, so a caller can watch that one instead.
+        job: Ulid,
+    },
+
     /// The library refused the operation, with the reason a user can read.
     #[error(transparent)]
     Library(#[from] crate::library::LibraryError),
@@ -813,6 +912,86 @@ mod tests {
             matches!(error, RuntimeError::UnknownJob { .. }),
             "{error:?}"
         );
+
+        runtime.shutdown().await;
+    }
+
+    /// A scan of an empty library runs, journals, and reaches a terminal state.
+    ///
+    /// The walk's own behaviour is the job's to test; what this asserts is the runtime's half —
+    /// a row exists before the job runs, the job is remembered, and the row closes.
+    #[tokio::test]
+    async fn a_scan_can_be_started_and_its_row_closes() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let started = runtime.start_library_scan().await.unwrap();
+        let row = await_terminal(&runtime, started.journal_id).await;
+
+        assert_eq!(row.kind, library_scan::KIND);
+        assert_eq!(row.state, JobPhase::Succeeded, "{row:?}");
+        assert!(
+            !runtime.live().contains_key(&started.job),
+            "and it is no longer live"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// A second scan while one is live is refused by name rather than queued or dropped.
+    ///
+    /// The slot is held the way the runtime holds it — a scheduler job of the scan's kind,
+    /// remembered as live — because a scan of a temporary library finishes in microseconds and a
+    /// test that raced two real ones would be a test of the machine's speed. What is under test is
+    /// the guard, and the guard reads the live set.
+    #[tokio::test]
+    async fn a_second_scan_while_one_is_live_is_refused_by_name() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let journal_id = runtime
+            .database
+            .insert_job(NewJob {
+                kind: library_scan::KIND.to_owned(),
+                priority: library_scan::PRIORITY,
+                dedupe_key: None,
+                payload_json: "{}".to_owned(),
+                max_attempts: 1,
+                created_at: runtime.clock.now().as_millisecond(),
+            })
+            .await
+            .unwrap();
+        let held = runtime
+            .scheduler
+            .submit(
+                JobSpec {
+                    kind: library_scan::KIND.to_owned(),
+                    priority: library_scan::PRIORITY,
+                    dedupe_key: None,
+                    max_attempts: 1,
+                },
+                HelloJob::new(
+                    Arc::clone(&runtime.database),
+                    Arc::clone(&runtime.bus),
+                    Arc::clone(&runtime.clock),
+                    journal_id,
+                    hello::MAX_STEPS,
+                ),
+            )
+            .await
+            .unwrap();
+        let held_id = held.id();
+        runtime.remember(held, journal_id);
+
+        let refused = runtime
+            .start_library_scan()
+            .await
+            .expect_err("one scan at a time");
+
+        match refused {
+            RuntimeError::ScanAlreadyRunning { job } => assert_eq!(job, held_id),
+            other => panic!("expected a refusal naming the running scan, got {other:?}"),
+        }
 
         runtime.shutdown().await;
     }

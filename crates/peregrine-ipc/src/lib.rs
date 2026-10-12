@@ -62,6 +62,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_roots,
             library::add_root,
             library::remove_root,
+            library::scan_now,
         ])
         .events(collect_events![])
 }

@@ -37,6 +37,7 @@ function noLibraries(): LibraryRoots {
     error: null,
     add: () => Promise.resolve(null),
     remove: () => Promise.resolve(false),
+    scan: () => Promise.resolve(null),
   };
 }
 

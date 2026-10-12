@@ -14,6 +14,7 @@
 import { commands } from "./generated/bindings.js";
 import type {
   BuildInfo,
+  JobStarted,
   LibraryRootDto,
   RootKind,
   RootRef,
@@ -86,6 +87,17 @@ export async function addLibraryRoot(
   scanMode: RootScanMode,
 ): Promise<LibraryRootDto> {
   return unwrap(commands.addRoot(path, kind, scanMode));
+}
+
+/**
+ * Starts a scan of every library root and answers with the job to watch.
+ *
+ * A scan asked for while one is running throws a `Conflict` rather than queueing: the walk is the
+ * expensive part, and a queue of identical walks is not a feature. The caller shows the refusal as
+ * it shows any other.
+ */
+export async function scanLibrary(): Promise<JobStarted> {
+  return unwrap(commands.scanNow());
 }
 
 /**
