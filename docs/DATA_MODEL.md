@@ -1032,7 +1032,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I3 | A `media_file.path` is unique and canonical. Two items never claim one file. | `UNIQUE (path)` |
 | I4 | Every non-terminal `download_job` has a `safety_report_json` before `state` advances past `inspecting`. | State transition guard in the repository, plus a CHECK-adjacent test |
 | I5 | No `download_file.path` may be absolute, contain `..`, or escape the job's `save_path`. | Validated at insert; re-validated on read of the persisted report |
-| I6 | `watch_progress.percent = position_ms / duration_ms`, and `watched = 1` implies `percent ≥ 0.92` unless set manually. | Domain function is the only writer |
+| I6 | `watch_progress.percent = position_ms / duration_ms`, and `watched = 1` implies `percent ≥ 0.92` unless set manually. **This is a floor, not the playback threshold:** [FLOWS](./FLOWS.md) F10 marks a title watched at ≥ 0.95 or at the credits, and the lower bound here exists so that a manual or imported mark between the two is representable. | Domain function is the only writer |
 | I7 | `episode.season_number`/`episode_number` are unique within a title. | `UNIQUE (title_id, season_number, episode_number)` |
 | I8 | A `secret_ref` never coexists with a plaintext secret in `settings`. | Test that serializes all settings and greps for key-shaped values |
 | I9 | `provider_cache` and `image_cache` rows are always droppable without loss of user data. | Rebuild test: wipe both, assert the app still renders from the catalogue |

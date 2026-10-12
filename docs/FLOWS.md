@@ -345,7 +345,7 @@ sequenceDiagram
     end
 
     alt User quits or file ends
-        PS->>DB: final position, watched flag per policy (≥92% or credits)
+        PS->>DB: final position, watched flag per policy (F10 owns the threshold)
         PS->>Mpv: quit, reap
         PS->>Stream: close session, invalidate token
         PS-->>UI: player://state (ended) + next-up payload
@@ -497,6 +497,8 @@ sequenceDiagram
 ```
 
 The watched policy is a pure function with the boundary cases pinned by tests: exactly at the threshold, a video shorter than the skip window, a manual "mark unwatched" that must survive the next finalize, and a re-watch that increments `play_count` without clearing `watched_at`.
+
+**The threshold above is the policy; the storage floor is lower, and they are not the same number.** The policy marks a title watched at ≥ 0.95, or when the credits are reached. The stored invariant, [DATA_MODEL](./DATA_MODEL.md) I6, is weaker on purpose: a row with `watched = 1` must carry `percent ≥ 0.92`, so that a manual mark and an imported mark — a Trakt row, or a user pressing "mark watched" at 93% — is representable without the database rejecting it. `0.95` is therefore what normal playback writes; `0.92` is the weakest row the database accepts. Neither number decides the other, and both boundaries are tested (`PG-E4-09` owns the policy's, `PG-E4-01` owns the invariant's). The continue-watching index band ends at 0.95 because a `watched = 0` row above it should not exist; the band is a query optimisation, not a rule.
 
 ---
 
