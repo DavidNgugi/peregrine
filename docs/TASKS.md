@@ -46,6 +46,7 @@ PG-E0-14 is settled: `cargo deny check` is green on the real graph (advisories, 
 | PG-E1-10 | PG-E10-09 (Phase 2) | The quit dialog "states the seed count", which needs the torrent engine |
 | PG-E1-15 | aggregate download progress (Phase 2/3) | The badge is "driven by aggregate download progress"; its declared dep is only PG-E1-09, so the dependency line is incomplete |
 | PG-E1-16 | PG-E24-03 (Phase 4) | Reveal-in-file-manager is "path-guarded" through the adapter that does not exist |
+| PG-E2-12 | PG-E25-01 → PG-E20-01 (both Phase 4) | Command timing is surfaced "in Diagnostics" at a level the settings registry chooses; PG-E25-01's own note says exposing level changes is owed to the settings registry, so the chain is two phases deep |
 
 PG-E1-21 additionally requires a sound to be "verified by ear on each OS" and recorded in `SPIKE-11`, so it is a three-platform manual verification rather than something a single machine can close.
 
