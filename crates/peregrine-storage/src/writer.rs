@@ -5,6 +5,7 @@
 //! message on one channel. Callers therefore cannot contend for the lock, and a write
 //! is serialized behind the writer task instead of failing with `SQLITE_BUSY`.
 
+use peregrine_domain::Event;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::catalogue::{StubTitle, TitleExternalId};
@@ -57,18 +58,41 @@ pub(crate) enum WriteResponse {
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
 ///
-/// Every column is supplied rather than derived: the caller owns the clock, so a test
-/// can write a deterministic timestamp and a replay can write the original one.
+/// The timestamp and the detail are supplied rather than derived: the caller owns the clock, so a
+/// test can write a deterministic timestamp and a replay can write the original one. The kind,
+/// the subject kind, and the subject id are the one thing a caller cannot supply, because they
+/// come from [`peregrine_domain::Event`]: the declared vocabulary is the only way to name an
+/// event, so a repository cannot write a name this build does not know.
+///
+/// ```
+/// # use peregrine_domain::Event;
+/// # use peregrine_storage::NewEvent;
+/// let stored = NewEvent {
+///     at_millis: 0,
+///     event: Event::DownloadFailed { job_id: 7 },
+///     detail_json: None,
+/// };
+/// assert_eq!(stored.event.as_str(), "download.failed");
+/// assert_eq!(stored.event.subject_id(), 7);
+/// ```
+///
+/// ```compile_fail
+/// # use peregrine_storage::NewEvent;
+/// // A string kind is not a constructor: `NewEvent` has no `kind` field.
+/// let _ = NewEvent {
+///     at_millis: 0,
+///     kind: "download.invented".to_owned(),
+///     subject_kind: Some("download_job".to_owned()),
+///     subject_id: Some(7),
+///     detail_json: None,
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct NewEvent {
     /// Unix milliseconds UTC.
     pub at_millis: i64,
-    /// Event kind, for example `media.added` or `download.failed`.
-    pub kind: String,
-    /// The kind of the subject the event is about, when it has one.
-    pub subject_kind: Option<String>,
-    /// The subject's row id, when the event has one.
-    pub subject_id: Option<i64>,
+    /// The declared operation, which is also the row's kind and subject.
+    pub event: Event,
     /// Pre-serialized JSON detail; never a secret (ARCHITECTURE §12).
     pub detail_json: Option<String>,
 }
@@ -149,17 +173,17 @@ async fn apply(
 /// Inserts one `event_log` row and reports its rowid.
 async fn append_event(
     connection: &mut sqlx::SqliteConnection,
-    event: &NewEvent,
+    new_event: &NewEvent,
 ) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
         "INSERT INTO event_log (at, kind, subject_kind, subject_id, detail_json) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
     )
-    .bind(event.at_millis)
-    .bind(&event.kind)
-    .bind(event.subject_kind.as_deref())
-    .bind(event.subject_id)
-    .bind(event.detail_json.as_deref())
+    .bind(new_event.at_millis)
+    .bind(new_event.event.as_str())
+    .bind(new_event.event.subject_kind().as_str())
+    .bind(new_event.event.subject_id())
+    .bind(new_event.detail_json.as_deref())
     .execute(&mut *connection)
     .await?;
     Ok(result.last_insert_rowid())
@@ -170,14 +194,16 @@ mod tests {
     use super::*;
     use crate::database::open_writer_connection;
     use crate::migrations;
+    use peregrine_domain::{SubjectKind, WatchSubject};
+    use sqlx::Row as _;
     use tempfile::TempDir;
 
+    /// A declared event, because the writer accepts nothing else (PG-E4-16); the sequence
+    /// stands in for a job id so two rows are distinguishable.
     fn event(sequence: i64) -> NewEvent {
         NewEvent {
             at_millis: 1_700_000_000_000 + sequence,
-            kind: "test.dropped_reply".to_owned(),
-            subject_kind: None,
-            subject_id: None,
+            event: Event::DownloadFailed { job_id: sequence },
             detail_json: None,
         }
     }
@@ -238,9 +264,7 @@ mod tests {
         let error = handle
             .send(WriteRequest::AppendEvent(NewEvent {
                 at_millis: 0,
-                kind: "test.no_writer".to_owned(),
-                subject_kind: None,
-                subject_id: None,
+                event: Event::DownloadQueued { job_id: 1 },
                 detail_json: None,
             }))
             .await
@@ -249,6 +273,70 @@ mod tests {
         assert!(
             matches!(error, StorageError::WriterStopped),
             "got {error:?}"
+        );
+    }
+
+    /// PG-E4-16: what the vocabulary declares is what the row holds and what a reader rebuilds.
+    /// The row is read back through the three columns rather than through the caller's value, so
+    /// the check covers the write path and the read path and not just the type.
+    #[tokio::test]
+    async fn an_appended_event_reads_back_as_the_declared_event() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        let mut connection = open_writer_connection(&path).await.unwrap();
+        migrations::apply(&mut connection, &path).await.unwrap();
+
+        let (requests, receiver) = mpsc::channel(WRITE_QUEUE_DEPTH);
+        let writer = tokio::spawn(run(connection, receiver));
+        let handle = WriterHandle { requests };
+
+        let declared = Event::ProgressWatched {
+            subject: WatchSubject::Episode(9),
+        };
+        let response = handle
+            .send(WriteRequest::AppendEvent(NewEvent {
+                at_millis: 1_700_000_000_000,
+                event: declared,
+                detail_json: Some("{\"percent\":0.97}".to_owned()),
+            }))
+            .await
+            .unwrap();
+        let WriteResponse::EventAppended { id } = response else {
+            panic!("the writer answered `append_event` with another request's response");
+        };
+        drop(handle);
+        writer.await.unwrap();
+
+        let mut reader = open_writer_connection(&path).await.unwrap();
+        let row = sqlx::query(
+            "SELECT at, kind, subject_kind, subject_id, detail_json FROM event_log WHERE id = ?1",
+        )
+        .bind(id)
+        .fetch_one(&mut reader)
+        .await
+        .unwrap();
+
+        let kind: String = row.get("kind");
+        let subject_kind: String = row.get("subject_kind");
+        let subject_id: i64 = row.get("subject_id");
+        assert_eq!(row.get::<i64, _>("at"), 1_700_000_000_000);
+        assert_eq!(kind, "progress.watched");
+        assert_eq!(subject_kind, "episode");
+        assert_eq!(subject_id, 9);
+        assert_eq!(
+            row.get::<Option<String>, _>("detail_json").as_deref(),
+            Some("{\"percent\":0.97}")
+        );
+
+        let parsed = Event::parse(
+            &kind,
+            SubjectKind::parse(&subject_kind).expect("the row holds a declared subject kind"),
+            subject_id,
+        );
+        assert_eq!(
+            parsed,
+            Some(declared),
+            "an appended event must read back as the event it was"
         );
     }
 }

@@ -13,6 +13,7 @@ pub mod account;
 pub mod availability;
 pub mod catalogue;
 pub mod download;
+pub mod event;
 pub mod id;
 pub mod inspect;
 pub mod library;
@@ -38,6 +39,7 @@ pub use catalogue::{
     Person, Season, SeasonNumber, Title, TitleAlias, TitleKind, TitleStatus, TitleSubtype,
 };
 pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
+pub use event::{Event, SubjectKind, WatchSubject};
 pub use id::{ExternalId, ExternalIdError, Provider};
 pub use inspect::{
     EntryKind, Finding, InspectionLimits, OptIn, Reason, SafetyReport, TorrentDescription,

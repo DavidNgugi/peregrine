@@ -299,7 +299,7 @@ graph LR
   - Acceptance: Property test: offset then reverse offset is identity
 - [x] **PG-E4-15** `M` · deps PG-E4-14 · Subtitle format model and SRT/VTT/ASS writers
   - Acceptance: Round-trip of styling-bearing ASS preserves italics and positioning
-- [ ] **PG-E4-16** `S` · deps PG-E4-11, PG-E4-13 · Domain event enum covering every state-changing operation
+- [x] **PG-E4-16** `S` · deps PG-E4-11, PG-E4-13 · Domain event enum covering every state-changing operation
   - Acceptance: Repository layer emits only declared events
 - [x] **PG-E4-17** `S` · deps PG-E4-01 · `Clock` and `IdGenerator` ports for determinism in tests
   - Acceptance: `cargo xtask check-determinism` fails on a wall-clock or random read outside an adapter crate

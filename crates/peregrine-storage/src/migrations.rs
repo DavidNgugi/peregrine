@@ -2304,9 +2304,7 @@ mod tests {
         database
             .append_event(crate::writer::NewEvent {
                 at_millis: 1_700_000_000_000,
-                kind: "media.added".to_owned(),
-                subject_kind: Some("title".to_owned()),
-                subject_id: Some(1),
+                event: peregrine_domain::Event::DownloadQueued { job_id: 1 },
                 detail_json: None,
             })
             .await

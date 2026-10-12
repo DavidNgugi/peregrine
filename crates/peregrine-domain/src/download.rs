@@ -327,7 +327,7 @@ pub fn transition(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::inspect::{
         EntryKind, InspectionLimits, OptIn, TorrentDescription, TorrentEntry, TorrentInspector,
@@ -593,6 +593,15 @@ mod tests {
             .iter()
             .find(|(from, candidate, _)| *from == state && *candidate == kind)
             .map(|(_, _, to)| *to)
+    }
+
+    /// The legal cells as events a caller can produce, so the event vocabulary's coverage test
+    /// (PG-E4-16) walks this matrix rather than a copy of it that could drift.
+    pub(crate) fn legal_cells() -> Vec<(DownloadState, DownloadEvent, DownloadState)> {
+        LEGAL
+            .iter()
+            .map(|&(from, kind, to)| (from, kind.event(), to))
+            .collect()
     }
 
     fn terminal() -> Vec<DownloadState> {
