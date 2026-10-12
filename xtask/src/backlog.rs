@@ -1,7 +1,7 @@
 //! `backlog-stats`: the roll-up table in docs/TASKS.md, computed rather than
 //! estimated by hand.
 //!
-//! Reads the task tables out of docs/TASKS.md, sums the estimate shorthand, and
+//! Reads the task checklist out of docs/TASKS.md, sums the estimate shorthand, and
 //! groups by delivery phase and by state. It also compares the result with the
 //! declared totals at the bottom of that file so the two cannot drift.
 
@@ -48,38 +48,80 @@ impl Task {
     }
 }
 
-/// Parses one table row, or `None` when the line is not a task row. Columns are
-/// located by content rather than by position so an added optional column does
-/// not silently shift the estimate into the state.
+/// Parses one checklist line, or `None` when the line is not a task.
+///
+/// The format is the one docs/TASKS.md's Conventions section documents:
+///
+/// ```text
+/// - [ ] **PG-E3-10** *(doing)* `L` · deps PG-E3-04 · Type-safe repositories
+/// ```
+///
+/// Only the machine-readable prefix is parsed, and only up to the first segment that is not
+/// one of the known metadata shapes; everything after that is the task's prose and may
+/// contain anything, including text that looks like an estimate or a state.
 #[must_use]
 pub fn parse_row(line: &str) -> Option<Task> {
     let trimmed = line.trim();
-    if !trimmed.starts_with('|') {
-        return None;
+    let done = trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ");
+    let rest = if done {
+        trimmed
+            .strip_prefix("- [x] ")
+            .or_else(|| trimmed.strip_prefix("- [X] "))
+    } else {
+        trimmed.strip_prefix("- [ ] ")
+    }?;
+
+    let (id, after_id) = bolded(rest)?;
+    let epic = parse_epic(&id)?;
+
+    let mut state = if done { "done" } else { "todo" }.to_owned();
+    let mut estimate = String::new();
+    let mut segments = after_id.trim_start().split(" · ");
+
+    // The head holds the state tag and the estimate, in that order and nothing else: a
+    // token that is neither ends the metadata, so prose cannot be read as a band.
+    if let Some(head) = segments.next() {
+        for token in head.split_whitespace() {
+            match token {
+                "*(doing)*" => "doing".clone_into(&mut state),
+                "*(review)*" => "review".clone_into(&mut state),
+                other => match backticked(other) {
+                    Some(band) if ESTIMATE_DAYS.iter().any(|(name, _)| *name == band) => {
+                        band.clone_into(&mut estimate);
+                    }
+                    _ => break,
+                },
+            }
+        }
     }
-    let fields: Vec<String> = trimmed
-        .trim_matches('|')
-        .split('|')
-        .map(|f| f.trim().to_owned())
-        .collect();
-    let id = fields.first()?;
-    let epic = parse_epic(id)?;
-    let estimate = fields
-        .iter()
-        .find(|f| ESTIMATE_DAYS.iter().any(|(name, _)| name == f))
-        .cloned()
-        .unwrap_or_default();
-    let state = fields
-        .iter()
-        .find(|f| STATES.contains(&f.as_str()))
-        .cloned()
-        .unwrap_or_else(|| "todo".to_owned());
+
+    // Dependencies and platform follow the estimate, before the prose.
+    for segment in segments {
+        let segment = segment.trim();
+        if segment.starts_with("deps ") || segment.starts_with("plat ") {
+            continue;
+        }
+        break;
+    }
+
     Some(Task {
-        id: id.clone(),
+        id,
         epic,
         estimate,
         state,
     })
+}
+
+/// The identifier inside the first `**…**` on the line, and what follows it.
+fn bolded(text: &str) -> Option<(String, &str)> {
+    let start = text.find("**")? + 2;
+    let end = text[start..].find("**")? + start;
+    Some((text[start..end].to_owned(), &text[end + 2..]))
+}
+
+/// The contents of a segment that is exactly one code span, if it is.
+fn backticked(segment: &str) -> Option<&str> {
+    segment.strip_prefix('`')?.strip_suffix('`')
 }
 
 /// `PG-E12-03` -> `12`. The prefix is deliberately strict: a malformed ID in the
@@ -97,7 +139,30 @@ pub fn parse(root: &Path) -> Result<Vec<Task>> {
     let path = root.join(TASKS_FILE);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("cannot read {TASKS_FILE}"))?;
-    Ok(text.lines().filter_map(parse_row).collect())
+    Ok(tasks_in(&text))
+}
+
+/// Every task in the file, ignoring fenced blocks.
+///
+/// The Conventions section shows the line format in a fence, and that example names a real
+/// task: counting it would make the roll-up depend on the documentation about the roll-up.
+#[must_use]
+pub fn tasks_in(text: &str) -> Vec<Task> {
+    let mut fenced = false;
+    let mut tasks = Vec::new();
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        if let Some(task) = parse_row(line) {
+            tasks.push(task);
+        }
+    }
+    tasks
 }
 
 #[derive(Debug, Default)]
@@ -303,41 +368,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_a_task_row() {
-        let row = "| PG-E3-01 | SQLite open path | WAL on | — | S |";
-        let task = parse_row(row).unwrap();
-        assert_eq!(task.id, "PG-E3-01");
+    fn parses_an_open_task() {
+        let line = "- [ ] **PG-E3-10** `L` · deps PG-E3-04 · Type-safe repositories per aggregate";
+        let task = parse_row(line).unwrap();
+        assert_eq!(task.id, "PG-E3-10");
         assert_eq!(task.epic, 3);
-        assert_eq!(task.estimate, "S");
+        assert_eq!(task.estimate, "L");
         assert_eq!(task.state, "todo");
-        assert!((task.days() - 1.0).abs() < f64::EPSILON);
+        assert!((task.days() - 4.5).abs() < f64::EPSILON);
         assert_eq!(task.phase(), 0);
     }
 
     #[test]
-    fn parses_a_row_with_the_state_and_platform_columns() {
-        let row = "| PG-E1-01 | Chrome | Traffic lights | PG-E0-03 | M | all | review |";
-        let task = parse_row(row).unwrap();
-        assert_eq!(task.estimate, "M");
-        assert_eq!(task.state, "review");
-        assert_eq!(task.phase(), 0);
+    fn a_checked_box_is_done() {
+        let task = parse_row("- [x] **PG-E0-01** `S` · Cargo workspace").unwrap();
+        assert_eq!(task.state, "done");
+        assert_eq!(task.estimate, "S");
+        assert!(parse_row("- [X] **PG-E0-01** `S` · Cargo workspace").is_some());
+    }
+
+    #[test]
+    fn an_annotated_state_is_read_and_absent_means_todo() {
+        let review = parse_row("- [ ] **PG-E1-01** *(review)* `M` · plat mac · Chrome").unwrap();
+        assert_eq!(review.state, "review");
+        assert_eq!(review.estimate, "M");
+
+        let doing = parse_row("- [ ] **PG-E3-10** *(doing)* `L` · deps PG-E3-04 · x").unwrap();
+        assert_eq!(doing.state, "doing");
+
+        let plain = parse_row("- [ ] **PG-E5-01** `M` · x").unwrap();
+        assert_eq!(plain.state, "todo");
+    }
+
+    /// The prefix ends where the prose begins, so a task whose text contains a band name or
+    /// a state word cannot move the numbers.
+    #[test]
+    fn prose_cannot_masquerade_as_metadata() {
+        let task = parse_row(
+            "- [ ] **PG-E7-01** `M` · Shell layout: an `XL` rail and a `done` marker in the text",
+        )
+        .unwrap();
+        assert_eq!(task.estimate, "M", "the first band is the estimate");
+        assert_eq!(task.state, "todo");
+
+        let no_metadata = parse_row("- [ ] **PG-E7-01** · a task with no band at all").unwrap();
+        assert_eq!(no_metadata.estimate, "");
+        assert!((no_metadata.days() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn ignores_non_task_lines() {
         assert!(parse_row("## E0 · Repository and tooling").is_none());
+        assert!(parse_row("- Acceptance: something").is_none());
         assert!(parse_row("| ID | Task | Acceptance | Deps | Est |").is_none());
+        assert!(parse_row("- [ ] a task with no identifier").is_none());
     }
 
     #[test]
     fn rejects_a_malformed_task_id() {
-        assert!(parse_row("| PG-E-01 | x | y | — | S |").is_none());
+        assert!(parse_row("- [ ] **PG-E-01** `S` · x").is_none());
+        assert!(parse_row("- [ ] **PG-E1-x** `S` · x").is_none());
     }
 
     #[test]
     fn phase_mapping_follows_the_backlog_headings() {
         let at = |id: &str| {
-            parse_row(&format!("| {id} | t | a | — | S |"))
+            parse_row(&format!("- [ ] **{id}** `S` · x"))
                 .unwrap()
                 .phase()
         };
@@ -357,9 +453,9 @@ mod tests {
     #[test]
     fn rollup_groups_by_phase_and_state() {
         let tasks = vec![
-            parse_row("| PG-E0-01 | a | b | — | S | done |").unwrap(),
-            parse_row("| PG-E0-02 | a | b | — | M | todo |").unwrap(),
-            parse_row("| PG-E5-01 | a | b | — | XL | todo |").unwrap(),
+            parse_row("- [x] **PG-E0-01** `S` · a").unwrap(),
+            parse_row("- [ ] **PG-E0-02** `M` · a").unwrap(),
+            parse_row("- [ ] **PG-E5-01** `XL` · a").unwrap(),
         ];
         let stats = rollup(&tasks);
         assert_eq!(stats.tasks, 3);
@@ -367,6 +463,17 @@ mod tests {
         assert_eq!(stats.by_state["done"], 1);
         assert_eq!(stats.by_phase[&0], (2, 3.5));
         assert_eq!(stats.by_phase[&1], (1, 8.0));
+    }
+
+    /// The format example in the Conventions section names a real task; it must not be
+    /// counted, or the roll-up would depend on the prose describing it.
+    #[test]
+    fn a_fenced_example_is_not_a_task() {
+        let text =
+            "```\n- [ ] **PG-E3-10** *(doing)* `L` · example\n```\n- [ ] **PG-E0-01** `S` · real\n";
+        let tasks = tasks_in(text);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "PG-E0-01");
     }
 
     #[test]

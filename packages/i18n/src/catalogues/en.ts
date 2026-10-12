@@ -109,8 +109,7 @@ export const en = {
         },
         provider_schema_drift: {
           title: "A provider changed how it answers.",
-          advice:
-            "Peregrine shows what it already has and refreshes later. Nothing is lost.",
+          advice: "Peregrine shows what it already has and refreshes later. Nothing is lost.",
         },
         unsafe_content: {
           title: "The download was stopped by the safety check.",
