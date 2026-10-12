@@ -9,69 +9,35 @@
 //! in [`service::NotificationService::notify`] is therefore the design, not an
 //! implementation detail.
 //!
-//! What lives here: the two ports the service needs beyond `peregrine-domain`'s
-//! pure policy ([`NotificationCentre`] and [`NotificationPreferences`]), the
-//! preference shape, and the service that composes them. What lives in
-//! `peregrine-domain`: the catalogue, the copy, the deep-link routes, the leak
-//! scanner, and the decision function. What lives in `peregrine-platform`: the
-//! `OsNotifier` adapter that talks to the notification server.
+//! What lives here: the settings the user owns ([`Preferences`] and its port), the
+//! [`Outcome`] a caller reports, and the service that composes the ports. What lives in
+//! `peregrine-domain`: the catalogue, the copy, the deep-link routes, the leak scanner, the
+//! planner, and the centre's own port and rows. What lives in `peregrine-storage`: the
+//! `notification` table's repository. What lives in `peregrine-platform` and is **not written
+//! yet**: the `OsNotifier` adapter that talks to the notification server, which PG-E1-14 owns.
 
 pub mod service;
 
 use jiff::Timestamp;
 use jiff::civil::Time;
 use peregrine_domain::notify::{
-    EnableReason, EventSetting, NotificationEvent, QuietHoursWindow, Severity, SuppressionReason,
+    EnableReason, EventSetting, NotificationEvent, QuietHoursWindow, Severity,
 };
 
+pub use peregrine_domain::centre::{
+    CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, NewCentreEntry,
+    NotificationCentre, NotificationId, RecentNotification, RecentQuery, RecentWindow, Recorded,
+    SubjectKind, SubjectNaming,
+};
 pub use service::{NotificationService, ServiceError};
 
-/// Where the in-app centre is stored.
-///
-/// ARCHITECTURE §5 puts the notification repository in `peregrine-storage` — the
-/// repository is the implementation and the port is the core's — so this trait is
-/// the core's half and `peregrine-storage` provides the other.
-pub trait NotificationCentre {
-    /// Writes one entry and reports what happened to it.
-    ///
-    /// The write happens before any OS delivery is attempted, so a process that
-    /// dies between the two leaves a readable entry rather than a lost event.
-    fn record(
-        &self,
-        entry: &NewCentreEntry,
-    ) -> impl std::future::Future<Output = Result<Recorded, CentreError>> + Send;
-
-    /// Lists centre entries, newest first, without their dismissed rows.
-    fn list(
-        &self,
-        cursor: Option<CentreCursor>,
-        limit: u32,
-    ) -> impl std::future::Future<Output = Result<Vec<CentreEntry>, CentreError>> + Send;
-
-    /// The windowed rows a policy decision needs.
-    fn recent(
-        &self,
-        query: &RecentQuery,
-    ) -> impl std::future::Future<Output = Result<Vec<RecentNotification>, CentreError>> + Send;
-
-    /// The delivery state of one entry, or `None` when no such row exists.
-    fn delivery(
-        &self,
-        id: NotificationId,
-    ) -> impl std::future::Future<Output = Result<Option<Delivery>, CentreError>> + Send;
-
-    /// Records the outcome of one OS delivery attempt.
-    ///
-    /// Returns whether the row was there to update: an entry dismissed while its
-    /// toast was in flight must not resurrect itself.
-    fn mark_delivered(
-        &self,
-        id: NotificationId,
-        delivery: &Delivery,
-    ) -> impl std::future::Future<Output = Result<bool, CentreError>> + Send;
-}
-
 /// Where the user's notification choices are stored.
+///
+/// Not yet implemented, and deliberately not implemented here: the settings registry that
+/// owns `settings` is PG-E20-01's, and the wizard and permissions UI that write through it
+/// are PG-E1-20's. Until it exists the service is constructed with the test double in
+/// `crates/peregrine-app/tests/notify.rs`, and nothing in the shipping binary constructs a
+/// [`NotificationService`] yet.
 pub trait NotificationPreferences {
     /// Reads the current preferences, or the catalogue defaults when unset.
     fn load(
@@ -83,162 +49,6 @@ pub trait NotificationPreferences {
         &self,
         preferences: &Preferences,
     ) -> impl std::future::Future<Output = Result<(), PreferencesError>> + Send;
-}
-
-/// The row identifier the notification table assigns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NotificationId(pub i64);
-
-/// A row to insert into the centre.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewCentreEntry {
-    /// The catalogue event's stable key.
-    pub event: String,
-    /// `normal` or `critical`.
-    pub severity: &'static str,
-    /// The scanned title.
-    pub title: String,
-    /// The scanned body.
-    pub body: Option<String>,
-    /// The scanned deep link, shared with the OS payload.
-    pub deep_link: Option<String>,
-    /// The subject's kind, when the event has one.
-    pub subject_kind: Option<&'static str>,
-    /// The subject's row id, when the event has one.
-    pub subject_id: Option<i64>,
-    /// The key repeated events coalesce on.
-    pub dedupe_key: Option<String>,
-    /// The key a burst summary groups on.
-    pub group_key: Option<String>,
-    /// The resolved sound value, when one was asked for.
-    pub sound: Option<String>,
-    /// What the OS attempt has ended as so far.
-    pub delivery: Delivery,
-    /// Unix milliseconds UTC, from the injected clock.
-    pub created_at: i64,
-}
-
-/// What happened when the entry was recorded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Recorded {
-    /// A new row was inserted.
-    Inserted(NotificationId),
-    /// A row inside the dedupe window was refreshed instead of duplicated.
-    Updated(NotificationId),
-}
-
-impl Recorded {
-    /// The row the caller should deliver, if any.
-    #[must_use]
-    pub const fn id(self) -> NotificationId {
-        match self {
-            Self::Inserted(id) | Self::Updated(id) => id,
-        }
-    }
-}
-
-/// One centre row, as the UI reads it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CentreEntry {
-    /// The row identifier.
-    pub id: NotificationId,
-    /// The catalogue event's key.
-    pub event: String,
-    /// `normal` or `critical`.
-    pub severity: String,
-    /// The stored title.
-    pub title: String,
-    /// The stored body.
-    pub body: Option<String>,
-    /// The stored deep link, which is the same one the toast carried.
-    pub deep_link: Option<String>,
-    /// The delivery state.
-    pub delivery: Delivery,
-    /// When it was created, in Unix milliseconds UTC.
-    pub created_at: i64,
-    /// Whether the user has read it.
-    pub read: bool,
-    /// Whether the user dismissed it.
-    pub dismissed: bool,
-}
-
-/// A keyset cursor: `(created_at, id)` of the last row a page ended on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CentreCursor {
-    /// The last row's `created_at`.
-    pub created_at: i64,
-    /// The last row's id, which breaks ties between rows sharing a millisecond.
-    pub id: NotificationId,
-}
-
-/// A row the planner counts, as the repository reads it.
-///
-/// Deliberately not [`CentreEntry`]: the planner needs the keys and the outcome,
-/// not the copy, and a narrower read is a narrower thing to get wrong.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecentNotification {
-    /// The row identifier.
-    pub id: NotificationId,
-    /// The dedupe key, when the row has one.
-    pub dedupe_key: Option<String>,
-    /// The group key, when the row has one.
-    pub group_key: Option<String>,
-    /// The delivery state.
-    pub delivery: Delivery,
-    /// When it was created, in Unix milliseconds UTC.
-    pub created_at: i64,
-}
-
-/// The windowed rows a policy decision needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecentQuery {
-    /// The instant the windows are measured back from.
-    pub now: i64,
-    /// Count rows with this dedupe key inside `dedupe_window_millis`.
-    pub dedupe_key: Option<String>,
-    /// The dedupe window, from ADR 0015 §4.
-    pub dedupe_window_millis: i64,
-    /// Count rows with this group key inside `burst_window_millis`.
-    pub group_key: Option<String>,
-    /// The burst window, from ADR 0015 §4.
-    pub burst_window_millis: i64,
-    /// Count rows delivered inside `rate_limit_window_millis`.
-    pub rate_limit_window_millis: i64,
-}
-
-/// The outcome of an OS delivery attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Delivery {
-    /// Recorded, not yet attempted.
-    Pending,
-    /// The OS accepted the toast.
-    Delivered {
-        /// The plugin's int32 id.
-        native_id: i32,
-        /// When it was handed over, in Unix milliseconds UTC.
-        at: i64,
-    },
-    /// Held back before any OS call, with the reason.
-    Suppressed(SuppressionReason),
-    /// The OS channel refused it, with the message.
-    Failed(String),
-}
-
-/// Why the centre could not be read or written.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum CentreError {
-    /// The storage layer refused the operation.
-    #[error("the notification centre could not be reached: {message}")]
-    Unavailable {
-        /// The storage error, flattened so no driver type crosses this port.
-        message: String,
-    },
-    /// A stored row does not match the documented schema.
-    #[error("a stored notification row is not valid: {message}")]
-    Corrupt {
-        /// What the row said that the schema does not allow.
-        message: String,
-    },
 }
 
 /// Why the preferences could not be read or written.
@@ -398,6 +208,9 @@ pub struct Outcome {
     pub recorded: Recorded,
     /// What happened to the OS attempt.
     pub delivery: Delivery,
+    /// How many events this row stands for: always one for a single event, the burst count for
+    /// a summary, and the number of held events for a quiet-hours digest.
+    pub aggregated: u32,
 }
 
 impl Outcome {

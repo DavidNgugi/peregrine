@@ -12,6 +12,7 @@
 pub mod account;
 pub mod availability;
 pub mod catalogue;
+pub mod centre;
 pub mod download;
 pub mod event;
 pub mod id;
@@ -37,6 +38,11 @@ pub use catalogue::{
     AliasKind, CatalogueError, Company, CompanyRole, Credit, CreditKind, Episode, EpisodeNumber,
     EpisodeOrdering, EpisodePosition, EpisodeType, Genre, Keyword, MetadataState, OrderingScheme,
     Person, Season, SeasonNumber, Title, TitleAlias, TitleKind, TitleStatus, TitleSubtype,
+};
+pub use centre::{
+    CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, NewCentreEntry,
+    NotificationCentre, NotificationId, RecentNotification, RecentQuery, RecentWindow, Recorded,
+    SubjectKind, SubjectNaming,
 };
 pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
 pub use event::{Event, SubjectKind, WatchSubject};

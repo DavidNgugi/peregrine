@@ -8,6 +8,8 @@
 use peregrine_domain::Event;
 use tokio::sync::{mpsc, oneshot};
 
+use peregrine_domain::centre::{Delivery, NewCentreEntry, NotificationId, Recorded};
+
 use crate::catalogue::{StubTitle, TitleExternalId};
 use crate::error::StorageError;
 use crate::jobs::{JobChange, NewJob};
@@ -39,6 +41,16 @@ pub(crate) enum WriteRequest {
         title_id: i64,
         ids: Vec<TitleExternalId>,
     },
+    /// Insert or refresh one `notification` row.
+    ///
+    /// The read-then-write of the dedupe window happens on the writer's own connection,
+    /// so two events arriving at once cannot both decide they are the first.
+    RecordNotification(Box<NewCentreEntry>),
+    /// Apply one delivery outcome to a `notification` row.
+    MarkNotificationDelivered {
+        id: NotificationId,
+        delivery: Box<Delivery>,
+    },
 }
 
 /// The writer's answer to a [`WriteRequest`].
@@ -54,6 +66,10 @@ pub(crate) enum WriteResponse {
     TitleInserted { id: i64 },
     /// The external ids are attached.
     ExternalIdsAttached,
+    /// The notification row was inserted, or refreshed inside its dedupe window.
+    NotificationRecorded { recorded: Recorded },
+    /// Whether a `notification` row was there to change.
+    NotificationDelivered { changed: bool },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -166,6 +182,16 @@ async fn apply(
             crate::catalogue::attach_external_ids(connection, title_id, &ids)
                 .await
                 .map(|()| WriteResponse::ExternalIdsAttached)
+        }
+        WriteRequest::RecordNotification(entry) => {
+            crate::notify::insert_or_refresh(connection, &entry)
+                .await
+                .map(|recorded| WriteResponse::NotificationRecorded { recorded })
+        }
+        WriteRequest::MarkNotificationDelivered { id, delivery } => {
+            crate::notify::apply_delivery(connection, id, &delivery)
+                .await
+                .map(|changed| WriteResponse::NotificationDelivered { changed })
         }
     }
 }

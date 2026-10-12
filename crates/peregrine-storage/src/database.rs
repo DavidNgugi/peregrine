@@ -76,6 +76,19 @@ impl Database {
         &self.recovery
     }
 
+    /// The single-writer handle, for a repository that lives in its own module.
+    ///
+    /// A repository needs the writer and a reader, not the handle's whole surface; handing
+    /// it the two ports is what keeps the writer the only write path (`ARCHITECTURE` §5).
+    pub(crate) const fn writer(&self) -> &WriterHandle {
+        &self.writer
+    }
+
+    /// The reader pool, for a repository that lives in its own module.
+    pub(crate) const fn readers(&self) -> &SqlitePool {
+        &self.readers
+    }
+
     /// Appends one row to `event_log` through the single writer.
     ///
     /// Returns the rowid `SQLite` assigned: only the writer task ever holds the write

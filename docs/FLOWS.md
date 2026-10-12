@@ -631,6 +631,7 @@ sequenceDiagram
     NS-->>UI: state, test-notification button, OS settings link
 
     Note over NS: An event arrives, for example download.completed
+    NS->>NS: render title and body per the privacy setting, scanning every string
     NS->>DB: insert notification, delivery_state=pending
     NS->>NS: policy: enabled, quiet hours, focus, dedupe window, rate limit
 
@@ -638,7 +639,6 @@ sequenceDiagram
         NS->>DB: delivery_state=suppressed with a reason
         NS-->>UI: centre entry only, no toast and no sound
     else Allowed
-        NS->>NS: render title and body per the privacy setting
         NS->>OS: show with int32 id, resolved sound, deep link in extra
         NS->>DB: delivery_state=delivered, delivered_at, native_id
         NS-->>UI: centre entry plus the in-app chime when in-app-only
@@ -659,7 +659,7 @@ sequenceDiagram
 
 Invariants and tests for this flow:
 
-- The centre entry is written **before** the OS call, so a crash between the two loses a toast and never the event.
+- The centre entry is written **before** the OS call, so a crash between the two loses a toast and never the event. The copy is rendered — and therefore scanned — before the insert, because the row holds the same scanned text the toast carries.
 - A notification is only shown with a listener registered; the handler is installed during startup, because the plugin neither displays nor reports actions without one, and notifications shown before it exists report nothing.
 - The same deep link is reachable from the centre, so no capability depends on a toast being clicked. This matters on Windows, where a click is only reported while the toast is on screen.
 - Sound-off is best-effort on Linux and Windows and the UI says so; the in-app chime is the only sound whose behaviour we control end to end.
