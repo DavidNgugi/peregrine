@@ -13,6 +13,7 @@ pub mod account;
 pub mod catalogue;
 pub mod id;
 pub mod library;
+pub mod name;
 pub mod notify;
 pub mod path;
 pub mod ports;
@@ -34,6 +35,7 @@ pub use library::{
     SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile, WATCHED_PERCENT,
     WatchProgress, WatchProgressError, WatchlistEntry,
 };
+pub use name::{LibraryName, NameError, Numbering, UnresolvedReason};
 pub use notify::{
     BURST_SUMMARY_THRESHOLD, DEDUPE_WINDOW_MILLIS, DeepLink, DeepLinkError, EnableReason,
     EventSetting, Focus, MAX_DEEP_LINK_BYTES, MAX_TEXT_BYTES, NotificationEvent,

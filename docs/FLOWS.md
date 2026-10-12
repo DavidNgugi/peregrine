@@ -366,7 +366,7 @@ sequenceDiagram
     participant UI
     participant Lib as LibraryService
     participant Scan as Scanner
-    participant Parse as domain::NameParser
+    participant Parse as domain::LibraryName
     participant Probe as ProbeService
     participant DB as storage
     participant FF as ffprobe
@@ -378,8 +378,8 @@ sequenceDiagram
 
     Lib->>DB: skip files unchanged since last scan
     par Per file, bounded concurrency
-        Lib->>Parse: parse(path, sidecar nfo if present)
-        Parse-->>Lib: ParsedMedia{title, year, season, episode, confidence, reasons}
+        Lib->>Parse: parse(path text)
+        Parse-->>Lib: LibraryName{title, year, season, episodes, absolute, numbering, extension, release} or NameError{name, reason}
         alt Confidence high
             Lib->>DB: match to existing title or create stub
         else Confidence low or ambiguous
@@ -399,7 +399,7 @@ sequenceDiagram
 
 Reconciliation never deletes watch progress or catalogue rows when a file disappears; it marks `missing_since` and keep the rows, so re-adding the file restores the item instead of recreating an orphan.
 
-Tests: naming corpus of 200 real-world release and file names with expected parses (anime absolute, multi-episode, season packs, year ambiguity, sample files, extras folders, `S01E01E02`, `1x01`, `EP01`, `Season 1/01.mkv`), a file that changes size without changing mtime (hash fallback), a root that becomes unreachable (network volume), and 20 k files scanned within the time budget of `SPIKE-7`.
+Tests: the parser half of the naming corpus is `crates/peregrine-domain/tests/library_corpus.rs` (PG-E4-04, 200+ names with expected parses, including anime absolute, multi-episode, season packs, year ambiguity, `S01E01E02`, `1x01`, `EP01`, `Season 1/01.mkv`, and the names it must refuse). The scanner half still owes sample files and extras folders, a file that changes size without changing mtime (hash fallback), a root that becomes unreachable (network volume), and 20 k files scanned within the time budget of `SPIKE-7`.
 
 ---
 
