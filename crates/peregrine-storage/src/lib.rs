@@ -19,6 +19,7 @@ mod catalogue;
 mod database;
 mod error;
 mod fts;
+mod image_cache;
 mod integrity;
 mod jobs;
 mod json;
@@ -40,6 +41,7 @@ pub use catalogue::{
 };
 pub use database::Database;
 pub use error::StorageError;
+pub use image_cache::ImageCacheEntry;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{LibraryRootRow, MediaFileRow, MediaItemRow, SubtitleTrackRow, UnmatchedFileRow};

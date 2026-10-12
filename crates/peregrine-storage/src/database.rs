@@ -558,6 +558,75 @@ impl Database {
         crate::library::missing_files(&self.readers, root_id).await
     }
 
+    /// Records that one image is cached, or refreshes where it is and how big it is.
+    ///
+    /// Written *after* the bytes are published, never before: a row that outlives its file is a row
+    /// an eviction tolerates, and a file that outlives its row is a leak only a cache wipe reaps
+    /// (PG-E6-18). The instants and the hit count of a row that already exists are kept — see
+    /// [`ImageCacheEntry`].
+    pub async fn record_image(
+        &self,
+        entry: crate::image_cache::ImageCacheEntry,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordImageCache(Box::new(entry)))
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("record_image", &other)),
+        }
+    }
+
+    /// One cached image, or `None` when no row holds that key.
+    pub async fn image_cache_entry(
+        &self,
+        key: &str,
+    ) -> Result<Option<crate::image_cache::ImageCacheEntry>, StorageError> {
+        crate::image_cache::entry(&self.readers, key).await
+    }
+
+    /// How many images are cached and how many bytes they account for, which is the number a size
+    /// cap is compared against (PG-E6-10) and what the artwork tier reports.
+    pub async fn image_cache_totals(&self) -> Result<crate::image_cache::Totals, StorageError> {
+        crate::image_cache::totals(&self.readers).await
+    }
+
+    /// Reports that one cached image was read at `at`, answering whether the row was there.
+    ///
+    /// A hit is the caller's answer rather than this one's: only the caller knows whether the file
+    /// it found was the one it was looking for.
+    pub async fn touch_image(&self, key: &str, at: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::TouchImageCache {
+                key: key.to_owned(),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("touch_image", &other)),
+        }
+    }
+
+    /// Removes one `image_cache` row, answering whether it was there.
+    ///
+    /// The blob is not touched: this layer knows only the path the row held, and the layer that
+    /// owns the bytes removes the file first and the row second (PG-E6-10).
+    pub async fn remove_image(&self, key: &str) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RemoveImageCache {
+                key: key.to_owned(),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("remove_image", &other)),
+        }
+    }
+
     /// Marks one file absent at scan time, or present again.
     ///
     /// The instant is the caller's — [`MediaFile::mark_missing`] keeps the *first* one, so a

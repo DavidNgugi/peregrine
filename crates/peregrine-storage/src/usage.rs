@@ -171,11 +171,9 @@ pub(crate) async fn disk_usage(pool: &SqlitePool) -> Result<DiskUsage, StorageEr
         .fetch_one(pool)
         .await
         .map_err(StorageError::from_sqlx)?;
-    let (artwork_rows, artwork_bytes): (i64, i64) =
-        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(bytes), 0) FROM image_cache")
-            .fetch_one(pool)
-            .await
-            .map_err(StorageError::from_sqlx)?;
+    // One query, shared with the size cap's check: the artwork tier reports both numbers and the
+    // cap compares one of them, so neither owns the `SELECT`.
+    let artwork = crate::image_cache::totals(pool).await?;
     // An embedded track lives inside its media file and is not a sidecar; only a row that
     // records a path has bytes of its own.
     let sidecar_rows: i64 =
@@ -200,8 +198,8 @@ pub(crate) async fn disk_usage(pool: &SqlitePool) -> Result<DiskUsage, StorageEr
             },
             TierUsage {
                 tier: Tier::Artwork,
-                rows: unsigned(artwork_rows),
-                bytes: Some(unsigned(artwork_bytes)),
+                rows: unsigned(artwork.rows),
+                bytes: Some(unsigned(artwork.bytes)),
                 measured_from: MeasuredFrom::Recorded("image_cache.bytes"),
             },
             TierUsage {

@@ -85,6 +85,17 @@ pub(crate) enum WriteRequest {
         account_id: peregrine_domain::AccountId,
         title_id: i64,
     },
+    /// Insert or refresh one `image_cache` row.
+    RecordImageCache(Box<crate::image_cache::ImageCacheEntry>),
+    /// Report that one cached image was read.
+    TouchImageCache {
+        key: String,
+        at: i64,
+    },
+    /// Remove one `image_cache` row.
+    RemoveImageCache {
+        key: String,
+    },
     /// Insert or refresh one `notification` row.
     ///
     /// The read-then-write of the dedupe window happens on the writer's own connection,
@@ -306,6 +317,20 @@ async fn apply_library_write(
         } => crate::library::set_file_missing(connection, id, missing_since, updated_at)
             .await
             .map(|changed| WriteResponse::RowChanged { changed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::RecordImageCache(entry) => crate::image_cache::record(connection, &entry)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::TouchImageCache { key, at } => {
+            crate::image_cache::touch(connection, &key, at)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+                .map_err(StorageError::from_sqlx)
+        }
+        WriteRequest::RemoveImageCache { key } => crate::image_cache::remove(connection, &key)
+            .await
+            .map(|removed| WriteResponse::RowChanged { changed: removed })
             .map_err(StorageError::from_sqlx),
         WriteRequest::UpsertWatchProgress(progress) => {
             crate::watch::upsert_progress(connection, &progress)
