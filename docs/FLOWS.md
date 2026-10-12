@@ -259,7 +259,7 @@ sequenceDiagram
 
     Acq->>Gate: inspect(meta, save_path, settings)
     Gate->>Gate: validate each path, extension allowlist,<br/>count and size caps, no symlink, no reserved names
-    Gate-->>Acq: SafetyReport{allowed, blocked[], warnings[], totals}
+    Gate-->>Acq: SafetyReport{verdict, findings[], file_count, total_bytes}
 
     alt Blocked
         Acq->>DB: state=blocked, persist report, error_code=UNSAFE_CONTENT
