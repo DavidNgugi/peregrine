@@ -16,6 +16,7 @@ use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
 use crate::error::StorageError;
 use crate::integrity::Recovery;
 use crate::jobs::{JobChange, JobRecord, NewJob};
+use crate::maintenance::{MaintenanceOutcome, MaintenancePlan, MaintenanceRequest};
 use crate::page::PageRequest;
 use crate::pragmas;
 use crate::retention::{RetentionOutcome, RetentionPlan};
@@ -312,6 +313,38 @@ impl Database {
         plan: &RetentionPlan,
     ) -> Result<RetentionOutcome, StorageError> {
         crate::retention::apply(&self.writer, plan).await
+    }
+
+    /// What a maintenance run at `request.at_millis` would do, before any of it happens.
+    ///
+    /// The instant and §6's two intervals arrive as values (AGENTS R14); the `VACUUM` half of
+    /// the fragmentation trigger is measured here, from the file. Planning writes nothing, so
+    /// it is allowed while playback is active — the gate belongs to
+    /// [`Database::apply_maintenance`], which is what runs the plan.
+    pub async fn plan_maintenance(
+        &self,
+        request: MaintenanceRequest,
+    ) -> Result<MaintenancePlan, StorageError> {
+        crate::maintenance::plan(&self.readers, request).await
+    }
+
+    /// Applies a maintenance plan through the single writer.
+    ///
+    /// `is_playing` is the caller's answer to "is something playing right now?", asked before
+    /// every step: this adapter may not name the player (AGENTS R6), so the answer is a
+    /// predicate owned by whoever can see both crates — `peregrine-app`'s maintenance job. A
+    /// step that finds playback running is declined; a step that fails is reported and the
+    /// remaining steps still run. The one error returned is a stopped writer, when nothing can
+    /// run at all.
+    pub async fn apply_maintenance<F>(
+        &self,
+        plan: &MaintenancePlan,
+        is_playing: F,
+    ) -> Result<MaintenanceOutcome, StorageError>
+    where
+        F: Fn() -> bool + Send,
+    {
+        crate::maintenance::apply(&self.writer, plan, &is_playing).await
     }
 
     /// The bytes the database can account for, per `DATA_MODEL` §7 tier.

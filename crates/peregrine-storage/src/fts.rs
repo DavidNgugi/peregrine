@@ -170,6 +170,30 @@ pub(crate) async fn rebuild(connection: &mut SqliteConnection) -> Result<u64, sq
     Ok(result.rows_affected())
 }
 
+/// Merges the index's b-tree segments, which is `FTS5`'s `optimize`.
+///
+/// An `FTS5` table is written as a series of immutable segments, one per transaction that
+/// touched it, and a term is looked up in each of them; the index is only merged when it is
+/// asked to be. That is what `optimize` is for, and it is why the maintenance job runs it
+/// (`DATA_MODEL` §6): left alone, an index written a title at a time degrades into as many
+/// segments as there were writes. It is idempotent — a second call on a merged index has
+/// nothing to merge — and it is defined by the index's own contents, so it cannot change what
+/// a search matches.
+///
+/// It runs on the caller's connection, which is the writer's: this is a write to the index,
+/// and the single-writer rule (`ARCHITECTURE` §5) is what keeps it from interleaving with a
+/// title being indexed.
+///
+/// # Errors
+///
+/// The driver's error.
+pub(crate) async fn optimize(connection: &mut SqliteConnection) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT INTO title_fts (title_fts) VALUES ('optimize')")
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
 /// The `MATCH` expression for a user's query, or `None` when there is nothing to match.
 ///
 /// `FTS5` has its own query grammar, and a user string is not a query: `"` alone is
