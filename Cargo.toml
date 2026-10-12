@@ -82,6 +82,23 @@ tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 # The native file and folder pickers (PG-E1-12). The platform's own dialog is the only
 # one that behaves like the rest of the desktop, and it needs no window of ours to draw.
 tauri-plugin-dialog = { version = "2.8.2" }
+# The `peregrine://` scheme registration and the delivery of a URL the running app is
+# asked to open (PG-E1-11). This plugin is what makes the scheme reachable by the OS at
+# all — an `Info.plist` URL type, a Windows registry entry, a `.desktop` handler — and
+# it is what turns a macOS Launch Services open into an event. The alternative is a
+# per-OS registration maintained by us plus no handler for the Apple Event, which is
+# the one delivery path `std::env::args` cannot see.
+tauri-plugin-deep-link = { version = "2.6.1" }
+# The login item (PG-E1-13). It owns the per-OS mechanism — `SMAppService` on macOS, a
+# registry `Run` key on Windows, an XDG autostart entry on Linux — and registering it
+# creates nothing by itself, which is what keeps autostart off until the user asks.
+tauri-plugin-autostart = { version = "2.7.0" }
+# Menu accelerators for the shortcut registry (PG-E1-08). `muda`'s `CMD_OR_CTRL` is the
+# one definition of "Cmd on macOS, Ctrl elsewhere", and `tauri` already carries `muda`
+# on every desktop platform; naming it directly is what lets the registry hold the same
+# modifier a menu item is built from instead of a second string table. The feature set
+# mirrors `tauri`'s so the crate is not built a second time with different features.
+muda = { version = "0.20", default-features = false, features = ["serde", "gtk3"] }
 # Single-instance enforcement with argument forwarding (PG-E1-04). This is the
 # implementation the Tauri project maintains per OS; a hand-rolled lock would have to
 # reimplement a named mutex, a D-Bus name, and a Unix socket, and would be the only one

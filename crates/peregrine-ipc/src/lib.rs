@@ -15,12 +15,19 @@
 //! the webview. The shell calls it once, from `setup`, and calls
 //! [`runtime::shutdown`] on the way out.
 
+pub mod autostart;
 pub mod bindings;
 pub mod error;
 pub mod guard;
 pub mod jobs;
 pub mod runtime;
+pub mod shortcuts;
 pub mod system;
+
+// The shell reads the tray's counters through [`runtime::shell_status`] and may not depend
+// on `peregrine-app` directly, so the type that function answers with is named here rather
+// than reached through a second dependency edge (AGENTS R6).
+pub use peregrine_app::ShellStatus;
 
 #[cfg(test)]
 mod contract_tests;
@@ -45,6 +52,9 @@ pub fn builder() -> Builder<tauri::Wry> {
             system::build_info::<tauri::Wry>,
             system::health,
             system::log_tail,
+            shortcuts::list_shortcuts,
+            autostart::autostart_enabled::<tauri::Wry>,
+            autostart::set_autostart::<tauri::Wry>,
             jobs::start_hello,
             jobs::cancel,
             jobs::list,

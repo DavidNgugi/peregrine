@@ -18,7 +18,18 @@ tauri-build = { workspace = true }
 # owns that contract.
 [dependencies]
 peregrine-ipc = { workspace = true }
-tauri = { workspace = true }
+# The `peregrine://` grammar is a parser of untrusted input, and parsers live in the
+# domain (AGENTS R13/R15). The shell is the adapter that receives the OS's input and
+# nothing more (PG-E1-11).
+peregrine-domain = { workspace = true }
+# `tauri::generate_context!` decodes the plugin configuration from `tauri.conf.json` at
+# compile time and the generated code names this crate, which is why the deep-link scheme
+# entry is what makes it required rather than merely permitted.
+serde_json = { workspace = true }
+# `tray-icon` is what makes `tauri::tray` exist; the tray and its state-aware menu are
+# PG-E1-09. The window, the event loop, and the OS plugins are the only things this
+# feature reaches.
+tauri = { workspace = true, features = ["tray-icon"] }
 # A second launch has to find the first: the plugin owns the lock (a named mutex on
 # Windows, a D-Bus name on Linux, a Unix socket on macOS) and hands the second launch's
 # arguments to the running instance, which is the PG-E1-04 delivery and the seam PG-E1-11's
@@ -28,10 +39,20 @@ tauri-plugin-single-instance = { workspace = true }
 # it here is what lets the webview's `plugin:dialog|open` call be answered at all; the ACL
 # decides whether it may be.
 tauri-plugin-dialog = { workspace = true }
+# The `peregrine://` scheme registration and the Apple Event path (PG-E1-11). Registering
+# it here is what makes the OS hand a URL to this application at all, and its `on_open_url`
+# handler is the one delivery path the process's own argument vector cannot see.
+tauri-plugin-deep-link = { workspace = true }
+# The login item the settings toggle drives (PG-E1-13). Registering the plugin creates no
+# login item: autostart stays off until the user asks for it.
+tauri-plugin-autostart = { workspace = true }
 # The main window's size, position, and maximized state survive a restart because
 # this plugin owns them (docs/ARCHITECTURE.md §6), not because this crate writes a
 # geometry file of its own.
 tauri-plugin-window-state = { workspace = true }
+# The tray's counters are re-read from the core on an interval; the runtime's own timer
+# is what schedules that, rather than a thread of ours sleeping beside it.
+tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
@@ -43,3 +64,9 @@ tauri = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true
+
+# `cargo-machete` reads the crate's own sources, and `serde_json` is named only by the
+# code `tauri::generate_context!` expands into, so the search cannot see the use. The
+# dependency is real: removing it stops the shell from compiling.
+[package.metadata.cargo-machete]
+ignored = ["serde_json"]
