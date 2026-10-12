@@ -69,6 +69,63 @@ const EXTRAS_DIRECTORIES: &[&str] = &[
     "interviews",
 ];
 
+/// What a scan recorded about one file, which is what the next scan compares.
+///
+/// Two numbers, because each catches what the other misses. A **size** change is what a rewrite
+/// inside a filesystem's mtime granularity looks like — FAT and NTFS round to two seconds, some
+/// network shares to one, and a download that finished and was re-fetched within that window keeps
+/// its timestamp. An **mtime** change is what an edit that happens to preserve the length looks
+/// like. Both have to match for a file to be left alone, which is the rule
+/// [`Freshness::of`] applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Stamp {
+    /// The file's size in bytes.
+    pub size_bytes: u64,
+    /// Its modification time, in milliseconds since the Unix epoch.
+    pub mtime_ms: i64,
+}
+
+/// What an incremental pass decided about one candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Freshness {
+    /// The library has never seen this path.
+    New,
+    /// The library has it, and neither number changed.
+    Unchanged,
+    /// The library has it and something changed.
+    Changed,
+}
+
+impl Freshness {
+    /// Classifies a candidate against what the library already recorded for its path.
+    ///
+    /// # The hash fallback this does not have, and cannot yet
+    ///
+    /// The one case two numbers cannot see is content that changed while both stayed the same:
+    /// same length, same second. Catching it means digesting the file and comparing the digest
+    /// with the one from last time — and `media_file` has no digest column
+    /// (`docs/DATA_MODEL.md`), so there is nothing to compare against. Digesting every unchanged
+    /// file on every scan is exactly the work incremental scanning exists to avoid, so the
+    /// fallback is not a shortcut away: it needs a stored digest plus a rule for *when* to spend a
+    /// read, and neither exists yet. The acceptance this rule was written for — a file that
+    /// changes size while its mtime stays put — is decided by the size alone, which is why it
+    /// works without one.
+    #[must_use]
+    pub fn of(recorded: Option<Stamp>, candidate: Stamp) -> Self {
+        match recorded {
+            None => Self::New,
+            Some(recorded) if recorded == candidate => Self::Unchanged,
+            Some(_) => Self::Changed,
+        }
+    }
+
+    /// Whether this candidate needs the expensive path: a parse, a probe, and possibly a match.
+    #[must_use]
+    pub const fn needs_work(self) -> bool {
+        !matches!(self, Self::Unchanged)
+    }
+}
+
 /// Why a path is not a library candidate.
 ///
 /// The reasons are the ones the task names plus the two the walk needs: a link it will not
@@ -281,6 +338,7 @@ fn is_temporary(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::path::PathBuf;
 
     fn verdict(path: &str) -> ScanVerdict {
@@ -575,6 +633,94 @@ mod tests {
                 ScanPolicy::new().file(&path, false),
                 ScanVerdict::Skipped(SkipReason::Unsupported)
             );
+        }
+    }
+
+    fn stamp(size_bytes: u64, mtime_ms: i64) -> Stamp {
+        Stamp {
+            size_bytes,
+            mtime_ms,
+        }
+    }
+
+    #[test]
+    fn a_file_that_changed_size_without_changing_its_mtime_is_detected() {
+        // PG-E14-03's acceptance. This is the case the size half of the pair exists for: a rewrite
+        // inside the filesystem's mtime granularity leaves the timestamp alone, so a rule that
+        // trusted mtime alone would skip the file forever.
+        assert_eq!(
+            Freshness::of(
+                Some(stamp(1_000, 1_700_000_000_000)),
+                stamp(1_001, 1_700_000_000_000)
+            ),
+            Freshness::Changed
+        );
+        // The other direction, which is the same defect: a truncation.
+        assert_eq!(
+            Freshness::of(
+                Some(stamp(1_000, 1_700_000_000_000)),
+                stamp(999, 1_700_000_000_000)
+            ),
+            Freshness::Changed
+        );
+    }
+
+    #[test]
+    fn a_file_that_changed_mtime_without_changing_its_size_is_detected() {
+        // An edit that happens to preserve the length: the size half sees nothing.
+        assert_eq!(
+            Freshness::of(
+                Some(stamp(1_000, 1_700_000_000_000)),
+                stamp(1_000, 1_700_000_000_001)
+            ),
+            Freshness::Changed
+        );
+    }
+
+    #[test]
+    fn both_numbers_matching_is_the_only_way_a_file_is_left_alone() {
+        let recorded = stamp(1_000, 1_700_000_000_000);
+
+        assert_eq!(
+            Freshness::of(Some(recorded), recorded),
+            Freshness::Unchanged
+        );
+        assert!(!Freshness::of(Some(recorded), recorded).needs_work());
+    }
+
+    #[test]
+    fn a_path_the_library_has_never_seen_is_new_rather_than_changed() {
+        // The states are different work: a new file is parsed and matched, an existing one that
+        // changed is re-probed against an item that is already there.
+        assert_eq!(Freshness::of(None, stamp(1, 2)), Freshness::New);
+        assert!(Freshness::of(None, stamp(1, 2)).needs_work());
+    }
+
+    #[test]
+    fn a_change_in_either_number_needs_work_and_a_match_does_not() {
+        assert!(Freshness::Changed.needs_work());
+        assert!(Freshness::New.needs_work());
+        assert!(!Freshness::Unchanged.needs_work());
+    }
+
+    proptest! {
+        /// The rule as a property: `Unchanged` holds exactly when the two stamps are equal, so no
+        /// pair of numbers reaches "leave it alone" without both having been compared.
+        #[test]
+        fn unchanged_holds_exactly_for_equal_stamps(
+            size in 0_u64..u64::MAX,
+            mtime in i64::MIN..i64::MAX,
+            other_size in 0_u64..u64::MAX,
+            other_mtime in i64::MIN..i64::MAX,
+        ) {
+            let recorded = stamp(size, mtime);
+            let candidate = stamp(other_size, other_mtime);
+            let expected = if recorded == candidate {
+                Freshness::Unchanged
+            } else {
+                Freshness::Changed
+            };
+            prop_assert_eq!(Freshness::of(Some(recorded), candidate), expected);
         }
     }
 

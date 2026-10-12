@@ -101,7 +101,7 @@ pub use release::{
     AudioCodec, EpisodeSpan, HdrFormat, ReleaseName, ReleaseSource, RepackKind, Resolution,
     VideoCodec,
 };
-pub use scan::{ScanPolicy, ScanVerdict, SkipReason, is_media_extension};
+pub use scan::{Freshness, ScanPolicy, ScanVerdict, SkipReason, Stamp, is_media_extension};
 pub use session::{
     MAX_STDERR_TAIL_BYTES, Session, SessionEvent, SessionFailure, SessionRejected, SessionState,
     StderrTail,

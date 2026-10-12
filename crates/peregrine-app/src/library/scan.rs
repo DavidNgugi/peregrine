@@ -25,12 +25,13 @@
 //! the kind of failure, and only an unreadable *root* stops the scan, because then there is
 //! nothing to report.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use peregrine_domain::{ScanPolicy, ScanVerdict, SkipReason};
+use peregrine_domain::{Freshness, ScanPolicy, ScanVerdict, SkipReason, Stamp};
 use thiserror::Error;
 use tracing::debug;
 
@@ -43,6 +44,28 @@ pub struct CandidateFile {
     pub size_bytes: u64,
     /// Its modification time, in milliseconds since the Unix epoch.
     pub mtime_ms: i64,
+}
+
+impl CandidateFile {
+    /// What an incremental pass records about this file.
+    #[must_use]
+    pub const fn stamp(&self) -> Stamp {
+        Stamp {
+            size_bytes: self.size_bytes,
+            mtime_ms: self.mtime_ms,
+        }
+    }
+
+    /// What an incremental pass should do about this file, given what the library recorded.
+    ///
+    /// `known` is keyed by path and holds one stamp per file the library already has under this
+    /// root. Building it is the caller's job because it is a database read, and where it comes
+    /// from is the scan job's business (PG-E14-04); what this method owns is the comparison and
+    /// the answer, which is [`Freshness`]'s rule and not a second copy of it.
+    #[must_use]
+    pub fn freshness(&self, known: &HashMap<PathBuf, Stamp>) -> Freshness {
+        Freshness::of(known.get(&self.path).copied(), self.stamp())
+    }
 }
 
 /// One path the policy refused, and why.
@@ -460,6 +483,93 @@ mod tests {
             .expect("the film is a candidate");
         assert_eq!(film.size_bytes, b"a film".len() as u64);
         assert!(film.mtime_ms > 0, "a file written now has a real mtime");
+    }
+
+    #[test]
+    fn a_file_that_changed_size_without_changing_its_mtime_is_detected() {
+        // PG-E14-03's acceptance, staged against a real filesystem rather than against the rule
+        // alone. `File::set_modified` puts the recorded mtime back after the rewrite, which is what
+        // a filesystem with a coarse timestamp granularity does by itself: FAT and NTFS round to
+        // two seconds, so a file re-fetched inside that window keeps its timestamp and changes its
+        // size. The final assertion checks the staging worked, because a test that failed to move
+        // the mtime back would pass for the wrong reason.
+        let (corpus, scanner) = corpus("incremental-size");
+        let film = corpus.root.join("Movies/Alien (1979).mkv");
+        let first = scanner.scan(&corpus.root).unwrap();
+        let known: HashMap<PathBuf, Stamp> = first
+            .candidates
+            .iter()
+            .map(|file| (file.path.clone(), file.stamp()))
+            .collect();
+
+        let unchanged = scanner
+            .scan(&corpus.root)
+            .unwrap()
+            .candidates
+            .into_iter()
+            .find(|file| file.path == film)
+            .expect("the film is still there");
+        assert_eq!(unchanged.freshness(&known), Freshness::Unchanged);
+
+        let mtime = fs::metadata(&film).unwrap().modified().unwrap();
+        fs::write(&film, b"a film, but longer now").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&film)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+
+        let second = scanner.scan(&corpus.root).unwrap();
+        let rewritten = second
+            .candidates
+            .iter()
+            .find(|file| file.path == film)
+            .expect("a rewritten file is still a candidate");
+
+        assert_eq!(fs::metadata(&film).unwrap().modified().unwrap(), mtime);
+        assert!(rewritten.size_bytes > unchanged.size_bytes);
+        assert_eq!(rewritten.freshness(&known), Freshness::Changed);
+    }
+
+    #[test]
+    fn a_file_the_library_has_never_seen_is_new() {
+        let (corpus, scanner) = corpus("incremental-new");
+        let newcomer = corpus.file("Movies/Arrival (2016).mkv", b"a newer film");
+
+        let outcome = scanner.scan(&corpus.root).unwrap();
+        let known = HashMap::new();
+        let found = outcome
+            .candidates
+            .iter()
+            .find(|file| file.path == newcomer)
+            .expect("the new film is a candidate");
+
+        assert_eq!(found.freshness(&known), Freshness::New);
+        assert!(found.freshness(&known).needs_work());
+    }
+
+    #[test]
+    fn an_unchanged_scan_needs_no_work_at_all() {
+        // The point of the pass: a library that has not changed is a scan that does nothing
+        // expensive, whatever the size of the tree.
+        let (corpus, scanner) = corpus("incremental-none");
+        let first = scanner.scan(&corpus.root).unwrap();
+        let known: HashMap<PathBuf, Stamp> = first
+            .candidates
+            .iter()
+            .map(|file| (file.path.clone(), file.stamp()))
+            .collect();
+
+        let second = scanner.scan(&corpus.root).unwrap();
+
+        assert!(
+            second
+                .candidates
+                .iter()
+                .all(|file| file.freshness(&known) == Freshness::Unchanged),
+            "nothing changed between the two scans"
+        );
     }
 
     #[test]
