@@ -1,7 +1,7 @@
 import { NowPlayingBar } from "@peregrine/player-ui";
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
 import type { ReactElement } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DiscoverScreen } from "../features/discover/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
@@ -18,13 +18,22 @@ import {
   useShortcuts,
 } from "../features/settings/index.js";
 import type { Platform } from "../lib/platform.js";
-import { SCREENS, SCREEN_FOR_ACTION, type Screen } from "./screens.js";
+import { writePath } from "../lib/window-path.js";
+import { ROUTE_FOR_ACTION, routePath, type Route } from "./routes.js";
+import { SCREENS } from "./screens.js";
 import { useTheme } from "./useTheme.js";
 import { WindowChrome } from "./WindowChrome.js";
 
 interface AppShellProps {
   /** Which platform's window chrome to present; `null` when the core could not be asked. */
   readonly platform: Platform | null;
+  /**
+   * The route the window opened at.
+   *
+   * A prop rather than a read of `window.location`, so that the shell — the thing its tests render —
+   * does not need a browser to exist. The entry that mounts it reads the path.
+   */
+  readonly route: Route;
 }
 
 /**
@@ -37,13 +46,26 @@ interface AppShellProps {
  * is the property PG-E7-01's acceptance names, and the reason the screen switch is a
  * ternary inside one `main` rather than a component that replaces the whole tree.
  *
- * The screen switch is still state rather than a route: typed routing is PG-E7-02, and the
+ * The screen switch is a route (`./routes.js`) rather than a name: the sidebar, the shortcut
+ * dispatcher, and the path the window opened at all speak the same type, so a place in the
+ * application is spelled once. What is still owed by PG-E7-02 is the other half of its acceptance —
+ * cache-first loaders — and the routes for screens that do not exist yet; the old note about typed
+ * routing living here is the part that has landed.
  * sidebar rows become links when it lands.
  */
-export function AppShell({ platform }: AppShellProps): ReactElement {
+export function AppShell({ platform, route: initialRoute }: AppShellProps): ReactElement {
   const { t } = useTranslation();
   const { resolved, setPreference } = useTheme();
-  const [screen, setScreen] = useState<Screen>("discover");
+  // Where the user is, which the sidebar, the shortcut dispatcher, and the screen switch all read
+  // from one value. It starts where the window opened and only this shell moves it.
+  const [route, setRoute] = useState<Route>(initialRoute);
+
+  // And the window's path follows it, so the two cannot drift: a reload — which a webview performs
+  // for reasons it does not announce — returns the user to the screen they were on rather than to
+  // the one the window happened to open at.
+  useEffect(() => {
+    writePath(routePath(route));
+  }, [route]);
 
   // The icon and the name describe the same action — what the button would switch *to* —
   // so a sighted user and a screen reader are told the same thing.
@@ -63,9 +85,9 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
   const openScreen = useCallback((action: string) => {
-    const target = SCREEN_FOR_ACTION[action];
+    const target = ROUTE_FOR_ACTION[action];
     if (target !== undefined) {
-      setScreen(target);
+      setRoute(target);
     }
   }, []);
   useShortcutDispatch(shortcuts.bindings, openScreen);
@@ -86,23 +108,23 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
         <Sidebar label={t("shell.nav.label")}>
           {SCREENS.map((entry) => (
             <SidebarItem
-              current={entry.id === screen}
+              current={entry.route.kind === route.kind}
               icon={entry.icon}
-              key={entry.id}
+              key={entry.route.kind}
               label={t(entry.labelKey)}
               onSelect={() => {
-                setScreen(entry.id);
+                setRoute(entry.route);
               }}
             />
           ))}
         </Sidebar>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {screen === "discover" ? <DiscoverScreen /> : null}
-          {screen === "library" ? (
+          {route.kind === "discover" ? <DiscoverScreen /> : null}
+          {route.kind === "library" ? (
             <LibraryScreen scan={scan} titles={library} unmatched={unmatched} />
           ) : null}
-          {screen === "jobs" ? <JobsScreen /> : null}
-          {screen === "settings" ? (
+          {route.kind === "diagnostics" ? <JobsScreen /> : null}
+          {route.kind === "settings" ? (
             <SettingsScreen libraries={libraries} shortcuts={shortcuts} />
           ) : null}
         </main>

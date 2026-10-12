@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.js";
+import { HOME, parseRoute } from "./app/routes.js";
 import { resolvePlatform } from "./lib/platform.js";
 import "./styles.css";
 
@@ -17,7 +18,11 @@ if (container === null) {
 void resolvePlatform().then((platform) => {
   createRoot(container).render(
     <StrictMode>
-      <App platform={platform} />
+      {/* The path the window opened at, read here rather than inside the shell: `window` belongs
+          to the browser entry, and the shell stays renderable without one (its tests have none).
+          A path this build has no screen for opens the home screen, which is what a browser does
+          with a URL it cannot resolve. */}
+      <App platform={platform} route={parseRoute(window.location.pathname) ?? HOME} />
     </StrictMode>,
   );
 });
