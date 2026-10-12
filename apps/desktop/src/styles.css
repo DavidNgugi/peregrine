@@ -56,10 +56,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Heights are chained rather than set with `100vh`: at a fractional device-pixel
+   ratio the viewport unit rounds against the window box, and the difference is
+   enough to put a scrollbar on the document and shift the chrome by a pixel at
+   125% and 150%. Nothing here scrolls at the document level either; the
+   scrollable regions are the screens' own. */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 /* The webview is the app window, not a document: text selection and the
    right-click menu follow the platform's native apps, not the browser's. */
 #root {
-  height: 100vh;
   user-select: none;
 }
 

@@ -114,7 +114,17 @@ pure = false
 may_depend_on = [
   "peregrine-ipc",
 ]
-runtime = ["serde", "serde_json", "tauri", "thiserror", "tracing"]
+runtime = [
+  "serde",
+  "serde_json",
+  "tauri",
+  # Window geometry is this plugin's, not the shell's:
+  # docs/ARCHITECTURE.md §6 puts "window geometry" in its row and lists
+  # "Reimplemented" in the Never column.
+  "tauri-plugin-window-state",
+  "thiserror",
+  "tracing",
+]
 build = ["tauri-build"]
 pure = false
 

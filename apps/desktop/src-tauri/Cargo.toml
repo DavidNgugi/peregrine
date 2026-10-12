@@ -19,6 +19,10 @@ tauri-build = { workspace = true }
 [dependencies]
 peregrine-ipc = { workspace = true }
 tauri = { workspace = true }
+# The main window's size, position, and maximized state survive a restart because
+# this plugin owns them (docs/ARCHITECTURE.md §6), not because this crate writes a
+# geometry file of its own.
+tauri-plugin-window-state = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

@@ -79,6 +79,10 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 tauri = { version = "2.12.1" }
 tauri-build = { version = "2.7.1" }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+# Window geometry belongs to this plugin rather than to hand-rolled persistence:
+# docs/ARCHITECTURE.md §6 puts "window geometry" in the plugin's row and lists
+# "Reimplemented" in the Never column.
+tauri-plugin-window-state = { version = "2.5.0" }
 thiserror = { version = "2.0.21" }
 tempfile = { version = "3.27.0" }
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
