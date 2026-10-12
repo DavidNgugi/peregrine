@@ -417,6 +417,10 @@ may_depend_on = [
 runtime = [
   "futures",
   "jiff",
+  # The image cache's key is a SHA-256 digest, rendered as lowercase hex (PG-E6-09). It is a
+  # workspace dependency already — `peregrine-platform` verifies sidecar digests with it — so
+  # this is a second consumer of a crate the graph has, not a new one.
+  "sha2",
   "thiserror",
   "tokio",
   "tokio-util",

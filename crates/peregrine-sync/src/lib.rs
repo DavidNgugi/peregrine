@@ -14,6 +14,7 @@ mod backoff;
 mod core;
 mod error;
 mod heap;
+mod images;
 mod job;
 #[cfg(test)]
 mod tests;
@@ -25,6 +26,7 @@ pub use core::{
 };
 pub use error::{JobError, SchedulerError};
 pub use heap::JobSpec;
+pub use images::{CachedImage, ImageCache, ImageCacheError, ImageKey, ImageVariant};
 pub use job::{
     Job, JobCompletion, JobContext, JobFuture, JobHandle, JobKind, JobOutcome, JobOutput,
     JobResult, JobState, JobStateKind,

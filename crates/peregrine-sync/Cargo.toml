@@ -13,6 +13,9 @@ publish = false
 futures = { workspace = true }
 jiff = { workspace = true }
 peregrine-domain = { workspace = true }
+# The image cache's key is `sha256(provider|path|variant)` (DATA_MODEL, `image_cache.key`).
+# The digest is rendered as lowercase hex by `std::fmt`, so no hex crate is needed for it.
+sha2 = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
