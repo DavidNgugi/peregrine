@@ -2267,7 +2267,17 @@ mod tests {
 
         #[test]
         fn a_generated_absolute_name_parses(
-            words in prop::collection::vec("[A-Za-z]{1,8}", 1..4),
+            // A word spelled `ep` or `episode` is an episode-prefix marker in this grammar, not
+            // a title: `EP - 001` is read as the marker plus an episode number and refused for
+            // having no title, which is the documented behaviour of `a_marker_shaped_title_word_is_a_marker`.
+            // Generating one here would assert something the grammar contradicts, so the
+            // property admits only words that can be titles.
+            words in prop::collection::vec(
+                "[A-Za-z]{1,8}".prop_filter("a title word, not an episode marker", |word| {
+                    !is_episode_marker(word)
+                }),
+                1..4,
+            ),
             episode in 1u32..1000,
         ) {
             let title = words.join(" ");
@@ -2276,6 +2286,41 @@ mod tests {
             prop_assert_eq!(parsed.title(), Some(title.as_str()));
             prop_assert_eq!(parsed.absolute(), Some(episode));
             prop_assert_eq!(parsed.numbering(), Some(Numbering::BareAbsolute));
+        }
+    }
+
+    /// Whether a word is an episode-prefix marker rather than a possible title.
+    ///
+    /// Only the two spellings that fit the generator's letters-only alphabet can collide. A
+    /// word that is a marker *plus* digits, like `S01`, cannot be generated at all, and the
+    /// tag spellings — `TC`, `HD`, `x264` — are read as titles when they stand alone before a
+    /// bare number, so excluding them would narrow the property for no reason.
+    fn is_episode_marker(word: &str) -> bool {
+        word.eq_ignore_ascii_case("ep") || word.eq_ignore_ascii_case("episode")
+    }
+
+    #[test]
+    fn a_marker_shaped_title_word_is_a_marker() {
+        // The case the property above must not generate, asserted on purpose so the
+        // ambiguity is documented rather than left to whichever seed a run happens to draw.
+        for (text, episode) in [("EP - 001", 1), ("Episode - 001", 1), ("ep - 004", 4)] {
+            let error = LibraryName::parse(text)
+                .expect_err("a marker-shaped word is a marker, so there is no title");
+            assert_eq!(
+                error.reason,
+                UnresolvedReason::NoTitle,
+                "`{text}` should be refused for having no title"
+            );
+            assert_eq!(
+                error.name.numbering(),
+                Some(Numbering::PrefixedAbsolute),
+                "`{text}` should still record the episode number it found"
+            );
+            assert_eq!(
+                error.name.absolute(),
+                Some(episode),
+                "`{text}` should read the number after the marker"
+            );
         }
     }
 }
