@@ -62,6 +62,6 @@ Negative and accepted:
 
 ## Verification
 
-- `xtask check-notices` fails a release whose sidecars lack a licence file, a source offer, or a recorded `configure` line.
+- `xtask check-notices` fails a release whose sidecar *declaration* lacks a licence, a source offer, or a recorded `configure` line. Checking that the licence texts themselves are present in the bundle is owed by PG-E26-01.
 - `SPIKE-6` measures the encoder ladder on reference hardware and produces the published capability matrix.
 - A CI fixture test asserts that the shipped ffmpeg reports no `--enable-gpl` configuration.

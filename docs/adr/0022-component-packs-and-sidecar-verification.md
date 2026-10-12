@@ -89,7 +89,7 @@ Negative and accepted:
 ## Verification
 
 - `cargo xtask gen-sidecars --check` fails when the generated table and `sidecars.toml` disagree, the same way `gen-ipc --check` does.
-- `cargo xtask check-notices` fails when a declared sidecar has no licence file, no source offer, or no recorded build configuration (PG-E0-18).
+- `cargo xtask check-notices` fails when a declared sidecar has no licence, no source offer, no version pin, no source URL, or no recorded build configuration, and when the generated `THIRD_PARTY.md` drifts from `sidecars.toml` and the two lockfiles (PG-E0-18). It validates the *declarations*, not the presence of a licence text inside a bundle; that half belongs to PG-E26-01.
 - A fixture suite proves the verifier refuses, one test per rejection: a byte-count mismatch, a hash mismatch, a valid artefact with a signature from the wrong key, a truncated download, an oversized response, and a file whose size changed after verification. Each asserts that no file was renamed into place and that the typed error names the failing step.
 - A test asserts that a spawn cannot be constructed from a path that has not been verified, and that a refused sidecar produces a named capability loss rather than a panic.
 - A CI fixture asserts that a sidecar whose configuration output contains `--enable-gpl` is refused (PG-E26-01).

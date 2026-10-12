@@ -27,8 +27,10 @@ The GPL and the LGPL require the scripts used to control compilation and
 installation, not just the source tarball. For `ffmpeg` that is the `configure`
 line; for `mpv` it is the `meson` invocation and any carried patch. Both are
 recorded per release in [DEPENDENCIES.md](../docs/DEPENDENCIES.md) §5, which
-`cargo xtask check-notices` gates: a release whose sidecar has no licence file,
-no source offer, or no recorded build configuration fails rather than publishing.
+`cargo xtask check-notices` gates: a sidecar *declaration* with no licence, no
+source offer, or no recorded build configuration fails rather than publishing.
+It does not yet check that the licence texts themselves reach a bundle; that
+half is owed by PG-E26-01.
 
 ## What is still owed by PG-E0-18
 

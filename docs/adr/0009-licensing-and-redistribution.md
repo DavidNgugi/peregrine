@@ -48,5 +48,5 @@ Negative and accepted:
 ## Verification
 
 - `cargo-deny` licence allowlist is a required CI gate; adding a dependency with a new licence requires an ADR update.
-- Every release attaches an SBOM and a bundled-licences manifest; `xtask check-notices` fails if a sidecar has no licence file or source offer.
+- Every release attaches an SBOM and a bundled-licences manifest; `xtask check-notices` fails when a sidecar's declaration in `sidecars.toml` has no licence, no source offer, or no recorded build configuration, and when `THIRD_PARTY.md` drifts from the declarations and the two lockfiles. It does **not** yet verify that the licence texts themselves are present in a bundle — that half is owed by PG-E26-01.
 - The exact sidecar licences and the verified crates and packages matrix live in [DEPENDENCIES.md](../DEPENDENCIES.md).

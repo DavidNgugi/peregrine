@@ -2,8 +2,11 @@
 
 Everything in this directory is copied into every released bundle by
 `bundle.resources` in [tauri.conf.json](../apps/desktop/src-tauri/tauri.conf.json),
-and `cargo xtask check-notices` (PG-E0-18) fails a release in which it is missing
-or incomplete.
+as is the generated `THIRD_PARTY.md` at the repository root.
+`cargo xtask check-notices` (PG-E0-18) fails when that generated file drifts from
+its three inputs. The gate does not itself check that a bundle contains these
+files; the bundler does, because a `bundle.resources` entry that matches nothing
+fails the build.
 
 The files live at the repository root rather than under `apps/desktop` because
 they are redistribution obligations of the whole product, and because the gate
@@ -24,5 +27,7 @@ artefact drifts from its three inputs, because a hand-written stand-in would be
 exactly the stale attestation ADR 0009 §Decision 7 exists to prevent. The two
 sidecar licence texts are not written yet: they land with the pinned sidecars in
 PG-E26-01. `bundle.resources` in
-[tauri.conf.json](../apps/desktop/src-tauri/tauri.conf.json) carries `NOTICE` and
-this directory, and does not yet carry `THIRD_PARTY.md` itself.
+[tauri.conf.json](../apps/desktop/src-tauri/tauri.conf.json) carries `NOTICE`,
+this directory, and the generated `THIRD_PARTY.md` at the repository root, so the
+attribution ships even though it is generated outside this directory. The two
+licence texts in the table above are the remaining gap in this directory.
