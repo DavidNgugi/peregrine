@@ -191,10 +191,9 @@ mod tests {
     #[tokio::test]
     async fn a_dropped_reply_does_not_stop_the_writer() {
         let directory = TempDir::new().unwrap();
-        let mut connection = open_writer_connection(&directory.path().join("peregrine.sqlite"))
-            .await
-            .unwrap();
-        migrations::apply(&mut connection).await.unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        let mut connection = open_writer_connection(&path).await.unwrap();
+        migrations::apply(&mut connection, &path).await.unwrap();
 
         let (requests, receiver) = mpsc::channel(WRITE_QUEUE_DEPTH);
         let writer = tokio::spawn(run(connection, receiver));

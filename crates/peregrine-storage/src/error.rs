@@ -28,6 +28,58 @@ pub enum StorageError {
         source: Box<dyn StdError + Send + Sync>,
     },
 
+    /// A pending migration failed and the upgrade stopped before it changed anything.
+    ///
+    /// `SQLite` applies DDL transactionally, so this is the one migration failure the user
+    /// can act on: the database is exactly as it was, and the copy taken first is the way
+    /// back if the application will not start.
+    #[error(
+        "migration {version:04}_{description} failed and the database was left unchanged: \
+         {source}; update Peregrine, and if the application will not start, restore the copy \
+         taken before the upgrade if one exists"
+    )]
+    MigrationFailed {
+        /// The version of the migration that failed.
+        version: i64,
+        /// Its description, as the migration file names it.
+        description: String,
+        /// The copy taken before this upgrade, when the database held one to take.
+        backup: Option<PathBuf>,
+        /// The driver's error, boxed so `sqlx` stays crate-private.
+        source: Box<dyn StdError + Send + Sync>,
+    },
+
+    /// The database could not be copied before an upgrade started.
+    ///
+    /// The upgrade has not run: the copy is taken first precisely so that a migration never
+    /// writes to a database that cannot be restored.
+    #[error(
+        "cannot copy the database at {} before upgrading it: {source}; free some space on the \
+         drive and check the folder's permissions, then start again",
+        path.display()
+    )]
+    Backup {
+        /// The database that could not be copied.
+        path: PathBuf,
+        /// The filesystem's or the driver's error.
+        source: Box<dyn StdError + Send + Sync>,
+    },
+
+    /// A database that failed its integrity check could not be moved aside.
+    ///
+    /// Nothing was deleted: the file is still where it was, and the next boot retries.
+    #[error(
+        "the damaged database at {} could not be moved aside, so nothing was deleted: {source}; \
+         close any other copy of Peregrine and check the folder's permissions, then start again",
+        path.display()
+    )]
+    Quarantine {
+        /// The file that could not be moved.
+        path: PathBuf,
+        /// The filesystem's error.
+        source: Box<dyn StdError + Send + Sync>,
+    },
+
     /// A statement failed for a reason other than lock contention.
     #[error("a database statement failed: {source}")]
     Statement {

@@ -5,30 +5,137 @@
 //! directory that is missing or was replaced. `sqlx` records each migration's checksum
 //! in `_sqlx_migrations`, so an edited migration that has already run fails the open
 //! rather than leaving the schema half-described by two versions of the same file.
+//!
+//! The runner is deliberately more than `Migrator::run`: an existing database is copied
+//! before the first pending migration ([`crate::backup`]), because rolling a schema change
+//! back is not supported and the copy is the only way back (`DATA_MODEL` §5). A failure is
+//! reported as [`StorageError::MigrationFailed`], naming the migration and the copy.
+
+use std::path::{Path, PathBuf};
 
 use sqlx::SqliteConnection;
-use sqlx::migrate::{MigrateError, Migrator};
-use tracing::info;
+use sqlx::migrate::{MigrateError, Migration, Migrator};
+use tracing::{info, warn};
+
+use crate::error::StorageError;
 
 /// The embedded migrations. `build.rs` keeps cargo watching the directory.
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
-/// Applies every pending migration and logs the set that is now in force.
+/// Applies every pending migration, copying an existing database first.
 ///
 /// Runs on the writer connection before the writer task starts, so no reader exists
 /// while the schema is changing and every later write shares the same connection.
 ///
 /// Returns how many migrations the embedded set now holds; after a successful run every
 /// one of them is applied, so that is also the count of migrations in force.
-pub(crate) async fn apply(connection: &mut SqliteConnection) -> Result<usize, MigrateError> {
-    MIGRATOR.run(&mut *connection).await?;
+///
+/// # Errors
+///
+/// [`StorageError::Backup`] when the pre-migration copy cannot be taken — the migrations
+/// are then not run at all — and [`StorageError::MigrationFailed`] when one fails, leaving
+/// the database as it was.
+pub(crate) async fn apply(
+    connection: &mut SqliteConnection,
+    path: &Path,
+) -> Result<usize, StorageError> {
+    run(connection, path, &MIGRATOR).await
+}
 
-    let applied: Vec<String> = MIGRATOR
+/// Applies `migrator`'s pending migrations, copying an existing database first.
+///
+/// The migrator is a parameter so a test can run a set that contains a migration designed
+/// to fail; the product always passes the embedded set.
+async fn run(
+    connection: &mut SqliteConnection,
+    path: &Path,
+    migrator: &Migrator,
+) -> Result<usize, StorageError> {
+    let in_force = applied_versions(connection).await?;
+    let pending = migrator
         .iter()
-        .map(|migration| format!("{:04}_{}", migration.version, migration.description))
-        .collect();
-    info!(migrations = ?applied, "embedded migrations applied");
+        .filter(|migration| !in_force.contains(&migration.version))
+        .count();
+
+    // A database with nothing applied is a first install: there is no user data to copy,
+    // and a copy of an empty file would put a file in the data directory that says nothing.
+    let backup = if pending > 0 && !in_force.is_empty() {
+        let from_version = in_force.iter().copied().max().unwrap_or_default();
+        Some(crate::backup::take(connection, path, from_version).await?)
+    } else {
+        None
+    };
+
+    if let Err(error) = migrator.run(&mut *connection).await {
+        return Err(failure(error, backup, migrator));
+    }
+
+    let applied: Vec<String> = migrator.iter().map(rendered).collect();
+    info!(
+        migrations = ?applied,
+        applied = pending,
+        "embedded migrations applied"
+    );
     Ok(applied.len())
+}
+
+/// The migration versions the database has recorded, oldest first.
+///
+/// `_sqlx_migrations` is the table `sqlx`'s migrator owns and names by default; the count
+/// is read here rather than through the migrator because the decision to copy the database
+/// has to be taken before the migrator runs.
+async fn applied_versions(connection: &mut SqliteConnection) -> Result<Vec<i64>, StorageError> {
+    let table: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    if table == 0 {
+        return Ok(Vec::new());
+    }
+
+    sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(StorageError::from_sqlx)
+}
+
+/// `0001_init`, the form every log line and error uses to name a migration.
+fn rendered(migration: &Migration) -> String {
+    format!("{:04}_{}", migration.version, migration.description)
+}
+
+/// The typed error for a failed run, naming the migration when the driver named one.
+///
+/// A failure the driver did not attribute to a migration — a checksum mismatch, a dirty
+/// record — is not one migration's fault, so it keeps the generic variant rather than
+/// guessing at a version.
+fn failure(error: MigrateError, backup: Option<PathBuf>, migrator: &Migrator) -> StorageError {
+    let MigrateError::ExecuteMigration(_, version) = &error else {
+        return StorageError::migrate(error);
+    };
+    let version = *version;
+    let description = migrator
+        .iter()
+        .find(|migration| migration.version == version)
+        .map_or_else(
+            || "unknown".to_owned(),
+            |migration| migration.description.to_string(),
+        );
+    warn!(
+        version,
+        description,
+        backup = ?backup,
+        %error,
+        "a pending migration failed; the database was left unchanged"
+    );
+    StorageError::MigrationFailed {
+        version,
+        description,
+        backup,
+        source: Box::new(error),
+    }
 }
 
 #[cfg(test)]
@@ -36,6 +143,8 @@ mod tests {
     use super::*;
     use crate::database::{Database, open_writer_connection};
     use sqlx::Connection;
+    use sqlx::SqlSafeStr as _;
+    use sqlx::migrate::MigrationType;
     use tempfile::TempDir;
 
     /// The forty tables the seven migrations create, per `DATA_MODEL` §2.1–§2.8.
@@ -946,12 +1055,19 @@ mod tests {
         ),
     ];
 
+    /// The file every fixture in this module keeps its database in.
+    fn database_path(directory: &TempDir) -> std::path::PathBuf {
+        directory.path().join("peregrine.sqlite")
+    }
+
     /// A connection with every embedded migration applied, plus the resources it needs to live.
     async fn migrated(directory: &TempDir) -> SqliteConnection {
-        let mut connection = open_writer_connection(&directory.path().join("peregrine.sqlite"))
+        let mut connection = open_writer_connection(&database_path(directory))
             .await
             .unwrap();
-        apply(&mut connection).await.unwrap();
+        apply(&mut connection, &database_path(directory))
+            .await
+            .unwrap();
         connection
     }
 
@@ -1118,7 +1234,7 @@ mod tests {
         );
 
         let mut connection = open_writer_connection(&path).await.unwrap();
-        let applied = apply(&mut connection).await.unwrap();
+        let applied = apply(&mut connection, &path).await.unwrap();
 
         assert_eq!(
             applied, 8,
@@ -1514,11 +1630,11 @@ mod tests {
         let path = directory.path().join("peregrine.sqlite");
 
         let mut first = open_writer_connection(&path).await.unwrap();
-        apply(&mut first).await.unwrap();
+        apply(&mut first, &path).await.unwrap();
         first.close().await.unwrap();
 
         let mut second = open_writer_connection(&path).await.unwrap();
-        let applied = apply(&mut second).await.unwrap();
+        let applied = apply(&mut second, &path).await.unwrap();
 
         assert_eq!(applied, 8);
         assert_eq!(
@@ -1565,7 +1681,7 @@ mod tests {
         let path = directory.path().join("peregrine.sqlite");
 
         let mut connection = open_writer_connection(&path).await.unwrap();
-        apply(&mut connection).await.unwrap();
+        apply(&mut connection, &path).await.unwrap();
         let before = schema(&mut connection).await;
         connection.close().await.unwrap();
 
@@ -1574,7 +1690,7 @@ mod tests {
         remove_if_present(&path.with_extension("sqlite-shm"));
 
         let mut connection = open_writer_connection(&path).await.unwrap();
-        apply(&mut connection).await.unwrap();
+        apply(&mut connection, &path).await.unwrap();
 
         assert_eq!(before, schema(&mut connection).await);
     }
@@ -2344,7 +2460,9 @@ mod tests {
         .await
         .unwrap();
         // The fixture needs a media item to point at; BASE_FIXTURES creates one.
-        apply(&mut connection).await.unwrap();
+        apply(&mut connection, &database_path(&directory))
+            .await
+            .unwrap();
 
         let profile: Option<String> = sqlx::query_scalar(
             "SELECT video_profile FROM media_file WHERE path = '/media/alien.mkv'",
@@ -2405,7 +2523,9 @@ mod tests {
             .unwrap();
         }
 
-        apply(&mut connection).await.unwrap();
+        apply(&mut connection, &database_path(&directory))
+            .await
+            .unwrap();
 
         let rows: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
             "SELECT id, state, COALESCE(info_hash, ''), error_code FROM download_job ORDER BY id",
@@ -2466,7 +2586,9 @@ mod tests {
             .unwrap();
         }
 
-        apply(&mut connection).await.unwrap();
+        apply(&mut connection, &database_path(&directory))
+            .await
+            .unwrap();
 
         let rows: Vec<(i64, String, String)> =
             sqlx::query_as("SELECT id, path, language FROM image_ref ORDER BY id")
@@ -2493,6 +2615,261 @@ mod tests {
             rows[2],
             (4, "/poster.jpg".to_owned(), "de".to_owned()),
             "a real language is a different row, and ids are preserved"
+        );
+    }
+
+    /// The fixture migration's SQL: it creates and writes before it fails.
+    const FAILING_MIGRATION: &str = include_str!("../tests/fixtures/failing_migration.sql");
+
+    /// The version the fixture takes, past every merged migration.
+    const FAILING_VERSION: i64 = 9;
+
+    /// A corrected version of the fixture, used to prove a failed run can be retried.
+    const FIXED_MIGRATION: &str = "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY, note TEXT NOT NULL); \
+                                   INSERT INTO migration_probe (id, note) VALUES (1, 'fixed');";
+
+    /// The embedded set plus one migration that always fails.
+    ///
+    /// The embedded migrations are reused with their own checksums, so the run is a real
+    /// upgrade of a database that already holds them rather than a replay from empty.
+    fn migrator_with_a_failure() -> Migrator {
+        with_extra(Migration::new(
+            FAILING_VERSION,
+            "deliberately_failing".into(),
+            MigrationType::Simple,
+            FAILING_MIGRATION.into_sql_str(),
+            false,
+        ))
+    }
+
+    /// The embedded set plus `migration`.
+    fn with_extra(migration: Migration) -> Migrator {
+        let mut migrations: Vec<Migration> = MIGRATOR.iter().cloned().collect();
+        migrations.push(migration);
+        Migrator::with_migrations(migrations)
+    }
+
+    /// Whether `table` exists, which is how a rolled-back `CREATE TABLE` is visible.
+    async fn table_exists(connection: &mut SqliteConnection, table: &str) -> bool {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        )
+        .bind(table)
+        .fetch_one(&mut *connection)
+        .await
+        .unwrap();
+        count > 0
+    }
+
+    /// The pre-migration copies in `directory`, by file name.
+    async fn copies(directory: &TempDir) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut entries = tokio::fs::read_dir(directory.path()).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.contains(".backup-") {
+                names.push(name);
+            }
+        }
+        names.sort();
+        names
+    }
+
+    /// PG-E3-13's acceptance: a failing migration leaves the database untouched and a copy
+    /// of it exists.
+    #[tokio::test]
+    async fn a_failing_migration_leaves_the_database_unchanged_and_backed_up() {
+        let directory = TempDir::new().unwrap();
+        let path = database_path(&directory);
+        let mut connection = migrated(&directory).await;
+        write_all(&mut connection, BASE_FIXTURES).await;
+        let before = schema(&mut connection).await;
+
+        let error = run(&mut connection, &path, &migrator_with_a_failure())
+            .await
+            .expect_err("the fixture migration always fails");
+
+        let StorageError::MigrationFailed {
+            version,
+            description,
+            backup,
+            ..
+        } = &error
+        else {
+            panic!("expected a migration failure naming the migration, got {error:?}");
+        };
+        assert_eq!(*version, FAILING_VERSION);
+        assert_eq!(description, "deliberately_failing");
+        let message = error.to_string();
+        assert!(
+            message.contains("0009_deliberately_failing"),
+            "the error must name the migration: {message}"
+        );
+        assert!(
+            message.contains("restore the copy taken before the upgrade"),
+            "the error must say what to do: {message}"
+        );
+        let backup = backup
+            .clone()
+            .expect("an existing database is copied first");
+        assert!(
+            backup.is_file(),
+            "the copy must exist: {}",
+            backup.display()
+        );
+
+        // Nothing the failed migration wrote survives: the fixture creates a table and
+        // inserts a row before it fails, so a runner without a transaction per migration
+        // would leave both behind.
+        assert!(
+            !table_exists(&mut connection, "migration_probe").await,
+            "the failed migration's table must be rolled back"
+        );
+        assert_eq!(schema(&mut connection).await, before);
+        assert_eq!(
+            versions(&mut connection).await,
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
+            "a failed migration must not be recorded"
+        );
+        let titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(titles, 2, "the user's rows are untouched");
+
+        // The copy is the database as it was *before* the migration: no probe table, and
+        // no record of the version that failed.
+        let mut copy = open_writer_connection(&backup).await.unwrap();
+        assert!(!table_exists(&mut copy, "migration_probe").await);
+        assert_eq!(versions(&mut copy).await, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        let copied_titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
+            .fetch_one(&mut copy)
+            .await
+            .unwrap();
+        assert_eq!(copied_titles, 2);
+    }
+
+    /// The failure is recoverable: the database was not left dirty, so the corrected
+    /// migration applies to it without a restore.
+    #[tokio::test]
+    async fn a_failed_migration_is_applied_when_it_is_fixed() {
+        let directory = TempDir::new().unwrap();
+        let path = database_path(&directory);
+        let mut connection = migrated(&directory).await;
+
+        run(&mut connection, &path, &migrator_with_a_failure())
+            .await
+            .expect_err("the fixture migration always fails");
+
+        let fixed = with_extra(Migration::new(
+            FAILING_VERSION,
+            "deliberately_failing".into(),
+            MigrationType::Simple,
+            FIXED_MIGRATION.into_sql_str(),
+            false,
+        ));
+        let applied = run(&mut connection, &path, &fixed).await.unwrap();
+
+        assert_eq!(applied, 9);
+        assert_eq!(versions(&mut connection).await, (1..=9).collect::<Vec<_>>());
+        assert!(table_exists(&mut connection, "migration_probe").await);
+    }
+
+    /// A copy is taken before the first pending migration, and it holds the schema as it
+    /// was, which is what makes it a way back rather than a second copy of the new one.
+    #[tokio::test]
+    async fn an_upgrade_copies_the_database_before_the_pending_migration() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated_up_to_0007(&directory).await;
+
+        let applied = apply(&mut connection, &database_path(&directory))
+            .await
+            .unwrap();
+
+        assert_eq!(applied, 8);
+        let copies = copies(&directory).await;
+        assert_eq!(
+            copies,
+            vec!["peregrine.sqlite.backup-0007-01".to_owned()],
+            "one copy, named after the version it holds"
+        );
+        let mut copy = open_writer_connection(&directory.path().join(&copies[0]))
+            .await
+            .unwrap();
+        assert_eq!(
+            versions(&mut copy).await,
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "the copy predates the migration that was pending"
+        );
+        assert_eq!(versions(&mut connection).await, (1..=8).collect::<Vec<_>>());
+    }
+
+    /// A database that is already up to date is not copied again: the copy is for an
+    /// upgrade, and taking one on every boot would grow the data directory for nothing.
+    #[tokio::test]
+    async fn an_up_to_date_database_is_not_copied_again() {
+        let directory = TempDir::new().unwrap();
+        let path = database_path(&directory);
+
+        let mut first = open_writer_connection(&path).await.unwrap();
+        run(&mut first, &path, &MIGRATOR).await.unwrap();
+        assert!(
+            copies(&directory).await.is_empty(),
+            "a first install has no user data to copy"
+        );
+        first.close().await.unwrap();
+
+        let mut second = open_writer_connection(&path).await.unwrap();
+        run(&mut second, &path, &MIGRATOR).await.unwrap();
+
+        assert_eq!(
+            copies(&directory).await,
+            Vec::<String>::new(),
+            "an up-to-date database is not copied"
+        );
+    }
+
+    /// The permissions edge case: a database that cannot be copied is not migrated, because
+    /// the copy is the only way back from an upgrade.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_database_that_cannot_be_copied_is_not_migrated() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated_up_to_0007(&directory).await;
+        let path = database_path(&directory);
+
+        let original = tokio::fs::metadata(directory.path())
+            .await
+            .unwrap()
+            .permissions();
+        tokio::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o500))
+            .await
+            .unwrap();
+
+        let error = apply(&mut connection, &path)
+            .await
+            .expect_err("the copy cannot be written into a read-only directory");
+
+        // Restore before asserting, or a failure here leaves the temporary directory
+        // undeletable.
+        tokio::fs::set_permissions(directory.path(), original)
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(error, StorageError::Backup { .. }),
+            "expected a typed backup failure, got {error:?}"
+        );
+        assert!(
+            error.to_string().contains("free some space"),
+            "the error must say what to do: {error}"
+        );
+        assert_eq!(
+            versions(&mut connection).await,
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "the upgrade must not have run without a copy"
         );
     }
 }

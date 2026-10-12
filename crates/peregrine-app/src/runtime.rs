@@ -129,6 +129,9 @@ pub struct Health {
     pub scheduler: SchedulerMetrics,
     /// The event bus's counters.
     pub events: EventStats,
+    /// Whether the boot-time integrity check had to rebuild the database, which means the
+    /// library it held is gone and has to be rebuilt by scanning (ARCHITECTURE §15).
+    pub rescan_required: bool,
 }
 
 /// The running application.
@@ -176,6 +179,8 @@ impl Runtime {
                 source,
             })?;
 
+        // A recovery is logged where it happens, in `Database::open`; the runtime carries
+        // the signal on to health.
         let database = Arc::new(Database::open(config.database_path()).await?);
         let scheduler = Arc::new(Scheduler::new(SchedulerConfig::defaults()));
         let bus = Arc::new(EventBus::new(Arc::clone(&config.sink)));
@@ -341,11 +346,15 @@ impl Runtime {
     }
 
     /// The counters a diagnostics screen shows.
+    ///
+    /// `rescan_required` is read from the database handle the runtime actually opened, so it
+    /// cannot disagree with the file in use (ARCHITECTURE §15).
     pub async fn health(&self) -> Health {
         Health {
             startup: self.startup,
             scheduler: self.scheduler.metrics().await,
             events: self.bus.stats(),
+            rescan_required: self.database.recovery().requires_rescan(),
         }
     }
 
@@ -839,6 +848,42 @@ mod tests {
         let health = runtime.health().await;
         assert_eq!(health.scheduler, SchedulerMetrics::default());
         assert_eq!(health.events, EventStats::default());
+        assert!(
+            !health.rescan_required,
+            "a first install has no library to rebuild"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// PG-E3-13 and PG-E3-14 on the real boot path: a damaged database is detected, kept
+    /// aside, rebuilt, and the rescan it requires reaches the health surface the commands
+    /// read — after which the runtime is a working one.
+    #[tokio::test]
+    async fn a_damaged_database_is_rebuilt_at_boot_and_reported_through_health() {
+        let directory = TempDir::new().unwrap();
+        tokio::fs::write(directory.path().join(DATABASE_FILE), b"not a database")
+            .await
+            .unwrap();
+
+        let (runtime, _sink) = runtime(&directory).await;
+
+        assert!(
+            runtime.health().await.rescan_required,
+            "the boot must signal that the library has to be rescanned"
+        );
+        let quarantine = directory.path().join(format!("{DATABASE_FILE}.corrupt-1"));
+        assert!(
+            quarantine.is_file(),
+            "the damaged file must be kept, not deleted"
+        );
+
+        let started = runtime.start_hello(1).await.unwrap();
+        let row = await_terminal(&runtime, started.journal_id).await;
+        assert_eq!(
+            row.state,
+            JobPhase::Succeeded,
+            "the rebuilt database must be a working one: {row:?}"
+        );
         runtime.shutdown().await;
     }
 }

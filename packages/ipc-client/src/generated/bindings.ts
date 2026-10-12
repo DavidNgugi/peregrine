@@ -224,6 +224,12 @@ export type Health = {
 	scheduler: SchedulerHealth,
 	/**  The event bus's counters. */
 	events: EventHealth,
+	/**
+	 *  Whether the boot-time integrity check had to rebuild the database, which means the
+	 *  library has to be rebuilt by scanning (ARCHITECTURE §15). The quarantined file is
+	 *  named in the log, not here: no path travels over IPC.
+	 */
+	rescanRequired: boolean,
 };
 
 /**  One row of the job journal. */
