@@ -11,6 +11,7 @@
 
 pub mod account;
 pub mod catalogue;
+pub mod download;
 pub mod id;
 pub mod inspect;
 pub mod library;
@@ -29,6 +30,7 @@ pub use catalogue::{
     EpisodeOrdering, EpisodePosition, EpisodeType, Genre, Keyword, MetadataState, OrderingScheme,
     Person, Season, SeasonNumber, Title, TitleAlias, TitleKind, TitleStatus, TitleSubtype,
 };
+pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
 pub use id::{ExternalId, ExternalIdError, Provider};
 pub use inspect::{
     EntryKind, Finding, InspectionLimits, OptIn, Reason, SafetyReport, TorrentDescription,

@@ -274,7 +274,7 @@ graph LR
   - Acceptance: Boundary tests at 0%, 2%, 50%, 92%, 95%, 99%, and zero-duration
 - [ ] **PG-E4-10** `M` · deps PG-E4-07, PG-E3-05 · `EpisodeOrderingStrategy` for aired, absolute, DVD, anime
   - Acceptance: Ordering fixtures reproduce expected lists
-- [ ] **PG-E4-11** `M` · deps PG-E4-01 · Download job state machine with guarded transitions
+- [x] **PG-E4-11** `M` · deps PG-E4-01 · Download job state machine with guarded transitions
   - Acceptance: Illegal transitions rejected; every state reachable in a test
 - [ ] **PG-E4-12** `M` · deps PG-E4-11 · Media availability derivation from items and jobs
   - Acceptance: Table-driven test over item and job combinations
