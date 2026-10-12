@@ -205,6 +205,10 @@ may_depend_on = [
 runtime = [
   "jiff",
   "serde",
+  # The sidecar verifier hashes the artefact the pinned manifest describes; it is
+  # the same SHA-256 implementation the migration journal already uses
+  # (docs/adr/0022 §3), not a second hash crate for the same job.
+  "sha2",
   "thiserror",
   "tokio",
   "tracing",
