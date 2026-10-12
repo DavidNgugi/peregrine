@@ -5,7 +5,12 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DiscoverScreen } from "../features/discover/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
-import { SettingsScreen, useShortcutDispatch, useShortcuts } from "../features/settings/index.js";
+import {
+  SettingsScreen,
+  useLibraryRoots,
+  useShortcutDispatch,
+  useShortcuts,
+} from "../features/settings/index.js";
 import type { Platform } from "../lib/platform.js";
 import { SCREENS, SCREEN_FOR_ACTION, type Screen } from "./screens.js";
 import { useTheme } from "./useTheme.js";
@@ -47,6 +52,7 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
   // The registry is the core's (PG-E1-08); the same answer drives the Settings list and
   // the keys this shell acts on, so the two cannot disagree.
   const shortcuts = useShortcuts();
+  const libraries = useLibraryRoots();
   const openScreen = useCallback((action: string) => {
     const target = SCREEN_FOR_ACTION[action];
     if (target !== undefined) {
@@ -84,7 +90,9 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {screen === "discover" ? <DiscoverScreen /> : null}
           {screen === "jobs" ? <JobsScreen /> : null}
-          {screen === "settings" ? <SettingsScreen shortcuts={shortcuts} /> : null}
+          {screen === "settings" ? (
+            <SettingsScreen libraries={libraries} shortcuts={shortcuts} />
+          ) : null}
         </main>
       </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />

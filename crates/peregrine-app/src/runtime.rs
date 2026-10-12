@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use peregrine_domain::{Clock, IdGenerator};
+use peregrine_domain::{Clock, IdGenerator, LibraryRoot, LibraryRootKind, ScanMode};
 use peregrine_platform::{SystemClock, UlidGenerator};
 use peregrine_storage::{
     Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
@@ -26,6 +26,8 @@ use peregrine_sync::{
     JobHandle, JobSpec, Scheduler, SchedulerConfig, SchedulerError, SchedulerMetrics,
 };
 use serde_json::json;
+
+use crate::library::{LibraryRootRow, LibraryService};
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::time::Instant;
 use tracing::{info, warn};
@@ -381,6 +383,57 @@ impl Runtime {
         Ok(())
     }
 
+    /// The library roots, newest first.
+    ///
+    /// A root is a directory the user configured, so there is no `AccountScope` here and none is
+    /// accepted: what is scoped is the content inside the roots, not the list of them.
+    pub async fn library_roots(
+        &self,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<LibraryRootRow>, RuntimeError> {
+        let request = match after {
+            Some(cursor) => PageRequest::after(Cursor::new(cursor), limit),
+            None => PageRequest::first(limit),
+        };
+        Ok(self.library().roots(request).await?)
+    }
+
+    /// Adds a directory as a library root.
+    ///
+    /// The path arrives from the shell's own folder picker, which hands it over as text it has not
+    /// validated (`UntrustedPath`, PG-E1-12); `PathGuard` in the service is what decides whether it
+    /// can be a root, and this is where that refusal becomes a structured error the UI can show.
+    pub async fn add_library_root(
+        &self,
+        path: &str,
+        kind: LibraryRootKind,
+        scan_mode: ScanMode,
+    ) -> Result<LibraryRoot, RuntimeError> {
+        let now = self.clock.now();
+        Ok(self
+            .library()
+            .add_root(Path::new(path), kind, scan_mode, now)
+            .await?)
+    }
+
+    /// Removes a library root, reporting whether it was there.
+    ///
+    /// Nothing else is removed with it: the files, the items, and the watch progress all stay
+    /// (PG-E14-01), which is why this returns a `bool` rather than a plan the caller has to
+    /// confirm. There is no destructive step here to confirm.
+    pub async fn remove_library_root(&self, id: i64) -> Result<bool, RuntimeError> {
+        Ok(self.library().remove_root(id).await?)
+    }
+
+    /// The library service over this runtime's database.
+    ///
+    /// Built on demand rather than held: it is two fields of an `Arc`, and a service that outlives
+    /// its runtime is the kind of thing that keeps a database handle alive after shutdown.
+    fn library(&self) -> LibraryService {
+        LibraryService::new(Arc::clone(&self.database))
+    }
+
     /// One page of journal rows, newest first.
     ///
     /// `after` is the id of the previous page's last row; `None` reads the newest page. The
@@ -611,6 +664,10 @@ pub enum RuntimeError {
         /// What the caller got wrong, phrased for a user.
         detail: String,
     },
+
+    /// The library refused the operation, with the reason a user can read.
+    #[error(transparent)]
+    Library(#[from] crate::library::LibraryError),
 
     /// No live job has that id.
     #[error("no job {job} is running; it may have finished already")]

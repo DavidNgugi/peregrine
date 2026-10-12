@@ -28,3 +28,10 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
 pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, ShellStatus, StartedJob};
+// The command surface speaks these too, and `peregrine-ipc` may depend on this crate and not
+// on `peregrine-domain` (AGENTS R6): re-exported rather than duplicated so a kind added to the
+// domain cannot reach the wire in a form the domain does not have.
+pub use peregrine_domain::{LibraryRoot, LibraryRootKind, ScanMode};
+// And the instant a root's fields carry, for the same reason: the command surface has to name
+// the type it converts, and `jiff` is not a dependency it may take (AGENTS R6).
+pub use jiff::Timestamp;

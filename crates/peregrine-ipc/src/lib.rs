@@ -20,6 +20,7 @@ pub mod bindings;
 pub mod error;
 pub mod guard;
 pub mod jobs;
+pub mod library;
 pub mod runtime;
 pub mod shortcuts;
 pub mod system;
@@ -58,6 +59,9 @@ pub fn builder() -> Builder<tauri::Wry> {
             jobs::start_hello,
             jobs::cancel,
             jobs::list,
+            library::list_roots,
+            library::add_root,
+            library::remove_root,
         ])
         .events(collect_events![])
 }

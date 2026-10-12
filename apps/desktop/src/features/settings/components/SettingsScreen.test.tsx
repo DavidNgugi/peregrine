@@ -3,6 +3,7 @@ import type { ShortcutBinding } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
+import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { SettingsScreen } from "./SettingsScreen.js";
 
@@ -26,6 +27,19 @@ function registry(bindings: readonly ShortcutBinding[]): ShortcutRegistry {
   return { bindings, loading: false, failed: false };
 }
 
+/** The library read as a resolved, empty one: this suite is about the shortcut list. */
+function noLibraries(): LibraryRoots {
+  return {
+    roots: [],
+    loading: false,
+    failed: false,
+    busy: false,
+    error: null,
+    add: () => Promise.resolve(null),
+    remove: () => Promise.resolve(false),
+  };
+}
+
 /**
  * The screen as markup rather than as a mounted tree.
  *
@@ -33,10 +47,10 @@ function registry(bindings: readonly ShortcutBinding[]): ShortcutRegistry {
  * shows what it drew; the login-item hook's effect does not run, which is what keeps this
  * test off the IPC bridge.
  */
-function markup(shortcuts: ShortcutRegistry): string {
+function markup(shortcuts: ShortcutRegistry, libraries: LibraryRoots = noLibraries()): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <SettingsScreen shortcuts={shortcuts} />
+      <SettingsScreen libraries={libraries} shortcuts={shortcuts} />
     </I18nextProvider>,
   );
 }

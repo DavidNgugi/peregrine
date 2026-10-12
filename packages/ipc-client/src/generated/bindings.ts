@@ -97,6 +97,26 @@ export const commands = {
 	 *  [`ErrorCode::StorageCorrupt`] when the journal cannot be read.
 	 */
 	list: (limit: number | null) => typedError<JobRecord_Serialize[], AppError_Serialize>(__TAURI_INVOKE("list", { limit })),
+	/**  One page of library roots, newest first. */
+	listRoots: (limit: number | null) => typedError<LibraryRootDto[], AppError_Serialize>(__TAURI_INVOKE("list_roots", { limit })),
+	/**
+	 *  Adds a folder as a library root and answers with the row it wrote.
+	 * 
+	 *  The path is text the shell's picker handed over without validating it (PG-E1-12), so the only
+	 *  thing this command does with it is pass it to the service that decides. A folder that is
+	 *  already a root comes back as an error naming the row that holds it, which is what lets the
+	 *  screen point at the existing entry instead of only refusing.
+	 */
+	addRoot: (path: string, kind: RootKind, scanMode: RootScanMode) => typedError<LibraryRootDto, AppError_Serialize>(__TAURI_INVOKE("add_root", { path, kind, scanMode })),
+	/**
+	 *  Removes a library root, reporting whether it was there.
+	 * 
+	 *  This is the command whose name is the most dangerous thing about it, so the answer is explicit:
+	 *  removing a root stops it being scanned and removes nothing else. The files stay where they are,
+	 *  the items and their watch progress stay in the library, and a file that comes back is the same
+	 *  item rather than a new one (PG-E14-01, PG-E14-13).
+	 */
+	removeRoot: (root: RootRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("remove_root", { root })),
 };
 
 /* Types */
@@ -361,6 +381,60 @@ export type JobState =
 "failed" | 
 /**  Terminal: cancellation was observed, or the job never started. */
 "canceled";
+
+/**  One library root as the settings screen shows it. */
+export type LibraryRootDto = {
+	/**
+	 *  The row id, which is the paging cursor and what a removal names.
+	 * 
+	 *  `Number` opts this `i64` into a TypeScript `number`, which specta otherwise refuses rather
+	 *  than silently losing precision. A row id and a Unix-millisecond instant both stay well
+	 *  inside the 2^53 a JavaScript number represents exactly.
+	 */
+	id: number,
+	/**  The absolute, canonical directory. */
+	path: string,
+	/**  What it is expected to hold. */
+	kind: RootKind,
+	/**  When it is scanned. */
+	scanMode: RootScanMode,
+	/**  When it was last scanned, in Unix milliseconds, or nothing when it never was. */
+	lastScanAt: number | null,
+	/**  When it was added, in Unix milliseconds. */
+	createdAt: number,
+};
+
+/**  What a root is expected to hold, as the webview spells it. */
+export type RootKind = 
+/**  Films. */
+"movies" | 
+/**  Series. */
+"shows" | 
+/**  Both, or neither — a folder the user has not organised. */
+"mixed" | 
+/**  A download directory, which is watched rather than browsed. */
+"downloads";
+
+/**
+ *  The root a command acts on.
+ * 
+ *  A DTO rather than a bare `i64` argument, because specta refuses to export a large integer as a
+ *  command argument — a bare cursor or id would be the one thing in the contract with no type on
+ *  the other side. The same reason `jobs::list` shows one page and takes no cursor.
+ */
+export type RootRef = {
+	/**  The row id, as the list returned it. */
+	id: number,
+};
+
+/**  When a root is scanned, as the webview spells it. */
+export type RootScanMode = 
+/**  A watcher keeps it current. */
+"incremental" | 
+/**  On a schedule the settings own. */
+"scheduled" | 
+/**  Only when the user asks. */
+"manual";
 
 /**  The scheduler's counters. */
 export type SchedulerHealth = {

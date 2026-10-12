@@ -12,7 +12,14 @@
  */
 
 import { commands } from "./generated/bindings.js";
-import type { BuildInfo, ShortcutBinding } from "./generated/bindings.js";
+import type {
+  BuildInfo,
+  LibraryRootDto,
+  RootKind,
+  RootRef,
+  RootScanMode,
+  ShortcutBinding,
+} from "./generated/bindings.js";
 import { normalizeIpcError } from "./errors.js";
 
 /** The generated result union for one command. */
@@ -53,6 +60,43 @@ export async function getBuildInfo(): Promise<BuildInfo> {
  */
 export async function listShortcuts(): Promise<ShortcutBinding[]> {
   return unwrap(commands.listShortcuts());
+}
+
+/**
+ * The library roots the user has configured, newest first.
+ *
+ * `limit` is the page size rather than a cursor: the settings screen shows one page, and the
+ * generated contract has no large-integer argument for a cursor to travel in — the same reason
+ * `jobs::list` takes a limit and nothing else.
+ */
+export async function listLibraryRoots(limit?: number): Promise<LibraryRootDto[]> {
+  return unwrap(commands.listRoots(limit ?? null));
+}
+
+/**
+ * Adds a folder as a library root.
+ *
+ * `path` is what the shell's folder picker returned, which is text the picker has not validated
+ * (`UntrustedPath`, PG-E1-12); the core is what decides whether it can be a root, and its refusal
+ * arrives as an `IpcError` this module throws.
+ */
+export async function addLibraryRoot(
+  path: string,
+  kind: RootKind,
+  scanMode: RootScanMode,
+): Promise<LibraryRootDto> {
+  return unwrap(commands.addRoot(path, kind, scanMode));
+}
+
+/**
+ * Removes a library root, answering whether the row was there.
+ *
+ * Removing a root stops it being scanned and removes nothing else: the files stay, and so do the
+ * items and the watch progress (PG-E14-01, PG-E14-13). There is nothing here to confirm.
+ */
+export async function removeLibraryRoot(id: number): Promise<boolean> {
+  const root: RootRef = { id };
+  return unwrap(commands.removeRoot(root));
 }
 
 /** Whether Peregrine is registered to start with the operating system's session. */

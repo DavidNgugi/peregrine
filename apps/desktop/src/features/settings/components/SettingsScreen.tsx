@@ -10,7 +10,9 @@ import {
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
+import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
+import { LibrariesSection } from "./LibrariesSection.js";
 
 interface SettingsScreenProps {
   /**
@@ -20,6 +22,14 @@ interface SettingsScreenProps {
    * fetch could disagree with the keys the shell is already dispatching on.
    */
   readonly shortcuts: ShortcutRegistry;
+
+  /**
+   * The library folders, as the shell read them.
+   *
+   * Passed in for the same reason the shortcut registry is: the shell owns the read, and a second
+   * one here could disagree with the list the rest of the app is working from.
+   */
+  readonly libraries: LibraryRoots;
 }
 
 /**
@@ -35,7 +45,7 @@ interface SettingsScreenProps {
  * ask". The settings registry (PG-E20-01) takes this screen over; nothing here is a setting
  * of our own.
  */
-export function SettingsScreen({ shortcuts }: SettingsScreenProps): ReactElement {
+export function SettingsScreen({ shortcuts, libraries }: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
   const autoStart = useAutoStart();
 
@@ -75,6 +85,8 @@ export function SettingsScreen({ shortcuts }: SettingsScreenProps): ReactElement
         />
         {autoStart.failed ? <ErrorState title={t("settings.autostart.failed")} /> : null}
       </SettingsSection>
+
+      <LibrariesSection libraries={libraries} />
     </Screen>
   );
 }

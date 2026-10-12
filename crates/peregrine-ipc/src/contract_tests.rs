@@ -182,6 +182,43 @@ fn list_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { jobs::list(harness.dead_state(), None).await.map(drop) })
 }
 
+/// `list_roots` reads the roots through the runtime, so it fails the same way.
+fn list_roots_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::list_roots(harness.dead_state(), None)
+            .await
+            .map(drop)
+    })
+}
+
+/// `add_root` refuses a path that cannot be a root before it writes anything.
+///
+/// This is the branch a user reaches with a real hand: the shell's folder picker hands the path
+/// over as text it has not validated (PG-E1-12), so a relative path is the input the service has to
+/// refuse rather than the scanner discovering it later.
+fn add_root_with_an_unusable_path(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::add_root(
+            harness.served_state(),
+            "Movies".to_owned(),
+            crate::library::RootKind::Movies,
+            crate::library::RootScanMode::Incremental,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `remove_root` reaches the runtime like the other two, and a dead runtime is its only failure
+/// that is not a plain "the row was not there".
+fn remove_root_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::remove_root(harness.dead_state(), crate::library::RootRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -223,6 +260,15 @@ struct ContractCase {
 /// fails that test by name; a case naming a command that is not registered fails it too, so
 /// the table cannot keep a dead entry either.
 fn cases() -> Vec<ContractCase> {
+    let mut all = shell_cases();
+    all.extend(job_cases());
+    all.extend(library_cases());
+    all.extend(autostart_cases());
+    all
+}
+
+/// The commands that answer about the process and the shell rather than about work.
+fn shell_cases() -> Vec<ContractCase> {
     vec![
         ContractCase {
             command: "build_info",
@@ -247,6 +293,12 @@ fn cases() -> Vec<ContractCase> {
             },
             drive: log_tail_without_a_runtime,
         },
+    ]
+}
+
+/// The commands that start, watch, and cancel work.
+fn job_cases() -> Vec<ContractCase> {
+    vec![
         ContractCase {
             command: "start_hello",
             expected: Expected::Fails {
@@ -279,6 +331,42 @@ fn cases() -> Vec<ContractCase> {
             },
             drive: list_without_a_runtime,
         },
+    ]
+}
+
+/// The commands that manage the library roots.
+fn library_cases() -> Vec<ContractCase> {
+    vec![
+        ContractCase {
+            command: "list_roots",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_roots_without_a_runtime,
+        },
+        ContractCase {
+            command: "add_root",
+            expected: Expected::Fails {
+                code: ErrorCode::InvalidInput,
+                retryable: false,
+            },
+            drive: add_root_with_an_unusable_path,
+        },
+        ContractCase {
+            command: "remove_root",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: remove_root_without_a_runtime,
+        },
+    ]
+}
+
+/// The commands the shell's own chrome reaches.
+fn autostart_cases() -> Vec<ContractCase> {
+    vec![
         ContractCase {
             command: "list_shortcuts",
             expected: Expected::CannotFail {

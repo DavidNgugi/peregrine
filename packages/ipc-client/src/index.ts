@@ -12,15 +12,22 @@ export type {
   JobRecord,
   JobStarted,
   JobState,
+  LibraryRootDto,
+  RootKind,
+  RootRef,
+  RootScanMode,
   SchedulerHealth,
   ShortcutBinding,
 } from "./generated/bindings.js";
 
 export {
+  addLibraryRoot,
   getAutoStartEnabled,
   getBuildInfo,
   isSuccessful,
+  listLibraryRoots,
   listShortcuts,
+  removeLibraryRoot,
   setAutoStart,
   unwrap,
 } from "./client.js";

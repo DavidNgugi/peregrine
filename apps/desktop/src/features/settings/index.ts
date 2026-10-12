@@ -1,4 +1,7 @@
+export { LibrariesSection } from "./components/LibrariesSection.js";
 export { SettingsScreen } from "./components/SettingsScreen.js";
+export { useLibraryRoots } from "./hooks/useLibraryRoots.js";
+export type { LibraryRoots } from "./hooks/useLibraryRoots.js";
 export { useAutoStart } from "./hooks/useAutoStart.js";
 export type { AutoStartControl, AutoStartState } from "./hooks/useAutoStart.js";
 export { useShortcutDispatch, useShortcuts } from "./hooks/useShortcuts.js";

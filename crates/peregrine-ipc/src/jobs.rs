@@ -222,7 +222,30 @@ impl From<RuntimeError> for AppError {
                 .with_detail("The log file could not be read.")
                 .with_cause(source.to_string()),
             RuntimeError::Storage(inner) => storage_error(inner),
+            // A folder that is already a library is a conflict the screen can point at; a path the
+            // service refuses is bad input; anything else is the database, and `storage_error`
+            // decides what to say about that. The service's own message is not passed through: it
+            // contains the absolute path the user picked, and rule 3 of ARCHITECTURE §7 keeps paths
+            // out of the payload.
+            RuntimeError::Library(inner) => library_error(inner),
         }
+    }
+}
+
+/// Maps a library refusal onto the codes the UI branches on.
+fn library_error(error: &peregrine_app::LibraryError) -> AppError {
+    use peregrine_app::LibraryError;
+
+    match error {
+        LibraryError::AlreadyARoot { .. } => AppError::new(ErrorCode::Conflict)
+            .with_detail("That folder is already one of your libraries.")
+            .with_cause(error.to_string()),
+        LibraryError::Path(_) | LibraryError::NotText { .. } => {
+            AppError::new(ErrorCode::InvalidInput)
+                .with_detail("That folder cannot be used as a library.")
+                .with_cause(error.to_string())
+        }
+        LibraryError::Storage(inner) => storage_error(inner),
     }
 }
 

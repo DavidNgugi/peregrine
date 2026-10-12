@@ -80,6 +80,37 @@ export const en = {
           body: "Peregrine's core did not answer, so this list is unknown rather than short. Reopening the app tries the read again.",
         },
       },
+      libraries: {
+        title: "Media folders",
+        description:
+          "The folders Peregrine is allowed to scan. Removing one stops it being scanned: nothing is deleted, and what you have watched stays.",
+        remove: "Remove",
+        refused: {
+          title: "That folder could not be added.",
+        },
+        unavailable: {
+          title: "Your folders could not be read.",
+          body: "Peregrine's core did not answer, so this list is unknown rather than empty. Reopening the app tries the read again.",
+        },
+        empty: {
+          title: "No folders yet.",
+          body: "Add the folder your films or series are in. Peregrine scans it where it is and moves nothing.",
+        },
+        add: {
+          label: "Add a folder",
+          description:
+            "Peregrine asks the system for a folder and scans what is in it. Nothing is moved, renamed, or copied.",
+          action: "Add folder",
+        },
+        kind: {
+          movies: "Films",
+          shows: "Series",
+          mixed: "Films and series",
+          downloads: "Downloads",
+        },
+        neverScanned: "{{kind}} · not scanned yet",
+        scanned: "{{kind}} · scanned",
+      },
       autostart: {
         title: "Start with your computer",
         description:
