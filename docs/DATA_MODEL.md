@@ -368,6 +368,11 @@ CREATE TABLE media_file (
 );
 CREATE INDEX media_file_item_idx    ON media_file (media_item_id);
 CREATE INDEX media_file_missing_idx ON media_file (missing_since) WHERE missing_since IS NOT NULL;
+-- Added by migration 0011 with the §4 usage aggregate it serves, and the index a per-root read of
+-- present files goes through: `root_id` leads it, so `WHERE root_id = ?1 AND missing_since IS NULL`
+-- reads the index rather than a table whose pages hold `probe_json`.
+CREATE INDEX media_file_usage_idx   ON media_file (root_id, quality_label, media_item_id, size_bytes)
+  WHERE missing_since IS NULL;
 
 CREATE TABLE library_root (
   id          INTEGER PRIMARY KEY,
@@ -625,6 +630,9 @@ CREATE TABLE provider_cache (
 );
 CREATE INDEX provider_cache_expiry_idx ON provider_cache (expires_at);
 CREATE INDEX provider_cache_resource_idx ON provider_cache (provider, resource);
+-- Added by migration 0011: DATA_MODEL §7's cache total sums `size_bytes` without reading the
+-- gzip-compressed bodies, which are most of the database's bytes.
+CREATE INDEX provider_cache_size_idx ON provider_cache (size_bytes);
 
 CREATE TABLE image_cache (
   key          TEXT PRIMARY KEY,     -- sha256(provider|path|variant)

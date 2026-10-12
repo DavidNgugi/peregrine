@@ -38,7 +38,7 @@ use thiserror::Error;
 
 /// Why a root could not be added, changed, or removed.
 #[derive(Debug, Error)]
-pub enum RootError {
+pub enum LibraryError {
     /// The path is not one a root may be.
     #[error(transparent)]
     Path(#[from] PathGuardError),
@@ -86,32 +86,40 @@ impl LibraryService {
         Self { database }
     }
 
+    /// The database this service reads and writes.
+    ///
+    /// Crate-visible rather than public: a sibling module of the same service needs it, and a
+    /// caller outside this crate has no business reaching past the service to the rows.
+    pub(crate) fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
     /// Adds `path` as a root, or explains why it cannot be one.
     ///
     /// # Errors
     ///
-    /// [`RootError::Path`] when the path is relative, contains a `.` or `..`, or fails the
-    /// component policy; [`RootError::AlreadyARoot`] when the folder is already a root, in which
-    /// case the error carries the existing row's id; [`RootError::NotText`] when the path cannot
-    /// be stored; and [`RootError::Storage`] when the row cannot be written.
+    /// [`LibraryError::Path`] when the path is relative, contains a `.` or `..`, or fails the
+    /// component policy; [`LibraryError::AlreadyARoot`] when the folder is already a root, in which
+    /// case the error carries the existing row's id; [`LibraryError::NotText`] when the path cannot
+    /// be stored; and [`LibraryError::Storage`] when the row cannot be written.
     pub async fn add_root(
         &self,
         path: &Path,
         kind: LibraryRootKind,
         scan_mode: ScanMode,
         at: Timestamp,
-    ) -> Result<LibraryRoot, RootError> {
+    ) -> Result<LibraryRoot, LibraryError> {
         let guard = PathGuard::new(path)?;
         let root = guard.root();
-        let stored = root.to_str().ok_or_else(|| RootError::NotText {
+        let stored = root.to_str().ok_or_else(|| LibraryError::NotText {
             path: root.to_path_buf(),
         })?;
 
         // The lookup gives the common case a message naming the row that already holds the folder;
         // the schema's `UNIQUE (path)` is what actually stops a duplicate, so a lost race against
-        // another caller arrives as `RootError::Storage` rather than as a silent second root.
+        // another caller arrives as `LibraryError::Storage` rather than as a silent second root.
         if let Some(existing) = self.database.library_root_by_path(stored).await? {
-            return Err(RootError::AlreadyARoot {
+            return Err(LibraryError::AlreadyARoot {
                 path: root.to_path_buf(),
                 id: existing.id,
             });
@@ -130,7 +138,7 @@ impl LibraryService {
         self.database
             .library_root(id)
             .await?
-            .ok_or(RootError::Storage(StorageError::WriterStopped))
+            .ok_or(LibraryError::Storage(StorageError::WriterStopped))
     }
 
     /// Removes a root, reporting whether it was there.
@@ -141,8 +149,8 @@ impl LibraryService {
     ///
     /// # Errors
     ///
-    /// [`RootError::Storage`] when the row cannot be removed.
-    pub async fn remove_root(&self, id: i64) -> Result<bool, RootError> {
+    /// [`LibraryError::Storage`] when the row cannot be removed.
+    pub async fn remove_root(&self, id: i64) -> Result<bool, LibraryError> {
         Ok(self.database.remove_library_root(id).await?)
     }
 
@@ -150,8 +158,8 @@ impl LibraryService {
     ///
     /// # Errors
     ///
-    /// [`RootError::Storage`] when the row cannot be changed.
-    pub async fn set_scan_mode(&self, id: i64, mode: ScanMode) -> Result<bool, RootError> {
+    /// [`LibraryError::Storage`] when the row cannot be changed.
+    pub async fn set_scan_mode(&self, id: i64, mode: ScanMode) -> Result<bool, LibraryError> {
         Ok(self.database.set_root_scan_mode(id, mode).await?)
     }
 
@@ -159,8 +167,8 @@ impl LibraryService {
     ///
     /// # Errors
     ///
-    /// [`RootError::Storage`] when the page cannot be read.
-    pub async fn roots(&self, request: PageRequest) -> Result<Vec<LibraryRootRow>, RootError> {
+    /// [`LibraryError::Storage`] when the page cannot be read.
+    pub async fn roots(&self, request: PageRequest) -> Result<Vec<LibraryRootRow>, LibraryError> {
         Ok(self.database.list_library_roots(request).await?)
     }
 }
@@ -169,8 +177,8 @@ impl LibraryService {
 ///
 /// `PathGuard` has already refused an empty root, so this cannot fail for a path that reached it;
 /// it returns the storage error rather than unwrapping so the call site stays free of panics.
-fn text(value: &str) -> Result<peregrine_domain::NonEmptyText, RootError> {
-    peregrine_domain::NonEmptyText::new(value).map_err(|_| RootError::NotText {
+fn text(value: &str) -> Result<peregrine_domain::NonEmptyText, LibraryError> {
+    peregrine_domain::NonEmptyText::new(value).map_err(|_| LibraryError::NotText {
         path: PathBuf::from(value),
     })
 }
@@ -246,7 +254,7 @@ mod tests {
             .await;
 
         match refused {
-            Err(RootError::AlreadyARoot { id, path }) => {
+            Err(LibraryError::AlreadyARoot { id, path }) => {
                 assert_eq!(id, first.id);
                 assert_eq!(path, movies);
             }
@@ -275,7 +283,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(refused, Err(RootError::Path(_))), "{refused:?}");
+        assert!(matches!(refused, Err(LibraryError::Path(_))), "{refused:?}");
         assert_eq!(
             service.roots(PageRequest::first(10)).await.unwrap(),
             Vec::new()
@@ -299,7 +307,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(refused, Err(RootError::Path(_))), "{refused:?}");
+        assert!(matches!(refused, Err(LibraryError::Path(_))), "{refused:?}");
     }
 
     #[tokio::test]

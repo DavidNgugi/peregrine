@@ -145,12 +145,17 @@ impl Scanner {
             source,
         })?;
 
-        self.walk_entries(entries, &mut outcome);
+        self.walk_entries(root, entries, &mut outcome);
         Ok(outcome)
     }
 
     /// Classifies and descends into one directory's already-sorted entries.
-    fn walk_entries(self, entries: Vec<fs::DirEntry>, outcome: &mut ScanOutcome) {
+    ///
+    /// `root` is threaded through because the policy must see a path *below* the root and not the
+    /// root itself: a library at `/Users/me/.media/Movies` is a library the user chose, and a rule
+    /// about hidden names that reads the user's own path would skip every file in it. The same
+    /// applies to a root the user put inside a folder called `Extras`.
+    fn walk_entries(self, root: &Path, entries: Vec<fs::DirEntry>, outcome: &mut ScanOutcome) {
         for entry in entries {
             let path = entry.path();
             let Ok(file_type) = entry.file_type() else {
@@ -174,7 +179,7 @@ impl Scanner {
                     // inside it: the user skipped the folder, so the folder is the answer.
                     ScanVerdict::Skipped(reason) => skip(outcome, path, reason),
                     ScanVerdict::Candidate => match read_sorted(&path) {
-                        Ok(children) => self.walk_entries(children, outcome),
+                        Ok(children) => self.walk_entries(root, children, outcome),
                         Err(error) => outcome.unreadable.push(UnreadableDirectory {
                             path,
                             kind: error.kind(),
@@ -191,7 +196,12 @@ impl Scanner {
                 continue;
             }
 
-            match self.policy.file(&path, false) {
+            // Relative to the root, for the reason in the doc comment above: the components of
+            // the root are the user's choice, and only what is below it is the policy's business.
+            match self
+                .policy
+                .file(path.strip_prefix(root).unwrap_or(&path), false)
+            {
                 ScanVerdict::Skipped(reason) => skip(outcome, path, reason),
                 ScanVerdict::Candidate => match entry.metadata() {
                     Ok(metadata) => outcome.candidates.push(CandidateFile {
@@ -483,6 +493,53 @@ mod tests {
             .expect("the film is a candidate");
         assert_eq!(film.size_bytes, b"a film".len() as u64);
         assert!(film.mtime_ms > 0, "a file written now has a real mtime");
+    }
+
+    #[test]
+    fn a_root_under_a_hidden_or_extras_directory_is_still_scanned() {
+        // Found by PG-E14-13's reconciler tests, which build their corpus with `TempDir` — whose
+        // own name starts with a dot. The policy was being applied to the root's own path, so a
+        // library at `/Users/me/.media/Movies` was skipped in its entirety, every file reported as
+        // hidden. The rules describe what is *below* the root, because the root is a path the user
+        // chose and can defend; `/media/Extras/Alien.mkv` is not the same claim as a root the user
+        // named `Extras`.
+        for root_name in [".media-library", ".hidden", "Extras", "Sample"] {
+            let corpus = Corpus::new(&format!("dotted-root-{root_name}"));
+            let film = corpus.file("Movies/Alien (1979).mkv", b"a film");
+            let scan_root = corpus.root.join(root_name);
+            fs::create_dir_all(&scan_root).unwrap();
+            let inside = scan_root.join("Movies/Alien (1979).mkv");
+            fs::create_dir_all(inside.parent().unwrap()).unwrap();
+            fs::rename(&film, &inside).unwrap();
+
+            let outcome = Scanner::new(ScanPolicy::new()).scan(&scan_root).unwrap();
+
+            assert_eq!(
+                outcome.candidates.len(),
+                1,
+                "a root named {root_name} holds one film"
+            );
+            assert_eq!(outcome.candidates[0].path, inside);
+            assert!(
+                outcome.skipped.is_empty(),
+                "nothing below a chosen root is skipped for the root's own name: {:?}",
+                outcome.skipped
+            );
+        }
+    }
+
+    #[test]
+    fn a_hidden_directory_below_the_root_is_still_skipped() {
+        // The other half of the same rule, so the fix above cannot be read as "hidden names stop
+        // mattering".
+        let corpus = Corpus::new("still-hidden");
+
+        corpus.file("Movies/.Trash/old.mkv", b"a hidden folder");
+
+        let outcome = Scanner::new(ScanPolicy::new()).scan(&corpus.root).unwrap();
+
+        assert_eq!(outcome.candidates, Vec::new());
+        assert_eq!(outcome.skipped[0].reason, SkipReason::Hidden);
     }
 
     #[test]

@@ -403,6 +403,85 @@ pub(crate) async fn root_by_path(
     row.map(TryInto::try_into).transpose()
 }
 
+/// One recorded file under a root, as a reconciliation or an incremental scan needs it.
+///
+/// Deliberately not a [`MediaFile`]: what both callers compare is the path and the two numbers a
+/// scan stamps a file with, and reading `probe_json` — the largest column in the table — to answer
+/// "has this changed" would read a gzip document per file per scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedFile {
+    /// The `media_file` row id, which is what a missing mark is written against.
+    pub id: i64,
+    /// The stored path, which is the absolute canonical one.
+    pub path: String,
+    /// The size the last scan recorded.
+    pub size_bytes: i64,
+    /// The modification time the last scan recorded, in milliseconds.
+    pub mtime_ms: i64,
+}
+
+/// The files of one root that are present, served by migration 0011's partial index.
+///
+/// The `missing_since IS NULL` predicate is not decoration: `media_file_usage_idx` is partial on
+/// exactly that, and its leading column is `root_id`, so this reads an index rather than the
+/// table. Dropping the predicate turns a scan of one library into a scan of every library's rows,
+/// including the ones with no bytes on disk.
+pub(crate) async fn present_files(
+    pool: &sqlx::SqlitePool,
+    root_id: i64,
+) -> Result<Vec<RecordedFile>, StorageError> {
+    let rows = sqlx::query_as::<_, RecordedFileRow>(
+        "SELECT id, path, size_bytes, mtime_ms FROM media_file \
+         WHERE root_id = ?1 AND missing_since IS NULL ORDER BY id",
+    )
+    .bind(root_id)
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// The files of one root that are marked missing.
+///
+/// The predicate matches `media_file_missing_idx`, which is partial on `missing_since IS NOT
+/// NULL`; `root_id` is not in it, so the root is applied after the index read. That is the right
+/// order of work: the missing set is the small one — normally empty — while the table is the big
+/// one, and no index carries both predicates today.
+pub(crate) async fn missing_files(
+    pool: &sqlx::SqlitePool,
+    root_id: i64,
+) -> Result<Vec<RecordedFile>, StorageError> {
+    let rows = sqlx::query_as::<_, RecordedFileRow>(
+        "SELECT id, path, size_bytes, mtime_ms FROM media_file \
+         WHERE missing_since IS NOT NULL AND root_id = ?1 ORDER BY id",
+    )
+    .bind(root_id)
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// The four columns [`RecordedFile`] needs.
+#[derive(sqlx::FromRow)]
+struct RecordedFileRow {
+    id: i64,
+    path: String,
+    size_bytes: i64,
+    mtime_ms: i64,
+}
+
+impl From<RecordedFileRow> for RecordedFile {
+    fn from(row: RecordedFileRow) -> Self {
+        Self {
+            id: row.id,
+            path: row.path,
+            size_bytes: row.size_bytes,
+            mtime_ms: row.mtime_ms,
+        }
+    }
+}
+
 pub(crate) async fn list_roots(
     pool: &sqlx::SqlitePool,
     request: PageRequest,
@@ -1339,6 +1418,91 @@ mod tests {
         assert!(
             !database.remove_library_root(root_id).await.unwrap(),
             "removing a root that is already gone changes nothing"
+        );
+    }
+
+    /// PG-E14-13's acceptance, at the layer that owns the rows it is about.
+    ///
+    /// "Removing and restoring a file preserves watch progress" is a statement about what a missing
+    /// mark does *not* touch, so the test puts a file row, its item, and a progress row in place,
+    /// marks the file missing, and asserts all three are still there — then clears the mark and
+    /// asserts it is the same row rather than a new one. The half of the claim that is unrecoverable
+    /// if it breaks is the first: a deleted row takes its subtitles with it by cascade, and the
+    /// progress hanging off the item would have nothing left to describe.
+    #[tokio::test]
+    async fn marking_a_file_missing_keeps_its_item_and_its_watch_progress() {
+        use peregrine_domain::{PlaybackPosition, ProgressSource, WatchProgress};
+
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+        let (item_id, file_id) = item_with_file(&database, 1, "/media/Alien (1979).mkv").await;
+        database
+            .record_watch_progress(WatchProgress::record(
+                AccountId::new(1).unwrap(),
+                1,
+                None,
+                PlaybackPosition::new(90_000, Some(7_200_000)).unwrap(),
+                ProgressSource::Local,
+                at(NOW),
+                None,
+            ))
+            .await
+            .unwrap();
+
+        assert!(
+            database
+                .set_media_file_missing(file_id, Some(NOW + 1_000), NOW + 1_000)
+                .await
+                .unwrap()
+        );
+
+        let missing = database
+            .media_file(any_account(), file_id)
+            .await
+            .unwrap()
+            .expect("the row is stamped, never deleted");
+        assert_eq!(missing.missing_since, Some(at(NOW + 1_000)));
+        assert_eq!(missing.media_item_id, item_id);
+        assert!(
+            database
+                .media_item(any_account(), item_id)
+                .await
+                .unwrap()
+                .is_some(),
+            "the item survives, which is what the progress hangs off"
+        );
+        assert!(
+            database
+                .watch_progress(any_account(), 1, None)
+                .await
+                .unwrap()
+                .is_some(),
+            "what the user watched is not the file's to take with it"
+        );
+
+        assert!(
+            database
+                .set_media_file_missing(file_id, None, NOW + 2_000)
+                .await
+                .unwrap()
+        );
+        let restored = database
+            .media_file(any_account(), file_id)
+            .await
+            .unwrap()
+            .expect("still the same row");
+        assert_eq!(restored.id, file_id, "a restore is not a second file");
+        assert_eq!(restored.missing_since, None);
+        assert!(
+            database
+                .watch_progress(any_account(), 1, None)
+                .await
+                .unwrap()
+                .is_some(),
+            "and the position is still the one the user left"
         );
     }
 

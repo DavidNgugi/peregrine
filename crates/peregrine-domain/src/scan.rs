@@ -250,12 +250,18 @@ impl ScanPolicy {
 
     /// Whether a file is a candidate, or skipped and why.
     ///
+    /// `path` is the path *below its root*, which is the distinction that stops a policy about
+    /// names from reading the user's own configuration: a library at `/Users/me/.media/Movies` is
+    /// a path the user chose, so the dot in `.media` is not a reason to skip every file in it. The
+    /// scanner gives this function a stripped path for that reason, and a caller classifying a path
+    /// by hand has to do the same.
+    ///
     /// `symlink` is the walk's answer rather than this module's: whether a path is a link is a
     /// filesystem fact, and this module has no filesystem. Passing it in keeps the decision in
     /// one place rather than letting the walk skip links behind the policy's back.
     ///
-    /// Every component is checked, not only the file's own name, because a file inside a `Sample`
-    /// folder is a sample whatever it is called.
+    /// Every component below the root is checked, not only the file's own name, because a file
+    /// inside a `Sample` folder is a sample whatever it is called.
     #[must_use]
     pub fn file(self, path: &Path, symlink: bool) -> ScanVerdict {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {

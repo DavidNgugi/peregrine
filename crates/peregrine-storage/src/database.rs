@@ -534,6 +534,30 @@ impl Database {
         crate::library::list_files_for_item(&self.readers, scope, media_item_id, request).await
     }
 
+    /// The present files of one root, with the two numbers a scan compares.
+    ///
+    /// Served by the partial index migration 0011 adds, so this is an index read per library
+    /// rather than a walk of every `media_file` row — which matters because the table's pages hold
+    /// `probe_json`.
+    pub async fn present_files(
+        &self,
+        root_id: i64,
+    ) -> Result<Vec<crate::library::RecordedFile>, StorageError> {
+        crate::library::present_files(&self.readers, root_id).await
+    }
+
+    /// The files of one root that are marked missing.
+    ///
+    /// What a restore is decided against: a path in this set that a scan sees again is a file that
+    /// came back, and PG-E14-13's rule is that its row — and the watch progress hanging off its
+    /// item — was never removed in the first place.
+    pub async fn missing_files(
+        &self,
+        root_id: i64,
+    ) -> Result<Vec<crate::library::RecordedFile>, StorageError> {
+        crate::library::missing_files(&self.readers, root_id).await
+    }
+
     /// Marks one file absent at scan time, or present again.
     ///
     /// The instant is the caller's — [`MediaFile::mark_missing`] keeps the *first* one, so a
