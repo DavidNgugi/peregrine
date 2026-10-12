@@ -7,14 +7,18 @@
 //! is keyset-paginated through [`PageRequest`] — `cargo xtask check-offset` keeps it that
 //! way.
 //!
-//! [`Database`] is the handle: `open` applies the embedded migrations on the one write
-//! connection and hands that connection to a task, while reads are served by a small
-//! pool. No `sqlx` type appears in this crate's public surface, so the driver stays an
-//! implementation detail of the adapter.
+//! [`Database`] is the handle: `open` checks an existing file with `PRAGMA integrity_check`
+//! (quarantining it and rebuilding when it is damaged), copies it before applying the first
+//! pending migration, and hands the write connection to a task while reads are served by a
+//! small pool. [`Database::recovery`] reports what that check found. No `sqlx` type appears
+//! in this crate's public surface, so the driver stays an implementation detail of the
+//! adapter.
 
+mod backup;
 mod catalogue;
 mod database;
 mod error;
+mod integrity;
 mod jobs;
 mod migrations;
 mod page;
@@ -26,6 +30,7 @@ pub use catalogue::{
 };
 pub use database::Database;
 pub use error::StorageError;
+pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use page::{Cursor, MAX_PAGE_ROWS, PageRequest};
 pub use writer::NewEvent;

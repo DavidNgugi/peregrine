@@ -63,6 +63,10 @@ pub struct Health {
     pub scheduler: SchedulerHealth,
     /// The event bus's counters.
     pub events: EventHealth,
+    /// Whether the boot-time integrity check had to rebuild the database, which means the
+    /// library has to be rebuilt by scanning (ARCHITECTURE §15). The quarantined file is
+    /// named in the log, not here: no path travels over IPC.
+    pub rescan_required: bool,
 }
 
 /// The scheduler's counters.
@@ -140,6 +144,7 @@ impl From<peregrine_app::Health> for Health {
                 dropped: health.events.dropped,
                 degraded: health.events.is_degraded(),
             },
+            rescan_required: health.rescan_required,
         }
     }
 }
@@ -206,6 +211,7 @@ mod tests {
                 dropped: 0,
                 degraded: true,
             },
+            rescan_required: true,
         };
 
         let json = serde_json::to_value(health).unwrap();
@@ -213,5 +219,6 @@ mod tests {
         assert_eq!(json["scheduler"]["retriesScheduled"], 4);
         assert_eq!(json["events"]["degraded"], true);
         assert_eq!(json["events"]["delivered"], 6);
+        assert_eq!(json["rescanRequired"], true);
     }
 }

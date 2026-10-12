@@ -578,7 +578,7 @@ A `conformance` test crate runs each provider's fixtures against shared invarian
 | Torrent stalled | Piece-starvation detection surfaces "no peers" with actionable detail (DHT nodes, tracker status, port reachability), plus the option to try an alternative release. |
 | Disk full | New downloads blocked, active ones paused (not failed) with a resume affordance, image cache trimmed automatically, and a clear banner with the required bytes. |
 | mpv crash | Session state machine moves to `failed`, UI shows the exit code and stderr tail, offers retry from the last known position. The app itself never dies. |
-| DB locked / corrupt | `PRAGMA integrity_check` at startup; on corruption, back up the file, rebuild the schema, and reimport the library by scanning. Provider caches are simply refetched. |
+| DB locked / corrupt | `PRAGMA integrity_check` at startup; on corruption, quarantine the damaged file and its write-ahead files beside the database — never deleted — recreate a clean schema, and signal that the library must be reimported by scanning (`Health.rescanRequired`). A lock another process holds is reported as a busy error rather than as damage. Provider caches are simply refetched. |
 | Subtitle provider quota exhausted | Falls through the preference chain, then reports "no subtitles found — quota reached for OpenSubtitles, next reset 04:00". |
 | Cast device disappears | Session ends gracefully, position is written back, and local playback can resume at that point. |
 | Update check fails | Silent; retried on the next launch; never blocks startup. |

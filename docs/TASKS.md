@@ -28,7 +28,7 @@ Every task implicitly includes its tests, error handling, structured logging, an
 
 The desktop now starts a real runtime: it opens the SQLite database, runs the scheduler, publishes events through the coalescing bus to the webview, keeps redacted JSON logs, and drains all of it on exit. A Diagnostics screen starts a hello job, watches its progress, cancels it, and reads the journal row and the log tail the core wrote (PG-E0-19). Discover is still an empty shell, and provider, torrent, indexer, playback, stream, cast, monitor, MCP, and testkit crates remain documentation-only scaffolds.
 
-Storage is complete for Phase 0: SQLite opening with the documented PRAGMA set, the single writer and reader pool, eight migrations whose schema the tests assert column by column, keyset-paged reads, and the job journal. The three schema defects PG-E3-06, PG-E3-08 and PG-E3-09 had recorded are settled by migration 0008 and the document they came from is corrected (PG-E3-19). Domain implementations exist for external IDs, release parsing, quality profiles, and path policy; and the application layer holds the scheduler, the event bus and its rate limiter, the runtime, notification policy and service ports, and redacted logging, with generated IPC bindings and theme validation. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
+Storage is complete for Phase 0: SQLite opening with the documented PRAGMA set, the single writer and reader pool, eight migrations whose schema the tests assert column by column — applied through a runner that copies an existing database first and rotates the copies, with a boot-time integrity check that quarantines a damaged file and rebuilds the schema — keyset-paged reads, and the job journal. The three schema defects PG-E3-06, PG-E3-08 and PG-E3-09 had recorded are settled by migration 0008 and the document they came from is corrected (PG-E3-19). Domain implementations exist for external IDs, release parsing, quality profiles, and path policy; and the application layer holds the scheduler, the event bus and its rate limiter, the runtime, notification policy and service ports, and redacted logging, with generated IPC bindings and theme validation. Tooling tasks retain their existing status; their acceptance is exercised through repository commands and CI.
 
 The current verification, with rustc 1.99.0 on macOS arm64, passed 354 Rust tests and 75 frontend tests at the commit that wrote this paragraph (the counts move with every test added), plus `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `cargo xtask check-arch`, `check-migrations`, `check-todos`, `check-commands`, and `gen-ipc --check`, and the frontend typecheck, lint, format check, and build. What that does not establish: any Windows or Linux run (PG-E0-13 still owes a green three-platform CI), a run of the packaged app, and the platform and soak suites that do not exist yet.
 
@@ -221,9 +221,9 @@ graph LR
   - Acceptance: `OFFSET` is absent from the codebase, enforced by grep gate
 - [ ] **PG-E3-12** `M` · deps PG-E3-04 · FTS5 contentless table with explicit maintenance and rebuild command
   - Acceptance: Rebuild reproduces identical search results
-- [ ] **PG-E3-13** `M` · deps PG-E3-03 · Migration runner with pre-migration backup and rotation
+- [x] **PG-E3-13** `M` · deps PG-E3-03 · Migration runner with pre-migration backup and rotation
   - Acceptance: A failing migration leaves the database untouched and backed up
-- [ ] **PG-E3-14** `M` · deps PG-E3-13 · Integrity check on boot with corruption recovery path
+- [x] **PG-E3-14** `M` · deps PG-E3-13 · Integrity check on boot with corruption recovery path
   - Acceptance: Injected corruption rebuilds and rescan triggers
 - [ ] **PG-E3-15** `S` · deps PG-E3-10 · Retention jobs per DATA_MODEL §6
   - Acceptance: Old rows pruned; user data untouched

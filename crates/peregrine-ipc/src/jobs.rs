@@ -245,6 +245,25 @@ fn storage_error(error: &StorageError) -> AppError {
         StorageError::Migrate { .. } => AppError::new(ErrorCode::StorageCorrupt)
             .with_detail("The library database could not be upgraded.")
             .with_cause("the embedded migrations could not be applied"),
+        // The database is untouched, so this is not corruption: the upgrade did not run and
+        // the copy taken first is the way back. The version and the copy's path are in the
+        // log, and neither belongs in the payload (rule 3 of ARCHITECTURE §7).
+        StorageError::MigrationFailed {
+            version,
+            description,
+            ..
+        } => AppError::new(ErrorCode::StorageCorrupt)
+            .with_detail("The library database could not be upgraded; it was left unchanged.")
+            .with_cause(format!("migration {version:04}_{description} failed")),
+        StorageError::Backup { .. } => AppError::new(ErrorCode::PermissionDenied)
+            .with_detail("The library database could not be copied before upgrading it.")
+            .with_cause("the pre-migration copy could not be written"),
+        StorageError::Quarantine { .. } => AppError::new(ErrorCode::StorageCorrupt)
+            .with_detail(
+                "The library database is damaged and could not be moved aside. Close any \
+                 other copy of Peregrine and start again.",
+            )
+            .with_cause("the damaged database could not be moved aside"),
         StorageError::Pragma { pragma, .. } => AppError::new(ErrorCode::StorageCorrupt)
             .with_detail("The library database could not be configured safely.")
             .with_cause(format!("`{pragma}` is not in force")),
@@ -364,6 +383,34 @@ mod tests {
             (
                 RuntimeError::Storage(StorageError::WriterStopped),
                 ErrorCode::Internal,
+                false,
+            ),
+            (
+                RuntimeError::Storage(StorageError::MigrationFailed {
+                    version: 9,
+                    description: "deliberately_failing".to_owned(),
+                    backup: Some(std::path::PathBuf::from(
+                        "/home/someone/.local/share/peregrine/peregrine.sqlite.backup-0008-01",
+                    )),
+                    source: "the migration failed".into(),
+                }),
+                ErrorCode::StorageCorrupt,
+                false,
+            ),
+            (
+                RuntimeError::Storage(StorageError::Backup {
+                    path: std::path::PathBuf::from("/home/someone/.local/share/peregrine"),
+                    source: "the disk is full".into(),
+                }),
+                ErrorCode::PermissionDenied,
+                false,
+            ),
+            (
+                RuntimeError::Storage(StorageError::Quarantine {
+                    path: std::path::PathBuf::from("/home/someone/.local/share/peregrine"),
+                    source: "permission denied".into(),
+                }),
+                ErrorCode::StorageCorrupt,
                 false,
             ),
             (

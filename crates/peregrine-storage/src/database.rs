@@ -3,11 +3,13 @@
 use std::path::Path;
 
 use sqlx::ConnectOptions;
+use sqlx::Connection as _;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
 use crate::error::StorageError;
+use crate::integrity::Recovery;
 use crate::jobs::{JobChange, JobRecord, NewJob};
 use crate::page::PageRequest;
 use crate::pragmas;
@@ -24,34 +26,54 @@ const READER_POOL_MAX: u32 = 4;
 pub struct Database {
     writer: WriterHandle,
     readers: SqlitePool,
+    recovery: Recovery,
 }
 
 impl Database {
-    /// Opens the database at `path`, creating it when it does not exist, applies the
-    /// embedded migrations on the write connection, and starts the writer task.
+    /// Opens the database at `path`, creating it when it does not exist, checks the file
+    /// for damage, applies the embedded migrations on the write connection, and starts the
+    /// writer task.
+    ///
+    /// The order is the recovery path of ARCHITECTURE §15: a damaged file is moved aside and
+    /// replaced with a clean schema before the writer opens it, and an upgrade copies an
+    /// existing database before it applies the first pending migration.
     ///
     /// # Errors
     ///
     /// [`StorageError::Pragma`] means the write connection could not be brought to the
     /// documented PRAGMA set, so the database was left untouched and the caller should
-    /// report the pragma rather than retry blindly.
+    /// report the pragma rather than retry blindly. [`StorageError::MigrationFailed`] and
+    /// [`StorageError::Backup`] mean the upgrade did not run; [`StorageError::Quarantine`]
+    /// means a damaged file is still in the way and nothing was deleted.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let path = path.as_ref();
         // The path is the first thing a support question needs and is not a secret; this
         // crate never logs a setting or a credential.
         info!(path = %path.display(), "opening the database");
 
+        let recovery = recover(path).await?;
         let mut connection = open_writer_connection(path).await?;
-        crate::migrations::apply(&mut connection)
-            .await
-            .map_err(StorageError::migrate)?;
+        crate::migrations::apply(&mut connection, path).await?;
 
         let writer = WriterHandle::spawn(connection);
         let readers = open_reader_pool(path)
             .await
             .map_err(|error| StorageError::open(path, error))?;
 
-        Ok(Self { writer, readers })
+        Ok(Self {
+            writer,
+            readers,
+            recovery,
+        })
+    }
+
+    /// What the boot-time integrity check found.
+    ///
+    /// [`Recovery::Rebuilt`] means the rows that were in the file are not in the database
+    /// any more, so the library has to be rebuilt by scanning (ARCHITECTURE §15).
+    #[must_use]
+    pub fn recovery(&self) -> &Recovery {
+        &self.recovery
     }
 
     /// Appends one row to `event_log` through the single writer.
@@ -215,6 +237,51 @@ fn unexpected_response(operation: &'static str, response: &WriteResponse) -> Sto
         column: operation,
         found: format!("{response:?}"),
     }
+}
+
+/// Checks an existing file for damage and rebuilds the database when it is damaged.
+///
+/// A file that is not there yet, or is empty, has nothing to check: that is a first install.
+/// The check runs on its own connection, which is closed before anything is renamed, because
+/// a filesystem that refuses to move an open file would turn detection into a failure.
+async fn recover(path: &Path) -> Result<Recovery, StorageError> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) if metadata.len() > 0 => {}
+        Ok(_) => return Ok(Recovery::Intact),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Recovery::Intact);
+        }
+        Err(error) => {
+            return Err(StorageError::Open {
+                path: path.to_path_buf(),
+                source: Box::new(error),
+            });
+        }
+    }
+
+    let mut connection = crate::integrity::probe(path).await?;
+    let damage = crate::integrity::check(&mut connection).await?;
+    connection
+        .close()
+        .await
+        .map_err(|error| StorageError::open(path, error))?;
+
+    let Some(reason) = damage else {
+        return Ok(Recovery::Intact);
+    };
+    warn!(
+        path = %path.display(),
+        reason = %reason,
+        "the database failed its integrity check"
+    );
+
+    let quarantine = crate::integrity::quarantine(path).await?;
+    warn!(
+        path = %path.display(),
+        quarantine = %quarantine.display(),
+        "a clean schema replaces the damaged database, so the library must be rescanned"
+    );
+    Ok(Recovery::Rebuilt { quarantine })
 }
 
 /// Opens the connection the writer task will own, with the documented pragmas applied
@@ -384,12 +451,184 @@ mod tests {
 
         let first = Database::open(&path).await.unwrap();
         let first_id = first.append_event(event(0, 0)).await.unwrap();
+        let recovery = first.recovery().clone();
         drop(first);
+        assert_eq!(recovery, Recovery::Intact);
 
         let second = Database::open(&path).await.unwrap();
         let second_id = second.append_event(event(0, 1)).await.unwrap();
 
         assert_eq!(first_id, 1);
         assert_eq!(second_id, 2, "the reopened writer continues the log");
+    }
+
+    /// The files a recovery path writes, by name: a copy taken before an upgrade and a
+    /// quarantined file are the only two things a boot may add to the data directory.
+    async fn recovery_artifacts(directory: &TempDir) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut entries = tokio::fs::read_dir(directory.path()).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.contains(".backup-") || name.contains(".corrupt-") {
+                names.push(name);
+            }
+        }
+        names.sort();
+        names
+    }
+
+    /// PG-E3-14's healthy path: nothing observable happens. No copy, no quarantine, and the
+    /// rows that were there are still there.
+    #[tokio::test]
+    async fn a_healthy_database_boots_without_writing_anything() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+
+        let first = Database::open(&path).await.unwrap();
+        assert_eq!(*first.recovery(), Recovery::Intact);
+        assert!(!first.recovery().requires_rescan());
+        assert_eq!(first.append_event(event(0, 0)).await.unwrap(), 1);
+        drop(first);
+
+        let second = Database::open(&path).await.unwrap();
+
+        assert_eq!(*second.recovery(), Recovery::Intact);
+        assert_eq!(
+            second.event_count().await.unwrap(),
+            1,
+            "the healthy path must not touch the rows"
+        );
+        assert!(
+            recovery_artifacts(&directory).await.is_empty(),
+            "a healthy boot leaves no copy and no quarantine: {:?}",
+            recovery_artifacts(&directory).await
+        );
+    }
+
+    /// PG-E3-14's acceptance: injected corruption is detected, the damaged file is kept
+    /// rather than deleted, a clean schema replaces it, and the boot says the library has
+    /// to be rescanned.
+    #[tokio::test]
+    async fn a_corrupt_database_is_quarantined_and_rebuilt() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+
+        // A database that worked and held a row, closed cleanly so the fixture is not
+        // relying on a destructor running before the file is overwritten.
+        let mut connection = open_writer_connection(&path).await.unwrap();
+        crate::migrations::apply(&mut connection, &path)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO event_log (at, kind) VALUES (0, 'test.before_corruption')")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        connection.close().await.unwrap();
+
+        // Real corruption: the file's header is overwritten, so it is no longer a database.
+        let mut bytes = tokio::fs::read(&path).await.unwrap();
+        bytes[..100].fill(0xff);
+        tokio::fs::write(&path, &bytes).await.unwrap();
+
+        let database = Database::open(&path).await.unwrap();
+
+        let Recovery::Rebuilt { quarantine } = database.recovery() else {
+            panic!(
+                "the damaged file must be rebuilt, got {:?}",
+                database.recovery()
+            );
+        };
+        assert!(
+            database.recovery().requires_rescan(),
+            "the rows are gone, so the library has to be scanned again"
+        );
+        assert_eq!(
+            tokio::fs::read(quarantine).await.unwrap(),
+            bytes,
+            "the damaged file is kept byte for byte, not deleted"
+        );
+        assert_eq!(
+            database.event_count().await.unwrap(),
+            0,
+            "the rebuilt schema is empty: the old rows are in the quarantined file"
+        );
+        let tables: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'title'",
+        )
+        .fetch_one(&database.readers)
+        .await
+        .unwrap();
+        assert_eq!(tables, 1, "the clean schema is the embedded one");
+
+        // The rebuilt database is a working one, and the next boot finds it healthy.
+        assert_eq!(database.append_event(event(0, 0)).await.unwrap(), 1);
+        drop(database);
+        let next = Database::open(&path).await.unwrap();
+        assert_eq!(*next.recovery(), Recovery::Intact);
+    }
+
+    /// A file that was never a database at all is treated the same way: the recovery path
+    /// is about the file, not about how it became unreadable.
+    #[tokio::test]
+    async fn a_file_that_is_not_a_database_is_quarantined_too() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        tokio::fs::write(&path, b"this was never a database")
+            .await
+            .unwrap();
+
+        let database = Database::open(&path).await.unwrap();
+
+        let Recovery::Rebuilt { quarantine } = database.recovery() else {
+            panic!("expected a rebuild, got {:?}", database.recovery());
+        };
+        assert_eq!(
+            tokio::fs::read(&quarantine).await.unwrap(),
+            b"this was never a database"
+        );
+        assert_eq!(database.title_count().await.unwrap(), 0);
+    }
+
+    /// The permissions edge case: damage that cannot be moved aside is reported, and the
+    /// file is still there. Nothing is deleted to make the boot succeed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_damaged_database_that_cannot_be_moved_aside_is_reported() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        tokio::fs::write(&path, b"not a database").await.unwrap();
+        let original = tokio::fs::metadata(directory.path())
+            .await
+            .unwrap()
+            .permissions();
+        tokio::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o500))
+            .await
+            .unwrap();
+
+        let error = Database::open(&path)
+            .await
+            .expect_err("a damaged file that cannot be moved must not be silently replaced");
+
+        // Restore before asserting, or a failing assertion leaves the temporary directory
+        // undeletable.
+        tokio::fs::set_permissions(directory.path(), original)
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(error, StorageError::Quarantine { .. }),
+            "expected a typed quarantine failure, got {error:?}"
+        );
+        assert!(
+            error.to_string().contains("close any other copy"),
+            "the error must say what to do: {error}"
+        );
+        assert_eq!(
+            tokio::fs::read(&path).await.unwrap(),
+            b"not a database",
+            "the damaged file must not be deleted when it cannot be moved"
+        );
     }
 }
