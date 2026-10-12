@@ -25,7 +25,7 @@ Positive: relational queries with real joins; built-in ranked search with no sec
 Negative and mitigated:
 
 - Single-writer serialization is a real constraint for a queue writing progress from 20 jobs. Mitigated by coalescing progress writes to ≤1 Hz per job and keeping network calls out of write transactions. A Phase 2 load test with 20 concurrent jobs is the gate.
-- FTS5 must be maintained by hand because triggers cannot cheaply aggregate aliases, keywords, and cast names. Mitigated by a single repository path that owns catalogue writes, plus a `rebuild-fts` maintenance command verified to reproduce identical results.
+- FTS5 must be maintained by hand because triggers cannot cheaply aggregate aliases, keywords, and cast names. Mitigated by a single repository path that owns catalogue writes, plus a rebuild path on that same writer — `Database::rebuild_search_index` (PG-E3-12) — verified to reproduce identical results; the maintenance job (PG-E3-16) is where it is scheduled. The `rebuild-fts` command this line used to name was never built.
 - Schema migrations are forever-applied. Mitigated by immutability checks, fixture upgrades, and refusing to open a newer schema rather than corrupting it.
 
 ## Alternatives rejected

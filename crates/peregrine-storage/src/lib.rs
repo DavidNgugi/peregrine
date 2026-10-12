@@ -18,6 +18,7 @@ mod backup;
 mod catalogue;
 mod database;
 mod error;
+mod fts;
 mod integrity;
 mod jobs;
 mod migrations;

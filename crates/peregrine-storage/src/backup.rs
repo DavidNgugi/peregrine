@@ -313,7 +313,7 @@ mod tests {
     async fn a_partial_file_is_not_a_copy_and_is_reused() {
         let directory = TempDir::new().unwrap();
         let (mut connection, path) = migrated(&directory).await;
-        let leftover = with_suffix(&path, ".backup-0008-01.partial");
+        let leftover = with_suffix(&path, ".backup-0009-01.partial");
         tokio::fs::write(&leftover, b"half a copy").await.unwrap();
 
         assert_eq!(
@@ -322,12 +322,12 @@ mod tests {
             "a partial file is not a copy"
         );
 
-        let copy = take(&mut connection, &path, 8).await.unwrap();
+        let copy = take(&mut connection, &path, 9).await.unwrap();
 
-        assert_eq!(copy, with_suffix(&path, ".backup-0008-01"));
+        assert_eq!(copy, with_suffix(&path, ".backup-0009-01"));
         assert!(!leftover.exists(), "the leftover must not survive the run");
         assert!(copy.is_file());
         let mut restored = open_writer_connection(&copy).await.unwrap();
-        assert_eq!(versions(&mut restored).await, (1..=8).collect::<Vec<_>>());
+        assert_eq!(versions(&mut restored).await, (1..=9).collect::<Vec<_>>());
     }
 }

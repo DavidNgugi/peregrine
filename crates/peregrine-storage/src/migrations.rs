@@ -147,7 +147,21 @@ mod tests {
     use sqlx::migrate::MigrationType;
     use tempfile::TempDir;
 
-    /// The forty tables the seven migrations create, per `DATA_MODEL` §2.1–§2.8.
+    /// The FTS5 index and the shadow tables `SQLite` keeps beside it.
+    ///
+    /// They hold no user row — the index is derived from `title` and can be rebuilt from it
+    /// (`PG-E3-12`) — so they are not part of the table set that asserts the schema's tables,
+    /// and `the_search_index_is_a_contentless_fts5_table` asserts them on their own. The four
+    /// shadow tables are created by the FTS5 module itself and are not named by a migration.
+    const FTS_TIER: [&str; 5] = [
+        "title_fts",
+        "title_fts_config",
+        "title_fts_data",
+        "title_fts_docsize",
+        "title_fts_idx",
+    ];
+
+    /// The forty tables the eight migrations create, per `DATA_MODEL` §2.1–§2.8.
     const DOCUMENTED_TABLES: [&str; 40] = [
         "account",
         "cast_session",
@@ -917,7 +931,7 @@ mod tests {
         ("watchlist_entry", "title", "title_id", "id", "CASCADE"),
     ];
 
-    /// Every named index the seven migrations create.
+    /// Every named index the eight migrations create.
     const DOCUMENTED_INDICES: [&str; 37] = [
         "credit_person_idx",
         "credit_title_order_idx",
@@ -1209,6 +1223,19 @@ mod tests {
         .unwrap()
     }
 
+    /// The tables the migrations declare, which is every table except the derived FTS tier.
+    async fn documented_tables(connection: &mut SqliteConnection) -> Vec<String> {
+        names(
+            connection,
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
+             AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' ORDER BY name",
+        )
+        .await
+        .into_iter()
+        .filter(|name| !FTS_TIER.contains(&name.as_str()))
+        .collect()
+    }
+
     /// The whole schema except the disposable cache tier, so a test can prove the tier's
     /// removal changed nothing else.
     async fn schema_without_cache(
@@ -1237,22 +1264,70 @@ mod tests {
         let applied = apply(&mut connection, &path).await.unwrap();
 
         assert_eq!(
-            applied, 8,
-            "the embedded set is 0001–0008, one migration per file"
+            applied, 9,
+            "the embedded set is 0001–0009, one migration per file"
         );
+        assert_eq!(
+            documented_tables(&mut connection).await,
+            DOCUMENTED_TABLES,
+            "the search index is excluded: it is derived, and asserted on its own below"
+        );
+        assert_eq!(
+            versions(&mut connection).await,
+            (1..=9).collect::<Vec<_>>(),
+            "every applied migration must be recorded, in order"
+        );
+    }
+
+    /// PG-E3-12: the index is a contentless FTS5 table that accepts a per-row delete, and
+    /// `SQLite` creates the shadow tables it needs beside it.
+    ///
+    /// The two options are asserted by name rather than by behaviour because they are what
+    /// `DATA_MODEL` §2.9 records, and a rebuild of this schema must produce the same table.
+    /// `contentless_delete=1` is the load-bearing one: without it `SQLite` refuses
+    /// `DELETE FROM title_fts` outright, and the maintenance path has no way to remove a
+    /// title from the index short of rebuilding all of it.
+    #[tokio::test]
+    async fn the_search_index_is_a_contentless_fts5_table() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = migrated(&directory).await;
+
+        let sql: String = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'title_fts'",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .expect("the index is declared by the embedded migrations");
+
+        assert!(
+            sql.to_uppercase().contains("FTS5"),
+            "the index must be an FTS5 table: {sql}"
+        );
+        for option in ["content=''", "contentless_delete=1"] {
+            assert!(
+                sql.to_lowercase().contains(option),
+                "`title_fts` must declare `{option}`: {sql}"
+            );
+        }
+        assert!(
+            !sql.contains("content='title'"),
+            "an external-content table would keep a second copy of the corpus: {sql}"
+        );
+
+        // `SQLite` creates these itself; a migration that named them would break the moment
+        // the module's internal layout changed. The set is asserted whole, so the tier the
+        // table-set assertion filters is exactly what is in the database.
+        let mut expected = FTS_TIER.to_vec();
+        expected.sort_unstable();
         assert_eq!(
             names(
                 &mut connection,
                 "SELECT name FROM sqlite_master WHERE type = 'table' \
-                 AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' ORDER BY name",
+                 AND name LIKE 'title\\_fts%' ESCAPE '\\' ORDER BY name",
             )
             .await,
-            DOCUMENTED_TABLES
-        );
-        assert_eq!(
-            versions(&mut connection).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8],
-            "every applied migration must be recorded, in order"
+            expected,
+            "the index and the shadow tables `SQLite` keeps beside it, and nothing else"
         );
     }
 
@@ -1636,10 +1711,10 @@ mod tests {
         let mut second = open_writer_connection(&path).await.unwrap();
         let applied = apply(&mut second, &path).await.unwrap();
 
-        assert_eq!(applied, 8);
+        assert_eq!(applied, 9);
         assert_eq!(
             versions(&mut second).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8],
+            (1..=9).collect::<Vec<_>>(),
             "a second run must not record the migrations twice"
         );
     }
@@ -1661,12 +1736,7 @@ mod tests {
         MIGRATOR.undo(&mut connection, 0).await.unwrap();
 
         assert_eq!(
-            names(
-                &mut connection,
-                "SELECT name FROM sqlite_master WHERE type = 'table' \
-                 AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' ORDER BY name",
-            )
-            .await,
+            documented_tables(&mut connection).await,
             DOCUMENTED_TABLES,
             "undo is a no-op because no down migration exists"
         );
@@ -1711,7 +1781,7 @@ mod tests {
         .unwrap()
     }
 
-    /// Every foreign key the seven migrations declare, with the delete behaviour that
+    /// Every foreign key the eight migrations declare, with the delete behaviour that
     /// `pragma_foreign_key_list` reports. A dropped `ON DELETE` clause is invisible to
     /// `pragma_table_info`, so it gets its own test.
     #[tokio::test]
@@ -2622,7 +2692,7 @@ mod tests {
     const FAILING_MIGRATION: &str = include_str!("../tests/fixtures/failing_migration.sql");
 
     /// The version the fixture takes, past every merged migration.
-    const FAILING_VERSION: i64 = 9;
+    const FAILING_VERSION: i64 = 10;
 
     /// A corrected version of the fixture, used to prove a failed run can be retried.
     const FIXED_MIGRATION: &str = "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY, note TEXT NOT NULL); \
@@ -2702,7 +2772,7 @@ mod tests {
         assert_eq!(description, "deliberately_failing");
         let message = error.to_string();
         assert!(
-            message.contains("0009_deliberately_failing"),
+            message.contains("0010_deliberately_failing"),
             "the error must name the migration: {message}"
         );
         assert!(
@@ -2728,7 +2798,7 @@ mod tests {
         assert_eq!(schema(&mut connection).await, before);
         assert_eq!(
             versions(&mut connection).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8],
+            (1..=9).collect::<Vec<_>>(),
             "a failed migration must not be recorded"
         );
         let titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
@@ -2741,7 +2811,7 @@ mod tests {
         // no record of the version that failed.
         let mut copy = open_writer_connection(&backup).await.unwrap();
         assert!(!table_exists(&mut copy, "migration_probe").await);
-        assert_eq!(versions(&mut copy).await, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(versions(&mut copy).await, (1..=9).collect::<Vec<_>>());
         let copied_titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
             .fetch_one(&mut copy)
             .await
@@ -2770,8 +2840,11 @@ mod tests {
         ));
         let applied = run(&mut connection, &path, &fixed).await.unwrap();
 
-        assert_eq!(applied, 9);
-        assert_eq!(versions(&mut connection).await, (1..=9).collect::<Vec<_>>());
+        assert_eq!(applied, 10);
+        assert_eq!(
+            versions(&mut connection).await,
+            (1..=10).collect::<Vec<_>>()
+        );
         assert!(table_exists(&mut connection, "migration_probe").await);
     }
 
@@ -2786,7 +2859,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(applied, 8);
+        assert_eq!(applied, 9);
         let copies = copies(&directory).await;
         assert_eq!(
             copies,
@@ -2801,7 +2874,7 @@ mod tests {
             vec![1, 2, 3, 4, 5, 6, 7],
             "the copy predates the migration that was pending"
         );
-        assert_eq!(versions(&mut connection).await, (1..=8).collect::<Vec<_>>());
+        assert_eq!(versions(&mut connection).await, (1..=9).collect::<Vec<_>>());
     }
 
     /// A database that is already up to date is not copied again: the copy is for an
