@@ -795,7 +795,8 @@ mod tests {
                 audio_codecs,
                 size_caps,
                 group_rules,
-            ),
+            )
+            .expect("the fixture preference orders name no value twice"),
             QualityRank::new(3),
             true,
             true,
@@ -1645,6 +1646,17 @@ mod tests {
             })
     }
 
+    /// A generated list with repeats removed, keeping the order the generator produced.
+    fn deduplicated<T: Copy + PartialEq>(values: Vec<T>) -> Vec<T> {
+        let mut unique = Vec::with_capacity(values.len());
+        for value in values {
+            if !unique.contains(&value) {
+                unique.push(value);
+            }
+        }
+        unique
+    }
+
     fn rules_strategy() -> impl Strategy<Value = QualityRules> {
         (
             prop::collection::vec(resolution_strategy(), 0..4),
@@ -1675,14 +1687,18 @@ mod tests {
                         .into_iter()
                         .filter(|group| !allowed.contains(group))
                         .collect();
+                    // A preference order cannot name one value twice, so the generator
+                    // deduplicates before it builds — a duplicate would make every generated
+                    // profile invalid rather than exercising the ranker.
                     QualityRules::new(
-                        resolutions,
-                        sources,
-                        video_codecs,
-                        audio_codecs,
+                        deduplicated(resolutions),
+                        deduplicated(sources),
+                        deduplicated(video_codecs),
+                        deduplicated(audio_codecs),
                         SizeCaps::new(floor, ceiling).expect("the generator orders the caps"),
                         GroupRules::new(allowed, blocked).expect("the generator removes overlap"),
                     )
+                    .expect("the generator deduplicates every preference order")
                 },
             )
     }

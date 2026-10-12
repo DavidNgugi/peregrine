@@ -149,11 +149,58 @@ impl TryFrom<GroupRulesDraft> for GroupRules {
     }
 }
 
+/// The spellings of a preference list, in order.
+fn spellings(values: impl Iterator<Item = &'static str>) -> Vec<&'static str> {
+    values.collect()
+}
+
+/// The first spelling that appears more than once, if any.
+///
+/// A linear scan rather than a set: these lists hold a handful of entries, and this keeps the
+/// check allocation-light and the reported value the one the user actually typed twice.
+fn first_duplicate(spellings: &[&'static str]) -> Option<&'static str> {
+    spellings
+        .iter()
+        .enumerate()
+        .find_map(|(index, value)| spellings[..index].contains(value).then_some(*value))
+}
+
+/// The wire form of [`QualityRules`], validated on the way in.
+///
+/// `Vec` alone cannot refuse a duplicated entry, so deserialization goes through this and the
+/// same check the constructor runs. Without it, a hand-edited profile file could carry a
+/// preference order the constructor would have rejected.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QualityRulesDraft {
+    resolutions: Vec<Resolution>,
+    sources: Vec<ReleaseSource>,
+    video_codecs: Vec<VideoCodec>,
+    audio_codecs: Vec<AudioCodec>,
+    size_caps: SizeCaps,
+    groups: GroupRules,
+}
+
+impl TryFrom<QualityRulesDraft> for QualityRules {
+    type Error = QualityProfileError;
+
+    fn try_from(draft: QualityRulesDraft) -> Result<Self, Self::Error> {
+        Self::new(
+            draft.resolutions,
+            draft.sources,
+            draft.video_codecs,
+            draft.audio_codecs,
+            draft.size_caps,
+            draft.groups,
+        )
+    }
+}
+
 /// The rules inside a profile: what it accepts and prefers, and its size caps.
 // Unknown fields are refused rather than ignored, because a misspelled rule would
 // silently widen the profile instead of failing the load.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "QualityRulesDraft")]
 pub struct QualityRules {
     resolutions: Vec<Resolution>,
     sources: Vec<ReleaseSource>,
@@ -165,22 +212,60 @@ pub struct QualityRules {
 
 impl QualityRules {
     /// Builds rules from accept lists, caps, and group rules.
-    pub const fn new(
+    ///
+    /// An accept list is a *preference order*, so naming one value twice is a contradiction
+    /// rather than a harmless repeat: the second entry can never be reached, and a user who
+    /// typed it believes they asked for something. It is refused here and on the
+    /// deserialization path, which is the only other way a `QualityRules` comes into being.
+    ///
+    /// # Errors
+    ///
+    /// [`QualityProfileError::DuplicatedRule`] when a list names one value twice.
+    pub fn new(
         resolutions: Vec<Resolution>,
         sources: Vec<ReleaseSource>,
         video_codecs: Vec<VideoCodec>,
         audio_codecs: Vec<AudioCodec>,
         size_caps: SizeCaps,
         groups: GroupRules,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, QualityProfileError> {
+        let rules = Self {
             resolutions,
             sources,
             video_codecs,
             audio_codecs,
             size_caps,
             groups,
+        };
+        rules.validate()?;
+        Ok(rules)
+    }
+
+    /// Refuses a preference order that names one value twice.
+    fn validate(&self) -> Result<(), QualityProfileError> {
+        for (field, spellings) in [
+            (
+                "resolution",
+                spellings(self.resolutions.iter().map(|value| value.as_str())),
+            ),
+            (
+                "source",
+                spellings(self.sources.iter().map(|value| value.as_str())),
+            ),
+            (
+                "video codec",
+                spellings(self.video_codecs.iter().map(|value| value.as_str())),
+            ),
+            (
+                "audio codec",
+                spellings(self.audio_codecs.iter().map(|value| value.as_str())),
+            ),
+        ] {
+            if let Some(value) = first_duplicate(&spellings) {
+                return Err(QualityProfileError::DuplicatedRule { field, value });
+            }
         }
+        Ok(())
     }
 
     /// The accepted resolutions, preferred first; empty means no constraint.
@@ -320,6 +405,16 @@ pub enum QualityProfileError {
     /// A group name in a rule was empty or only whitespace.
     #[error("a release group rule needs a name")]
     EmptyGroup,
+    /// An accept list named the same value twice.
+    #[error(
+        "the {field} preference order names `{value}` twice, so the second entry can never be reached"
+    )]
+    DuplicatedRule {
+        /// Which accept list held the duplicate.
+        field: &'static str,
+        /// The repeated value, as the schema spells it.
+        value: &'static str,
+    },
 }
 
 #[cfg(test)]
@@ -388,6 +483,120 @@ mod tests {
             caps(Some(1_000_000), Some(60_000_000_000)),
             groups(&["FRAMESTOR"], &["YIFY"]),
         )
+        .expect("the fixture preference orders name no value twice")
+    }
+
+    /// A generated list with repeats removed, keeping the order the generator produced.
+    fn deduplicated<T: Copy + PartialEq>(values: Vec<T>) -> Vec<T> {
+        let mut unique = Vec::with_capacity(values.len());
+        for value in values {
+            if !unique.contains(&value) {
+                unique.push(value);
+            }
+        }
+        unique
+    }
+
+    #[test]
+    fn a_preference_order_that_names_a_value_twice_is_refused() {
+        type Case = (
+            Vec<Resolution>,
+            Vec<ReleaseSource>,
+            Vec<VideoCodec>,
+            Vec<AudioCodec>,
+            &'static str,
+            &'static str,
+        );
+        let cases: [Case; 4] = [
+            (
+                vec![Resolution::FullHd, Resolution::UltraHd, Resolution::FullHd],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                "resolution",
+                "1080p",
+            ),
+            (
+                Vec::new(),
+                vec![
+                    ReleaseSource::BluRay,
+                    ReleaseSource::WebDl,
+                    ReleaseSource::BluRay,
+                ],
+                Vec::new(),
+                Vec::new(),
+                "source",
+                "bluray",
+            ),
+            (
+                Vec::new(),
+                Vec::new(),
+                vec![VideoCodec::H264, VideoCodec::H265, VideoCodec::H264],
+                Vec::new(),
+                "video codec",
+                "h264",
+            ),
+            (
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                vec![AudioCodec::Aac, AudioCodec::Eac3, AudioCodec::Aac],
+                "audio codec",
+                "aac",
+            ),
+        ];
+
+        for (resolutions, sources, video_codecs, audio_codecs, field, value) in cases {
+            let error = QualityRules::new(
+                resolutions,
+                sources,
+                video_codecs,
+                audio_codecs,
+                caps(None, None),
+                groups(&[], &[]),
+            )
+            .expect_err("a preference order cannot name one value twice");
+            assert!(
+                matches!(
+                    error,
+                    QualityProfileError::DuplicatedRule { field: named, value: repeated }
+                        if named == field && repeated == value
+                ),
+                "expected the {field} list to be named, got: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_repeated_order_is_refused_when_it_is_deserialized() {
+        // Built from a real serialization rather than a hand-written literal, so the test
+        // cannot pass because the wire shape was guessed wrong.
+        let mut value = serde_json::to_value(rules()).expect("a fixture profile serializes");
+        let resolutions = value["resolutions"]
+            .as_array_mut()
+            .expect("the resolutions field is a list");
+        let first = resolutions
+            .first()
+            .cloned()
+            .expect("the fixture names at least one resolution");
+        resolutions.push(first);
+
+        let error = serde_json::from_value::<QualityRules>(value)
+            .expect_err("the wire form must refuse a repeated order");
+        assert!(
+            error.to_string().contains("twice"),
+            "the message should say the value is named twice: {error}"
+        );
+    }
+
+    #[test]
+    fn a_valid_order_survives_the_wire_form() {
+        let rules = rules();
+        let json = serde_json::to_string(&rules).expect("a profile serializes");
+        assert_eq!(
+            serde_json::from_str::<QualityRules>(&json).expect("and comes back"),
+            rules
+        );
     }
 
     fn profile() -> QualityProfile {
@@ -622,7 +831,8 @@ mod tests {
             Vec::new(),
             caps(None, None),
             groups(&[], &[]),
-        );
+        )
+        .expect("empty preference orders name nothing twice");
         assert!(
             unrestricted.resolutions().is_empty(),
             "a profile with no resolution rule accepts every resolution"
@@ -683,14 +893,18 @@ mod tests {
                         .into_iter()
                         .filter(|group| !allowed.contains(group))
                         .collect();
+                    // A preference order cannot name one value twice, so the generator
+                    // deduplicates before it builds: without this every generated profile
+                    // would fail the very rule these tests exist to exercise.
                     QualityRules::new(
-                        resolutions,
-                        sources,
-                        video_codecs,
-                        audio_codecs,
+                        deduplicated(resolutions),
+                        deduplicated(sources),
+                        deduplicated(video_codecs),
+                        deduplicated(audio_codecs),
                         SizeCaps::new(floor, ceiling).expect("the generator orders the caps"),
                         GroupRules::new(allowed, blocked).expect("the generator removes overlap"),
                     )
+                    .expect("the generator deduplicates every preference order")
                 },
             )
     }
