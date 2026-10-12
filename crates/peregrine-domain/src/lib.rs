@@ -10,16 +10,30 @@
 //! invent its own.
 
 pub mod account;
+pub mod catalogue;
 pub mod id;
+pub mod library;
 pub mod notify;
 pub mod path;
 pub mod ports;
 pub mod quality;
 pub mod redaction;
 pub mod release;
+pub mod text;
 
 pub use account::{AccountError, AccountId, AccountScope, Visibility};
+pub use catalogue::{
+    AliasKind, CatalogueError, Company, CompanyRole, Credit, CreditKind, Episode, EpisodeNumber,
+    EpisodeOrdering, EpisodePosition, EpisodeType, Genre, Keyword, MetadataState, OrderingScheme,
+    Person, Season, SeasonNumber, Title, TitleAlias, TitleKind, TitleStatus, TitleSubtype,
+};
 pub use id::{ExternalId, ExternalIdError, Provider};
+pub use library::{
+    LibraryRoot, LibraryRootKind, MediaFile, MediaItem, MediaItemState, MediaOrigin,
+    PlaybackPosition, ProgressSource, ScanMode, SmartCollection, StoredWatchProgress,
+    SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile, WATCHED_PERCENT,
+    WatchProgress, WatchProgressError, WatchlistEntry,
+};
 pub use notify::{
     BURST_SUMMARY_THRESHOLD, DEDUPE_WINDOW_MILLIS, DeepLink, DeepLinkError, EnableReason,
     EventSetting, Focus, MAX_DEEP_LINK_BYTES, MAX_TEXT_BYTES, NotificationEvent,
@@ -38,3 +52,60 @@ pub use release::{
     AudioCodec, EpisodeSpan, HdrFormat, ReleaseName, ReleaseSource, RepackKind, Resolution,
     VideoCodec,
 };
+pub use text::{NonEmptyText, TextError};
+
+/// Declares an enum that mirrors one `TEXT ... CHECK (col IN (...))` constraint.
+///
+/// The caller documents the variants; the macro supplies the three things every stored enum
+/// owes the repositories: the database spelling, the complete list in the constraint's order,
+/// and a parse that refuses a value this build does not know. Generating them together is
+/// what makes forgetting the read half of the mapping — the half a new enum is most likely to
+/// omit — impossible.
+///
+/// It is defined after the modules that use it so that they import it explicitly by path;
+/// `macro_rules!` textual scope would otherwise make that import look unused.
+macro_rules! stored_enum {
+    (
+        $(#[$enum_meta:meta])*
+        $name:ident { $($(#[$variant_meta:meta])* $variant:ident => $text:literal),+ $(,)? }
+    ) => {
+        $(#[$enum_meta])*
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+            ::serde::Serialize,
+            ::serde::Deserialize,
+        )]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name {
+            $($(#[$variant_meta])* $variant,)+
+        }
+
+        impl $name {
+            /// Every variant, in the order the database constraint lists them.
+            pub const ALL: &[Self] = &[$(Self::$variant),+];
+
+            /// The value the `CHECK` constraint accepts.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $text,)+
+                }
+            }
+
+            /// Parses the stored value, or `None` for one this build does not know.
+            #[must_use]
+            pub fn parse(value: &str) -> Option<Self> {
+                match value {
+                    $($text => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+pub(crate) use stored_enum;

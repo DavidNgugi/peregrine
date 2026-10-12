@@ -240,7 +240,7 @@ graph LR
 
 ## E4 · Domain core
 
-- [ ] **PG-E4-01** *(doing)* `M` · deps PG-E0-01 · Core entities and value objects with validating constructors **Remaining:** The current crate exports IDs, release parsing, quality profiles, path policy, notification policy, clock/id ports, and the account scope (`AccountId`, `AccountScope`, `Visibility`). Catalogue and library entities remain, and so does the application integration of the scope: no IPC command takes one yet, because no screen reads content.
+- [x] **PG-E4-01** `M` · deps PG-E0-01 · Core entities and value objects with validating constructors
   - Acceptance: Illegal states unrepresentable; construction failures are typed
 - [ ] **PG-E4-02** *(doing)* `S` · deps PG-E4-01 · `ExternalId` with provider prefixes and parsing
   - Acceptance: Round-trip property test over generated ID shapes
