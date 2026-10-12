@@ -361,9 +361,9 @@ mod tests {
         NewEvent {
             // Injected, never the wall clock (AGENTS R14).
             at_millis: 1_700_000_000_000 + writer * WRITES_PER_WRITER + sequence,
-            kind: "test.concurrent_write".to_owned(),
-            subject_kind: Some("writer".to_owned()),
-            subject_id: Some(writer),
+            // A declared event, because the writer accepts nothing else (PG-E4-16); the writer
+            // index stands in for a job id so the rows are distinguishable.
+            event: peregrine_domain::Event::DownloadQueued { job_id: writer },
             detail_json: None,
         }
     }

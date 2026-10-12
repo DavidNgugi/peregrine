@@ -766,6 +766,20 @@ CREATE TABLE cast_session (
 );
 ```
 
+`event_log.kind` and `event_log.subject_kind` are not free text. Every value a repository writes
+comes from the declared event vocabulary in `peregrine-domain`
+(`crates/peregrine-domain/src/event.rs`): `NewEvent` holds the domain type rather than a string,
+so a name the vocabulary does not declare is a compile error rather than a typo that reaches the
+table, and the vocabulary's own test pins each name. `subject_kind` names the table the subject
+row lives in — `download_job`, `title`, or `episode` — and `subject_id` is that row's id, so
+every event is about something. The vocabulary covers the download-job state machine (SM1) and
+the watch-progress writes of F10 today. `media.added` and `media.deleted` — the library import of
+F8 and the deletion of F12, owed by PG-E14 and PG-E15 — are named by the flows and the comment
+above but not yet declared, because nothing performs them yet; each extends the vocabulary in the
+change that implements it. Note that `notification.subject_kind` spells the same download row
+`download` where this column uses `download_job`; the two columns are independent and reconciling
+them is a migration.
+
 ### 2.9 Full-text search
 
 ```sql
