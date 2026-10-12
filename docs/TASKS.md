@@ -203,7 +203,7 @@ graph LR
   - Acceptance: Poster loads without base64 or IPC payloads
 - [x] **PG-E2-09** `XS` · deps PG-E2-01 · Payload size guard: responses over 64 KB log a warning in dev
   - Acceptance: Fixture oversized response triggers the guard
-- [ ] **PG-E2-10** `M` · deps PG-E2-02 · IPC contract tests generated from the command registry
+- [ ] **PG-E2-10** `M` · deps PG-E2-02 · IPC contract tests generated from the command registry **Remaining:** the suite is in `crates/peregrine-ipc/src/contract_tests.rs` and the coverage test does fail by name when a command is registered without a case, but `system::build_info` has no failing path — its name, version, and target come from infallible lookups and it reaches for no managed state — so its case drives it against an application whose runtime never started and records that it cannot fail. The other five commands each drive a real failure through the mock app. The acceptance as written therefore holds for five of the six and cannot hold for the sixth: decide whether the intent, that no command's failure behaviour is untested, is met and tick this, or narrow the acceptance.
   - Acceptance: Every command has a test that exercises its error path
 - [x] **PG-E2-11** `S` · deps PG-E2-05 · Backpressure signal to the UI when events are dropped
   - Acceptance: UI shows a degraded live indicator instead of stalling

@@ -22,6 +22,11 @@ pub mod jobs;
 pub mod runtime;
 pub mod system;
 
+#[cfg(test)]
+mod contract_tests;
+#[cfg(test)]
+mod redaction;
+
 use tauri_specta::{Builder, collect_commands, collect_events};
 
 /// The command surface, registered once.

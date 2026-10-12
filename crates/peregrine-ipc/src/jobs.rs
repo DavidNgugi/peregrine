@@ -355,15 +355,6 @@ mod tests {
         assert!(object.contains_key("progressPermille"));
     }
 
-    /// A path can be rendered in three shapes depending on the machine that produced it, and the
-    /// fixtures below cover all three. Checking only `/home/` and `.local` — which is what this
-    /// test did before — passes on macOS and Windows no matter what leaks, because neither string
-    /// can appear in a path there. The canary is the part that matters: it is in every fixture
-    /// path, so it appears in the payload if any of them is interpolated, whatever the separator.
-    /// The roots are a second net for a future variant that forgets the canary.
-    const PATH_CANARY: &str = "peregrine-leak-canary";
-    const PATH_ROOTS: [&str; 5] = ["/home/", "/Users/", ".local", "AppData", "\\Users\\"];
-
     /// Every mapped runtime failure, with the code and the retryability it must produce.
     ///
     /// The table is separate from the assertion below because it is most of the line count, and a
@@ -462,16 +453,7 @@ mod tests {
                 .into_iter()
                 .flatten()
             {
-                assert!(
-                    !text.contains(PATH_CANARY),
-                    "a path reached the payload: {text}"
-                );
-                for root in PATH_ROOTS {
-                    assert!(
-                        !text.contains(root),
-                        "the path root `{root}` reached the payload: {text}"
-                    );
-                }
+                crate::redaction::assert_no_path("a mapped runtime failure", text);
             }
         }
     }
