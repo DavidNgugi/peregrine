@@ -103,9 +103,9 @@ graph LR
   - Acceptance: `tsc --noEmit` clean with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
 - [x] **PG-E0-10** `S` · deps PG-E0-08, PG-E0-09 · Pre-commit hooks: format, lint staged files, arch check
   - Acceptance: A commit with a formatting error is rejected locally
-- [ ] **PG-E0-11** *(review)* `XS` · Commit convention, PR template with perf and security checklists, CODEOWNERS
+- [ ] **PG-E0-11** *(review)* `XS` · Commit convention, PR template with perf and security checklists, CODEOWNERS **Remaining:** The template now carries every §4 category, the §6 budgets, the SECURITY.md per-PR controls, the DCO/commit convention and the §3 gates, but "rendered on a test PR" has not been executed: `gh` is unauthenticated here, so the GitHub-side rendering and the CODEOWNERS team names are unverified.
   - Acceptance: Template rendered on a test PR
-- [ ] **PG-E0-12** *(review)* `XS` · Issue templates and label taxonomy, milestones mapped to phases
+- [ ] **PG-E0-12** *(review)* `XS` · Issue templates and label taxonomy, milestones mapped to phases **Remaining:** Locally verified: every phase in PLAN.md §2 has one label, every epic in this file maps to one of them, and every label a template or `renovate.json` names exists in `labels.yml`. Unexecuted: GitHub applies a form label only if the label already exists in the repository, and nothing creates or verifies the taxonomy outside `.github/workflows/labels.yml`, which runs on push to `main`; so the forms produce labelled issues only after that sync has run, and the run itself is unobserved.
   - Acceptance: Templates produce labelled issues
 - [ ] **PG-E0-13** *(review)* `M` · deps PG-E0-01 · CI matrix: lint, test, build on macOS arm64, Windows x64, Ubuntu 24.04 **Remaining:** Install the Tauri Linux prerequisites in the Ubuntu MSRV job as well as the other jobs, and record a green three-platform CI run.
   - Acceptance: Green on a trivial PR with cache warm
@@ -115,7 +115,7 @@ graph LR
   - Acceptance: Build fails on an unused fixture dependency
 - [ ] **PG-E0-16** `M` · deps PG-E0-13 · Release workflow: bundles, SBOM, signed manifest, changelog
   - Acceptance: A tagged pre-release publishes artifacts and a manifest
-- [ ] **PG-E0-17** *(review)* `XS` · deps PG-E0-13 · Automated dependency updates, grouped weekly
+- [ ] **PG-E0-17** *(review)* `XS` · deps PG-E0-13 · Automated dependency updates, grouped weekly **Remaining:** The config is verified statically — `schedule:weekly`, one group each for cargo, npm and github-actions, and version ranges left to the DEPENDENCIES §1 policy — and the managed labels exist. Nothing has run: "a grouped PR opens on schedule" needs the Renovate app installed on the repository, then one scheduled run observed.
   - Acceptance: A grouped PR opens on schedule
 - [ ] **PG-E0-18** *(doing)* `S` · `LICENSE`, `NOTICE`, third-party attribution scaffold
   - Acceptance: Attribution file lists every runtime dependency and sidecar

@@ -20,6 +20,9 @@
 
 # Supply chain, packaging, and the gates that hold them.
 /.github/workflows/                 @peregrine-app/infra
+/.github/labels.yml                 @peregrine-app/infra
+/.github/ISSUE_TEMPLATE/            @peregrine-app/infra
+/renovate.json                      @peregrine-app/infra
 /deny.toml                          @peregrine-app/security
 /NOTICE                             @peregrine-app/security
 
