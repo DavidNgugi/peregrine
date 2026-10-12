@@ -310,6 +310,42 @@ pub(crate) async fn record_root_scan(
     Ok(result.rows_affected() > 0)
 }
 
+/// Removes one row of `library_root`, reporting whether the row was there.
+///
+/// This is the only statement a root removal runs. Everything the root produced — media items,
+/// files, watch progress, subtitles — is deliberately left alone (PG-E14-01): a user who removes
+/// a folder from Peregrine has said "stop scanning this", not "forget what I watched", and the
+/// files are theirs. What is no longer reachable is the root itself, which is what makes the
+/// scanner stop walking it.
+pub(crate) async fn remove_root(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM library_root WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *connection)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Changes when one root is scanned, reporting whether the row was there.
+///
+/// `last_scan_at` is untouched: how often a root is *going* to be scanned says nothing about when
+/// it last was, and clearing the instant would make the next scheduled scan treat a root that was
+/// scanned a minute ago as one that has never been scanned.
+pub(crate) async fn set_root_scan_mode(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    mode: ScanMode,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("UPDATE library_root SET scan_mode = ?1 WHERE id = ?2")
+        .bind(mode.as_str())
+        .bind(id)
+        .execute(&mut *connection)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Marks a file absent at scan time, or present again, reporting whether the row was there.
 ///
 /// The instant is
@@ -348,6 +384,25 @@ pub(crate) async fn root(
 }
 
 /// Reads a page of roots, newest first.
+/// The root at `path`, or `None`.
+///
+/// `path` is `UNIQUE` in the schema, so this is an index lookup rather than a scan, and it is how a
+/// caller decides whether a folder was already added before inserting it — with the caveat that
+/// the constraint, not the check, is what actually stops a duplicate.
+pub(crate) async fn root_by_path(
+    pool: &sqlx::SqlitePool,
+    path: &str,
+) -> Result<Option<LibraryRoot>, StorageError> {
+    let row = sqlx::query_as::<_, RootRow>(
+        "SELECT id, path, kind, scan_mode, last_scan_at, created_at FROM library_root WHERE path = ?1",
+    )
+    .bind(path)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    row.map(TryInto::try_into).transpose()
+}
+
 pub(crate) async fn list_roots(
     pool: &sqlx::SqlitePool,
     request: PageRequest,
@@ -1207,6 +1262,152 @@ mod tests {
     }
 
     // ---- round trips -------------------------------------------------------------
+
+    /// PG-E14-01's acceptance, at the layer that can actually break it.
+    ///
+    /// "Removing a root never deletes files or progress" is a statement about what a delete
+    /// statement does *not* touch, so the test puts something in every category the root could
+    /// have produced — a real file on a real disk, a `media_file` row, a `watch_progress` row —
+    /// removes the root, and asserts each one is still there. The file is written to a temporary
+    /// directory rather than asserted from a fixture, because the half of the claim that would be
+    /// catastrophic to get wrong is "the user's files are theirs".
+    #[tokio::test]
+    async fn removing_a_root_leaves_the_files_and_the_progress_alone() {
+        use peregrine_domain::{PlaybackPosition, ProgressSource, WatchProgress};
+
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+
+        let media = directory.path().join("Movies");
+        std::fs::create_dir_all(&media).unwrap();
+        let on_disk = media.join("Alien (1979).mkv");
+        std::fs::write(&on_disk, b"not really a matroska file").unwrap();
+
+        let root_id = database
+            .insert_library_root(root(media.to_str().unwrap()))
+            .await
+            .unwrap();
+        let item_id = database.insert_media_item(item(1, None)).await.unwrap();
+        let file_id = database
+            .insert_media_file(file(item_id, on_disk.to_str().unwrap()))
+            .await
+            .unwrap();
+        database
+            .record_watch_progress(WatchProgress::record(
+                AccountId::new(1).unwrap(),
+                1,
+                None,
+                PlaybackPosition::new(90_000, Some(7_200_000)).unwrap(),
+                ProgressSource::Local,
+                at(NOW),
+                None,
+            ))
+            .await
+            .unwrap();
+
+        assert!(database.remove_library_root(root_id).await.unwrap());
+
+        assert_eq!(
+            database.library_root(root_id).await.unwrap(),
+            None,
+            "the root is gone, which is what stops the scanner walking it"
+        );
+        assert!(
+            on_disk.is_file(),
+            "removing a root from Peregrine is not deleting the user's files"
+        );
+        assert!(
+            database
+                .media_file(any_account(), file_id)
+                .await
+                .unwrap()
+                .is_some(),
+            "the file row survives, so the library still knows what it has"
+        );
+        assert!(
+            database
+                .watch_progress(any_account(), 1, None)
+                .await
+                .unwrap()
+                .is_some(),
+            "what the user watched is not the root's to remove"
+        );
+
+        assert!(
+            !database.remove_library_root(root_id).await.unwrap(),
+            "removing a root that is already gone changes nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_root_s_scan_mode_can_be_changed_without_forgetting_when_it_was_scanned() {
+        // How often a root is going to be scanned says nothing about when it last was, and
+        // clearing the instant would make the next scheduled scan treat a root scanned a minute
+        // ago as one that has never been scanned.
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+        let id = database
+            .insert_library_root(root("/media/Movies"))
+            .await
+            .unwrap();
+        assert!(database.record_root_scan(id, NOW + 5).await.unwrap());
+
+        assert!(
+            database
+                .set_root_scan_mode(id, ScanMode::Manual)
+                .await
+                .unwrap()
+        );
+
+        let stored = database.library_root(id).await.unwrap().unwrap();
+        assert_eq!(stored.scan_mode, ScanMode::Manual);
+        assert_eq!(stored.last_scan_at, Some(at(NOW + 5)));
+        assert!(
+            !database
+                .set_root_scan_mode(id + 1, ScanMode::Manual)
+                .await
+                .unwrap(),
+            "changing a root that is not there changes nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_root_can_be_found_by_its_path_and_only_one_root_holds_a_path() {
+        // The lookup the service uses to say "that folder is already a library" before inserting,
+        // and the constraint that stops two callers racing into the same decision.
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+        let id = database
+            .insert_library_root(root("/media/Movies"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            database
+                .library_root_by_path("/media/Movies")
+                .await
+                .unwrap()
+                .map(|found| found.id),
+            Some(id)
+        );
+        assert_eq!(
+            database
+                .library_root_by_path("/media/Elsewhere")
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            database
+                .insert_library_root(root("/media/Movies"))
+                .await
+                .is_err(),
+            "the schema's UNIQUE constraint, not the lookup, is what stops a duplicate"
+        );
+    }
 
     #[tokio::test]
     async fn a_library_root_round_trips() {

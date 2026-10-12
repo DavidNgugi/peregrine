@@ -8,8 +8,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoo
 use tracing::{info, warn};
 
 use peregrine_domain::{
-    AccountScope, LibraryRoot, MediaFile, MediaItem, SubtitleTrack, UnmatchedFile, WatchProgress,
-    WatchlistEntry,
+    AccountScope, LibraryRoot, MediaFile, MediaItem, ScanMode, SubtitleTrack, UnmatchedFile,
+    WatchProgress, WatchlistEntry,
 };
 
 use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
@@ -384,6 +384,46 @@ impl Database {
     /// configured, not content.
     pub async fn library_root(&self, id: i64) -> Result<Option<LibraryRoot>, StorageError> {
         crate::library::root(&self.readers, id).await
+    }
+
+    /// The root at `path`, or `None`.
+    ///
+    /// `path` is `UNIQUE`, so this is an index lookup. It is how a caller decides whether a folder
+    /// is already a root before inserting it; the constraint, not this check, is what stops a
+    /// duplicate that two callers race into.
+    pub async fn library_root_by_path(
+        &self,
+        path: &str,
+    ) -> Result<Option<LibraryRoot>, StorageError> {
+        crate::library::root_by_path(&self.readers, path).await
+    }
+
+    /// Removes one library root, reporting whether the row was there.
+    ///
+    /// Only the `library_root` row goes. Media items, files, watch progress, and subtitles are
+    /// untouched (PG-E14-01), so removing a folder stops it being scanned and forgets nothing the
+    /// user watched.
+    pub async fn remove_library_root(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RemoveLibraryRoot { id })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("remove_library_root", &other)),
+        }
+    }
+
+    /// Changes when one root is scanned, reporting whether the row was there.
+    pub async fn set_root_scan_mode(&self, id: i64, mode: ScanMode) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetRootScanMode { id, mode })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("set_root_scan_mode", &other)),
+        }
     }
 
     /// A page of library roots, newest first.

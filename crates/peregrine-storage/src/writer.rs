@@ -5,7 +5,7 @@
 //! message on one channel. Callers therefore cannot contend for the lock, and a write
 //! is serialized behind the writer task instead of failing with `SQLITE_BUSY`.
 
-use peregrine_domain::Event;
+use peregrine_domain::{Event, ScanMode};
 use sqlx::Connection as _;
 use tokio::sync::{mpsc, oneshot};
 
@@ -34,7 +34,10 @@ pub(crate) enum WriteRequest {
     /// the alternative.
     InsertJob(Box<NewJob>),
     /// Apply one change to a `job` row.
-    UpdateJob { id: i64, change: Box<JobChange> },
+    UpdateJob {
+        id: i64,
+        change: Box<JobChange>,
+    },
     /// Insert one title in its `stub` state.
     InsertStubTitle(Box<StubTitle>),
     /// Attach external ids to one title.
@@ -56,7 +59,17 @@ pub(crate) enum WriteRequest {
     /// Insert one row into `subtitle_track`.
     InsertSubtitleTrack(Box<peregrine_domain::SubtitleTrack>),
     /// Record that a library root was scanned.
-    RecordRootScan { id: i64, at: i64 },
+    RemoveLibraryRoot {
+        id: i64,
+    },
+    SetRootScanMode {
+        id: i64,
+        mode: ScanMode,
+    },
+    RecordRootScan {
+        id: i64,
+        at: i64,
+    },
     /// Mark a media file absent, or present again.
     SetFileMissing {
         id: i64,
@@ -83,9 +96,13 @@ pub(crate) enum WriteRequest {
         delivery: Box<Delivery>,
     },
     /// Rewrite one title's search index row from the source tables.
-    ReindexTitle { title_id: i64 },
+    ReindexTitle {
+        title_id: i64,
+    },
     /// Remove one title's search index row.
-    RemoveTitleIndex { title_id: i64 },
+    RemoveTitleIndex {
+        title_id: i64,
+    },
     /// Rebuild the whole search index from the source tables.
     RebuildSearchIndex,
     /// Merge the search index's b-tree segments, which is `FTS5`'s `optimize`.
@@ -130,7 +147,7 @@ pub(crate) enum WriteResponse {
     RowInserted { id: i64 },
     /// An `INSERT OR IGNORE` that found the row already there.
     RowIgnored,
-    /// Whether a library row was there to change.
+    /// Whether a library row was there to change or remove.
     RowChanged { changed: bool },
     /// Every row of the request was applied, or a statement that either applies or fails with
     /// nothing to report (`ANALYZE`, the search index's `optimize`).
@@ -264,6 +281,16 @@ async fn apply_library_write(
             crate::library::insert_subtitle(connection, &track)
                 .await
                 .map(|id| WriteResponse::RowInserted { id })
+                .map_err(StorageError::from_sqlx)
+        }
+        WriteRequest::RemoveLibraryRoot { id } => crate::library::remove_root(connection, id)
+            .await
+            .map(|removed| WriteResponse::RowChanged { changed: removed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::SetRootScanMode { id, mode } => {
+            crate::library::set_root_scan_mode(connection, id, mode)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
                 .map_err(StorageError::from_sqlx)
         }
         WriteRequest::RecordRootScan { id, at } => {

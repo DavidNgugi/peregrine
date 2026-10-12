@@ -7,6 +7,7 @@
 
 pub mod events;
 pub mod jobs;
+pub mod library;
 pub mod notify;
 mod observability;
 pub mod runtime;
@@ -14,6 +15,7 @@ pub mod runtime;
 mod testing;
 
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
+pub use library::{LibraryService, RootError};
 pub use notify::{
     CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, EventPreference,
     NewCentreEntry, NotificationCentre, NotificationId, NotificationPreferences,
