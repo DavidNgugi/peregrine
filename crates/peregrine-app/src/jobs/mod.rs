@@ -7,6 +7,7 @@
 //! so a change to one that is not made to the other fails the build rather than the UI.
 
 pub mod hello;
+pub mod library_scan;
 
 use peregrine_storage::JobPhase;
 use serde_json::{Value, json};

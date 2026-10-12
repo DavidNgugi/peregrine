@@ -33,6 +33,8 @@ use std::time::SystemTime;
 
 use peregrine_domain::{Freshness, ScanPolicy, ScanVerdict, SkipReason, Stamp};
 use thiserror::Error;
+use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 /// One file the library could hold, with what an incremental pass compares.
@@ -98,6 +100,70 @@ pub struct ScanOutcome {
     pub unreadable: Vec<UnreadableDirectory>,
 }
 
+impl ScanOutcome {
+    /// Folds one directory's findings in and answers with the directories left to visit.
+    ///
+    /// The queue is the *walk's* state, not the outcome's: what a caller reads is a finished
+    /// answer, and an outcome that carried a work list would make two walks of one tree differ by
+    /// the list each of them had not finished yet.
+    fn absorb(&mut self, collected: DirectoryOutcome) -> Vec<PathBuf> {
+        self.candidates.extend(collected.candidates);
+        self.skipped.extend(collected.skipped);
+        self.unreadable.extend(collected.unreadable);
+        collected.directories
+    }
+
+    /// Sorts every list by path.
+    ///
+    /// Two walks of one tree — the sequential one and the bounded one — have to produce the same
+    /// outcome, and the order they *found* things in is the one thing about them that differs by
+    /// construction. Sorting is what makes that difference invisible, and it is also what makes a
+    /// scan log diffable between two runs (PG-E14-02).
+    fn sort(&mut self) {
+        self.candidates
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        self.skipped
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        self.unreadable
+            .sort_by(|left, right| left.path.cmp(&right.path));
+    }
+}
+
+/// One directory's own entries, classified.
+///
+/// The unit both walks are built from. `directories` is what is left to visit rather than what has
+/// been visited, so the driver decides the order — depth first for the sequential walk, whatever
+/// finishes first for the bounded one.
+#[derive(Debug, Default)]
+struct DirectoryOutcome {
+    candidates: Vec<CandidateFile>,
+    skipped: Vec<SkippedPath>,
+    unreadable: Vec<UnreadableDirectory>,
+    directories: Vec<PathBuf>,
+}
+
+/// Why reading the *root* did not answer, which the driver needs to tell apart.
+enum RootRead {
+    /// The filesystem refused.
+    Io(io::Error),
+    /// The blocking task did not finish, which only a panic inside it can cause.
+    Worker,
+}
+
+/// Reads one directory on the blocking pool.
+async fn read_on_the_pool(
+    scanner: Scanner,
+    root: &Path,
+    directory: &Path,
+) -> Result<DirectoryOutcome, RootRead> {
+    let root = root.to_path_buf();
+    let directory = directory.to_path_buf();
+    tokio::task::spawn_blocking(move || scanner.collect_directory(&root, &directory))
+        .await
+        .map_err(|_| RootRead::Worker)?
+        .map_err(RootRead::Io)
+}
+
 /// Why a root could not be walked at all.
 #[derive(Debug, Error)]
 pub enum ScanError {
@@ -110,6 +176,19 @@ pub enum ScanError {
         #[source]
         source: io::Error,
     },
+
+    /// The walk was cancelled, so its outcome says nothing about the tree.
+    ///
+    /// This is an error rather than a partial outcome on purpose: a caller that reconciled from a
+    /// partial walk would mark every file it had not reached yet as missing (PG-E14-04's
+    /// acceptance, and the reason `PG-E14-13`'s reconciliation is only ever called with a scan that
+    /// finished).
+    #[error("the scan was cancelled")]
+    Cancelled,
+
+    /// A blocking task did not finish, which only a panic inside it can cause.
+    #[error("the scan's worker for one directory did not finish")]
+    Worker,
 }
 
 /// Walks roots and reports what they hold.
@@ -140,28 +219,118 @@ impl Scanner {
     /// to abandon a library.
     pub fn scan(&self, root: &Path) -> Result<ScanOutcome, ScanError> {
         let mut outcome = ScanOutcome::default();
-        let entries = read_sorted(root).map_err(|source| ScanError::Root {
-            path: root.to_path_buf(),
-            source,
-        })?;
+        let collected = self
+            .collect_directory(root, root)
+            .map_err(|source| ScanError::Root {
+                path: root.to_path_buf(),
+                source,
+            })?;
+        let mut queue = outcome.absorb(collected);
 
-        self.walk_entries(root, entries, &mut outcome);
+        while let Some(directory) = queue.pop() {
+            match self.collect_directory(root, &directory) {
+                Ok(collected) => queue.extend(outcome.absorb(collected)),
+                Err(error) => outcome.unreadable.push(UnreadableDirectory {
+                    path: directory,
+                    kind: error.kind(),
+                }),
+            }
+        }
+
+        outcome.sort();
         Ok(outcome)
     }
 
-    /// Classifies and descends into one directory's already-sorted entries.
+    /// Walks `root` with at most `limit` directories being read at once, and stops when `cancel` is
+    /// requested.
     ///
-    /// `root` is threaded through because the policy must see a path *below* the root and not the
-    /// root itself: a library at `/Users/me/.media/Movies` is a library the user chose, and a rule
-    /// about hidden names that reads the user's own path would skip every file in it. The same
-    /// applies to a root the user put inside a folder called `Extras`.
-    fn walk_entries(self, root: &Path, entries: Vec<fs::DirEntry>, outcome: &mut ScanOutcome) {
-        for entry in entries {
+    /// The same traversal as [`Scanner::scan`], driven differently: every directory is read on the
+    /// blocking pool, up to `limit` of them in flight, because a filesystem walk must never block
+    /// the runtime and a library on a network volume makes that concrete. The outcome is
+    /// **identical** to the sequential walk's — same candidates, same skips, same unreadable
+    /// directories, in the same order — which is asserted rather than assumed, because two walks
+    /// that disagree would make a scan's result depend on which one ran it.
+    ///
+    /// # Errors
+    ///
+    /// [`ScanError::Root`] when the root itself cannot be read, which is the one failure that stops
+    /// the scan because then there is nothing to report; [`ScanError::Cancelled`] when cancellation
+    /// was requested; [`ScanError::Worker`] when a blocking task did not finish, which only a panic
+    /// inside it can cause.
+    pub async fn scan_bounded(
+        &self,
+        root: &Path,
+        limit: usize,
+        cancel: &CancellationToken,
+    ) -> Result<ScanOutcome, ScanError> {
+        let limit = limit.max(1);
+        let mut outcome = ScanOutcome::default();
+        let mut pending: JoinSet<(PathBuf, io::Result<DirectoryOutcome>)> = JoinSet::new();
+
+        let mut queue: Vec<PathBuf> = match read_on_the_pool(*self, root, root).await {
+            Ok(collected) => outcome.absorb(collected),
+            Err(RootRead::Io(source)) => {
+                return Err(ScanError::Root {
+                    path: root.to_path_buf(),
+                    source,
+                });
+            }
+            Err(RootRead::Worker) => return Err(ScanError::Worker),
+        };
+
+        while !queue.is_empty() || !pending.is_empty() {
+            if cancel.is_cancelled() {
+                // The tasks still reading are asked to stop rather than awaited: what they were
+                // going to produce is not needed, and a cancelled scan should stop promptly.
+                pending.abort_all();
+                return Err(ScanError::Cancelled);
+            }
+
+            while pending.len() < limit {
+                let Some(directory) = queue.pop() else {
+                    break;
+                };
+                let scanner = *self;
+                let root = root.to_path_buf();
+                pending.spawn_blocking(move || {
+                    let collected = scanner.collect_directory(&root, &directory);
+                    (directory, collected)
+                });
+            }
+
+            let Some(joined) = pending.join_next().await else {
+                break;
+            };
+            match joined {
+                Ok((_visited, Ok(collected))) => queue.extend(outcome.absorb(collected)),
+                Ok((directory, Err(error))) => outcome.unreadable.push(UnreadableDirectory {
+                    path: directory,
+                    kind: error.kind(),
+                }),
+                Err(_) => return Err(ScanError::Worker),
+            }
+        }
+
+        outcome.sort();
+        Ok(outcome)
+    }
+
+    /// One directory's own entries, classified, with the directories below it to visit.
+    ///
+    /// This is the whole of the scan's IO for one level — the listing, each entry's type, and the
+    /// stat that stamps a candidate — which is why it is the unit both walks are built from: the
+    /// sequential one calls it while descending, and the bounded one runs several at once on the
+    /// blocking pool. It is synchronous on purpose. `std::fs` blocks, and the repo's rule is that a
+    /// filesystem walk never blocks the runtime, so the blocking happens here and the awaits happen
+    /// in the driver.
+    fn collect_directory(self, root: &Path, directory: &Path) -> io::Result<DirectoryOutcome> {
+        let mut collected = DirectoryOutcome::default();
+        for entry in read_sorted(directory)? {
             let path = entry.path();
             let Ok(file_type) = entry.file_type() else {
                 // The entry vanished between the listing and the stat, which a download finishing
                 // beside a scan does routinely. It is not a candidate and not an error.
-                outcome.unreadable.push(UnreadableDirectory {
+                collected.unreadable.push(UnreadableDirectory {
                     path,
                     kind: io::ErrorKind::NotFound,
                 });
@@ -169,7 +338,7 @@ impl Scanner {
             };
 
             if file_type.is_symlink() {
-                skip(outcome, path, SkipReason::Symlink);
+                skip(&mut collected, path, SkipReason::Symlink);
                 continue;
             }
 
@@ -177,14 +346,8 @@ impl Scanner {
                 match self.policy.directory(&name_of(&path)) {
                     // The directory is reported once, with its reason, rather than every file
                     // inside it: the user skipped the folder, so the folder is the answer.
-                    ScanVerdict::Skipped(reason) => skip(outcome, path, reason),
-                    ScanVerdict::Candidate => match read_sorted(&path) {
-                        Ok(children) => self.walk_entries(root, children, outcome),
-                        Err(error) => outcome.unreadable.push(UnreadableDirectory {
-                            path,
-                            kind: error.kind(),
-                        }),
-                    },
+                    ScanVerdict::Skipped(reason) => skip(&mut collected, path, reason),
+                    ScanVerdict::Candidate => collected.directories.push(path),
                 }
                 continue;
             }
@@ -192,30 +355,31 @@ impl Scanner {
             if !file_type.is_file() {
                 // A socket, a fifo, or a device node in a media folder is not a title. Nothing is
                 // read from it, so a fifo cannot block the walk.
-                skip(outcome, path, SkipReason::Unsupported);
+                skip(&mut collected, path, SkipReason::Unsupported);
                 continue;
             }
 
-            // Relative to the root, for the reason in the doc comment above: the components of
-            // the root are the user's choice, and only what is below it is the policy's business.
+            // Relative to the root, for the reason in the module doc: the components of the root
+            // are the user's choice, and only what is below it is the policy's business.
             match self
                 .policy
                 .file(path.strip_prefix(root).unwrap_or(&path), false)
             {
-                ScanVerdict::Skipped(reason) => skip(outcome, path, reason),
+                ScanVerdict::Skipped(reason) => skip(&mut collected, path, reason),
                 ScanVerdict::Candidate => match entry.metadata() {
-                    Ok(metadata) => outcome.candidates.push(CandidateFile {
+                    Ok(metadata) => collected.candidates.push(CandidateFile {
                         path,
                         size_bytes: metadata.len(),
                         mtime_ms: modified_millis(&metadata),
                     }),
-                    Err(error) => outcome.unreadable.push(UnreadableDirectory {
+                    Err(error) => collected.unreadable.push(UnreadableDirectory {
                         path,
                         kind: error.kind(),
                     }),
                 },
             }
         }
+        Ok(collected)
     }
 }
 
@@ -224,7 +388,7 @@ impl Scanner {
 /// The log is `debug` because a large library has thousands of skips and every one of them is
 /// expected; the summary a user or a support report reads is the job's to write (PG-E14-04), and
 /// what this line exists for is answering "why is my film not in the library" without a rebuild.
-fn skip(outcome: &mut ScanOutcome, path: PathBuf, reason: SkipReason) {
+fn skip(outcome: &mut DirectoryOutcome, path: PathBuf, reason: SkipReason) {
     debug!(
         path = %path.display(),
         reason = reason.as_str(),
@@ -708,6 +872,106 @@ mod tests {
                 "the rest of the library still scanned"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_bounded_walk_and_the_sequential_walk_agree_exactly() {
+        // The property that makes two walks safe to have: whichever one ran, a scan's outcome is
+        // the same. They differ by construction — one recurses while the other runs up to four
+        // directories at once on the blocking pool — so the assertion is about the *outcome*, which
+        // is why the outcome is sorted rather than left in whatever order the walk found things.
+        let (corpus, scanner) = corpus("bounded-agrees");
+        let cancel = CancellationToken::new();
+
+        let sequential = scanner.scan(&corpus.root).unwrap();
+        let bounded = scanner
+            .scan_bounded(&corpus.root, 4, &cancel)
+            .await
+            .unwrap();
+
+        assert_eq!(bounded, sequential);
+        assert!(
+            !bounded.candidates.is_empty(),
+            "and the corpus has something to find"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bounded_walk_with_one_worker_at_a_time_is_still_the_same_walk() {
+        // The bound is a bound, not a behaviour: `limit` of one has to be the sequential walk.
+        let (corpus, scanner) = corpus("bounded-one");
+        let cancel = CancellationToken::new();
+
+        let sequential = scanner.scan(&corpus.root).unwrap();
+        let bounded = scanner
+            .scan_bounded(&corpus.root, 1, &cancel)
+            .await
+            .unwrap();
+
+        assert_eq!(bounded, sequential);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_walk_reports_cancellation_rather_than_a_partial_outcome() {
+        // PG-E14-04's acceptance at its smallest: cancelled means "no answer", not "here is what I
+        // got so far". A caller that reconciled from a partial answer would mark every file it had
+        // not reached yet as missing.
+        let (corpus, scanner) = corpus("bounded-cancelled");
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let outcome = scanner.scan_bounded(&corpus.root, 4, &cancel).await;
+
+        assert!(matches!(outcome, Err(ScanError::Cancelled)), "{outcome:?}");
+    }
+
+    #[tokio::test]
+    async fn a_walk_cancelled_after_the_first_level_still_refuses_to_answer() {
+        // The same rule with work already done: the root was read, some files were found, and the
+        // cancellation arrives before the tree is finished. What is asserted is that none of it is
+        // handed back — the partial outcome does not escape.
+        let (corpus, scanner) = corpus("bounded-cancelled-late");
+        let cancel = CancellationToken::new();
+        let cancelled = cancel.clone();
+        let root = corpus.root.clone();
+        let walker = tokio::spawn(async move { scanner.scan_bounded(&root, 4, &cancel).await });
+
+        cancelled.cancel();
+        let outcome = walker.await.expect("the walk task itself does not panic");
+
+        assert!(matches!(outcome, Err(ScanError::Cancelled)), "{outcome:?}");
+    }
+
+    #[tokio::test]
+    async fn a_bounded_walk_that_finishes_before_cancellation_still_answers() {
+        // The other side of the same rule, so the cancellation check cannot be read as "a walk
+        // where cancellation was ever requested refuses": one that finished first has an answer.
+        let (corpus, scanner) = corpus("bounded-finished");
+        let cancel = CancellationToken::new();
+
+        let outcome = scanner
+            .scan_bounded(&corpus.root, 4, &cancel)
+            .await
+            .unwrap();
+        cancel.cancel();
+
+        assert_eq!(outcome.candidates.len(), 2, "{outcome:?}");
+    }
+
+    #[tokio::test]
+    async fn a_bounded_walk_of_something_that_is_not_there_still_reports_the_root() {
+        // The one failure that stops a scan rather than being reported and stepped over.
+        let (corpus, scanner) = corpus("bounded-missing");
+        let cancel = CancellationToken::new();
+
+        let outcome = scanner
+            .scan_bounded(&corpus.root.join("NotPluggedIn"), 4, &cancel)
+            .await;
+
+        assert!(
+            matches!(outcome, Err(ScanError::Root { .. })),
+            "{outcome:?}"
+        );
     }
 
     #[test]
