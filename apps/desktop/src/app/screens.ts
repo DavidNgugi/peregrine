@@ -6,11 +6,11 @@ import type { IconName } from "@peregrine/ui";
  *
  * A screen appears here only once it exists. The sidebar is the app's navigation and the
  * shell's only way of reaching a screen, so an entry that opens nothing would be a control
- * that lies; Browse, Search, Title detail, Library, Downloads, Player, and Cast join the
- * list with the tasks that build them (PG-E7, PG-E13, PG-E16). Diagnostics is here rather
+ * that lies; Browse, Search, Title detail, Downloads, Player, and Cast join the list with the
+ * tasks that build them (PG-E7, PG-E13, PG-E16). Diagnostics is here rather
  * than in Settings because `crate::menu` and the shell both reach it directly today.
  */
-export type Screen = "discover" | "jobs" | "settings";
+export type Screen = "discover" | "library" | "jobs" | "settings";
 
 export interface ScreenEntry {
   readonly id: Screen;
@@ -21,6 +21,9 @@ export interface ScreenEntry {
 
 export const SCREENS: readonly ScreenEntry[] = [
   { id: "discover", labelKey: "discover.title", icon: "compass" },
+  // Second, because it is the one screen that works without a provider: what is on this machine is
+  // known as soon as a scan has run, while Discover waits on the metadata road.
+  { id: "library", labelKey: "library.title", icon: "library" },
   { id: "jobs", labelKey: "jobs.title", icon: "pulse" },
   { id: "settings", labelKey: "settings.title", icon: "tune" },
 ];

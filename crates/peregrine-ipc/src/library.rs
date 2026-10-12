@@ -85,6 +85,53 @@ impl From<RootScanMode> for ScanMode {
     }
 }
 
+/// One title the library holds, as the library screen shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTitleDto {
+    /// The row id, which is the paging cursor.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The display name.
+    pub name: String,
+    /// Film or series, as the webview spells it.
+    pub kind: RootKind,
+    /// How complete the metadata is: a title the library holds is a stub until a sync fills it in,
+    /// and a screen that showed a stub as complete would promise artwork and a synopsis it does not
+    /// have (`PG-E5-06`).
+    pub stub: bool,
+    /// How many items of it the library holds.
+    #[specta(type = Number)]
+    pub items: i64,
+    /// How many files those items have.
+    #[specta(type = Number)]
+    pub files: i64,
+    /// What those files add up to, in bytes.
+    #[specta(type = Number)]
+    pub bytes: i64,
+    /// How many of them are marked missing.
+    #[specta(type = Number)]
+    pub missing_files: i64,
+}
+
+impl From<peregrine_app::LibraryTitleRow> for LibraryTitleDto {
+    fn from(row: peregrine_app::LibraryTitleRow) -> Self {
+        Self {
+            id: row.title.id,
+            name: row.title.name,
+            kind: match row.title.kind {
+                peregrine_app::TitleKind::Movie => RootKind::Movies,
+                peregrine_app::TitleKind::Show => RootKind::Shows,
+            },
+            stub: row.title.metadata_state != peregrine_app::MetadataState::Complete,
+            items: row.items,
+            files: row.files,
+            bytes: row.bytes,
+            missing_files: row.missing_files,
+        }
+    }
+}
+
 /// The root a command acts on.
 ///
 /// A DTO rather than a bare `i64` argument, because specta refuses to export a large integer as a
@@ -179,6 +226,25 @@ pub async fn add_root(
             created_at: added.created_at.as_millisecond(),
         },
     ))
+}
+
+/// A page of the titles the library holds, newest first.
+///
+/// The first read of the library's own content rather than of its configuration, and the one the
+/// library screen is built on. A title the library holds is a *stub* until a provider sync fills it
+/// in, which the DTO says plainly: a screen can then show what it has without implying it has more.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_titles(
+    state: State<'_, RuntimeState>,
+    limit: Option<u32>,
+) -> Result<Vec<LibraryTitleDto>, AppError> {
+    let titles = state
+        .runtime()?
+        .library_titles(None, limit.unwrap_or(100))
+        .await?;
+    let titles = titles.into_iter().map(LibraryTitleDto::from).collect();
+    Ok(guard_response("library::list_titles", titles))
 }
 
 /// Starts a scan of every library root.

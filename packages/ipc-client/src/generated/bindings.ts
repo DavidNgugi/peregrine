@@ -126,6 +126,14 @@ export const commands = {
 	 *  walk is the expensive part and a queue of identical walks is not a feature.
 	 */
 	scanNow: () => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("scan_now")),
+	/**
+	 *  A page of the titles the library holds, newest first.
+	 * 
+	 *  The first read of the library's own content rather than of its configuration, and the one the
+	 *  library screen is built on. A title the library holds is a *stub* until a provider sync fills it
+	 *  in, which the DTO says plainly: a screen can then show what it has without implying it has more.
+	 */
+	listTitles: (limit: number | null) => typedError<LibraryTitleDto[], AppError_Serialize>(__TAURI_INVOKE("list_titles", { limit })),
 };
 
 /* Types */
@@ -411,6 +419,30 @@ export type LibraryRootDto = {
 	lastScanAt: number | null,
 	/**  When it was added, in Unix milliseconds. */
 	createdAt: number,
+};
+
+/**  One title the library holds, as the library screen shows it. */
+export type LibraryTitleDto = {
+	/**  The row id, which is the paging cursor. */
+	id: number,
+	/**  The display name. */
+	name: string,
+	/**  Film or series, as the webview spells it. */
+	kind: RootKind,
+	/**
+	 *  How complete the metadata is: a title the library holds is a stub until a sync fills it in,
+	 *  and a screen that showed a stub as complete would promise artwork and a synopsis it does not
+	 *  have (`PG-E5-06`).
+	 */
+	stub: boolean,
+	/**  How many items of it the library holds. */
+	items: number,
+	/**  How many files those items have. */
+	files: number,
+	/**  What those files add up to, in bytes. */
+	bytes: number,
+	/**  How many of them are marked missing. */
+	missingFiles: number,
 };
 
 /**  What a root is expected to hold, as the webview spells it. */

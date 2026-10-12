@@ -20,7 +20,8 @@ use std::time::Duration;
 use peregrine_domain::{Clock, IdGenerator, LibraryRoot, LibraryRootKind, ScanMode};
 use peregrine_platform::{SystemClock, UlidGenerator};
 use peregrine_storage::{
-    Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
+    Cursor, Database, JobChange, JobPhase, JobRecord, LibraryTitleRow, NewJob, PageRequest,
+    StorageError,
 };
 use peregrine_sync::{
     JobHandle, JobSpec, Scheduler, SchedulerConfig, SchedulerError, SchedulerMetrics,
@@ -38,6 +39,26 @@ use crate::events::{EventBus, EventSink, EventStats};
 use crate::jobs::hello::{self, HelloJob};
 use crate::jobs::{CANCELLED_CODE, INTERNAL_CODE};
 use crate::observability::{LogConfig, Observability};
+
+/// The scope every user-facing read in this build runs under.
+///
+/// Accounts are `PG-E35`'s epic, and the migrations seed no account row: a fresh installation has
+/// nothing to select between, so there is no account to resolve. What a scope *carries* is a
+/// ceiling and a curation flag, and this build has neither — so the scope is unrestricted, and the
+/// account id it names is inert for both predicates an unrestricted scope applies (`hidden_by_scope`
+/// is zero, which turns the predicate into a no-op; `peregrine-storage`'s own tests have relied on
+/// exactly that since the first scoped read).
+///
+/// **When the accounts epic lands, this becomes a resolution rather than a constant:** the runtime
+/// reads the default account and builds the scope from its `rating_ceiling` and `curated_only`, and
+/// every call site that passes this keeps passing a scope — which is why the constant lives here
+/// with the reason rather than at each call site with none.
+#[must_use]
+pub fn installation_scope() -> peregrine_domain::AccountScope {
+    peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("account one is a positive id"),
+    )
+}
 
 /// The database file inside the data directory.
 const DATABASE_FILE: &str = "peregrine.sqlite";
@@ -382,6 +403,25 @@ impl Runtime {
         }
         info!(job = %job, "cancellation requested");
         Ok(())
+    }
+
+    /// A page of the titles the library holds, newest first.
+    ///
+    /// Read under [`installation_scope`], which is the whole of this build's account story: the
+    /// screen asks what *it* has, and on an installation with one account that is everything.
+    pub async fn library_titles(
+        &self,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<LibraryTitleRow>, RuntimeError> {
+        let request = match after {
+            Some(cursor) => PageRequest::after(Cursor::new(cursor), limit),
+            None => PageRequest::first(limit),
+        };
+        Ok(self
+            .database
+            .list_library_titles(installation_scope(), request)
+            .await?)
     }
 
     /// The library roots, newest first.

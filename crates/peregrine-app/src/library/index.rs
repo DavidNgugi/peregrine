@@ -400,7 +400,7 @@ mod tests {
     use std::path::PathBuf;
 
     use peregrine_domain::{AccountId, AccountScope, LibraryRoot, LibraryRootKind, ScanMode};
-    use peregrine_storage::PageRequest;
+    use peregrine_storage::{MetadataState, PageRequest};
     use tempfile::TempDir;
 
     use peregrine_domain::ScanPolicy;
@@ -522,6 +522,26 @@ mod tests {
         assert_eq!(report.created_files, 1);
         assert_eq!(report.unmatched, 0);
         assert_eq!(corpus.titles().await, vec!["Alien"]);
+    }
+
+    #[tokio::test]
+    async fn a_title_the_indexer_creates_is_a_stub_rather_than_a_complete_one() {
+        // `PG-E5-06`: a stub is the identity a provider sync hangs its data off, and a title the
+        // library invented from a filename must not claim to be complete — a screen that showed it
+        // as complete would promise artwork and a synopsis that no sync has fetched.
+        let corpus = corpus("stub", &["Alien (1979).mkv"]).await;
+        corpus.index().await;
+
+        let titles = corpus
+            .database
+            .list_titles(
+                AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                PageRequest::first(10),
+            )
+            .await
+            .unwrap();
+        assert_eq!(titles.len(), 1);
+        assert_eq!(titles[0].metadata_state, MetadataState::Stub);
     }
 
     #[tokio::test]

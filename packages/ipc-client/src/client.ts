@@ -16,6 +16,7 @@ import type {
   BuildInfo,
   JobStarted,
   LibraryRootDto,
+  LibraryTitleDto,
   RootKind,
   RootRef,
   RootScanMode,
@@ -87,6 +88,16 @@ export async function addLibraryRoot(
   scanMode: RootScanMode,
 ): Promise<LibraryRootDto> {
   return unwrap(commands.addRoot(path, kind, scanMode));
+}
+
+/**
+ * A page of the titles the library holds, newest first.
+ *
+ * `limit` is the page size rather than a cursor, for the reason `listLibraryRoots` gives: the
+ * generated contract has no large-integer argument for a cursor to travel in.
+ */
+export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto[]> {
+  return unwrap(commands.listTitles(limit ?? null));
 }
 
 /**

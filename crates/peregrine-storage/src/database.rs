@@ -627,6 +627,19 @@ impl Database {
         }
     }
 
+    /// A page of the titles the library holds, newest first, with what it holds of each.
+    ///
+    /// The library screen's read, and a scoped one: this is a caller asking what *it* has, so the
+    /// scope applies (I25) and a title outside it is indistinguishable from one that is not there
+    /// (I37).
+    pub async fn list_library_titles(
+        &self,
+        scope: AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::LibraryTitleRow>, StorageError> {
+        crate::library::list_library_titles(&self.readers, scope, request).await
+    }
+
     /// The file at `path` and the numbers a scan compares, whatever account may see it.
     ///
     /// Part of the **scanner's** surface rather than a general read: the module doc in

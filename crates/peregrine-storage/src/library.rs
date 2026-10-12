@@ -50,6 +50,11 @@ use peregrine_domain::{
 };
 use sqlx::Connection as _;
 
+// The title vocabulary the library's own read maps, re-exported by the catalogue module rather than
+// declared twice: a kind the schema holds and this file spells differently would be a title the
+// screen could not name.
+use crate::catalogue::{MetadataState, TitleKind, TitleSubtype};
+
 /// One row of `library_root`, with the id a page resumes below.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryRootRow {
@@ -542,6 +547,119 @@ pub(crate) async fn item(
     .await
     .map_err(StorageError::from_sqlx)?;
     row.map(TryInto::try_into).transpose()
+}
+
+/// One title the library holds, with what it holds of it.
+///
+/// The library screen's unit: a title is what a person thinks they have, and the counts are what
+/// the screen can say about it without reading any file row. `missing_files` is the one count that
+/// is not a size: a title whose only copy is on an unplugged drive is *held* and not *available*,
+/// and a screen that showed it as either alone would be wrong about the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryTitleRow {
+    /// The title's identity, which a scoped read may only return when the scope may see it.
+    pub title: crate::catalogue::TitleIdentity,
+    /// How many items of it the library holds — one for a film, one per episode for a series.
+    pub items: i64,
+    /// How many files those items have between them.
+    pub files: i64,
+    /// What those files add up to, from the sizes the scans recorded.
+    pub bytes: i64,
+    /// How many of them are marked missing.
+    pub missing_files: i64,
+}
+
+/// A page of the titles the library holds, newest first.
+///
+/// The join starts from `title` and reaches `media_file` only through `media_item`, so an item with
+/// no file yet still counts as an item and contributes no bytes; the `LEFT JOIN` is what makes a
+/// film whose scan found the directory but not the file visible as an item rather than invisible.
+///
+/// # Cost
+///
+/// One grouped scan of the library's items and files, not of the catalogue: `media_item` holds a
+/// row per title the user actually has, and the scope predicate and the cursor both sit on `title`,
+/// whose `sort_name` and primary-key indices carry them. The `GROUP BY t.id` sorts by the index
+/// `media_item_movie_uq` already provides for films and by the join key for episodes, and the page
+/// limit is applied after the grouping, so the work is proportional to the page plus the groups it
+/// scans past — which is the same shape `DATA_MODEL` §4's usage aggregate has.
+pub(crate) async fn list_library_titles(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    request: PageRequest,
+) -> Result<Vec<LibraryTitleRow>, StorageError> {
+    let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
+        "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
+                COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
+                COALESCE(SUM(f.size_bytes), 0) AS bytes, \
+                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
+           FROM title t \
+           JOIN media_item m ON m.title_id = t.id \
+           LEFT JOIN media_file f ON f.media_item_id = m.id \
+          WHERE (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+            AND (?2 IS NULL OR t.id < ?2) \
+          GROUP BY t.id \
+          ORDER BY t.id DESC LIMIT ?3",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(request.bindable_cursor())
+    .bind(request.bindable_limit())
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// The columns [`LibraryTitleRow`] is built from.
+#[derive(sqlx::FromRow)]
+struct LibraryTitleQueryRow {
+    id: i64,
+    kind: String,
+    subtype: String,
+    name: String,
+    sort_name: String,
+    metadata_state: String,
+    adult: i64,
+    items: i64,
+    files: i64,
+    bytes: i64,
+    missing_files: i64,
+}
+
+impl TryFrom<LibraryTitleQueryRow> for LibraryTitleRow {
+    type Error = StorageError;
+
+    fn try_from(row: LibraryTitleQueryRow) -> Result<Self, Self::Error> {
+        let identity = crate::catalogue::TitleIdentity {
+            id: row.id,
+            kind: TitleKind::parse(&row.kind).ok_or_else(|| StorageError::UnexpectedValue {
+                column: "title.kind",
+                found: row.kind.clone(),
+            })?,
+            subtype: TitleSubtype::parse(&row.subtype).ok_or_else(|| {
+                StorageError::UnexpectedValue {
+                    column: "title.subtype",
+                    found: row.subtype.clone(),
+                }
+            })?,
+            name: row.name,
+            sort_name: row.sort_name,
+            metadata_state: MetadataState::parse(&row.metadata_state).ok_or_else(|| {
+                StorageError::UnexpectedValue {
+                    column: "title.metadata_state",
+                    found: row.metadata_state.clone(),
+                }
+            })?,
+            adult: row.adult != 0,
+        };
+        Ok(Self {
+            title: identity,
+            items: row.items,
+            files: row.files,
+            bytes: row.bytes,
+            missing_files: row.missing_files,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1556,6 +1674,84 @@ mod tests {
     /// asserts it is the same row rather than a new one. The half of the claim that is unrecoverable
     /// if it breaks is the first: a deleted row takes its subtitles with it by cascade, and the
     /// progress hanging off the item would have nothing left to describe.
+    #[tokio::test]
+    async fn the_library_lists_the_titles_it_holds_with_their_counts() {
+        // The library screen's read. Two files under one item and one under another: the counts are
+        // per title, so a title with two copies says two files and one item rather than two of each.
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+        title(&path, 2, "Arrival", 0, Some("PG-13")).await;
+        let (item_id, _) = item_with_file(&database, 1, "/media/Alien (1979).mkv").await;
+        database
+            .insert_media_file(file(item_id, "/media/Alien (1979) 2160p.mkv"))
+            .await
+            .unwrap();
+        item_with_file(&database, 2, "/media/Arrival (2016).mkv").await;
+
+        let rows = database
+            .list_library_titles(any_account(), PageRequest::first(10))
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        let alien = rows
+            .iter()
+            .find(|row| row.title.name == "Alien")
+            .expect("the film is listed");
+        assert_eq!(alien.items, 1);
+        assert_eq!(alien.files, 2);
+        assert_eq!(alien.missing_files, 0);
+        assert_eq!(alien.bytes, 8_000_000_000, "two four-gigabyte copies");
+    }
+
+    #[tokio::test]
+    async fn a_library_title_a_scope_cannot_see_is_not_listed_at_all() {
+        // I37 at the library's own read: an adult title the library holds is indistinguishable from
+        // one it does not, so a restricted account sees a page of one where the library holds two.
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        account(&path, 2, "Child").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+        title(&path, 2, "Adult Film", 1, Some("X")).await;
+        item_with_file(&database, 1, "/media/Alien (1979).mkv").await;
+        item_with_file(&database, 2, "/media/Adult Film (2019).mkv").await;
+
+        let visible = database
+            .list_library_titles(restricted(), PageRequest::first(10))
+            .await
+            .unwrap();
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].title.name, "Alien");
+    }
+
+    #[tokio::test]
+    async fn a_title_the_library_holds_no_file_of_is_still_listed() {
+        // An item with no file yet is a film whose file the scan has not reached — the `LEFT JOIN`
+        // is what keeps it visible as an item rather than dropping the title entirely.
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+        database.insert_media_item(item(1, None)).await.unwrap();
+
+        let rows = database
+            .list_library_titles(any_account(), PageRequest::first(10))
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].items, 1);
+        assert_eq!(rows[0].files, 0);
+        assert_eq!(rows[0].bytes, 0);
+    }
+
     #[tokio::test]
     async fn marking_a_file_missing_keeps_its_item_and_its_watch_progress() {
         use peregrine_domain::{PlaybackPosition, ProgressSource, WatchProgress};

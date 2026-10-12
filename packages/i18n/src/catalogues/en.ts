@@ -69,6 +69,36 @@ export const en = {
       jobs: "Go to Diagnostics",
       settings: "Go to Settings",
     },
+    library: {
+      title: "Library",
+      section: "What is here",
+      description:
+        "Every title the scans have found in your folders, with how many copies and how much space it takes. Nothing here is downloaded or moved.",
+      column: {
+        title: "Title",
+        kind: "Kind",
+        files: "Copies",
+        size: "Size",
+        missing: "Missing",
+      },
+      kind: {
+        films: "Film",
+        series: "Series",
+      },
+      stub: "No metadata yet",
+      size: {
+        none: "—",
+        value: "{{value}} {{unit}}",
+      },
+      empty: {
+        title: "Nothing has been scanned in yet.",
+        body: "Add a folder in Settings, then run a scan. Titles appear here as the scan finds them.",
+      },
+      unavailable: {
+        title: "Your library could not be read.",
+        body: "Peregrine's core did not answer, so this list is unknown rather than empty. Reopening the app tries the read again.",
+      },
+    },
     settings: {
       title: "Settings",
       shortcuts: {

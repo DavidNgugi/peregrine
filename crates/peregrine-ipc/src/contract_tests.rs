@@ -229,6 +229,15 @@ fn scan_now_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `list_titles` reaches the runtime like the other library reads.
+fn list_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::list_titles(harness.dead_state(), None)
+            .await
+            .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -384,6 +393,14 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: scan_now_without_a_runtime,
+        },
+        ContractCase {
+            command: "list_titles",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_titles_without_a_runtime,
         },
         ContractCase {
             command: "list_shortcuts",

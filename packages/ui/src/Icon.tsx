@@ -24,6 +24,15 @@ const PATHS = {
       <path d="M15.6 8.4 10.9 10.9 8.4 15.6 13.1 13.1Z" />
     </>
   ),
+  /** Library: spines on a shelf, which read as what is here rather than what could be. */
+  library: (
+    <>
+      <path d="M4 4v16" />
+      <path d="M8 4v16" />
+      <path d="M12 4v16" />
+      <path d="M17.5 5.2 20.4 19" />
+    </>
+  ),
   /** Diagnostics: a pulse, read from left to right. */
   pulse: <path d="M3 12h3.5l2.5-6 4 12 2.5-6H21" />,
   /** Settings: two sliders, which read as preferences on all three platforms. */
