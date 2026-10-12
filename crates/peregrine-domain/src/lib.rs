@@ -22,6 +22,7 @@ pub mod rank;
 pub mod redaction;
 pub mod release;
 pub mod text;
+pub mod watch;
 
 pub use account::{AccountError, AccountId, AccountScope, Visibility};
 pub use catalogue::{
@@ -36,9 +37,9 @@ pub use inspect::{
 };
 pub use library::{
     LibraryRoot, LibraryRootKind, MediaFile, MediaItem, MediaItemState, MediaOrigin,
-    PlaybackPosition, ProgressSource, ScanMode, SmartCollection, StoredWatchProgress,
-    SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile, WATCHED_PERCENT,
-    WatchProgress, WatchProgressError, WatchlistEntry,
+    PlaybackPosition, ProgressSource, STORAGE_FLOOR_PERCENT, ScanMode, SmartCollection,
+    StoredWatchProgress, SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack,
+    UnmatchedFile, WatchOrigin, WatchProgress, WatchProgressError, WatchlistEntry,
 };
 pub use notify::{
     BURST_SUMMARY_THRESHOLD, DEDUPE_WINDOW_MILLIS, DeepLink, DeepLinkError, EnableReason,
@@ -62,6 +63,10 @@ pub use release::{
     VideoCodec,
 };
 pub use text::{NonEmptyText, TextError};
+pub use watch::{
+    EpisodePlacement, FinalizeOutcome, RESUME_PERCENT, RESUME_REWIND_MS, ResumePoint,
+    WATCHED_PERCENT, finalize, is_watched, next_episode, resume_point,
+};
 
 /// Declares an enum that mirrors one `TEXT ... CHECK (col IN (...))` constraint.
 ///

@@ -13,6 +13,12 @@
 //!   `percent` cannot be set from outside; a stored row is validated by [`WatchProgress::restore`]
 //!   against the same derivation before it becomes a value.
 //!
+//! [`WatchProgress`] decides *the storage floor* and nothing else: a watched row below
+//! [`STORAGE_FLOOR_PERCENT`] must have been set by hand, because I6 only promises that the
+//! database never holds a measured watched row below it. When playback finishes a title is
+//! [`crate::watch`]'s decision, at a higher threshold, and the row takes that decision through
+//! [`WatchProgress::apply_finalize`]; the entity does not recompute it from a percentage.
+//!
 //! [`WatchProgress`] is also the one entity here that carries no row id. `watch_progress` has a
 //! generated `entity_key` column and a `UNIQUE (account_id, entity_key)` constraint, so its
 //! natural key is the account and the title or episode; the surrogate `id` exists for the row
@@ -130,7 +136,7 @@ stored_enum! {
     /// Where a watch-progress row's numbers came from, as `watch_progress.source` stores it.
     ///
     /// `Manual` is the marker I6 keys on: only a row the user set by hand may claim to be
-    /// watched below the threshold, because only then is the claim a statement of intent
+    /// watched below the storage floor, because only then is the claim a statement of intent
     /// rather than a measurement.
     ProgressSource {
         /// Reported by this installation's player.
@@ -142,8 +148,26 @@ stored_enum! {
     }
 }
 
-/// The share of a runtime at which a reported playback counts as watched (`DATA_MODEL` I6).
-pub const WATCHED_PERCENT: f64 = 0.92;
+/// How a watched flag came to be set, for the one call that has to tell them apart.
+///
+/// I6 accepts a watched row below [`STORAGE_FLOOR_PERCENT`] only when the user put it there, so
+/// the caller has to say which it is; guessing from the percentage would defeat the point of
+/// having a floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WatchOrigin {
+    /// The user marked it, which is a statement of intent and may sit below the floor.
+    Manual,
+    /// The watched policy decided it ([`crate::watch`]), which must satisfy the floor.
+    Policy,
+}
+
+/// The lowest share of a runtime a watched row may record when the user did not set it (I6).
+///
+/// This is a *floor*, not the playback threshold: [`crate::watch::WATCHED_PERCENT`] is what
+/// normal playback writes, and it is higher on purpose so that a manual or imported mark
+/// between the two numbers stays representable instead of the database rejecting the row.
+pub const STORAGE_FLOOR_PERCENT: f64 = 0.92;
 
 /// A reported playback position and, when the player knows it, the runtime it is measured
 /// against.
@@ -203,12 +227,6 @@ impl PlaybackPosition {
     pub fn percent(self) -> f64 {
         percent_of(self.position_ms, self.duration_ms)
     }
-
-    /// Whether a freshly derived row would be watched at this position.
-    #[must_use]
-    pub fn is_watched(self) -> bool {
-        self.percent() >= WATCHED_PERCENT
-    }
 }
 
 #[derive(Deserialize)]
@@ -251,12 +269,12 @@ pub enum WatchProgressError {
         /// The refused value.
         value: i64,
     },
-    /// A row claims to be watched below the threshold without having been set manually (I6).
+    /// A row claims to be watched below the storage floor without having been set by hand (I6).
     #[error(
-        "a watched row is {percent} played, below the {} threshold, and was not set manually",
-        WATCHED_PERCENT
+        "a watched row is {percent} played, below the {} storage floor, and was not set by hand",
+        STORAGE_FLOOR_PERCENT
     )]
-    WatchedBelowThreshold {
+    WatchedBelowFloor {
         /// The percentage the row's own position and runtime derive.
         percent: f64,
     },
@@ -308,6 +326,11 @@ pub struct StoredWatchProgress {
 /// the row's own position and runtime and refuses a watched flag the derivation cannot
 /// support.
 ///
+/// The watched *flag* is not derived here, though: the playback threshold belongs to
+/// [`crate::watch`], and the entity only enforces [`STORAGE_FLOOR_PERCENT`] on a flag it is
+/// handed. [`WatchProgress::record`] therefore stores a position as unwatched, and
+/// [`WatchProgress::apply_finalize`] applies the policy's decision at the end of a playback.
+///
 /// The value is identified by [`WatchProgress::entity_key`] and the account, not by the row's
 /// surrogate id, which the mapper keeps for itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -328,13 +351,13 @@ pub struct WatchProgress {
 }
 
 impl WatchProgress {
-    /// Builds the value for a position a player reported, deriving the percentage and the
-    /// watched flag.
+    /// Builds the value for a position a player reported, deriving the percentage.
     ///
-    /// The flag follows the position: at or above [`WATCHED_PERCENT`] the row is watched and
-    /// stamped with `at`, below it the row is not watched and carries no stamp. A row that
-    /// must be watched below the threshold is not recorded here — it is marked by hand with
-    /// [`WatchProgress::mark_watched`], which records *why* it may be.
+    /// The row is stored unwatched: whether a position finishes a title is the policy's
+    /// decision ([`crate::watch::finalize`]), taken at the end of the playback and applied with
+    /// [`WatchProgress::apply_finalize`]. A position that has been reported is not evidence
+    /// that the session ended, and the two answers differ exactly at the threshold — which is
+    /// why a row reported at 0.93 stays resumable instead of being stored finished.
     #[must_use]
     pub fn record(
         account_id: AccountId,
@@ -345,17 +368,15 @@ impl WatchProgress {
         at: Timestamp,
         device_label: Option<String>,
     ) -> Self {
-        let percent = position.percent();
-        let watched = percent >= WATCHED_PERCENT;
         Self {
             account_id,
             title_id,
             episode_id,
             position_ms: position.position_ms(),
             duration_ms: position.duration_ms(),
-            percent,
-            watched,
-            watched_at: watched.then_some(at),
+            percent: position.percent(),
+            watched: false,
+            watched_at: None,
             play_count: 0,
             updated_at: at,
             source,
@@ -369,13 +390,16 @@ impl WatchProgress {
     ///
     /// [`WatchProgressError::NegativePosition`] and [`WatchProgressError::NegativeDuration`]
     /// for a row whose millisecond columns cannot be a position, and
-    /// [`WatchProgressError::WatchedBelowThreshold`] when a row that was not set by hand
-    /// claims to be watched below the threshold.
+    /// [`WatchProgressError::WatchedBelowFloor`] when a row that was not set by hand claims to
+    /// be watched below the storage floor.
     pub fn restore(stored: StoredWatchProgress) -> Result<Self, WatchProgressError> {
         let position = PlaybackPosition::new(stored.position_ms, stored.duration_ms)?;
         let derived = position.percent();
-        if stored.watched && stored.source != ProgressSource::Manual && derived < WATCHED_PERCENT {
-            return Err(WatchProgressError::WatchedBelowThreshold { percent: derived });
+        if stored.watched
+            && stored.source != ProgressSource::Manual
+            && derived < STORAGE_FLOOR_PERCENT
+        {
+            return Err(WatchProgressError::WatchedBelowFloor { percent: derived });
         }
         Ok(Self {
             account_id: stored.account_id,
@@ -395,17 +419,36 @@ impl WatchProgress {
 
     /// Moves the position, re-deriving the percentage and the watched flag.
     ///
-    /// A row that is still watched keeps the instant it was first marked, so "watched at"
-    /// means when it was finished rather than when it was last touched. A row that drops back
-    /// below the threshold loses the flag and its stamp — that is what makes marking watched
-    /// reversible by simply playing the item again.
+    /// A row that is still watched keeps the instant it was first marked, whether this move
+    /// takes it further past the floor or back below [`crate::watch::WATCHED_PERCENT`] but not
+    /// below the floor: "watched at" means when it was finished, not when it was last touched,
+    /// and a re-watch's coalesced writes must not keep re-stamping it. A row that drops below
+    /// the storage floor loses the flag and its stamp — that is what makes marking watched
+    /// reversible by simply playing the item again. The flag here is the floor's, not the
+    /// policy's: a row above the floor but below [`crate::watch::WATCHED_PERCENT`] is left
+    /// unwatched by [`WatchProgress::record`] and is unaffected either way.
+    ///
+    /// One row is exempt from all of that: one the user marked unwatched. Its percentage still
+    /// follows the position, but the flag and the manual source stay, so that the next
+    /// [`WatchProgress::apply_finalize`] — the only caller that closes a session — can still see
+    /// the intent after the position has moved it past the floor. A hand-set *watched* flag is
+    /// not exempt: it cannot persist below the floor anyway (I6 refuses to read it back), and
+    /// keeping a manual watched mark across a playback belongs to `PG-E18-06`, which owns the
+    /// marking surface.
     pub fn set_position(&mut self, position: PlaybackPosition, at: Timestamp) {
         let percent = position.percent();
-        let watched = percent >= WATCHED_PERCENT;
+        if self.source == ProgressSource::Manual && !self.watched {
+            self.position_ms = position.position_ms();
+            self.duration_ms = position.duration_ms();
+            self.percent = percent;
+            self.updated_at = at;
+            return;
+        }
+        let watched = percent >= STORAGE_FLOOR_PERCENT;
         if watched && !self.watched {
             self.watched_at = Some(at);
         }
-        if !watched {
+        if !watched && self.watched {
             self.watched_at = None;
         }
         self.position_ms = position.position_ms();
@@ -415,23 +458,87 @@ impl WatchProgress {
         self.updated_at = at;
     }
 
-    /// Marks the row watched by hand, which is the one way to be watched below the threshold.
+    /// Marks the row watched, enforcing the storage floor unless the user did it by hand.
     ///
-    /// The source becomes [`ProgressSource::Manual`] because that is exactly what the row now
-    /// records: a statement of intent that no position supports.
-    pub fn mark_watched(&mut self, at: Timestamp) {
+    /// A [`WatchOrigin::Policy`] mark has to satisfy I6, so a policy that decides a title is
+    /// watched below the floor gets a typed refusal rather than an unwritable row. A
+    /// [`WatchOrigin::Manual`] mark is the user's statement of intent and is exempt: it also
+    /// becomes [`ProgressSource::Manual`], which is the marker [`WatchProgress::restore`]
+    /// reads back so the row survives a reload.
+    ///
+    /// # Errors
+    ///
+    /// [`WatchProgressError::WatchedBelowFloor`] when a policy mark is below the floor.
+    pub fn mark_watched(
+        &mut self,
+        origin: WatchOrigin,
+        at: Timestamp,
+    ) -> Result<(), WatchProgressError> {
+        if origin == WatchOrigin::Policy && self.percent < STORAGE_FLOOR_PERCENT {
+            return Err(WatchProgressError::WatchedBelowFloor {
+                percent: self.percent,
+            });
+        }
+        if origin == WatchOrigin::Manual {
+            self.source = ProgressSource::Manual;
+        }
+        if !self.watched {
+            self.watched_at = Some(at);
+        }
         self.watched = true;
-        self.watched_at = Some(at);
-        self.source = ProgressSource::Manual;
         self.updated_at = at;
+        Ok(())
     }
 
     /// Clears the watched flag and its stamp, leaving the position alone.
+    ///
+    /// The source becomes [`ProgressSource::Manual`] even when unwatching, because the row now
+    /// records an intent rather than a measurement, and I6 keys its exemption on exactly that.
     pub fn mark_unwatched(&mut self, at: Timestamp) {
         self.watched = false;
         self.watched_at = None;
         self.source = ProgressSource::Manual;
         self.updated_at = at;
+    }
+
+    /// Applies a finished playback's decision ([`crate::watch::finalize`]) to the row.
+    ///
+    /// The playback's final position is moved first with [`WatchProgress::set_position`] — the
+    /// policy decides the watched flag from it — and this then records the flag, the count, and
+    /// the write. Two rules here are the entity's rather than the policy's:
+    ///
+    /// - A policy mark is routed through [`WatchProgress::mark_watched`], so a decision the
+    ///   storage floor cannot hold is refused instead of written.
+    /// - A row the user has marked unwatched keeps that flag. I6 calls a manual row a statement
+    ///   of intent and a measured row a measurement; a finalize is a measurement, so it does
+    ///   not overwrite the intent. The user marks a re-watch watched again from the library,
+    ///   which is `PG-E18-06`'s surface.
+    ///
+    /// Returns whether the row changed, so a caller closing a session can skip a write that
+    /// would say nothing new.
+    ///
+    /// # Errors
+    ///
+    /// [`WatchProgressError::WatchedBelowFloor`] when the outcome marks watched below the floor,
+    /// which no policy that respects [`crate::watch::WATCHED_PERCENT`] ever does.
+    pub fn apply_finalize(
+        &mut self,
+        outcome: crate::watch::FinalizeOutcome,
+        at: Timestamp,
+    ) -> Result<bool, WatchProgressError> {
+        if self.source == ProgressSource::Manual && !self.watched {
+            return Ok(false);
+        }
+        if outcome.watched && !self.watched {
+            self.mark_watched(WatchOrigin::Policy, at)?;
+        }
+        if !outcome.watched && self.watched {
+            self.watched = false;
+            self.watched_at = None;
+        }
+        self.play_count = self.play_count.saturating_add(outcome.play_count);
+        self.updated_at = at;
+        Ok(true)
     }
 
     /// The value of the `entity_key` generated column: one progress row per account per
@@ -1075,24 +1182,37 @@ mod tests {
         for duration in [None, Some(0)] {
             let span = position(500, duration);
             assert_eq!(span.percent(), 0.0);
-            assert!(!span.is_watched());
             assert_eq!(record(500, duration).percent(), 0.0);
             assert!(!record(500, duration).watched());
         }
     }
 
     #[test]
-    fn the_watched_flag_turns_over_exactly_at_the_threshold() {
-        let below = record(919, Some(1000));
-        let exact = record(920, Some(1000));
-        let above = record(921, Some(1000));
+    fn a_recorded_position_is_not_watched_at_any_percentage() {
+        let at_the_floor = record(920, Some(1000));
+        let at_the_policy_threshold = record(950, Some(1000));
+        let past_the_end = record(1000, Some(1000));
 
-        assert!(!below.watched());
-        assert_eq!(below.watched_at(), None);
-        assert!(exact.watched(), "0.92 is the documented threshold (I6)");
-        assert!(above.watched());
-        assert_eq!(exact.watched_at(), Some(now()));
-        assert!(exact.percent() >= WATCHED_PERCENT);
+        assert!(
+            !at_the_floor.watched(),
+            "0.92 is the storage floor (I6), not a decision the entity may take"
+        );
+        assert_eq!(at_the_floor.watched_at(), None);
+        assert!(
+            !at_the_policy_threshold.watched() && !past_the_end.watched(),
+            "a reported position is not a finished playback; the policy decides that at finalize"
+        );
+    }
+
+    #[test]
+    fn the_storage_floor_is_a_floor_and_not_the_playback_threshold() {
+        assert_eq!(
+            STORAGE_FLOOR_PERCENT, 0.92,
+            "I6's floor is the weakest watched row the database accepts"
+        );
+        // The policy's own threshold is higher, which is the distinction the entity must not
+        // blur; the compile-time comparison lives with the policy that owns that number.
+        assert_eq!(crate::watch::WATCHED_PERCENT, 0.95);
     }
 
     #[test]
@@ -1129,11 +1249,11 @@ mod tests {
     }
 
     #[test]
-    fn a_watched_row_below_the_threshold_must_have_been_set_by_hand() {
+    fn a_watched_row_below_the_storage_floor_must_have_been_set_by_hand() {
         let measured = WatchProgress::restore(stored(0.5, true, ProgressSource::Local));
         assert_eq!(
             measured,
-            Err(WatchProgressError::WatchedBelowThreshold { percent: 0.5 })
+            Err(WatchProgressError::WatchedBelowFloor { percent: 0.5 })
         );
 
         let imported = WatchProgress::restore(stored(0.5, true, ProgressSource::Trakt));
@@ -1150,7 +1270,9 @@ mod tests {
         let mut progress = record(100, Some(1000));
         let later = at(1_700_000_100_000);
 
-        progress.mark_watched(later);
+        progress
+            .mark_watched(WatchOrigin::Manual, later)
+            .expect("a hand mark may sit below the storage floor");
         assert!(progress.watched());
         assert_eq!(progress.watched_at(), Some(later));
         assert_eq!(progress.source(), ProgressSource::Manual);
@@ -1167,14 +1289,39 @@ mod tests {
     }
 
     #[test]
-    fn recording_a_position_re_derives_the_watched_flag() {
+    fn a_policy_mark_below_the_storage_floor_is_refused() {
+        let mut progress = record(910, Some(1000));
+        assert_eq!(
+            progress.mark_watched(WatchOrigin::Policy, now()),
+            Err(WatchProgressError::WatchedBelowFloor { percent: 0.91 })
+        );
+        assert!(!progress.watched(), "a refused mark writes nothing");
+        assert_eq!(progress.source(), ProgressSource::Local);
+
+        let mut at_the_floor = record(920, Some(1000));
+        at_the_floor
+            .mark_watched(WatchOrigin::Policy, now())
+            .expect("0.92 is the weakest row I6 accepts");
+        assert!(at_the_floor.watched());
+        assert_eq!(
+            at_the_floor.source(),
+            ProgressSource::Local,
+            "a policy mark is still a measurement, so it keeps the source that reported it"
+        );
+    }
+
+    #[test]
+    fn recording_a_position_re_derives_the_storage_floor_flag() {
         let mut progress = record(1000, Some(1000));
+        progress
+            .mark_watched(WatchOrigin::Policy, now())
+            .expect("1.0 is above the floor");
         assert!(progress.watched());
         let first_stamp = progress.watched_at();
 
         let later = at(1_700_000_100_000);
         progress.set_position(position(999, Some(1000)), later);
-        assert!(progress.watched(), "0.999 is still above the threshold");
+        assert!(progress.watched(), "0.999 is still above the floor");
         assert_eq!(
             progress.watched_at(),
             first_stamp,
@@ -1189,14 +1336,116 @@ mod tests {
     #[test]
     fn a_hand_set_watch_flag_does_not_survive_a_reported_position() {
         let mut progress = record(100, Some(1000));
-        progress.mark_watched(now());
+        progress
+            .mark_watched(WatchOrigin::Manual, now())
+            .expect("the user may mark it by hand");
         assert!(progress.watched());
 
         progress.set_position(position(200, Some(1000)), at(1_700_000_100_000));
         assert!(
             !progress.watched(),
-            "the position is the only writer of the derived fields (I6)"
+            "the position is the only writer of the derived fields (I6); the library surface that \
+             has to keep a manual override is PG-E18-06's"
         );
+    }
+
+    #[test]
+    fn a_finalize_applies_the_policy_decision_to_the_row() {
+        let mut progress = record(500, Some(1000));
+        let ended = at(1_700_000_200_000);
+
+        let outcome = crate::watch::finalize(position(990, Some(1000)), false, ended);
+        progress.set_position(position(990, Some(1000)), ended);
+        assert!(
+            progress
+                .apply_finalize(outcome, ended)
+                .expect("0.99 clears the storage floor")
+        );
+        assert!(progress.watched());
+        assert_eq!(progress.watched_at(), Some(ended));
+        assert_eq!(progress.play_count(), 1);
+        assert_eq!(progress.position_ms(), 990, "the final position is kept");
+        assert_eq!(progress.updated_at(), ended);
+    }
+
+    #[test]
+    fn a_manual_unwatch_survives_the_next_finalize() {
+        let mut progress = record(500, Some(1000));
+        let marked = at(1_700_000_100_000);
+        progress.mark_unwatched(marked);
+        assert_eq!(progress.source(), ProgressSource::Manual);
+
+        let ended = at(1_700_000_200_000);
+        let outcome = crate::watch::finalize(position(990, Some(1000)), true, ended);
+        progress.set_position(position(990, Some(1000)), ended);
+        assert!(
+            !progress
+                .apply_finalize(outcome, ended)
+                .expect("the manual row is left alone"),
+            "the policy does not overwrite a statement of intent"
+        );
+        assert!(!progress.watched());
+        assert_eq!(progress.watched_at(), None);
+        assert_eq!(
+            progress.play_count(),
+            0,
+            "an ignored finalize counts nothing"
+        );
+    }
+
+    #[test]
+    fn a_re_watch_bumps_the_count_without_clearing_the_stamp() {
+        let mut progress = record(500, Some(1000));
+        let finished = at(1_700_000_100_000);
+        progress.set_position(position(990, Some(1000)), finished);
+        progress
+            .apply_finalize(
+                crate::watch::finalize(position(990, Some(1000)), false, finished),
+                finished,
+            )
+            .expect("above the floor");
+        assert_eq!(progress.play_count(), 1);
+        let first_stamp = progress.watched_at();
+        assert_eq!(first_stamp, Some(finished));
+
+        // The second playback: the player reports the position again, which must not disturb a
+        // stamp that already means "finished", and then closes the session.
+        let again = at(1_700_000_200_000);
+        progress.set_position(position(990, Some(1000)), again);
+        progress
+            .apply_finalize(
+                crate::watch::finalize(position(990, Some(1000)), false, again),
+                again,
+            )
+            .expect("still above the floor");
+
+        assert_eq!(
+            progress.play_count(),
+            2,
+            "the second playback is a second play"
+        );
+        assert_eq!(
+            progress.watched_at(),
+            first_stamp,
+            "watched_at is when it was first finished, not when it was last played"
+        );
+        assert!(progress.watched());
+    }
+
+    #[test]
+    fn a_policy_finalize_the_floor_cannot_hold_is_refused() {
+        let mut progress = record(500, Some(1000));
+        let ended = at(1_700_000_200_000);
+        let outcome = crate::watch::FinalizeOutcome {
+            watched: true,
+            watched_at: Some(ended),
+            play_count: 1,
+        };
+        assert_eq!(
+            progress.apply_finalize(outcome, ended),
+            Err(WatchProgressError::WatchedBelowFloor { percent: 0.5 })
+        );
+        assert!(!progress.watched());
     }
 
     #[test]
@@ -1235,6 +1484,10 @@ mod tests {
         assert!(
             json.contains("\"percent\":0.92"),
             "the derived percentage is part of the value that travels"
+        );
+        assert!(
+            !progress.watched(),
+            "and 0.92 does not make it watched, because that is the floor rather than the policy"
         );
     }
 
@@ -1467,7 +1720,7 @@ mod tests {
         }
 
         #[test]
-        fn a_recorded_row_is_watched_exactly_from_the_threshold(
+        fn a_recorded_row_is_never_watched_whatever_the_percentage(
             position_ms in 0i64..86_400_000,
             duration_ms in 1i64..86_400_000,
         ) {
@@ -1481,9 +1734,33 @@ mod tests {
                 Timestamp::from_millisecond(0).expect("in range"),
                 None,
             );
-            prop_assert_eq!(progress.watched(), span.percent() >= WATCHED_PERCENT);
+            // The flag is the policy's to set at the end of a playback, so no reported position,
+            // however far past the end, may produce a watched row on its own.
+            prop_assert!(!progress.watched());
+            prop_assert_eq!(progress.watched_at(), None);
             prop_assert!(progress.percent().is_finite());
             prop_assert!(progress.percent() >= 0.0);
+            prop_assert_eq!(progress.percent().to_bits(), expected_percent(position_ms, duration_ms).to_bits());
+        }
+
+        #[test]
+        fn a_policy_mark_is_accepted_exactly_from_the_storage_floor(
+            position_ms in 0i64..86_400_000,
+            duration_ms in 1i64..86_400_000,
+        ) {
+            let span = PlaybackPosition::new(position_ms, Some(duration_ms)).expect("non-negative");
+            let mut progress = WatchProgress::record(
+                AccountId::new(1).expect("positive"),
+                1,
+                None,
+                span,
+                ProgressSource::Local,
+                Timestamp::from_millisecond(0).expect("in range"),
+                None,
+            );
+            let marked = progress.mark_watched(WatchOrigin::Policy, Timestamp::from_millisecond(1).expect("in range"));
+            prop_assert_eq!(marked.is_ok(), span.percent() >= STORAGE_FLOOR_PERCENT);
+            prop_assert_eq!(progress.watched(), marked.is_ok());
         }
 
         #[test]
