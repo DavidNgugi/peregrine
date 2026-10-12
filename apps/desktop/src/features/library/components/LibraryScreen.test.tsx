@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
+import type { ScanControl } from "../hooks/useScan.js";
 import { LibraryScreen } from "./LibraryScreen.js";
 
 const i18n = createI18n();
@@ -24,7 +25,27 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
 }
 
 function library(state: Partial<LibraryTitles> = {}): LibraryTitles {
-  return { titles: [], loading: false, failed: false, ...state };
+  return { titles: [], loading: false, failed: false, refresh: () => Promise.resolve(), ...state };
+}
+
+/** The scan control as a state, with its action recorded rather than performed. */
+function scanControl(state: Partial<ScanControl> = {}): ScanControl & { readonly starts: number } {
+  const record = { starts: 0 };
+  return {
+    jobId: null,
+    phase: null,
+    permille: 0,
+    starting: false,
+    running: false,
+    finished: 0,
+    error: null,
+    start: () => {
+      record.starts += 1;
+      return Promise.resolve();
+    },
+    ...state,
+    ...record,
+  };
 }
 
 /**
@@ -34,10 +55,10 @@ function library(state: Partial<LibraryTitles> = {}): LibraryTitles {
  * what this screen has to get right: the read, the empty case, and the failed case are three
  * different screens and the test asserts they say three different things.
  */
-function markup(state: LibraryTitles): string {
+function markup(state: LibraryTitles, scan: ScanControl = scanControl()): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <LibraryScreen titles={state} />
+      <LibraryScreen scan={scan} titles={state} />
     </I18nextProvider>,
   );
 }
@@ -96,5 +117,53 @@ describe("LibraryScreen", () => {
     const html = markup(library({ titles: [title({ kind: "shows" })] }));
 
     expect(html).toContain("Series");
+  });
+
+  it("offers a scan even when the library is empty", () => {
+    // The empty state is exactly where a scan is wanted: the copy says to add a folder and scan,
+    // and a screen that made the user walk to Settings to do it would be a worse answer than the
+    // button it already has the command for.
+    const html = markup(library());
+
+    expect(html).toContain("Scan now");
+    expect(html).toContain("Nothing has been scanned in yet.");
+  });
+
+  it("shows the scan's progress while one is running and refuses a second", () => {
+    const running = markup(
+      library(),
+      scanControl({ jobId: "01J", running: true, phase: "running", permille: 420 }),
+    );
+
+    expect(running).toContain("Scanning");
+    expect(running).toContain('role="progressbar"');
+    expect(running).toContain(`disabled=""`);
+  });
+
+  it("says how the last scan ended rather than leaving the last word on screen", () => {
+    // "Scanning…" left behind after a failed scan is a screen lying about the state of the world,
+    // so each terminal phase gets its own sentence.
+    const succeeded = markup(library(), scanControl({ phase: "succeeded" }));
+    const failed = markup(library(), scanControl({ phase: "failed" }));
+
+    expect(succeeded).toContain("Scan finished.");
+    expect(failed).toContain("The last scan did not finish.");
+    expect(succeeded).not.toContain("Scanning");
+  });
+
+  it("shows why a scan was refused, in the core's own words", () => {
+    const refused = markup(
+      library(),
+      scanControl({
+        error: {
+          code: "CONFLICT",
+          message: "conflict",
+          detail: "A scan is already running.",
+          retryable: false,
+        },
+      }),
+    );
+
+    expect(refused).toContain("A scan is already running.");
   });
 });

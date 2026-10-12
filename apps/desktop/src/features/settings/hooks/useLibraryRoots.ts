@@ -15,15 +15,15 @@
 
 import {
   addLibraryRoot,
-  describeIpcError,
   listLibraryRoots,
   normalizeIpcError,
   removeLibraryRoot,
   scanLibrary,
 } from "@peregrine/ipc-client";
-import type { IpcError, JobStarted, LibraryRootDto, RootKind } from "@peregrine/ipc-client";
+import type { JobStarted, LibraryRootDto, RootKind } from "@peregrine/ipc-client";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
+import { messageOf } from "../../../lib/ipc-message.js";
 import { pickFolder } from "../../../lib/picker.js";
 
 /** The roots as the core holds them, and what the screen needs to know about the read. */
@@ -56,17 +56,6 @@ export interface LibraryRoots {
    * rather than as an exception the caller has to decode.
    */
   readonly scan: () => Promise<JobStarted | null>;
-}
-
-/**
- * What to show for a failed write.
- *
- * The core's own detail is a sentence written for a user — "That folder is already one of your
- * libraries." — so it wins over the code's generic copy. `describeIpcError` answers with keys
- * rather than text, which is why this is the message and not the copy.
- */
-function messageOf(error: IpcError): string {
-  return error.detail ?? error.message ?? describeIpcError(error).titleKey;
 }
 
 /** The scan policy a folder added from Settings gets. */

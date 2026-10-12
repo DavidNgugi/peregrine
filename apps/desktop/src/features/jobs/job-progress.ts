@@ -13,6 +13,8 @@
 
 import type { EventTopicName, JobRecord, JobState } from "@peregrine/ipc-client";
 
+import { eventPayload } from "../../lib/job-events.js";
+
 /** One live job, as the two streams describe it. */
 export interface LiveJob {
   readonly jobId: string;
@@ -44,14 +46,6 @@ export function percentOf(job: LiveJob | null): number {
   return Math.min(100, Math.max(0, job.progressPermille / 10));
 }
 
-/** Narrows an unknown value to a record, the shape both payloads have. */
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
 /** The phases the core declares, so an unknown string cannot reach the screen. */
 const PHASES: readonly JobState[] = [
   "queued",
@@ -80,12 +74,8 @@ function asFiniteNumber(value: unknown): number | null {
  * newer shape is how a screen renders nonsense.
  */
 export function parseJobEvent(topic: EventTopicName | string, envelope: unknown): JobEvent | null {
-  const outer = asRecord(envelope);
-  const inner = outer === null ? null : asRecord(outer["payload"]);
-  if (outer === null || inner === null) {
-    return null;
-  }
-  if (outer["schemaVersion"] !== 1) {
+  const inner = eventPayload(envelope);
+  if (inner === null) {
     return null;
   }
 

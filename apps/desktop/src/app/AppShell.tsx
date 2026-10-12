@@ -5,7 +5,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DiscoverScreen } from "../features/discover/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
-import { LibraryScreen, useLibraryTitles } from "../features/library/index.js";
+import { LibraryScreen, useLibraryTitles, useScan } from "../features/library/index.js";
 import {
   SettingsScreen,
   useLibraryRoots,
@@ -55,6 +55,7 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
   const shortcuts = useShortcuts();
   const libraries = useLibraryRoots();
   const library = useLibraryTitles();
+  const scan = useScan();
   const openScreen = useCallback((action: string) => {
     const target = SCREEN_FOR_ACTION[action];
     if (target !== undefined) {
@@ -91,7 +92,7 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
         </Sidebar>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {screen === "discover" ? <DiscoverScreen /> : null}
-          {screen === "library" ? <LibraryScreen titles={library} /> : null}
+          {screen === "library" ? <LibraryScreen scan={scan} titles={library} /> : null}
           {screen === "jobs" ? <JobsScreen /> : null}
           {screen === "settings" ? (
             <SettingsScreen libraries={libraries} shortcuts={shortcuts} />

@@ -15,17 +15,27 @@
  * like any other would promise artwork that is not coming yet.
  */
 
-import { EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
+import { Button, EmptyState, ErrorState, Progress, Screen, Section, Table } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
 import type { LibraryTitleDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { messageOf } from "../../../lib/ipc-message.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
+import type { ScanControl } from "../hooks/useScan.js";
 
 interface LibraryScreenProps {
   /** The titles as the shell read them. */
   readonly titles: LibraryTitles;
+  /**
+   * The scan this screen can start, and the state of the one it is following.
+   *
+   * Passed in rather than created here, for the same reason the shortcut registry is: the shell
+   * owns the subscription, so a scan started from Settings and a scan started from here are one
+   * scan with one story.
+   */
+  readonly scan: ScanControl;
 }
 
 /** What `useTranslation` hands a component, so the column builder can take it by name. */
@@ -96,13 +106,54 @@ function columnsOf(t: Translate): readonly TableColumn<LibraryTitleDto>[] {
 }
 
 /** The library screen. */
-export function LibraryScreen({ titles }: LibraryScreenProps): ReactElement {
+export function LibraryScreen({ titles, scan }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
   const columns = useMemo(() => columnsOf(t), [t]);
+  const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
+
+  // A scan is the only thing that changes this list, so watching one finish is the whole of the
+  // subscription: the counter changes once per finished scan, and a boolean would refresh once and
+  // then never again for the second.
+  useEffect(() => {
+    if (finished > 0) {
+      void refresh();
+    }
+  }, [finished, refresh]);
 
   return (
     <Screen title={t("library.title")}>
       <Section description={t("library.description")} title={t("library.section")}>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-4">
+            {scan.running ? (
+              <Progress label={t("library.scan.running")} value={scan.permille} />
+            ) : (
+              <span className="text-caption text-text-tertiary">
+                {scan.phase === "succeeded"
+                  ? t("library.scan.finished")
+                  : scan.phase === "canceled"
+                    ? t("library.scan.canceled")
+                    : scan.phase === "failed"
+                      ? t("library.scan.failed")
+                      : t("library.scan.idle")}
+              </span>
+            )}
+            <Button
+              disabled={scan.starting || scan.running}
+              onClick={() => {
+                void scan.start();
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              {scan.running ? t("library.scan.working") : t("library.scan.action")}
+            </Button>
+          </div>
+          {scan.error === null ? null : (
+            <ErrorState body={messageOf(scan.error)} title={t("library.scan.refused")} />
+          )}
+        </div>
+
         {titles.loading ? null : titles.failed ? (
           <ErrorState body={t("library.unavailable.body")} title={t("library.unavailable.title")} />
         ) : titles.titles.length === 0 ? (

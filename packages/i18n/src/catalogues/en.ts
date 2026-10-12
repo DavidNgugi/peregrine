@@ -74,6 +74,16 @@ export const en = {
       section: "What is here",
       description:
         "Every title the scans have found in your folders, with how many copies and how much space it takes. Nothing here is downloaded or moved.",
+      scan: {
+        action: "Scan now",
+        working: "Scanning",
+        running: "Scanning your folders…",
+        idle: "No scan has run from here yet.",
+        finished: "Scan finished.",
+        canceled: "The last scan was cancelled.",
+        failed: "The last scan did not finish.",
+        refused: "That scan could not be started.",
+      },
       column: {
         title: "Title",
         kind: "Kind",

@@ -12,7 +12,7 @@
 
 import { listLibraryTitles, normalizeIpcError } from "@peregrine/ipc-client";
 import type { LibraryTitleDto } from "@peregrine/ipc-client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 
 /** What the library holds, and what the screen needs to know about the read. */
@@ -23,6 +23,14 @@ export interface LibraryTitles {
   readonly loading: boolean;
   /** The read failed, so the list is unknown rather than empty. */
   readonly failed: boolean;
+  /**
+   * Re-reads the library.
+   *
+   * What the screen calls when a scan it started reaches a terminal phase: a scan is the only thing
+   * that changes this list, so watching one finish is the whole of the subscription this screen
+   * needs — polling would ask the same question at a cost nobody sees.
+   */
+  readonly refresh: () => Promise<void>;
 }
 
 /**
@@ -33,30 +41,25 @@ export interface LibraryTitles {
  * subscription the jobs bridge owns (`PG-E14-04`).
  */
 export function useLibraryTitles(): LibraryTitles {
-  const [state, setState] = useState<LibraryTitles>({
+  const [state, setState] = useState<Omit<LibraryTitles, "refresh">>({
     titles: [],
     loading: true,
     failed: false,
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    listLibraryTitles()
-      .then((titles) => {
-        if (!cancelled) {
-          setState({ titles, loading: false, failed: false });
-        }
-      })
-      .catch((caught: unknown) => {
-        logUiError("listLibraryTitles", normalizeIpcError(caught));
-        if (!cancelled) {
-          setState({ titles: [], loading: false, failed: true });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+  const read = useCallback(async (): Promise<void> => {
+    try {
+      const titles = await listLibraryTitles();
+      setState({ titles, loading: false, failed: false });
+    } catch (caught: unknown) {
+      logUiError("listLibraryTitles", normalizeIpcError(caught));
+      setState({ titles: [], loading: false, failed: true });
+    }
   }, []);
 
-  return state;
+  useEffect(() => {
+    void read();
+  }, [read]);
+
+  return { ...state, refresh: read };
 }
