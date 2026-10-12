@@ -14,8 +14,11 @@
 //! break by mixing two of them up beyond what the schema's foreign keys already refuse.
 //!
 //! The enums are the source of truth for the `CHECK` constraints they mirror, exactly as
-//! `DATA_MODEL` §2 requires: each one lists its values in the constraint's order, and a test
-//! asserts the list against the document.
+//! `DATA_MODEL` §2 requires, and each one lists its values in the constraint's order. A test
+//! here pins those spellings and that order as a regression guard, which is the strongest
+//! check a pure crate can make: it may not read a database (AGENTS R6). The check that the
+//! enum and the schema actually agree lives in `peregrine-storage`, which reads the `CHECK`
+//! clause out of `sqlite_master` and compares it with these same enums in both directions.
 
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -565,12 +568,20 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// Pins each enum's spellings and their order.
+    ///
+    /// The expected values are written out here rather than read from the schema, because this
+    /// crate may not touch a database (AGENTS R6) — so this test catches an accidental
+    /// variant rename, a dropped variant, or a reordering of `ALL`, and nothing more. The
+    /// list must agree with `DATA_MODEL` §2 *and* with the migration; `peregrine-storage`
+    /// asserts the second half against the live `CHECK` clause, and a change to either should
+    /// fail both.
     macro_rules! assert_check_values {
         ($enum:ty, [$($value:literal),+ $(,)?]) => {
             assert_eq!(
                 <$enum>::ALL.iter().map(|value| value.as_str()).collect::<Vec<_>>(),
                 [$($value),+],
-                "{} does not match its CHECK constraint",
+                "{} no longer lists the values this test pins",
                 stringify!($enum)
             );
         };
@@ -673,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn every_enum_matches_the_check_constraint_it_mirrors() {
+    fn every_enum_pins_its_spellings_and_their_order() {
         assert_check_values!(TitleKind, ["movie", "show"]);
         assert_check_values!(
             TitleSubtype,
