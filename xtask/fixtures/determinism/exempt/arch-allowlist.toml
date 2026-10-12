@@ -1,0 +1,24 @@
+[workspace]
+members = ["platform", "shipping"]
+
+[dev-dependencies]
+allowed = []
+
+[purity]
+forbidden_paths = []
+
+[determinism]
+adapters = ["platform"]
+forbidden = ["Timestamp::now", "Ulid::generate"]
+
+[crates.platform]
+may_depend_on = []
+runtime = []
+build = []
+pure = false
+
+[crates.shipping]
+may_depend_on = []
+runtime = []
+build = []
+pure = false

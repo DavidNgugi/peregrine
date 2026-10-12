@@ -27,6 +27,7 @@ if [ -n "$rust_changed" ]; then
   # The architecture check is the one gate that must never be skipped: it is the
   # only thing standing between a hurried import and a reversed dependency.
   cargo xtask check-arch || exit 1
+  cargo xtask check-determinism || exit 1
 fi
 
 migrations_changed=$(printf '%s\n' "$staged" | grep -E '^crates/peregrine-storage/migrations/' || true)

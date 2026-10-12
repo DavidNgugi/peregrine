@@ -50,6 +50,35 @@ forbidden_paths = [
 ]
 allowed_files = ["build.rs"]
 
+# Determinism, enforced by `cargo xtask check-determinism`. Time and identifiers
+# are injected through `peregrine-domain`'s `Clock` and `IdGenerator` ports
+# (AGENTS R14), so no shipping crate outside the adapters below may read a wall
+# clock or a random source.
+#
+#   adapters   crates permitted to hold a production implementation. These are the
+#              leaf adapters of AGENTS R8.
+#   forbidden  substrings naming a wall-clock or random entry point. Monotonic
+#              clocks are deliberately absent: `Instant::now` measures a duration
+#              rather than reporting a time, and `tokio::time` is what advances it
+#              in a test.
+#
+# Test-only code is skipped by the gate: a `#[cfg(test)]` region, a
+# `#[cfg(test)] mod name;` and the file it names, and anything under `tests/`.
+[determinism]
+adapters = ["peregrine-platform"]
+forbidden = [
+  # jiff: the wall clock, as an instant and as a zoned civil time.
+  "Timestamp::now",
+  "Zoned::now",
+  # std, and `web_time`'s stand-in for it, which is what `ulid` reads.
+  "SystemTime::now",
+  # ulid: the wall clock plus the OS random source, which is how an id is minted.
+  "Ulid::generate",
+  # The random sources a new dependency could bring in.
+  "rand::random",
+  "getrandom::fill",
+]
+
 
 # --- Per-crate policy -------------------------------------------------------
 
@@ -212,6 +241,9 @@ runtime = [
   "thiserror",
   "tokio",
   "tracing",
+  # The production id generator is the one shipping site permitted to touch a
+  # random source; `peregrine-platform` is a determinism adapter ([determinism]).
+  "ulid",
 ]
 build = []
 pure = false

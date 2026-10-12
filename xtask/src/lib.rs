@@ -13,6 +13,7 @@ pub mod arch;
 pub mod backlog;
 pub mod commands;
 pub mod deaddeps;
+pub mod determinism;
 pub mod genipc;
 pub mod migrations;
 pub mod notices;

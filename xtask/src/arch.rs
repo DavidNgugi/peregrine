@@ -21,6 +21,10 @@ pub struct Allowlist {
     #[serde(rename = "dev-dependencies")]
     pub dev_dependencies: DevPolicy,
     pub purity: PurityPolicy,
+    /// Absent when a fixture tree does not exercise `check-determinism`; the gate
+    /// treats an empty pattern list as an error, so it cannot pass vacuously.
+    #[serde(default)]
+    pub determinism: DeterminismPolicy,
     pub crates: BTreeMap<String, CratePolicy>,
 }
 
@@ -29,6 +33,18 @@ pub struct WorkspacePolicy {
     pub members: Vec<String>,
     #[serde(default)]
     pub unpublished: Vec<String>,
+}
+
+/// The `[determinism]` policy: which crates may hold a production clock or id
+/// generator, and what a wall-clock or random read looks like in a source line.
+#[derive(Debug, Default, Deserialize)]
+pub struct DeterminismPolicy {
+    /// Crates permitted to read a wall clock or a random source.
+    #[serde(default)]
+    pub adapters: Vec<String>,
+    /// Substrings naming a wall-clock or random entry point.
+    #[serde(default)]
+    pub forbidden: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,14 +217,16 @@ fn check_purity(root: &Path, member: &Member, policy: &PurityPolicy, report: &mu
     }
 }
 
-fn strip_comment(line: &str) -> &str {
+/// Strips a line comment. Shared with `check-determinism`, which must not flag a
+/// name that appears only in prose.
+pub(crate) fn strip_comment(line: &str) -> &str {
     match line.find("//") {
         Some(index) => &line[..index],
         None => line,
     }
 }
 
-fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

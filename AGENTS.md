@@ -103,6 +103,7 @@ pnpm test                    # frontend unit tests
 pnpm test:e2e                # Playwright flows
 pnpm check-dead-deps         # unused frontend dependencies (needs pnpm install)
 cargo xtask check-arch       # dependency rules
+cargo xtask check-determinism # no wall clock or randomness outside an adapter crate
 cargo xtask check-migrations # migration immutability
 cargo xtask check-todos      # every deferral names a task or an issue
 cargo xtask check-commands   # every IPC command fits the parse-call-map budget

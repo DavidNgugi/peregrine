@@ -1,9 +1,10 @@
 //! The production clock.
 //!
 //! `peregrine-domain` defines [`Clock`] and forbids itself from reading a real time, so
-//! the one place that reads the machine's clock is here, behind the port. Everything
-//! else — services, jobs, repositories — takes `dyn Clock` and is therefore testable
-//! against a fixed instant.
+//! the one place in shipping code that reads the machine's clock is here, behind the
+//! port; `cargo xtask check-determinism` fails the build on a wall-clock read anywhere
+//! else. Everything else — services, jobs, repositories — takes `dyn Clock` and is
+//! therefore testable against a fixed instant.
 
 use jiff::Timestamp;
 use peregrine_domain::Clock;
