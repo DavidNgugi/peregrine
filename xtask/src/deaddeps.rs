@@ -25,13 +25,36 @@ pub const VIOLATION_FIXTURE: &str = "xtask/fixtures/dead-deps/unused-dep";
 const CLEAN: i32 = 0;
 const UNUSED_FOUND: i32 = 1;
 
+/// What one `cargo-machete` run reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// Every declared dependency is named somewhere in the crate's sources.
+    Clean,
+    /// At least one declared dependency is not.
+    UnusedFound,
+}
+
+/// Reads a `cargo-machete` exit code.
+///
+/// `None` means the tool did not get far enough to answer rather than that it
+/// answered "clean", which is why this is not a `bool`. Keeping the comparison
+/// here rather than inline in [`run`] is what lets `cargo test` exercise it on a
+/// machine where `cargo-machete` is not installed.
+fn verdict(code: i32) -> Option<Verdict> {
+    match code {
+        CLEAN => Some(Verdict::Clean),
+        UNUSED_FOUND => Some(Verdict::UnusedFound),
+        _ => None,
+    }
+}
+
 /// Runs the gate. Returns whether the repository is clean.
 pub fn run(root: &Path) -> Result<bool> {
     let targets = scanned_targets(root)?;
     let (code, output) = machete(root, &targets)?;
-    match code {
-        CLEAN => {}
-        UNUSED_FOUND => {
+    match verdict(code) {
+        Some(Verdict::Clean) => {}
+        Some(Verdict::UnusedFound) => {
             eprintln!("check-dead-deps: unused dependencies found:");
             eprintln!("{output}");
             eprintln!(
@@ -39,18 +62,18 @@ pub fn run(root: &Path) -> Result<bool> {
             );
             return Ok(false);
         }
-        other => bail!("cargo-machete exited {other} while scanning the workspace:\n{output}"),
+        None => bail!("cargo-machete exited {code} while scanning the workspace:\n{output}"),
     }
 
     let fixture = root.join(VIOLATION_FIXTURE);
     let (code, output) = machete(root, &[fixture])?;
-    match code {
-        UNUSED_FOUND => {}
-        CLEAN => bail!(
+    match verdict(code) {
+        Some(Verdict::UnusedFound) => {}
+        Some(Verdict::Clean) => bail!(
             "the gate is broken: {VIOLATION_FIXTURE} declares a dependency its sources never \
              use, but it was reported clean. Fix the gate before trusting a green run."
         ),
-        other => bail!("cargo-machete exited {other} on the violation fixture:\n{output}"),
+        None => bail!("cargo-machete exited {code} on the violation fixture:\n{output}"),
     }
 
     println!(
@@ -177,6 +200,24 @@ mod tests {
                 "the fixture's sources now use `{dependency}`, so it no longer proves the gate fails"
             );
         }
+    }
+
+    /// The gate's own comparison, as opposed to the fixture's contents: `CLEAN`
+    /// and `UNUSED_FOUND` are the only exit codes that mean the tool answered,
+    /// and the verdict the fixture run must reach is the same `UNUSED_FOUND`
+    /// that fails the workspace run. Asserted here because a plain `cargo test`
+    /// on a machine without `cargo-machete` would otherwise check the fixture
+    /// but never the logic that reads it.
+    #[test]
+    fn the_only_verdicts_are_clean_and_unused_found() {
+        assert_eq!(verdict(CLEAN), Some(Verdict::Clean));
+        assert_eq!(verdict(UNUSED_FOUND), Some(Verdict::UnusedFound));
+        assert_eq!(
+            verdict(2),
+            None,
+            "a usage error must not read as a clean tree"
+        );
+        assert_eq!(verdict(-1), None, "a signal must not read as a clean tree");
     }
 
     /// The arch violation fixtures must stay outside the scanned set.

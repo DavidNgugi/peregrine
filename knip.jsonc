@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // The frontend half of the dead-dependency gate (AGENTS §3). Only findings that
+  // are a manifest-versus-sources mismatch are in scope: a declaration nothing
+  // imports, or an import nothing declares. Unused files, exports, types, enum
+  // members, and duplicates are a different concern (AGENTS R3 rather than R2),
+  // and reporting them here would fail a tree that is not dead weight because
+  // `packages/*` publish a deliberate public surface.
+  "include": [
+    "dependencies",
+    "devDependencies",
+    "optionalPeerDependencies",
+    "unlisted",
+    "binaries",
+  ],
+}

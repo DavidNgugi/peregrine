@@ -128,6 +128,11 @@ jobs:
         run: pnpm typecheck
       - name: Lint
         run: pnpm lint
+      # The frontend half of the dead-dependency gate. It runs its own negative
+      # fixture, so a knip upgrade that stops detecting unused dependencies fails
+      # here instead of reporting clean.
+      - name: No manifest declares a dependency its sources never use
+        run: pnpm check-dead-deps
       - name: Formatting
         run: pnpm format:check
       - name: Unit tests

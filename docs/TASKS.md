@@ -111,7 +111,7 @@ graph LR
   - Acceptance: Green on a trivial PR with cache warm
 - [ ] **PG-E0-14** *(doing)* `S` · deps PG-E0-13 · Supply-chain gate: `cargo-deny`, `cargo-audit`, `osv-scanner`, `pnpm audit`. **Open, and the job is red on the real graph:** 5 MPL-2.0 crates enter through Tauri's Linux stack (`cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`, `selectors`) and DEPENDENCIES §6 says no MPL-2.0 ships, so this needs a deliberate allowlist + §6 decision (and probably ADR 0009); `paste` and `proc-macro-error` are unmaintained transitively (specta/Tauri), needing a documented ignore or a dropped feature; and the `wildcards` ban false-positives on our own `{ workspace = true }` path deps in `peregrine-app` and `peregrine-desktop`
   - Acceptance: Build fails on an advisory fixture
-- [ ] **PG-E0-15** *(doing)* `XS` · deps PG-E0-13 · Dead-dependency gate: `knip`, `cargo-machete`
+- [x] **PG-E0-15** `XS` · deps PG-E0-13 · Dead-dependency gate: `knip`, `cargo-machete`
   - Acceptance: Build fails on an unused fixture dependency
 - [ ] **PG-E0-16** `M` · deps PG-E0-13 · Release workflow: bundles, SBOM, signed manifest, changelog
   - Acceptance: A tagged pre-release publishes artifacts and a manifest
