@@ -17,6 +17,7 @@ pub mod notify;
 pub mod path;
 pub mod ports;
 pub mod quality;
+pub mod rank;
 pub mod redaction;
 pub mod release;
 pub mod text;
@@ -46,6 +47,9 @@ pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
 pub use ports::{Clock, IdGenerator};
 pub use quality::{
     GroupRules, QualityProfile, QualityProfileError, QualityRank, QualityRules, SizeCaps,
+};
+pub use rank::{
+    Candidate, MAX_SCORE, Position, RankReason, Ranking, ReasonKind, Rejection, ReleaseRanker,
 };
 pub use redaction::{RedactionError, check_elements, check_text, is_safe};
 pub use release::{
