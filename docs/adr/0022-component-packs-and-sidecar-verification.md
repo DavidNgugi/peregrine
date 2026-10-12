@@ -19,7 +19,9 @@ What is undecided is the mechanism, and it is not a detail. A sidecar is an exec
 
 ### 1. One committed manifest is the source of truth, and it is compiled into the binary
 
-`sidecars.toml` at the repository root declares, for each component and each platform key (`os` × `arch`): the pinned version, the artefact URL, its exact byte size, its SHA-256, its detached signature, its licence and licence-file name, its source-offer URL, and — for `ffmpeg` — the recorded `configure` line. `cargo xtask gen-sidecars` turns it into a generated Rust table, and the committed generated file is diff-gated exactly like the IPC bindings (`cargo xtask gen-sidecars --check`).
+`sidecars.toml` at the repository root is the source of truth. It already exists for the licence obligations PG-E0-18 made mechanical: one `[[sidecar]]` table per component recording its licence, version pin, source URL, written source offer, why it is separate, and its build configuration. This record extends that file rather than adding a second one. Each `[[sidecar]]` gains per-platform-key (`os` × `arch`) artefact entries carrying the pinned version, the artefact URL, its exact byte size, its SHA-256, and its detached signature. The obligation fields and the artefact fields belong together because they describe the same binary, and a version bump has to move both.
+
+`cargo xtask gen-sidecars` turns the artefact entries into a generated Rust table, and the committed generated file is diff-gated exactly like the IPC bindings (`cargo xtask gen-sidecars --check`); `cargo xtask check-notices` keeps validating the obligation half.
 
 The consequence that matters: **the application never fetches a manifest at runtime.** The expected hashes are part of the binary the user already trusts, and the binary was built from a reviewed commit. A bump of a sidecar version is therefore a reviewable diff, not a network event.
 
