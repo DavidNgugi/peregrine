@@ -1,25 +1,36 @@
 //! `check-notices`: every bundled sidecar carries a recorded licence, a version
 //! pin, a source URL, and a written offer of corresponding source, and
-//! `THIRD_PARTY.md` is exactly what those declarations plus `Cargo.lock` produce.
+//! `THIRD_PARTY.md` is exactly what those declarations plus `Cargo.lock` and
+//! `pnpm-lock.yaml` produce.
 //!
 //! Why the attribution artefact is derived rather than hand-maintained: the
-//! crates linked into the application are an output of the lockfile, so a written
-//! list drifts the first time a dependency changes, and it drifts silently. The
-//! three things no file in the tree can answer — which executables we
-//! redistribute, what build each one uses, and where its corresponding source is
-//! offered from — are declared by hand in `sidecars.toml` and validated here.
+//! crates linked into the application and the packages bundled into the compiled
+//! frontend are outputs of the two lockfiles, so a written list drifts the first
+//! time a dependency changes, and it drifts silently. The three things no file in
+//! the tree can answer — which executables we redistribute, what build each one
+//! uses, and where its corresponding source is offered from — are declared by
+//! hand in `sidecars.toml` and validated here.
 //!
 //! The crate inventory is the non-development dependency closure of the shipped
 //! binary, read textually from `Cargo.lock` so the gate stays offline and needs no
 //! registry. `Cargo.lock` does not record edge kinds, so a crate that only a
 //! third-party build script uses can remain in the list; over-attribution is
 //! harmless, and every crate reached at runtime is present.
+//!
+//! The frontend inventory is the runtime closure of `apps/desktop` and the
+//! workspace packages it links, read out of `pnpm-lock.yaml`. That lockfile does
+//! record which edges are development-only, so the boundary is derived rather
+//! than guessed — see [`walk_frontend`] for why a `pnpm`-based generator was
+//! rejected instead. Both walks run offline: `check-notices` needs no registry,
+//! no `node_modules`, and no network.
 
 use crate::report::{Report, Violation};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
+use yaml_rust2::YamlLoader;
+use yaml_rust2::yaml::{Hash, Yaml};
 
 /// The hand-maintained sidecar declarations.
 pub const DECLARATIONS: &str = "sidecars.toml";
@@ -27,6 +38,16 @@ pub const DECLARATIONS: &str = "sidecars.toml";
 pub const ARTEFACT: &str = "THIRD_PARTY.md";
 const LOCKFILE: &str = "Cargo.lock";
 const MANIFEST: &str = "Cargo.toml";
+/// The pnpm lockfile the frontend runtime closure is read from.
+const FRONTEND_LOCKFILE: &str = "pnpm-lock.yaml";
+/// The workspace project the compiled frontend is built from. Vite bundles this
+/// app and the workspace packages it links into `apps/desktop/dist`.
+const FRONTEND_ROOT: &str = "apps/desktop";
+/// The only `lockfileVersion` this walk understands. pnpm has written `9.0` across
+/// pnpm 9, 10, and 11; a different major means the sections below may have moved,
+/// and a walk that found no edges would report an empty inventory that reads
+/// exactly like a complete one.
+const PNPM_LOCKFILE_VERSION: &str = "9.0";
 
 /// The one workspace member that is redistributed. `xtask` and
 /// `peregrine-testkit` are development tools, so the closure starts at the
@@ -103,16 +124,24 @@ struct Crate {
     version: String,
 }
 
+/// One third-party package bundled into the compiled frontend.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct FrontendPackage {
+    name: String,
+    version: String,
+}
+
 /// Everything a check or an update works from.
 struct Inventory {
     sidecars: Vec<Sidecar>,
     crates: Vec<Crate>,
+    packages: Vec<FrontendPackage>,
     report: Report,
 }
 
 impl Inventory {
     fn checked(&self) -> usize {
-        self.sidecars.len() + self.crates.len()
+        self.sidecars.len() + self.crates.len() + self.packages.len()
     }
 }
 
@@ -135,7 +164,7 @@ pub fn check(root: &Path) -> Result<(Report, usize)> {
     // one from an incomplete declaration would report drift the user cannot
     // act on until the declaration itself is fixed.
     if report.is_clean() {
-        let rendered = render(&inventory.sidecars, &inventory.crates);
+        let rendered = render(&inventory.sidecars, &inventory.crates, &inventory.packages);
         compare_artefact(root, &rendered, &mut report);
     }
     Ok((report, checked))
@@ -150,13 +179,14 @@ fn update(root: &Path) -> Result<bool> {
             inventory.checked(),
         ));
     }
-    let text = render(&inventory.sidecars, &inventory.crates);
+    let text = render(&inventory.sidecars, &inventory.crates, &inventory.packages);
     let path = root.join(ARTEFACT);
     std::fs::write(&path, &text).with_context(|| format!("cannot write {}", path.display()))?;
     println!(
-        "check-notices: wrote {ARTEFACT} ({} sidecar(s), {} crate(s))",
+        "check-notices: wrote {ARTEFACT} ({} sidecar(s), {} crate(s), {} frontend package(s))",
         inventory.sidecars.len(),
-        inventory.crates.len()
+        inventory.crates.len(),
+        inventory.packages.len()
     );
     Ok(true)
 }
@@ -164,10 +194,12 @@ fn update(root: &Path) -> Result<bool> {
 fn inventory(root: &Path) -> Result<Inventory> {
     let mut report = Report::new();
     let sidecars = declarations(root, &mut report)?;
+    let packages = frontend_packages(root, &mut report)?;
     let crates = runtime_crates(root, &mut report)?;
     Ok(Inventory {
         sidecars,
         crates,
+        packages,
         report,
     })
 }
@@ -299,6 +331,270 @@ fn is_pin(version: &str) -> bool {
         return false;
     };
     digits(major) && digits(minor) && parts.all(digits)
+}
+
+/// The runtime packages bundled into the compiled frontend.
+fn frontend_packages(root: &Path, report: &mut Report) -> Result<Vec<FrontendPackage>> {
+    let path = root.join(FRONTEND_LOCKFILE);
+    if !path.is_file() {
+        report.push(Violation::new(
+            FRONTEND_LOCKFILE,
+            "is missing; the packages bundled into the compiled frontend are read from it",
+        ));
+        return Ok(Vec::new());
+    }
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    Ok(walk_frontend(&text, report))
+}
+
+/// The frontend runtime closure, read from lockfile text.
+///
+/// Derived here rather than by a `pnpm licenses list --json --prod` generator,
+/// which is what the release SBOM uses for licence texts, because that command
+/// does not draw the boundary this artefact needs: it reports an *optional peer*
+/// that `autoInstallPeers` installed — `typescript` for `i18next`, `@types/react`
+/// for `zustand` — as a production package, and those are type-only installs the
+/// bundle never imports. It would also make the gate need `node_modules`, and the
+/// lockfile already records the edge kinds the generator would be guessing at.
+///
+/// Split from the file read so the fixture tests can exercise the walk without a
+/// fixture directory.
+fn walk_frontend(text: &str, report: &mut Report) -> Vec<FrontendPackage> {
+    let Ok(documents) = YamlLoader::load_from_str(text) else {
+        report.push(Violation::new(
+            FRONTEND_LOCKFILE,
+            "is not readable YAML; the frontend runtime inventory is read from it",
+        ));
+        return Vec::new();
+    };
+    let Some(document) = documents.first() else {
+        report.push(Violation::new(
+            FRONTEND_LOCKFILE,
+            "is empty; the frontend runtime inventory is read from it",
+        ));
+        return Vec::new();
+    };
+    let version = document["lockfileVersion"].as_str();
+    if version != Some(PNPM_LOCKFILE_VERSION) {
+        report.push(Violation::new(
+            FRONTEND_LOCKFILE,
+            format!(
+                "records lockfileVersion `{}` and this gate reads `{PNPM_LOCKFILE_VERSION}` (pnpm 9 \
+                 through 11); an unreadable format has to fail here rather than produce an empty \
+                 inventory that reads like a complete one",
+                version.unwrap_or("nothing")
+            ),
+        ));
+        return Vec::new();
+    }
+    let Some(importers) = document["importers"].as_hash() else {
+        report.push(Violation::new(
+            FRONTEND_LOCKFILE,
+            "has no `importers` section, so no workspace project's dependencies can be read",
+        ));
+        return Vec::new();
+    };
+    let mut walk = FrontendWalk {
+        snapshots: document["snapshots"].as_hash(),
+        packages: document["packages"].as_hash(),
+        attributed: BTreeSet::new(),
+        visited_snapshots: BTreeSet::new(),
+        visited_projects: BTreeSet::new(),
+    };
+    walk.project(importers, FRONTEND_ROOT, report);
+    if walk.attributed.is_empty() {
+        report.push(Violation::new(
+            FRONTEND_LOCKFILE,
+            format!(
+                "resolves no runtime package for `{FRONTEND_ROOT}`; an empty inventory reads \
+                 exactly like a complete one"
+            ),
+        ));
+    }
+    walk.attributed
+        .into_iter()
+        .map(|(name, version)| FrontendPackage { name, version })
+        .collect()
+}
+
+/// One walk over `pnpm-lock.yaml`'s runtime graph.
+///
+/// The lockfile has two edge tables. `importers` holds each workspace project's
+/// own `dependencies` and `devDependencies`, which is where the development-only
+/// boundary is written down; `snapshots` holds each resolved package's own
+/// dependency edges. Only a project's runtime tables and a package's runtime
+/// edges are followed, so a package reachable only through the toolchain has no
+/// edge into the walk and cannot appear.
+struct FrontendWalk<'lock> {
+    snapshots: Option<&'lock Hash>,
+    /// The `packages` section, keyed `name@version`. Needed only to recognise an
+    /// auto-installed optional peer, which pnpm records in a snapshot's
+    /// `optionalDependencies` beside genuine optional dependencies.
+    packages: Option<&'lock Hash>,
+    /// Attributed `(name, version)` pairs, with pnpm's peer suffix dropped.
+    attributed: BTreeSet<(String, String)>,
+    visited_snapshots: BTreeSet<String>,
+    visited_projects: BTreeSet<String>,
+}
+
+impl FrontendWalk<'_> {
+    /// Follows one workspace project's runtime dependencies.
+    fn project(&mut self, importers: &Hash, project: &str, report: &mut Report) {
+        if !self.visited_projects.insert(project.to_owned()) {
+            return;
+        }
+        let Some(entry) = importers.get(&Yaml::String(project.to_owned())) else {
+            report.push(Violation::new(
+                FRONTEND_LOCKFILE,
+                format!(
+                    "has no `{project}` importer, so the frontend runtime inventory cannot start; \
+                     update `FRONTEND_ROOT` in xtask/src/notices.rs if the layout changed"
+                ),
+            ));
+            return;
+        };
+        for section in ["dependencies", "optionalDependencies"] {
+            let Some(edges) = entry[section].as_hash() else {
+                continue;
+            };
+            for (name, edge) in edges {
+                let Some(name) = name.as_str() else {
+                    continue;
+                };
+                let Some(version) = scalar(&edge["version"]) else {
+                    report.push(Violation::new(
+                        FRONTEND_LOCKFILE,
+                        format!(
+                            "records no resolved version for `{name}` in `{project}`; a dependency \
+                             with no resolution cannot be attributed"
+                        ),
+                    ));
+                    continue;
+                };
+                if let Some(link) = version.strip_prefix("link:") {
+                    // A workspace package is our own code rather than third-party
+                    // attribution, but its runtime dependencies bundle with it.
+                    self.project(importers, &resolve_project(project, link), report);
+                } else {
+                    self.edge(name, &version, report);
+                }
+            }
+        }
+    }
+
+    /// Follows one resolved dependency edge.
+    fn edge(&mut self, name: &str, version: &str, report: &mut Report) {
+        // An aliased dependency (`"typescript": "npm:@typescript/typescript6@6.0.2"`)
+        // records the whole resolved key in the version field rather than a
+        // version on its own.
+        let primary = format!("{name}@{version}");
+        let key = if snapshot(self.snapshots, &primary).is_some() {
+            primary
+        } else {
+            version.to_owned()
+        };
+        let Some(entry) = snapshot(self.snapshots, &key) else {
+            report.push(Violation::new(
+                FRONTEND_LOCKFILE,
+                format!(
+                    "resolves `{name}` to `{version}`, which no snapshot matches; a runtime \
+                     dependency without a resolved package would otherwise be dropped from the \
+                     inventory without a word"
+                ),
+            ));
+            return;
+        };
+        if !self.visited_snapshots.insert(key.clone()) {
+            return;
+        }
+        if let Some(pair) = split_snapshot_key(&key) {
+            self.attributed.insert(pair);
+        }
+        for section in ["dependencies", "optionalDependencies"] {
+            let Some(edges) = entry[section].as_hash() else {
+                continue;
+            };
+            for (dependency, spec) in edges {
+                let (Some(dependency), Some(version)) = (dependency.as_str(), scalar(spec)) else {
+                    continue;
+                };
+                // pnpm writes the optional peers it installed for a package into
+                // the same table as that package's genuine optional dependencies.
+                // A peer is a type or tooling install the bundle never imports —
+                // attributing `typescript` because `i18next` names it as a peer
+                // would be a false entry — while a genuine optional dependency is
+                // kept, because over-attribution is safe and omission is not.
+                if section == "optionalDependencies" && is_peer(self.packages, &key, dependency) {
+                    continue;
+                }
+                self.edge(dependency, &version, report);
+            }
+        }
+    }
+}
+
+/// The snapshot entry a resolved edge points at.
+fn snapshot<'lock>(snapshots: Option<&'lock Hash>, key: &str) -> Option<&'lock Yaml> {
+    snapshots?.get(&Yaml::String(key.to_owned()))
+}
+
+/// The package name and resolved version in a snapshot key, with pnpm's peer
+/// suffix dropped (`react-dom@19.3.0(react@19.3.0)`).
+fn split_snapshot_key(key: &str) -> Option<(String, String)> {
+    let base = key.split('(').next()?;
+    let (name, version) = base.rsplit_once('@')?;
+    if name.is_empty() || version.is_empty() {
+        return None;
+    }
+    Some((name.to_owned(), version.to_owned()))
+}
+
+/// Whether `dependency` is a declared peer of the package a snapshot describes.
+fn is_peer(packages: Option<&Hash>, snapshot_key: &str, dependency: &str) -> bool {
+    let base = snapshot_key.split('(').next().unwrap_or(snapshot_key);
+    packages
+        .and_then(|packages| packages.get(&Yaml::String(base.to_owned())))
+        .and_then(|package| package["peerDependencies"].as_hash())
+        .is_some_and(|peers| peers.contains_key(&Yaml::String(dependency.to_owned())))
+}
+
+/// The literal text of a YAML scalar.
+///
+/// pnpm does not quote every version, and YAML 1.2 reads a bare `1.0` as a real
+/// and a bare `1` as an integer, so the text is recovered from all three variants;
+/// a version read as `1` where the lockfile means `1.0` would not match its
+/// snapshot key and would be reported as unresolved rather than silently dropped.
+fn scalar(value: &Yaml) -> Option<String> {
+    match value {
+        Yaml::String(text) | Yaml::Real(text) => Some(text.clone()),
+        Yaml::Integer(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+/// The importer key a `link:` target names, resolved against the project that
+/// declared it. Lockfile paths always use forward slashes.
+fn resolve_project(project: &str, link: &str) -> String {
+    let mut parts: Vec<&str> = if project == "." {
+        Vec::new()
+    } else {
+        project.split('/').collect()
+    };
+    for component in link.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
+    }
 }
 
 /// Every third-party crate the shipped binary resolves to, excluding
@@ -478,44 +774,37 @@ fn compare_artefact(root: &Path, rendered: &str, report: &mut Report) {
         Ok(_) => report.push(Violation::new(
             ARTEFACT,
             format!(
-                "does not match {DECLARATIONS} and {LOCKFILE}; run `cargo xtask check-notices --update`"
+                "does not match {DECLARATIONS}, {LOCKFILE}, and {FRONTEND_LOCKFILE}; run `cargo \
+                 xtask check-notices --update`"
             ),
         )),
         Err(error) => report.push(Violation::new(
             ARTEFACT,
-            format!(
-                "cannot be read ({error}); run `cargo xtask check-notices --update`"
-            ),
+            format!("cannot be read ({error}); run `cargo xtask check-notices --update`"),
         )),
     }
 }
 
-fn render(sidecars: &[Sidecar], crates: &[Crate]) -> String {
+fn render(sidecars: &[Sidecar], crates: &[Crate], packages: &[FrontendPackage]) -> String {
     use std::fmt::Write as _;
 
     let mut out = String::new();
     out.push_str("# Third-party attributions\n\n");
     let _ = write!(
         out,
-        "<!-- Generated from `{DECLARATIONS}` and `{LOCKFILE}` by `cargo xtask check-notices \
-         --update`. Do not edit by hand: `cargo xtask check-notices` fails when this file and \
-         those inputs disagree. -->\n\n"
+        "<!-- Generated from `{DECLARATIONS}`, `{LOCKFILE}`, and `{FRONTEND_LOCKFILE}` by \
+         `cargo xtask check-notices --update`. Do not edit by hand: `cargo xtask check-notices` \
+         fails when this file and those inputs disagree. -->\n\n"
     );
     out.push_str(
         "Peregrine itself is dual-licensed MIT OR Apache-2.0 (see `LICENSE-MIT` and \
          `LICENSE-APACHE`). This is the attribution inventory a redistribution of Peregrine must \
          carry. It exists for users and distributors, and it is derived rather than hand-written \
-         so it cannot drift from the lockfile.\n\n",
+         so it cannot drift from the lockfiles.\n\n",
     );
     render_sidecars(&mut out, sidecars);
     render_crates(&mut out, crates);
-    out.push_str(
-        "\n## Frontend packages\n\n\
-         The compiled frontend is bundled inside the application. Its runtime packages are listed \
-         in `docs/DEPENDENCIES.md` §3; `pnpm-lock.yaml` does not record which packages are \
-         development-only, so this gate does not derive that list, and the release's \
-         bundled-licence manifest must cover it.\n",
-    );
+    render_frontend(&mut out, packages);
     out
 }
 
@@ -579,6 +868,33 @@ fn render_crates(out: &mut String, crates: &[Crate]) {
     }
 }
 
+fn render_frontend(out: &mut String, packages: &[FrontendPackage]) {
+    use std::fmt::Write as _;
+
+    let _ = write!(
+        out,
+        "\n## Frontend packages\n\n\
+         The compiled frontend (`apps/desktop/dist`) bundles the {} packages below. They are the \
+         runtime closure of `{FRONTEND_ROOT}` and of the workspace packages it links, read from \
+         `{FRONTEND_LOCKFILE}` by following `dependencies` and `optionalDependencies`.\n\n\
+         Development-only packages are not redistributed and cannot appear here: pnpm records a \
+         workspace project's development dependencies in the lockfile but never resolves their \
+         transitive dependencies, so the Vite, ESLint, and Vitest toolchains have no edge into this \
+         walk. An optional *peer* that pnpm auto-installed for another package's types \
+         (`typescript`, `@types/react`) is excluded for the same reason: the bundle imports no code \
+         from it.\n\n\
+         Licence expressions and texts are not repeated here: `docs/DEPENDENCIES.md` §3 records the \
+         reviewed licence and purpose of each package, and the release's `pnpm licenses list \
+         --json` manifest carries the texts. `pnpm check-dead-deps` fails on a declared dependency \
+         nothing imports, so no package is listed merely because a manifest mentions it.\n\n\
+         | Package | Version |\n| --- | --- |\n",
+        packages.len()
+    );
+    for package in packages {
+        let _ = writeln!(out, "| `{}` | {} |", package.name, package.version);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,6 +917,30 @@ why_separate = "GPL-2.0-or-later has to stay outside the process boundary"
 build = "upstream release build"
 "#;
 
+    /// A minimal, complete pnpm lockfile: two runtime dependencies, one of which
+    /// depends on the other. Every fixture tree gets it, so `check` can run.
+    const PNPM_LOCK: &str = r"lockfileVersion: '9.0'
+importers:
+  apps/desktop:
+    dependencies:
+      react:
+        specifier: 19.3.0
+        version: 19.3.0
+      react-dom:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
+packages:
+  react@19.3.0: {}
+  react-dom@19.3.0:
+    peerDependencies:
+      react: ^19.3.0
+snapshots:
+  react@19.3.0: {}
+  react-dom@19.3.0(react@19.3.0):
+    dependencies:
+      react: 19.3.0
+";
+
     fn without(text: &str, prefix: &str) -> String {
         text.lines()
             .filter(|line| !line.trim_start().starts_with(prefix))
@@ -609,8 +949,13 @@ build = "upstream release build"
     }
 
     /// A minimal tree the gate can run against: one workspace member with no
-    /// dependencies, an empty lockfile, and the given declarations.
+    /// dependencies, a lockfile for each half, and the given declarations.
     fn fixture(declarations: &str) -> tempfile::TempDir {
+        fixture_lock(declarations, PNPM_LOCK)
+    }
+
+    /// The same tree with the frontend lockfile replaced.
+    fn fixture_lock(declarations: &str, lock: &str) -> tempfile::TempDir {
         let root = tempfile::TempDir::new().expect("a temporary directory");
         std::fs::create_dir_all(root.path().join("app")).unwrap();
         std::fs::write(
@@ -624,21 +969,37 @@ build = "upstream release build"
         )
         .unwrap();
         std::fs::write(root.path().join(LOCKFILE), "version = 4\n").unwrap();
+        std::fs::write(root.path().join(FRONTEND_LOCKFILE), lock).unwrap();
         std::fs::write(root.path().join(DECLARATIONS), declarations).unwrap();
         root
     }
 
+    fn frontend_names(lock: &str) -> Vec<String> {
+        let mut report = Report::new();
+        let packages = walk_frontend(lock, &mut report);
+        assert!(report.is_clean(), "{:#?}", report.sorted());
+        packages.into_iter().map(|package| package.name).collect()
+    }
+
     #[test]
     fn the_shipped_tree_is_attributed() {
-        let (report, checked) = check(&workspace_root()).expect("the tree must be readable");
+        let root = workspace_root();
+        let (report, checked) = check(&root).expect("the tree must be readable");
         assert!(
             report.is_clean(),
             "attribution violations: {:#?}",
             report.sorted()
         );
-        assert!(
-            checked >= 4,
-            "the three sidecars and the crate inventory must be counted, got {checked}"
+
+        let mut parts = Report::new();
+        let sidecars = declarations(&root, &mut parts).expect("the declarations read");
+        let packages = frontend_packages(&root, &mut parts).expect("the frontend lockfile reads");
+        let crates = runtime_crates(&root, &mut parts).expect("the workspace parses");
+        assert!(parts.is_clean(), "{:#?}", parts.sorted());
+        assert_eq!(
+            checked,
+            sidecars.len() + crates.len() + packages.len(),
+            "the count must cover the sidecars, the crate closure, and the frontend packages"
         );
     }
 
@@ -673,6 +1034,321 @@ build = "upstream release build"
                 "`{runtime}` is linked into the application and must be attributed"
             );
         }
+    }
+
+    /// The point of deriving the frontend list from `pnpm-lock.yaml` rather than
+    /// writing it by hand is that the toolchain stays out and the bundled packages
+    /// always appear.
+    #[test]
+    fn development_only_frontend_packages_are_excluded() {
+        let mut report = Report::new();
+        let packages =
+            frontend_packages(&workspace_root(), &mut report).expect("the lockfile reads");
+        assert!(report.is_clean(), "{:#?}", report.sorted());
+
+        let names: BTreeSet<&str> = packages
+            .iter()
+            .map(|package| package.name.as_str())
+            .collect();
+        for development in [
+            "typescript",
+            "@types/react",
+            "csstype",
+            "@typescript/typescript-darwin-arm64",
+            "vite",
+            "vitest",
+            "eslint",
+            "prettier",
+        ] {
+            assert!(
+                !names.contains(development),
+                "`{development}` is development-only and must not be attributed"
+            );
+        }
+        for runtime in [
+            "react",
+            "react-dom",
+            "scheduler",
+            "zustand",
+            "i18next",
+            "react-i18next",
+            "use-sync-external-store",
+        ] {
+            assert!(
+                names.contains(runtime),
+                "`{runtime}` is bundled into the frontend and must be attributed"
+            );
+        }
+    }
+
+    #[test]
+    fn the_artefact_lists_every_bundled_frontend_package() {
+        let root = workspace_root();
+        let mut report = Report::new();
+        let packages = frontend_packages(&root, &mut report).expect("the lockfile reads");
+        assert!(report.is_clean(), "{:#?}", report.sorted());
+        let artefact = std::fs::read_to_string(root.join(ARTEFACT)).expect("the artefact exists");
+        for package in &packages {
+            assert!(
+                artefact.contains(&format!("| `{}` | {} |", package.name, package.version)),
+                "`{} {}` is missing from {ARTEFACT}",
+                package.name,
+                package.version
+            );
+        }
+    }
+
+    /// The negative fixture the task asks for: a runtime dependency the lockfile
+    /// declares but does not resolve must fail the walk, rather than disappear
+    /// from the inventory. `react-dom` is genuinely bundled, so its absence is the
+    /// failure the gate exists to catch.
+    #[test]
+    fn a_runtime_dependency_with_no_resolved_package_is_reported() {
+        let broken = PNPM_LOCK.replace(
+            "  react-dom@19.3.0(react@19.3.0):\n    dependencies:\n      react: 19.3.0\n",
+            "",
+        );
+        assert_ne!(
+            broken, PNPM_LOCK,
+            "the fixture must lose its `react-dom` snapshot"
+        );
+
+        let mut report = Report::new();
+        let packages = walk_frontend(&broken, &mut report);
+        assert!(
+            report
+                .sorted()
+                .iter()
+                .any(|violation| violation.message.contains("`react-dom`")
+                    && violation.message.contains("no snapshot matches")),
+            "{:#?}",
+            report.sorted()
+        );
+        assert!(
+            !packages.iter().any(|package| package.name == "react-dom"),
+            "an unresolved dependency must not be attributed from nowhere"
+        );
+    }
+
+    /// The other direction of the same fixture, end to end: an artefact that does
+    /// not list a bundled package is stale, and the command exits non-zero.
+    #[test]
+    fn an_artefact_missing_a_bundled_package_is_rejected() {
+        let root = fixture(MPV);
+        assert!(run(root.path(), Mode::Update).expect("update must run"));
+        assert!(run(root.path(), Mode::Check).expect("a fresh artefact must pass"));
+
+        let path = root.path().join(ARTEFACT);
+        let committed = std::fs::read_to_string(&path).unwrap();
+        let missing = committed.replace("| `react-dom` | 19.3.0 |\n", "");
+        assert_ne!(
+            missing, committed,
+            "the fresh artefact must list `react-dom`"
+        );
+        std::fs::write(&path, missing).unwrap();
+
+        assert!(
+            !run(root.path(), Mode::Check).expect("the gate must run"),
+            "an artefact missing a bundled runtime dependency must fail the gate"
+        );
+    }
+
+    /// A dependency added to the lockfile but not to the artefact is drift, which
+    /// is the direction a byte comparison exists to catch.
+    #[test]
+    fn a_runtime_dependency_the_artefact_does_not_list_is_drift() {
+        let root = fixture(MPV);
+        assert!(run(root.path(), Mode::Update).expect("update must run"));
+
+        let grown = PNPM_LOCK
+            .replace(
+                "snapshots:\n  react@19.3.0: {}\n",
+                "snapshots:\n  react@19.3.0: {}\n  scheduler@0.28.0: {}\n",
+            )
+            .replace(
+                "      react-dom:\n",
+                "      scheduler:\n        specifier: 0.28.0\n        version: 0.28.0\n      react-dom:\n",
+            );
+        assert_ne!(grown, PNPM_LOCK);
+        std::fs::write(root.path().join(FRONTEND_LOCKFILE), grown).unwrap();
+
+        assert!(
+            !run(root.path(), Mode::Check).expect("the gate must run"),
+            "a bundled package the artefact does not list must fail the gate"
+        );
+        let (report, _) = check(root.path()).expect("the gate must run");
+        assert!(
+            report
+                .sorted()
+                .iter()
+                .any(|violation| violation.path == ARTEFACT
+                    && violation.message.contains("check-notices --update")),
+            "{:#?}",
+            report.sorted()
+        );
+    }
+
+    #[test]
+    fn an_unsupported_lockfile_version_is_reported() {
+        let mut report = Report::new();
+        let packages = walk_frontend(&PNPM_LOCK.replace("'9.0'", "'6.0'"), &mut report);
+        assert!(packages.is_empty(), "{packages:#?}");
+        assert!(
+            report
+                .sorted()
+                .iter()
+                .any(|violation| violation.message.contains("lockfileVersion")),
+            "{:#?}",
+            report.sorted()
+        );
+    }
+
+    #[test]
+    fn a_malformed_lockfile_is_reported() {
+        let mut report = Report::new();
+        let packages = walk_frontend("importers: [\n", &mut report);
+        assert!(packages.is_empty(), "{packages:#?}");
+        assert!(
+            report
+                .sorted()
+                .iter()
+                .any(|violation| violation.message.contains("not readable YAML")),
+            "{:#?}",
+            report.sorted()
+        );
+    }
+
+    /// A lockfile whose only edges are development edges resolves nothing, which
+    /// has to be a violation rather than an empty inventory that reads as clean.
+    #[test]
+    fn a_development_only_lockfile_resolves_nothing() {
+        let lock = "lockfileVersion: '9.0'
+importers:
+  apps/desktop:
+    devDependencies:
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4
+";
+        let mut report = Report::new();
+        let packages = walk_frontend(lock, &mut report);
+        assert!(packages.is_empty(), "{packages:#?}");
+        assert!(
+            report
+                .sorted()
+                .iter()
+                .any(|violation| violation.message.contains("resolves no runtime package")),
+            "{:#?}",
+            report.sorted()
+        );
+    }
+
+    /// A workspace link is our own code, so it is not attributed, but its runtime
+    /// dependencies bundle with it and are.
+    #[test]
+    fn a_workspace_package_is_followed_but_not_attributed() {
+        let lock = "lockfileVersion: '9.0'
+importers:
+  apps/desktop:
+    dependencies:
+      '@peregrine/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
+  packages/i18n:
+    dependencies:
+      i18next:
+        specifier: 26.4.2
+        version: 26.4.2
+snapshots:
+  i18next@26.4.2: {}
+";
+        assert_eq!(frontend_names(lock), ["i18next"]);
+    }
+
+    /// pnpm writes the optional peers it auto-installed into the same table as a
+    /// package's genuine optional dependencies. Only the peer is excluded: it is a
+    /// type-only install the bundle never imports, while a real optional
+    /// dependency is kept because over-attribution is safe and omission is not.
+    #[test]
+    fn an_auto_installed_optional_peer_is_excluded() {
+        let lock = "lockfileVersion: '9.0'
+importers:
+  apps/desktop:
+    dependencies:
+      react-error-boundary:
+        specifier: 6.1.6
+        version: 6.1.6
+snapshots:
+  react-error-boundary@6.1.6:
+    dependencies:
+      react: 19.3.0
+    optionalDependencies:
+      '@types/react': 19.3.0
+      fsevents: 2.3.3
+  react@19.3.0: {}
+  fsevents@2.3.3: {}
+packages:
+  react-error-boundary@6.1.6:
+    peerDependencies:
+      '@types/react': ^19.0.0
+";
+        let names = frontend_names(lock);
+        assert!(names.contains(&"fsevents".to_owned()), "{names:#?}");
+        assert!(!names.contains(&"@types/react".to_owned()), "{names:#?}");
+    }
+
+    /// An aliased dependency records the whole resolved key in the version field,
+    /// so it does not resolve as `declared@version`.
+    #[test]
+    fn an_aliased_dependency_resolves_to_its_real_package() {
+        let lock = "lockfileVersion: '9.0'
+importers:
+  apps/desktop:
+    dependencies:
+      typescript:
+        specifier: npm:@typescript/typescript6@6.0.2
+        version: '@typescript/typescript6@6.0.2'
+snapshots:
+  '@typescript/typescript6@6.0.2': {}
+";
+        let mut report = Report::new();
+        let packages = walk_frontend(lock, &mut report);
+        assert!(report.is_clean(), "{:#?}", report.sorted());
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "@typescript/typescript6");
+        assert_eq!(packages[0].version, "6.0.2");
+    }
+
+    /// pnpm does not quote every version, and YAML reads a bare `1.0` as a number.
+    /// The version has to survive as text or its snapshot key cannot match.
+    #[test]
+    fn an_unquoted_numeric_version_resolves() {
+        let lock = "lockfileVersion: '9.0'
+importers:
+  apps/desktop:
+    dependencies:
+      tiny:
+        specifier: 1.0
+        version: 1.0
+snapshots:
+  tiny@1.0: {}
+";
+        let mut report = Report::new();
+        let packages = walk_frontend(lock, &mut report);
+        assert!(report.is_clean(), "{:#?}", report.sorted());
+        assert_eq!(packages[0].name, "tiny");
+        assert_eq!(packages[0].version, "1.0");
+    }
+
+    /// A `link:` target is relative to the project that declares it.
+    #[test]
+    fn a_link_target_is_resolved_against_its_project() {
+        assert_eq!(
+            resolve_project("apps/desktop", "../../packages/ui"),
+            "packages/ui"
+        );
+        assert_eq!(resolve_project("apps/desktop", "../ui"), "apps/ui");
+        assert_eq!(resolve_project(".", "packages/i18n"), "packages/i18n");
     }
 
     #[test]
@@ -746,6 +1422,33 @@ build = "upstream release build"
         assert!(
             check(root.path()).is_err(),
             "a missing Cargo.lock must be an error, not a clean run"
+        );
+    }
+
+    /// A missing frontend lockfile is a violation rather than a clean run, since
+    /// the frontend half of the inventory would otherwise be silently empty.
+    #[test]
+    fn a_tree_without_a_frontend_lockfile_is_reported() {
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::write(root.path().join(MANIFEST), "[workspace]\nmembers = []\n").unwrap();
+        std::fs::write(root.path().join(LOCKFILE), "version = 4\n").unwrap();
+        std::fs::write(root.path().join(DECLARATIONS), MPV).unwrap();
+
+        let mut report = Report::new();
+        let packages = frontend_packages(root.path(), &mut report).expect("the gate must run");
+        assert!(packages.is_empty(), "{packages:#?}");
+        assert!(
+            report
+                .sorted()
+                .iter()
+                .any(|violation| violation.path == FRONTEND_LOCKFILE
+                    && violation.message.contains("is missing")),
+            "{:#?}",
+            report.sorted()
+        );
+        assert!(
+            !run(root.path(), Mode::Check).expect("the gate must run"),
+            "a missing frontend lockfile must fail the command"
         );
     }
 

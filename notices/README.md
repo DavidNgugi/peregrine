@@ -13,12 +13,16 @@ names them all read the same copy.
 | File | Produced by | Why it is here |
 | --- | --- | --- |
 | `SOURCE-OFFER.md` | hand-written, this task | the written offer of corresponding source that ADR 0013 §Decision 1 and ADR 0009 §Decision 4 require beside GPL `mpv` and LGPL `ffmpeg`/`ffprobe` |
-| `mpv-LICENSE.txt` | `check-notices`, PG-E0-18, from the pinned sidecar | the GPL text for the exact `mpv` build shipped |
-| `ffprobe-LICENSE.txt` | `check-notices`, PG-E0-18, from the pinned sidecar | the LGPL text for the exact `ffprobe`/`ffmpeg` build shipped |
-| `THIRD-PARTY.md` | `check-notices`, PG-E0-18, from `Cargo.lock` and `pnpm-lock.yaml` | attribution for the crates and packages that are statically linked or bundled, including the `encoding_rs` no-endorsement notice and the upstream `NOTICE` files Apache-2.0 requires |
+| `mpv-LICENSE.txt` | PG-E26-01, from the pinned sidecar | the GPL text for the exact `mpv` build shipped |
+| `ffprobe-LICENSE.txt` | PG-E26-01, from the pinned sidecar | the LGPL text for the exact `ffprobe`/`ffmpeg` build shipped |
+| `THIRD_PARTY.md` | `cargo xtask check-notices --update` (PG-E0-18), from `sidecars.toml`, `Cargo.lock`, and `pnpm-lock.yaml` | attribution for the crates and packages that are statically linked or bundled, including the `encoding_rs` no-endorsement notice and the upstream `NOTICE` files Apache-2.0 requires |
 
-The three generated files are absent until PG-E0-18 lands. That is deliberate:
-they are generated from the lockfiles and the pinned sidecars so they cannot
-drift, and a hand-written stand-in would be exactly the stale attestation ADR
-0009 §Decision 7 exists to prevent. Until they exist, `check-notices` fails, and
-the release workflow calls it before it archives anything.
+`THIRD_PARTY.md` is generated and gate-enforced today;
+`cargo xtask check-notices` runs in the `gates` job of
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) and fails when the
+artefact drifts from its three inputs, because a hand-written stand-in would be
+exactly the stale attestation ADR 0009 §Decision 7 exists to prevent. The two
+sidecar licence texts are not written yet: they land with the pinned sidecars in
+PG-E26-01. `bundle.resources` in
+[tauri.conf.json](../apps/desktop/src-tauri/tauri.conf.json) carries `NOTICE` and
+this directory, and does not yet carry `THIRD_PARTY.md` itself.

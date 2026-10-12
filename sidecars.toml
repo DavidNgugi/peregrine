@@ -3,8 +3,8 @@
 # Only the facts no file in the tree can derive live here: which third-party
 # executables we redistribute, what each licence requires, the version pin rule,
 # where its source is, and the build configuration the source offer promises.
-# `THIRD_PARTY.md` is generated from this file plus `Cargo.lock`; editing the
-# artefact by hand turns the next gate run red.
+# `THIRD_PARTY.md` is generated from this file plus `Cargo.lock` and
+# `pnpm-lock.yaml`; editing the artefact by hand turns the next gate run red.
 #
 # `version` is an exact version when every platform ships the same one, or the
 # literal `pinned-per-os`, which means docs/DEPENDENCIES.md §1: the release

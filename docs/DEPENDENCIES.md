@@ -79,6 +79,12 @@ Pinned versions, licences, and the obligations that come with redistributing the
 
 ## 3. Frontend dependencies
 
+This table is the licence review and the plan, including packages nothing installs
+yet. The list of packages actually bundled into the compiled frontend is derived
+from `pnpm-lock.yaml` instead of being copied from here, and it is in
+[`THIRD_PARTY.md`](../THIRD_PARTY.md) §Frontend packages, gate-enforced by
+`cargo xtask check-notices` (PG-E0-18).
+
 | Package | Version | Licence | Purpose |
 | --- | --- | --- | --- |
 | `react`, `react-dom` | 19.3.0 | MIT | UI runtime |
@@ -123,6 +129,7 @@ Dropped: `framer-motion` (alias of `motion`), `suspend-react` (abandoned 2023), 
 | `mockall` | 0.15.0 | MIT OR Apache-2.0 | Port mocks where fakes are insufficient |
 | `toml` | 1.1.7 | MIT OR Apache-2.0 | Parsing `Cargo.toml` and the architecture allowlist in `xtask`. Dev-only, never shipped. Added with `PG-E0-04`: the arch gate has to read manifests, and a hand-rolled TOML parser in a gate is a correctness risk |
 | `sha2` | 0.11.0 | MIT OR Apache-2.0 | SHA-256 for the migration journal in `xtask`. Dev-only, never shipped. Added with `PG-E0-05`: a hand-rolled hash in a gate is a correctness risk |
+| `yaml-rust2` | 0.13.0 | MIT OR Apache-2.0 | Parsing `pnpm-lock.yaml` for the frontend half of `check-notices` in `xtask`. Dev-only, never shipped. Added with `PG-E0-18`: a hand-rolled YAML reader in a gate is the same correctness risk `toml` avoids, and the alternative — a `pnpm licenses list --json` generator — both needs `node_modules` and reports auto-installed optional peers (`typescript`, `@types/react`) as production packages, so it cannot draw the dev-only boundary |
 | `cargo-deny` | 0.20.2 | MIT OR Apache-2.0 | Licence allowlist, bans, advisories — the primary supply-chain gate |
 | `cargo-machete` | 0.9.2 | MIT | Unused-dependency gate for the Cargo workspace (`cargo xtask check-dead-deps`). CI-only, never shipped; verified against crates.io on 2026-10-12 |
 | `cargo-audit` | 0.22.2 | Apache-2.0 OR MIT | Secondary advisory check; overlaps `cargo-deny`, run weekly rather than per-commit |
@@ -140,7 +147,7 @@ CI also uses two actions, pinned by version and digest in `.github/workflows/rel
 | `eslint`, `typescript-eslint`, `prettier` | 10.12.0, 8.71.1, 3.9.9 | MIT | Lint and format. The `typescript-eslint` peer range against TypeScript 7 is resolved in §7 |
 | `knip`, `publint`, `size-limit` | 6.40.0, 0.3.25, 14.2.0 | ISC; MIT | Dead code, package hygiene, bundle budgets. Only `knip` is installed; `pnpm check-dead-deps` gates on it (PG-E0-15), and `publint` and `size-limit` are not installed yet |
 
-`toml` and `sha2` were resolved and licence-checked live against crates.io on **2026-10-09** with `User-Agent: peregrine-plan`; both are dev-only and appear in no shipped binary. Every other version above was resolved on **2026-10-08**.
+`toml` and `sha2` were resolved and licence-checked live against crates.io on **2026-10-09** with `User-Agent: peregrine-plan`; both are dev-only and appear in no shipped binary. `yaml-rust2` 0.13.0 (MIT OR Apache-2.0, MSRV 1.85, the stable-API sibling of `saphyr`) was resolved and licence-checked the same way on **2026-10-12**, and it is dev-only too: it is the only crate the gate adds, and `cargo deny check` covers it. Every other version above was resolved on **2026-10-08**.
 
 Only `cargo-dist` (renamed upstream to `dist`) was considered and is **not** adopted: the Tauri bundler, driven by `pnpm tauri build` in `.github/workflows/release.yml`, already produces every artifact we ship, and a second release tool would duplicate it. That workflow does not use `tauri-action`, so nothing here depends on it.
 
@@ -154,7 +161,7 @@ Only `cargo-dist` (renamed upstream to `dist`) was considered and is **not** ado
 
 Payload cost and how we avoid it: **mpv plus a minimal ffprobe ship in the base install** (roughly 35–45 MB and 10–15 MB respectively). A **full ffmpeg build is 40–60 MB per platform** and is therefore an on-demand component pack, downloaded only when a feature needs it (casting transcode, bitmap subtitle extraction), verified against a pinned checksum and signature before use, and documented in Settings with its size shown before download. macOS notarization and Windows signing must cover each binary we ship, including the base sidecars.
 
-Obligations, checked per release by `xtask check-notices`. The declarations live in [`sidecars.toml`](../sidecars.toml), one entry per executable with its licence, version pin, source, source offer, and build configuration; the checked artefact is [`THIRD_PARTY.md`](../THIRD_PARTY.md), regenerated from those declarations and `Cargo.lock` by `cargo xtask check-notices --update`:
+Obligations, checked per release by `xtask check-notices`. The declarations live in [`sidecars.toml`](../sidecars.toml), one entry per executable with its licence, version pin, source, source offer, and build configuration; the checked artefact is [`THIRD_PARTY.md`](../THIRD_PARTY.md), regenerated from those declarations, `Cargo.lock`, and `pnpm-lock.yaml` by `cargo xtask check-notices --update`:
 
 The release copies the licence text for each shipped binary and the written source
 offer into every bundle through `bundle.resources` in
@@ -176,7 +183,7 @@ them is missing fails rather than publishing.
 
 | Situation | Obligation |
 | --- | --- |
-| MIT / Apache-2.0 crates and packages (the bulk) | Ship a generated third-party licence list. Apache-2.0 additionally requires including any upstream `NOTICE` file. The Rust runtime inventory is [`THIRD_PARTY.md`](../THIRD_PARTY.md); the licence texts it does not carry belong to the release's bundled-licence manifest |
+| MIT / Apache-2.0 crates and packages (the bulk) | Ship a generated third-party licence list. Apache-2.0 additionally requires including any upstream `NOTICE` file. The runtime inventory — Rust crates linked into the binary and frontend packages bundled into it — is [`THIRD_PARTY.md`](../THIRD_PARTY.md); the licence texts it does not carry belong to the release's bundled-licence manifest |
 | `encoding_rs` | Retain the BSD-3-Clause notice, including its no-endorsement clause |
 | `moka` | Attribution under both licence parts |
 | `walkdir`, `notify` | Attribution for `walkdir` under Unlicense/MIT; `notify` is CC0-1.0 |

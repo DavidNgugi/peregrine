@@ -6,10 +6,11 @@ LICENSE-APACHE).
 
 THIRD_PARTY.md is the attribution inventory for the components redistributed with
 it: every bundled sidecar executable with its licence, version pin, source, and
-written source offer, and every Rust dependency the application links.
-`cargo xtask check-notices` fails when that file drifts from sidecars.toml or
-Cargo.lock, and `cargo xtask check-notices --update` regenerates it. The
-redistribution obligations the gate does not carry itself are enumerated in
+written source offer, every Rust dependency the application links, and every
+package the compiled frontend bundles. `cargo xtask check-notices` fails when that
+file drifts from sidecars.toml, Cargo.lock, or pnpm-lock.yaml, and
+`cargo xtask check-notices --update` regenerates it. The redistribution
+obligations the gate does not carry itself are enumerated in
 docs/DEPENDENCIES.md §5 and §6.
 
 Obligations for specific statically linked crates, from docs/DEPENDENCIES.md §6:
