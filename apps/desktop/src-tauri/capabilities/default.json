@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window. The Phase 0 shell reads the OS theme and makes no other IPC call, so only the window module's read-only default set is granted.",
+  "description": "Permissions for the main window. The shell reads the OS theme this way, and starts the OS window drag from the chrome's title-bar region; `core:window:default` is the read-only set plus the internal maximize toggle that the region's double-click uses, so `start_dragging` is the only command it lacks (PG-E1-03). The core's own commands are not listed because this ACL does not gate them, and neither `tauri-plugin-window-state` nor any other plugin is listed because the webview calls none of them.",
   "windows": ["main"],
-  "permissions": ["core:window:default"]
+  "permissions": ["core:window:default", "core:window:allow-start-dragging"]
 }

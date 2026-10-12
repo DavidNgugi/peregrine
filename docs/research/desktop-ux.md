@@ -50,7 +50,9 @@ are 16px; window icon 16×16.
 Windows native frame with Mica extended into a 32px transparent client bar (Snap Layouts intact).
 Linux native decorations, no transparency, no effects. Never `decorations:false`. Restore state with
 `tauri-plugin-window-state` and create the window with `visible:false` — the plugin shows the window
-after restoring state, which is also the anti-white-flash mechanism.
+once the restored geometry is in place, which is what keeps it from appearing at the config default and
+jumping. That is not the anti-flash mechanism: the plugin shows the window from `on_window_ready`,
+before the webview has painted, so PG-E22-10 still owns the first-paint flash.
 
 ### 1.2 Menus and accelerators
 

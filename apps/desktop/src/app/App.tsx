@@ -1,6 +1,7 @@
 import { createI18n } from "@peregrine/i18n";
 import type { ReactElement } from "react";
 import { I18nextProvider } from "react-i18next";
+import type { Platform } from "../lib/platform.js";
 import { AppErrorBoundary } from "./AppErrorBoundary.js";
 import { AppShell } from "./AppShell.js";
 
@@ -8,11 +9,16 @@ import { AppShell } from "./AppShell.js";
 // first paint already has copy.
 const i18n = createI18n();
 
-export function App(): ReactElement {
+interface AppProps {
+  /** Which platform's window chrome to present; `null` when the core could not be asked. */
+  readonly platform: Platform | null;
+}
+
+export function App({ platform }: AppProps): ReactElement {
   return (
     <I18nextProvider i18n={i18n}>
       <AppErrorBoundary>
-        <AppShell />
+        <AppShell platform={platform} />
       </AppErrorBoundary>
     </I18nextProvider>
   );

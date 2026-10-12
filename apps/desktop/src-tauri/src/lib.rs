@@ -28,6 +28,12 @@ pub fn run() -> Result<(), ShellError> {
     // from it, so a command cannot be invokable without also being exported.
     let ipc = peregrine_ipc::builder();
     let app = tauri::Builder::default()
+        // The window is created `visible: false` and this plugin is what shows it, so the
+        // saved size and position are in place before the first frame: the window never
+        // appears at the config's default geometry and then jumps to the restored one.
+        // Restoring, tracking, and saving geometry are the plugin's job and not this
+        // shell's (docs/ARCHITECTURE.md §6 "State ownership").
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(ipc.invoke_handler())
         .setup(move |app| {
             ipc.mount_events(app);
@@ -82,6 +88,58 @@ mod tests {
                 .to_string()
                 .starts_with("the desktop shell could not start:"),
             "unexpected message: {error}"
+        );
+    }
+
+    /// The window contract the React chrome is written against, asserted against the
+    /// config the runtime was built with rather than against the file on disk.
+    ///
+    /// Three of these are load-bearing and easy to delete by accident: `visible: false`
+    /// is what lets `tauri-plugin-window-state` show the window after restoring its
+    /// geometry; `decorations: true` is what keeps the Windows Snap Layouts, the system
+    /// menu, and the Linux desktop's own window controls, which is why no platform has a
+    /// web-drawn caption button (`docs/DESIGN_SYSTEM.md` §8, docs/ARCHITECTURE.md §17); and
+    /// the overlay title bar with `hiddenTitle` is what makes the macOS chrome a title bar
+    /// the app draws into.
+    ///
+    /// The three overlay fields are macOS-only by implementation — Tauri applies them
+    /// under `cfg(target_os = "macos")` — so they can live in the shared config instead of
+    /// in a `tauri.macos.conf.json` that would have to restate the whole window entry,
+    /// because a platform config is merged as a JSON merge patch and replaces arrays.
+    #[test]
+    fn main_window_declares_restorable_overlay_chrome() {
+        // The runtime has to be named here: the macro expands to a generic function, and
+        // outside `run` there is no builder to infer the runtime from. `test = true` skips
+        // the macOS Info.plist embed, which a second expansion inside one binary cannot do;
+        // the config is still read and embedded, which is what the assertions below read.
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!(test = true);
+        let windows = &context.config().app.windows;
+        assert_eq!(windows.len(), 1, "the shell creates exactly one window");
+
+        let window = windows.first().expect("asserted exactly one window above");
+        assert_eq!(window.label, "main");
+        assert!(
+            !window.visible,
+            "the window-state plugin shows the window, after restoring its geometry"
+        );
+        assert!(
+            window.decorations,
+            "the OS keeps its frame, its caption buttons, and its Snap Layouts"
+        );
+        assert_eq!(window.title_bar_style, tauri::utils::TitleBarStyle::Overlay);
+        assert!(window.hidden_title, "the chrome renders the app name");
+        assert_eq!(
+            window.traffic_light_position,
+            Some(tauri::utils::config::LogicalPosition { x: 16.0, y: 18.0 }),
+            "traffic lights are placed in logical points, so 125% and 200% agree"
+        );
+        assert!(
+            window.width >= window.min_width.unwrap_or_default(),
+            "the window opens at or above its own minimum"
+        );
+        assert!(
+            window.height >= window.min_height.unwrap_or_default(),
+            "the window opens at or above its own minimum"
         );
     }
 }
