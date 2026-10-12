@@ -160,10 +160,13 @@ pub fn finalize(
 
 /// Where one episode sits in the scheme the caller is asking about.
 ///
-/// The overlay is additive and covers only the episodes a scheme renumbers, so an episode with
-/// no overlay row of its own keeps its canonical position ([`DATA_MODEL`] §2.3). Building one
-/// of these per episode is what lets [`next_episode`] rank a list without ever comparing
-/// episode numbers itself.
+/// The canonical position is where the episode sits as aired; the overlay, when the caller has
+/// one, is the row for the scheme it is ranking for. [`position`](Self::position) prefers the
+/// overlay, and that preference is only sound for a placement built for the scheme in hand:
+/// [`EpisodeOrderingStrategy::order`](crate::ordering::EpisodeOrderingStrategy::order) is what
+/// decides, per scheme, whether an episode without an overlay row has a place at all rather than
+/// keeping its aired one. Building one of these per episode is what lets [`next_episode`] rank a
+/// list without ever comparing episode numbers itself.
 ///
 /// [`DATA_MODEL`]: ../../../docs/DATA_MODEL.md
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,9 +196,11 @@ impl EpisodePlacement {
 
     /// The episode's position in the scheme, which is the overlay when there is one.
     ///
-    /// The overlay is trusted as given: the repository reads the row for the scheme the account
-    /// is using, and a row from another scheme would be a caller's bug that this function has no
-    /// way to detect, because the placement does not carry which scheme it was built for.
+    /// The overlay's scheme is trusted and not compared, because this accessor has no scheme to
+    /// compare it with: the caller built the placement for the scheme it is ranking for.
+    /// [`EpisodeOrderingStrategy::order`](crate::ordering::EpisodeOrderingStrategy::order) is
+    /// handed the scheme and uses a row only when it matches, which is where a row read for the
+    /// wrong scheme is caught.
     #[must_use]
     pub fn position(&self) -> EpisodePosition {
         self.overlay

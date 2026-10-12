@@ -18,6 +18,7 @@ pub mod inspect;
 pub mod library;
 pub mod name;
 pub mod notify;
+pub mod ordering;
 pub mod path;
 pub mod ports;
 pub mod quality;
@@ -56,6 +57,9 @@ pub use notify::{
     PlannerRequest, PlannerState, Platform, QuietHoursWindow, RATE_LIMIT_PER_MINUTE, Severity,
     SoundChoice, SoundError, SubjectLabel, SuppressionReason, burst_deep_link, deep_link,
     deep_link_for, plan, validate_custom_sound,
+};
+pub use ordering::{
+    DEFAULT_SCHEME, EpisodeOrderingStrategy, OrderedEpisodes, Unplaced, UnplacedReason,
 };
 pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
 pub use ports::{Clock, IdGenerator};
