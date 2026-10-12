@@ -36,6 +36,19 @@ Measured once on that machine in a debug build, for the record rather than as a 
 
 PG-E0-14 is settled: `cargo deny check` is green on the real graph (advisories, bans, licences, sources), the five MPL-2.0 crates that arrive through Tauri's own stack are accepted one crate at a time by [adr/0021](./adr/0021-mpl-2-0-transitive-dependencies.md), and the advisory half is proven able to fail against a fixture. Tooling now includes the dead-dependency gates for both workspaces (PG-E0-15), a release workflow that has never been executed because no tag exists and the GitHub token here is unusable (PG-E0-16), and a checked attribution artefact for both runtime halves, with `cargo xtask check-notices` deriving the frontend closure from `pnpm-lock.yaml` (PG-E0-18). [adr/0022](./adr/0022-component-packs-and-sidecar-verification.md) settles how a component pack is verified before it runs, which is the mechanism PG-E26-01 still has to build. PG-E28-07 owns documentation checking and PG-E22-02 owns icon checking; `cargo xtask check-docs` and `cargo xtask icons --check` are still named in AGENTS.md §3 and still unimplemented. E2E, parser fuzz targets, and performance budgets remain open under E4 and E27.
 
+**Phase 0 has six tasks that cannot be finished inside Phase 0**, because the backlog declares dependencies on features that later phases build. They are listed here rather than left to be discovered when someone tries to tick them, and none of them should be closed by weakening its acceptance:
+
+| Task | Depends on | Why the acceptance cannot be met yet |
+| --- | --- | --- |
+| PG-E1-05 | PG-E16-02 (Phase 3) | Its acceptance is "mpv and ffmpeg reaped"; there is no `PlayerBackend` and no mpv to reap |
+| PG-E1-06 | PG-E1-05 | Orphan reaping is specified against the process the player will spawn |
+| PG-E1-17 | PG-E1-05 | Power-save inhibition is specified "during playback and active downloads" |
+| PG-E1-10 | PG-E10-09 (Phase 2) | The quit dialog "states the seed count", which needs the torrent engine |
+| PG-E1-15 | aggregate download progress (Phase 2/3) | The badge is "driven by aggregate download progress"; its declared dep is only PG-E1-09, so the dependency line is incomplete |
+| PG-E1-16 | PG-E24-03 (Phase 4) | Reveal-in-file-manager is "path-guarded" through the adapter that does not exist |
+
+PG-E1-21 additionally requires a sound to be "verified by ear on each OS" and recorded in `SPIKE-11`, so it is a three-platform manual verification rather than something a single machine can close.
+
 ## Epic dependency graph
 
 ```mermaid
