@@ -366,7 +366,7 @@ graph LR
 
 ## E6 · Sync and cache
 
-- [ ] **PG-E6-01** *(doing)* `L` · deps PG-E3-08, PG-E4-19 · Job scheduler: priority queues, worker pool, dedupe, backoff with jitter **Remaining:** The scheduler runs behind the desktop runtime with a persisted job and IPC progress (PG-E0-19), and its queue overhead was measured once (about 55 000 no-op jobs/s in a debug build) — that number is recorded in the status section, not enforced. What remains: the shared testkit fakes (PG-E4-19), and the conformance suite a fake engine passes.
+- [ ] **PG-E6-01** `L` · deps PG-E3-08, PG-E4-19 · Job scheduler: priority queues, worker pool, dedupe, backoff with jitter **Remaining:** The scheduler runs behind the desktop runtime with a persisted job and IPC progress (PG-E0-19), and its queue overhead was measured once (about 55 000 no-op jobs/s in a debug build) — that number is recorded in the status section, not enforced. What remains: the shared testkit fakes (PG-E4-19), and the conformance suite a fake engine passes. **Marker cleared — nobody is on this task.** Its own note already names what remains, and the largest piece is the shared testkit fakes, which is PG-E4-19 and is in flight.
   - Acceptance: Deferred jobs retry on schedule; dedupe proven
 - [ ] **PG-E6-02** `M` · deps PG-E6-01 · Resource token acquisition with panic-safe release **Remaining:** PG-E6-01 already tests panic-safe worker-slot release. This task covers resource tokens beyond worker slots; verify release on panic, cancellation, and retry without duplicating that test.
   - Acceptance: Injected panic releases the token (guard test)
@@ -934,7 +934,7 @@ graph LR
   - Acceptance: Legible at 16 px; ships as SVG with a single currentColor path set
 - [ ] **PG-E22-02** `M` · deps PG-E22-01 · App icon per OS: macOS squircle with safe margins, Windows multi-size `.ico`, Linux PNG set **Remaining:** Implement cargo xtask icons --check for platform sizes and formats; current icon files alone do not satisfy the gate.
   - Acceptance: Passes each platform's iconography guidelines
-- [ ] **PG-E22-03** *(doing)* `M` · deps PG-E21-01 · Shipped themes: Default Dark, Default Light, Midnight, plus one high-contrast
+- [ ] **PG-E22-03** `M` · deps PG-E21-01 · Shipped themes: Default Dark, Default Light, Midnight, plus one high-contrast **Marker cleared — nobody is on this task, and it has no note of its own.** What exists: `assets/themes/` holds `default-dark.json`, `default-light.json` and `high-contrast.json`, and `packages/theme` holds the tokens and their test. What the title asks for and the tree does not have: the **Midnight** theme. The acceptance — contrast validation and visual snapshots per theme — is unverified here.
   - Acceptance: Each passes contrast validation and visual snapshots
 - [ ] **PG-E22-04** `M` · deps PG-E21-02 · Theme file format and a documented authoring guide
   - Acceptance: A community theme can be added without a rebuild
@@ -988,7 +988,7 @@ graph LR
   - Acceptance: Symlink escape and prefix-match escape attempts rejected
 - [ ] **PG-E24-04** `S` · deps PG-E24-01 · Remove or lock down every shell and opener capability
   - Acceptance: Media paths cannot be opened by the system handler
-- [ ] **PG-E24-05** *(doing)* `M` · deps PG-E0-01 · Secrets: keyring storage, `Secret` wrapper, redaction layer
+- [ ] **PG-E24-05** `M` · deps PG-E0-01 · Secrets: keyring storage, `Secret` wrapper, redaction layer **Marker cleared — nobody is on this task, and it has no note of its own.** What exists: `crates/peregrine-secrets` with `secret.rs`, `redact.rs` and the redaction tests. What the acceptance asks for and has not been run is the log-scanning test that finds no key material across every log path; whether the keyring adapter itself exists is a question this note does not answer, because checking it is that task's work rather than a reader's.
   - Acceptance: A log-scanning test finds no key material across all log paths
 - [ ] **PG-E24-06** `M` · deps PG-E24-01 · Sandboxed trailer webview with origin restrictions and no IPC access
   - Acceptance: Trailer cannot invoke any app command
@@ -1015,7 +1015,7 @@ graph LR
 
 ## E25 · Observability and diagnostics
 
-- [ ] **PG-E25-01** *(doing)* `M` · deps PG-E0-08 · `tracing` setup: structured JSON, rotation, redaction, per-module levels **Remaining:** The subscriber is installed and retained at desktop startup (PG-E0-19) and the log tail reaches the Diagnostics screen. Still owed: exposing level changes through settings, which needs the settings registry (PG-E20-01). Retention and key-shape scrubbing remain PG-E25-03.
+- [ ] **PG-E25-01** `M` · deps PG-E0-08 · `tracing` setup: structured JSON, rotation, redaction, per-module levels **Remaining:** The subscriber is installed and retained at desktop startup (PG-E0-19) and the log tail reaches the Diagnostics screen. Still owed: exposing level changes through settings, which needs the settings registry (PG-E20-01). Retention and key-shape scrubbing remain PG-E25-03. **Marker cleared — nobody is on this task.** Its note is accurate about the remainder: level changes need the settings registry (PG-E20-01), so this waits on that rather than on effort.
   - Acceptance: Log level change applies at runtime
 - [ ] **PG-E25-02** `M` · deps PG-E25-01 · Metrics registry: counters, histograms, per-provider and per-session
   - Acceptance: Exposed internally and rendered in Diagnostics
@@ -1134,7 +1134,7 @@ graph LR
   - Acceptance: Each entry has a symptom, cause, and fix
 - [ ] **PG-E28-06** `M` · deps PG-E28-01 · FAQ: subtitles, seeding, VPN, casting limitations, indexers, legal questions
   - Acceptance: Answers are honest about limitations
-- [ ] **PG-E28-07** *(doing)* `S` · deps PG-E0-13 · Architecture docs kept in sync, with a docs check in CI for broken links and diagrams **Remaining:** Implementation status and dependency ordering are reconciled; cargo xtask check-docs and its negative fixtures are still absent, so this task remains open.
+- [ ] **PG-E28-07** `S` · deps PG-E0-13 · Architecture docs kept in sync, with a docs check in CI for broken links and diagrams **Remaining:** Implementation status and dependency ordering are reconciled; cargo xtask check-docs and its negative fixtures are still absent, so this task remains open. **Marker cleared — nobody is on this task.** Its note is accurate: `check-docs` and its negative fixtures are still absent. AGENTS §3 now says so at the command line as well.
   - Acceptance: CI fails on a broken relative link or invalid mermaid block
 - [ ] **PG-E28-08** `M` · deps PG-E27-06 · Screenshot and demo-asset pipeline kept current per release
   - Acceptance: Screenshots refresh automatically from a scripted run
