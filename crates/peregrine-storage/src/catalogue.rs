@@ -760,7 +760,8 @@ mod tests {
         assert!(error.to_string().contains("series"), "{error}");
     }
 
-    /// R34: an unrestricted scope sees what the catalogue holds, whatever the rating.
+    /// **I25** under R34: every catalogue read takes an `AccountScope`, and an unrestricted one
+    /// sees what the catalogue holds, whatever the rating.
     #[tokio::test]
     async fn an_unrestricted_scope_sees_every_title() {
         let directory = TempDir::new().unwrap();
@@ -784,8 +785,9 @@ mod tests {
         );
     }
 
-    /// R34's fail-closed rule: a restricted scope sees neither adult-flagged content nor
-    /// content with no certification.
+    /// **I26** and **I27** under R34's fail-closed rule: a restricted scope sees neither
+    /// adult-flagged content (**I26**) nor content with no certification (**I27**), because
+    /// unrated content is not evidence that it is safe.
     #[tokio::test]
     async fn a_restricted_scope_hides_adult_and_unrated_content() {
         let directory = TempDir::new().unwrap();

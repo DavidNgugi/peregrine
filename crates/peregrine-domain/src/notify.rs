@@ -1009,6 +1009,7 @@ mod tests {
         );
     }
 
+    /// **I14, first clause**: a `critical` notification ignores event disablement and quiet hours.
     #[test]
     fn quiet_hours_never_hold_back_a_critical_event() {
         let mut state = state();
@@ -1028,6 +1029,8 @@ mod tests {
         }
     }
 
+    /// **I14, second clause**: the exemption is from quiet hours and disablement only —
+    /// consent, deduplication, focus suppression and the rate limit still apply.
     #[test]
     fn a_critical_event_that_cannot_be_disabled_still_respects_focus() {
         let mut state = state();

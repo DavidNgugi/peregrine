@@ -244,6 +244,9 @@ mod tests {
     const SECRET_PROBE: &str = "tmdb-api-key-4f9c2b1a8e7d6c5b";
     const MAGNET_PROBE: &str = "magnet:?xt=urn:btih:C12FE1C06BBA254A4DE7DDD1AD9E1B0D9C6F0A4B";
 
+    /// **I15**: no notification text may carry a filesystem path, secret, magnet URI, tracker
+    /// URL or infohash — one case per class, because a scanner that catches four of five
+    /// classes still leaks the fifth.
     #[test]
     fn the_scanner_finds_each_forbidden_class() {
         assert_eq!(
