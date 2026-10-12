@@ -42,3 +42,15 @@ pub fn verified_token(root: &Path, bytes: &[u8]) -> VerifiedSidecar {
     let staged = fixture(root, "staged-fixture", bytes);
     VerifiedSidecar::verify(&staged, &artifact_for(bytes)).expect("the fixture matches its pin")
 }
+
+/// A [`Sources`](crate::sidecar::Sources) whose managed directory is `directory`.
+///
+/// `install` only ever consults `managed`, so the beside-app path points at the same place
+/// rather than inventing a second location the test does not mean. The resolution tests build
+/// their own two-location sources.
+pub fn sources(directory: &Path) -> crate::sidecar::Sources {
+    crate::sidecar::Sources {
+        managed: directory.to_path_buf(),
+        beside_app: directory.to_path_buf(),
+    }
+}

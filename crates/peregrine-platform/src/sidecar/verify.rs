@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256 as Sha256Hasher};
 use thiserror::Error;
 
+use super::Sources;
+
 /// What a component must be, byte for byte, before it may run.
 ///
 /// Produced by the table `sidecars.toml` is compiled into ([adr/0022](../../../../docs/adr/0022-component-packs-and-sidecar-verification.md)
@@ -277,14 +279,24 @@ impl VerifiedSidecar {
 
 /// What a verified artefact becomes once it is moved into its final location.
 ///
-/// The final name is a parameter because whether a component is installed as `mpv`
-/// or `ffmpeg-7.1` is a packaging decision, and the version is the same one the
-/// manifest pins.
+/// The name is a parameter because whether a component is installed as `mpv` or
+/// `ffmpeg-7.1` is a packaging decision, and the version is the same one the manifest pins.
+///
+/// # Why the destination is a name and not a path
+///
+/// A verified artefact renamed to a caller-chosen *path* is still a problem: verification
+/// proves the bytes are the pinned ones, not that they belong where they are being put. So
+/// this takes a name and builds the destination itself, inside `sources.managed` — the
+/// directory [ADR 0022](../../../../../docs/adr/0022-component-packs-and-sidecar-verification.md)
+/// §4 calls the one the installer and the packs own. Containment is then structural rather
+/// than checked after the fact: a name with a separator in it is refused, so there is no
+/// path to escape with, and no `..` or symlinked parent to reason about.
 pub fn install(
     verified: VerifiedSidecar,
-    final_path: impl AsRef<Path>,
-) -> Result<VerifiedSidecar, InstallError> {
-    let final_path = final_path.as_ref();
+    sources: &Sources,
+    file_name: &str,
+) -> Result<VerifiedSidecar, InstallRefusal> {
+    let final_path = checked_destination(sources, file_name)?;
     // Taken apart so the token is consumed: a verification that has been installed
     // is the one at the new path, and there is no stale token left behind pointing
     // at the temporary name.
@@ -297,18 +309,60 @@ pub fn install(
     // half-written state. Across filesystems it is not, and the copy `rename` would
     // otherwise degrade into is refused: a partially visible artefact is exactly
     // what staging exists to prevent.
-    fs::rename(&staged, final_path).map_err(|source| InstallError {
-        from: staged,
-        to: final_path.to_owned(),
-        source,
+    fs::rename(&staged, &final_path).map_err(|source| {
+        InstallRefusal::Move(InstallError {
+            from: staged,
+            to: final_path.clone(),
+            source,
+        })
     })?;
 
     // The bytes at `final_path` are the ones that were hashed, because the rename
     // moved that inode. The token follows the file instead of being re-derived.
     Ok(VerifiedSidecar {
-        path: final_path.to_owned(),
+        path: final_path,
         sha256,
     })
+}
+
+/// The destination inside the managed directory, or the refusal that says why not.
+///
+/// The separators are rejected on every platform rather than only the host's, so a name that
+/// is a plain file name here is a plain file name everywhere — a manifest is written once and
+/// read on three operating systems.
+fn checked_destination(sources: &Sources, file_name: &str) -> Result<PathBuf, InstallRefusal> {
+    let not_a_name = || InstallRefusal::NotAName {
+        name: file_name.to_owned(),
+    };
+    if file_name.is_empty() || file_name == "." || file_name == ".." {
+        return Err(not_a_name());
+    }
+    if file_name.contains(['/', '\\', '\0']) {
+        return Err(not_a_name());
+    }
+    Ok(sources.managed.join(file_name))
+}
+
+/// Why a verified artefact was not installed.
+///
+/// The refusal is a distinct variant from a failed move rather than the same type with a
+/// synthetic `io::Error`, because the two mean opposite things to a caller:
+/// [`InstallError::is_target_unreplaceable`] reports a `PermissionDenied` as *retry*, which is
+/// the right advice for a component directory that is momentarily read-only and exactly the
+/// wrong advice for a name that tried to leave the directory.
+#[derive(Debug, Error)]
+pub enum InstallRefusal {
+    /// The move itself failed.
+    #[error(transparent)]
+    Move(InstallError),
+    /// The requested name is not a plain file name.
+    #[error(
+        "`{name}` is not a plain file name, so it cannot name a component in the managed directory"
+    )]
+    NotAName {
+        /// The name as the caller supplied it.
+        name: String,
+    },
 }
 
 /// Why a verified artefact could not be installed, and what the caller can do.

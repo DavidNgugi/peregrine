@@ -383,7 +383,7 @@ pub mod verify;
 // Re-exported here and at the crate root so a spawn path never has to reach through
 // a submodule to name the token it must hold; `SafePath` sits at the root of
 // `peregrine-domain` for the same reason.
-pub use verify::{VerifiedSidecar, VerifyError};
+pub use verify::{InstallError, InstallRefusal, VerifiedSidecar, VerifyError, install};
 
 #[cfg(test)]
 mod test_support;

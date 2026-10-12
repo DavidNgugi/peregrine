@@ -12,7 +12,69 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::*;
-use crate::sidecar::test_support::{artifact_for, digest_of_bytes, fixture, mpv_bytes};
+use crate::sidecar::test_support::{
+    artifact_for, digest_of_bytes, fixture, mpv_bytes, sources, verified_token,
+};
+
+/// The failed move inside a refusal, or a panic.
+///
+/// These tests are about the rename; a `NotAName` here would mean the destination helper
+/// rejected a plain name, which is a different rule with its own test below.
+fn moved(refusal: InstallRefusal) -> InstallError {
+    match refusal {
+        InstallRefusal::Move(inner) => inner,
+        // Named rather than a wildcard: a variant added later should fail to compile here,
+        // not be swallowed by an arm whose message would then be wrong.
+        InstallRefusal::NotAName { name } => {
+            panic!("expected a failed move, got a refused name: `{name}`")
+        }
+    }
+}
+
+/// A name that is not a plain file name is refused, and nothing lands outside the managed
+/// directory.
+///
+/// This is the containment control: `install` builds the destination from a name inside
+/// `sources.managed`, so a name carrying a separator is refused rather than resolved. The
+/// refusal is also a **different variant** from a failed move, and that distinction is the
+/// reason this test asserts the variant rather than just the error —
+/// `InstallError::is_target_unreplaceable` classifies a `PermissionDenied` as retryable,
+/// which is sound advice for a component directory that is momentarily read-only and the
+/// worst possible advice for a name that tried to leave it.
+#[test]
+fn a_name_that_is_not_a_plain_name_is_refused() {
+    // The managed directory is nested inside a directory this test owns, so the traversal
+    // assertion lands somewhere the test controls. Pointing it at the shared temporary
+    // directory instead made the test depend on what an earlier run had left there — it
+    // passed alone and failed in the suite, which is the whole flakiness this suite is
+    // supposed to be free of.
+    let outer = TempDir::new().expect("a temporary directory");
+    let managed = outer.path().join("managed");
+    fs::create_dir(&managed).expect("the fixture directory is writable");
+
+    for name in [
+        "",
+        ".",
+        "..",
+        "../escaped",
+        "sub/ffmpeg",
+        "..\\escaped",
+        "ff\0mpeg",
+    ] {
+        let token = verified_token(&managed, mpv_bytes());
+        let refused = install(token, &sources(&managed), name)
+            .expect_err("a name that is not a plain name cannot name a component");
+        assert!(
+            matches!(&refused, InstallRefusal::NotAName { name: refused_name } if refused_name == name),
+            "`{name}` should be refused as a name, got {refused:?}"
+        );
+    }
+
+    assert!(
+        !outer.path().join("escaped").exists(),
+        "a traversal attempt must not have created anything outside the managed directory"
+    );
+}
 
 /// `set_len` mutates the open file rather than replacing the directory entry, so the
 /// hook in the change-under-verification test leaves exactly the file the verifier is
@@ -176,7 +238,8 @@ fn installing_moves_the_verified_file_and_the_token_follows_it() {
         VerifiedSidecar::verify(&staged, &artifact_for(bytes)).expect("the fixture matches");
 
     let final_path = root.path().join("ffmpeg");
-    let installed = install(token, &final_path).expect("same filesystem, no target in the way");
+    let installed = install(token, &sources(root.path()), "ffmpeg")
+        .expect("same filesystem, no target in the way");
 
     assert_eq!(installed.path(), final_path);
     assert_eq!(installed.sha256(), digest_of_bytes(bytes));
@@ -209,7 +272,9 @@ fn installing_refuses_a_target_this_process_may_not_replace() {
     fs::create_dir(&occupied).expect("the fixture directory is writable");
     fixture(&occupied, "in-use", b"something is here");
 
-    let refused = install(token, &occupied).expect_err("the target is not replaceable");
+    let refused = moved(
+        install(token, &sources(root.path()), "ffmpeg").expect_err("the target is not replaceable"),
+    );
 
     assert_eq!(refused.from, staged);
     assert_eq!(refused.to, occupied);
@@ -246,8 +311,10 @@ fn installing_into_a_directory_this_process_may_not_write_is_reported_as_retryab
         return;
     }
 
-    let refused = install(token, locked.join("ffmpeg"))
-        .expect_err("the directory cannot be written, so the name cannot be created");
+    let refused = moved(
+        install(token, &sources(&locked), "ffmpeg")
+            .expect_err("the directory cannot be written, so the name cannot be created"),
+    );
     make_writable(&locked);
 
     assert!(
@@ -308,8 +375,10 @@ fn a_cross_device_move_is_refused_rather_than_copied() {
 
     let destination = other.join("peregrine-cross-device-fixture");
     fs::create_dir_all(&destination).expect("the second filesystem is writable");
-    let refused =
-        install(token, destination.join("ffmpeg")).expect_err("a cross-device move is refused");
+    let refused = moved(
+        install(token, &sources(&destination), "ffmpeg")
+            .expect_err("a cross-device move is refused"),
+    );
     let _ = fs::remove_dir_all(&destination);
 
     assert!(
