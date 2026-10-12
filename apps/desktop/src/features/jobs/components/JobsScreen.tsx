@@ -1,4 +1,16 @@
-import { Button } from "@peregrine/ui";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Panel,
+  Progress,
+  Screen,
+  Section,
+  Table,
+  type TableColumn,
+} from "@peregrine/ui";
+import type { JobRecord } from "@peregrine/ipc-client";
+import { describeIpcError } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { findJournalRow, isTerminal, percentOf } from "../job-progress.js";
@@ -8,13 +20,18 @@ import { useJobs } from "../hooks/useJobs.js";
 const STEPS = 300;
 
 /**
- * The Phase 0 diagnostics screen: start a hello job, watch it, cancel it, and read what
- * the core recorded.
+ * The Phase 0 diagnostics screen: start a hello job, watch it, cancel it, and read what the
+ * core recorded.
  *
  * It exists because `PLAN.md`'s Phase 0 exit criteria are "a hello job runs through the
  * scheduler with visible progress" and "logs tail in Diagnostics" — both of which need a
- * surface, not only a test (PLAN §8 item 1). Routing replaces the shell's screen switch
- * with PG-E7-01, and this screen becomes the Diagnostics page with PG-E25-05.
+ * surface, not only a test (PLAN §8 item 1). PG-E25-05 turns it into the full Diagnostics
+ * page; PG-E7-02 replaces the shell's screen switch with a route to it.
+ *
+ * Every element is the kit's — `Screen` owns the heading and the scroll, `Section` owns the
+ * two titled regions, `Table` owns the journal, `Progress` owns the bar, `Panel` owns the log
+ * surface, and `EmptyState`/`ErrorState` own the two ways a region can have nothing to show.
+ * What is left here is copy and state.
  */
 export function JobsScreen(): ReactElement {
   const { t } = useTranslation();
@@ -30,32 +47,42 @@ export function JobsScreen(): ReactElement {
   const percent =
     live === null ? 0 : Math.round(percentOf({ ...live, progressPermille: permille }));
 
-  return (
-    <section
-      aria-labelledby="jobs-title"
-      className="flex h-full flex-col gap-4 overflow-y-auto px-6 py-4"
-    >
-      <header className="flex items-baseline justify-between gap-4">
-        <h1 className="text-title-1 text-text-primary" id="jobs-title">
-          {t("jobs.title")}
-        </h1>
-        <p className="text-caption text-text-tertiary">{t("jobs.subtitle")}</p>
-      </header>
+  // The core's structured error, through the shared mapping: the title says what happened
+  // and the advice says what to do about it, which is the pair PLAN §8 item 4 asks for. The
+  // raw `error.message` is written to the UI log by the store and never shown here, because
+  // a message from the core can name a path (SECURITY.md T13).
+  const errorCopy = error === null ? null : describeIpcError(error);
 
-      {error !== null ? (
-        <div
-          className="flex items-center justify-between gap-3 rounded-md border border-border-subtle bg-surface-2 px-3 py-2"
-          role="alert"
-        >
-          <span className="text-body text-text-primary">
-            {t(`ipc.error.${error.code.toLowerCase()}.title`, {
-              defaultValue: error.message,
-            })}
-          </span>
-          <Button onClick={clearError} size="sm" variant="ghost">
-            {t("jobs.error.dismiss")}
-          </Button>
-        </div>
+  const columns: readonly TableColumn<JobRecord>[] = [
+    { id: "id", header: t("jobs.journal.id"), cell: (entry) => entry.id },
+    { id: "kind", header: t("jobs.journal.kind"), cell: (entry) => entry.kind },
+    { id: "state", header: t("jobs.journal.state"), cell: (entry) => entry.state },
+    {
+      id: "progress",
+      header: t("jobs.journal.progress"),
+      numeric: true,
+      cell: (entry) => `${String(entry.progressPermille / 10)}%`,
+    },
+    {
+      id: "attempts",
+      header: t("jobs.journal.attempts"),
+      numeric: true,
+      cell: (entry) => `${String(entry.attempts)}/${String(entry.maxAttempts)}`,
+    },
+  ];
+
+  return (
+    <Screen subtitle={t("jobs.subtitle")} title={t("jobs.title")}>
+      {errorCopy !== null ? (
+        <ErrorState
+          action={
+            <Button onClick={clearError} size="sm" variant="ghost">
+              {t("jobs.error.dismiss")}
+            </Button>
+          }
+          body={t(errorCopy.adviceKey)}
+          title={t(errorCopy.titleKey)}
+        />
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -86,26 +113,14 @@ export function JobsScreen(): ReactElement {
           {t("jobs.action.refresh")}
         </Button>
         {health?.events.degraded === true ? (
-          <span className="text-caption text-text-tertiary" role="status">
+          <p className="text-caption text-text-tertiary" role="status">
             {t("jobs.degraded", { count: health.events.dropped + health.events.failed })}
-          </span>
+          </p>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-1">
-        <div
-          aria-label={t("jobs.progress.label")}
-          aria-valuemax={100}
-          aria-valuemin={0}
-          aria-valuenow={percent}
-          className="h-2 w-full overflow-hidden rounded-full bg-surface-2"
-          role="progressbar"
-        >
-          <div
-            className="h-full bg-accent transition-[width] duration-200 ease-out motion-reduce:transition-none"
-            style={{ width: `${String(percent)}%` }}
-          />
-        </div>
+        <Progress label={t("jobs.progress.label")} value={percent} />
         <p className="text-caption text-text-secondary" role="status">
           {live === null
             ? t("jobs.progress.idle")
@@ -113,50 +128,26 @@ export function JobsScreen(): ReactElement {
         </p>
       </div>
 
-      <section aria-labelledby="jobs-journal-title" className="flex flex-col gap-2">
-        <h2 className="text-title-2 text-text-primary" id="jobs-journal-title">
-          {t("jobs.journal.title")}
-        </h2>
+      <Section title={t("jobs.journal.title")}>
         {journal.length === 0 ? (
-          <p className="text-body text-text-tertiary">{t("jobs.journal.empty")}</p>
+          <EmptyState title={t("jobs.journal.empty")} />
         ) : (
-          <table className="w-full border-collapse text-caption">
-            <thead>
-              <tr className="text-left text-text-tertiary">
-                <th scope="col">{t("jobs.journal.id")}</th>
-                <th scope="col">{t("jobs.journal.kind")}</th>
-                <th scope="col">{t("jobs.journal.state")}</th>
-                <th scope="col">{t("jobs.journal.progress")}</th>
-                <th scope="col">{t("jobs.journal.attempts")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {journal.map((entry) => (
-                <tr className="border-t border-border-subtle text-text-secondary" key={entry.id}>
-                  <td>{entry.id}</td>
-                  <td>{entry.kind}</td>
-                  <td>{entry.state}</td>
-                  <td>{`${String(entry.progressPermille / 10)}%`}</td>
-                  <td>{`${String(entry.attempts)}/${String(entry.maxAttempts)}`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Table columns={columns} rowKey={(entry) => entry.id} rows={journal} />
         )}
-      </section>
+      </Section>
 
-      <section aria-labelledby="jobs-log-title" className="flex min-h-0 flex-col gap-2">
-        <h2 className="text-title-2 text-text-primary" id="jobs-log-title">
-          {t("jobs.log.title")}
-        </h2>
+      <Section title={t("jobs.log.title")}>
         {logLines.length === 0 ? (
-          <p className="text-body text-text-tertiary">{t("jobs.log.empty")}</p>
+          <EmptyState title={t("jobs.log.empty")} />
         ) : (
-          <pre className="max-h-64 overflow-auto rounded-md bg-surface-2 p-3 text-caption text-text-secondary">
-            {logLines.join("\n")}
-          </pre>
+          <Panel>
+            {/* A `<pre>` is the element for a log: the line breaks are the content. */}
+            <pre className="max-h-64 overflow-auto p-3 font-mono text-caption text-text-secondary">
+              {logLines.join("\n")}
+            </pre>
+          </Panel>
         )}
-      </section>
-    </section>
+      </Section>
+    </Screen>
   );
 }

@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { twMerge } from "./merge.js";
 
 /**
@@ -20,20 +20,31 @@ export interface ErrorStateProps {
   readonly title: string;
   /** Why, or what to do about it. */
   readonly body?: string;
+  /**
+   * What the user can do about it, usually one `Button`.
+   *
+   * It sits outside the text so the control is not part of what is announced as the alert's
+   * content, and it is the caller's because only the caller knows whether a failure is
+   * dismissible, retryable, or neither.
+   */
+  readonly action?: ReactNode;
   readonly className?: string;
 }
 
-export function ErrorState({ title, body, className }: ErrorStateProps): ReactElement {
+export function ErrorState({ title, body, action, className }: ErrorStateProps): ReactElement {
   return (
     <div
       className={twMerge(
-        clsx("flex flex-col gap-1 border-l-2 border-state-danger px-3 py-2"),
+        clsx("flex items-start gap-3 border-l-2 border-state-danger px-3 py-2"),
         className,
       )}
       role="alert"
     >
-      <p className="text-body-strong text-text-primary">{title}</p>
-      {body === undefined ? null : <p className="text-caption text-text-secondary">{body}</p>}
+      <div className="flex flex-1 flex-col gap-1">
+        <p className="text-body-strong text-text-primary">{title}</p>
+        {body === undefined ? null : <p className="text-caption text-text-secondary">{body}</p>}
+      </div>
+      {action === undefined ? null : <div className="shrink-0">{action}</div>}
     </div>
   );
 }

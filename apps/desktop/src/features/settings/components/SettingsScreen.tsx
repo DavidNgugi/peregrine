@@ -1,6 +1,7 @@
 import {
   EmptyState,
   ErrorState,
+  Screen,
   SettingsRow,
   SettingsSection,
   ShortcutKeys,
@@ -39,14 +40,7 @@ export function SettingsScreen({ shortcuts }: SettingsScreenProps): ReactElement
   const autoStart = useAutoStart();
 
   return (
-    <section
-      aria-labelledby="settings-title"
-      className="flex h-full flex-col gap-6 overflow-y-auto px-6 py-4"
-    >
-      <h1 className="text-title-1 text-text-primary" id="settings-title">
-        {t("settings.title")}
-      </h1>
-
+    <Screen title={t("settings.title")}>
       <SettingsSection
         description={t("settings.shortcuts.description")}
         title={t("settings.shortcuts.title")}
@@ -81,6 +75,6 @@ export function SettingsScreen({ shortcuts }: SettingsScreenProps): ReactElement
         />
         {autoStart.failed ? <ErrorState title={t("settings.autostart.failed")} /> : null}
       </SettingsSection>
-    </section>
+    </Screen>
   );
 }

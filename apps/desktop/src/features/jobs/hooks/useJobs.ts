@@ -28,6 +28,12 @@ export function useJobs(): JobsState {
  */
 export function useJobsBridge(): void {
   useEffect(() => {
+    // Read once on mount, before subscribing: the journal, the counters, and the log tail are
+    // what the Diagnostics screen shows, and a screen that draws "no job has been recorded
+    // yet" without having asked is asserting something it does not know. The shell mounts
+    // this, so the read happens once per session rather than once per visit to the screen.
+    void jobsStore.getState().refresh();
+
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
 

@@ -31,4 +31,22 @@ describe("ErrorState", () => {
     const markup = renderToStaticMarkup(<ErrorState title="Could not save." />);
     expect(markup.match(/<p/gu)).toHaveLength(1);
   });
+
+  it("offers an action without making it part of the alert's content", () => {
+    // The control lives outside the text, so a screen reader announcing the alert reads
+    // what happened and not "Dismiss" in the middle of it.
+    const markup = renderToStaticMarkup(
+      <ErrorState
+        action={<button type="button">Dismiss</button>}
+        body="It came back with a code."
+        title="Could not save."
+      />,
+    );
+    expect(markup).toContain("Dismiss");
+    expect(markup.indexOf("</p>")).toBeLessThan(markup.indexOf("<button"));
+  });
+
+  it("draws no action when the caller has none", () => {
+    expect(renderToStaticMarkup(<ErrorState title="Could not save." />)).not.toContain("<button");
+  });
 });
