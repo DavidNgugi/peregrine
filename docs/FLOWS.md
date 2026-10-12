@@ -840,12 +840,14 @@ stateDiagram-v2
     inspecting --> removed: user cancels
     metadata --> removed: user cancels
     seeding --> removed: user removes
-    failed --> queued: retry with a different release
+    failed --> [*]
     completed --> [*]
     removed --> [*]
 ```
 
-Terminal states: `completed`, `removed`, `failed` (after retry exhaustion). Every non-terminal state has a persisted `engine_state_json`, so a restart reattaches rather than restarting the transfer. Progress writes are coalesced to at most 1 Hz per job.
+Terminal states: `completed`, `removed`, `failed`. Every non-terminal state has a persisted `engine_state_json`, so a restart reattaches rather than restarting the transfer. Progress writes are coalesced to at most 1 Hz per job.
+
+A retry after a failure is **a new job, not an edge of this one**. `download_job_hash_uq` is unique over the live states, so a failed job vacates its infohash and the retry is inserted fresh with its own `safety_report_json`; that is deliberate, because re-inspecting the same torrent on a retry is how a gate gets skipped. `download::transition` therefore treats `failed` as absorbing, and the diagram above no longer draws a `failed --> queued` arrow it does not have.
 
 `removed` is reachable from **every** non-terminal state, because a user has to be able to cancel a job they are still waiting for. Without the edges from `queued`, `inspecting`, and `metadata`, a job parked behind the active-set limit — which can be hours — has no way out, and a download manager that cannot cancel a queued download is not one. `download::transition` (PG-E4-11) currently rejects `Removed` in those four states, so the machine owes this row.
 
