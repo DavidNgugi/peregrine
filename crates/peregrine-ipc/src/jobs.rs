@@ -390,7 +390,7 @@ mod tests {
                     version: 9,
                     description: "deliberately_failing".to_owned(),
                     backup: Some(std::path::PathBuf::from(
-                        "/home/someone/.local/share/peregrine/peregrine.sqlite.backup-0008-01",
+                        "/Users/someone/Library/Application Support/peregrine-leak-canary/peregrine.sqlite.backup-0008-01",
                     )),
                     source: "the migration failed".into(),
                 }),
@@ -399,7 +399,9 @@ mod tests {
             ),
             (
                 RuntimeError::Storage(StorageError::Backup {
-                    path: std::path::PathBuf::from("/home/someone/.local/share/peregrine"),
+                    path: std::path::PathBuf::from(
+                        "C:\\Users\\someone\\AppData\\Roaming\\peregrine-leak-canary",
+                    ),
                     source: "the disk is full".into(),
                 }),
                 ErrorCode::PermissionDenied,
@@ -407,7 +409,9 @@ mod tests {
             ),
             (
                 RuntimeError::Storage(StorageError::Quarantine {
-                    path: std::path::PathBuf::from("/home/someone/.local/share/peregrine"),
+                    path: std::path::PathBuf::from(
+                        "/home/someone/.local/share/peregrine-leak-canary",
+                    ),
                     source: "permission denied".into(),
                 }),
                 ErrorCode::StorageCorrupt,
@@ -422,7 +426,9 @@ mod tests {
             ),
             (
                 RuntimeError::DataDirectory {
-                    path: std::path::PathBuf::from("/home/someone/.local/share/peregrine"),
+                    path: std::path::PathBuf::from(
+                        "/Users/someone/Library/Application Support/peregrine-leak-canary",
+                    ),
                     source: std::io::Error::new(
                         std::io::ErrorKind::NotADirectory,
                         "not a directory",
@@ -433,6 +439,16 @@ mod tests {
             ),
         ];
 
+        // A path can be rendered in three shapes depending on the machine that produced it, and
+        // the fixture set above covers all three. Checking only `/home/` and `.local` — which is
+        // what this test did — passes on macOS and Windows no matter what leaks, because
+        // neither string can appear in a path there. The canary is the part that matters: it
+        // is in every fixture path above, so it appears in the payload if any of them is
+        // interpolated, whatever the separator. The roots are a second net for a future
+        // variant that forgets the canary.
+        const PATH_CANARY: &str = "peregrine-leak-canary";
+        const PATH_ROOTS: [&str; 5] = ["/home/", "/Users/", ".local", "AppData", "\\Users\\"];
+
         for (error, code, retryable) in cases {
             let mapped = AppError::from(error);
             assert_eq!(mapped.code, code, "{}", mapped.message);
@@ -442,9 +458,15 @@ mod tests {
                 .flatten()
             {
                 assert!(
-                    !text.contains("/home/") && !text.contains(".local"),
+                    !text.contains(PATH_CANARY),
                     "a path reached the payload: {text}"
                 );
+                for root in PATH_ROOTS {
+                    assert!(
+                        !text.contains(root),
+                        "the path root `{root}` reached the payload: {text}"
+                    );
+                }
             }
         }
     }
