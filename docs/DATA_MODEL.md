@@ -1166,6 +1166,26 @@ Keyset pagination (`WHERE (sort_key, id) < (?, ?)`) is required everywhere: `OFF
 
 Automatic maintenance never runs while playback is active, never while a download is latency-sensitive and the user has enabled "don't disturb downloads", and always yields to user-initiated work.
 
+The job that applies the table above is `peregrine-storage`'s `maintenance` module, and it
+answers "is playback active?" with a predicate its caller supplies rather than by asking the
+player: this layer may not depend on the playback crate, so the answer is owned by the job in
+`peregrine-app`, the one place that can see both. The predicate is consulted before each step,
+so playback that starts mid-run stops the run where it is. Two of the triggers above —
+`ANALYZE`'s week and `VACUUM`'s month — are intervals the schema records no last-run instant
+for, so they arrive as values from the scheduler, which does not exist yet (`PG-E3-16`);
+`VACUUM`'s "exceeding 20% of the file" is measured from the file itself.
+
+`VACUUM` in this architecture is not the simple operation its name suggests, and the job's
+behaviour is what was measured rather than assumed. It cannot run inside a transaction, so it
+is dispatched on the writer's connection in autocommit. In WAL mode it compacts the logical
+database and reclaims **nothing** on disk on its own — `page_count * page_size` falls while the
+main file and the `-wal` keep their old size — so the job checkpoints the log after vacuuming,
+which is what truncates the file to the new geometry. And because `temp_store` is `MEMORY`
+(§5), the temporary database a `VACUUM` copies into is held in memory, which is why it is
+scheduled only when there are pages to reclaim or the month has elapsed. Neither §5's PRAGMA
+set nor the table above is changed by any of this; the measurements are recorded in the task
+note for `PG-E3-16`.
+
 ---
 
 ## 7. Disk accounting model

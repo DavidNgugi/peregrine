@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
-//! Migrations, repositories, FTS5 search, KV settings, the job journal, and the
-//! cache tables.
+//! Migrations, repositories, FTS5 search, the maintenance job, KV settings, the job journal,
+//! and the cache tables.
 //!
 //! Repositories carry no business rules, every catalogue and library read takes an
 //! `AccountScope`, all writes go through a single writer connection, and every list query
@@ -23,6 +23,7 @@ mod integrity;
 mod jobs;
 mod json;
 mod library;
+mod maintenance;
 mod migrations;
 mod notify;
 mod page;
@@ -42,6 +43,10 @@ pub use error::StorageError;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{LibraryRootRow, MediaFileRow, MediaItemRow, SubtitleTrackRow, UnmatchedFileRow};
+pub use maintenance::{
+    MaintenanceOutcome, MaintenancePlan, MaintenanceRequest, MaintenanceStep, StepOutcome,
+    StepRecord,
+};
 pub use notify::NotificationRepository;
 pub use page::{Cursor, MAX_PAGE_ROWS, PageRequest};
 pub use retention::{

@@ -88,6 +88,16 @@ pub(crate) enum WriteRequest {
     RemoveTitleIndex { title_id: i64 },
     /// Rebuild the whole search index from the source tables.
     RebuildSearchIndex,
+    /// Merge the search index's b-tree segments, which is `FTS5`'s `optimize`.
+    OptimizeSearchIndex,
+    /// `ANALYZE`, so the query planner's statistics describe the data that is there.
+    Analyze,
+    /// Compact the database file and checkpoint the write-ahead log.
+    ///
+    /// It is dispatched on the connection in autocommit, never inside a transaction: `SQLite`
+    /// refuses `VACUUM` from within one, and the checkpoint that makes the compaction visible
+    /// on disk cannot be in one either.
+    Vacuum,
     /// Prune one bounded batch of the rows a retention rule makes eligible.
     ///
     /// The instant comes from the plan rather than from a caller's clock read, and the limit
@@ -122,7 +132,8 @@ pub(crate) enum WriteResponse {
     RowIgnored,
     /// Whether a library row was there to change.
     RowChanged { changed: bool },
-    /// Every row of the request was applied.
+    /// Every row of the request was applied, or a statement that either applies or fails with
+    /// nothing to report (`ANALYZE`, the search index's `optimize`).
     Applied,
     /// The notification row was inserted, or refreshed inside its dedupe window.
     NotificationRecorded { recorded: Recorded },
@@ -134,6 +145,12 @@ pub(crate) enum WriteResponse {
     TitleIndexRemoved { removed: bool },
     /// How many titles the rebuild indexed.
     SearchIndexRebuilt { indexed: u64 },
+    /// The database was compacted; `checkpointed` is false when the log could not be truncated,
+    /// so the compacted file is not yet smaller on disk.
+    Vacuumed {
+        /// Whether the write-ahead log was checkpointed.
+        checkpointed: bool,
+    },
     /// How many rows a retention batch removed.
     RetentionPruned { rows: u64 },
 }
@@ -362,6 +379,19 @@ async fn apply(
         WriteRequest::RebuildSearchIndex => crate::fts::rebuild(connection)
             .await
             .map(|indexed| WriteResponse::SearchIndexRebuilt { indexed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::OptimizeSearchIndex => crate::fts::optimize(connection)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::Analyze => sqlx::query("ANALYZE")
+            .execute(&mut *connection)
+            .await
+            .map(|_| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::Vacuum => crate::maintenance::vacuum(connection)
+            .await
+            .map(|checkpointed| WriteResponse::Vacuumed { checkpointed })
             .map_err(StorageError::from_sqlx),
         WriteRequest::PruneRetention {
             rule,
