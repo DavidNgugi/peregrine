@@ -150,13 +150,13 @@ graph LR
   - Acceptance: Restores across restarts and monitor changes
 - [ ] **PG-E1-03** *(review)* `M` · deps PG-E1-01 · Custom drag regions, double-click-to-zoom, snap layouts **Remaining:** Landed: the macOS bar carries `data-tauri-drag-region="deep"` and `core:window:allow-start-dragging` is granted (the double-click zoom needs `internal_toggle_maximize`, which `core:window:default` already carries); every other platform declares `"false"`, because the native frame owns dragging there. Tauri's injected script refuses to drag from any element it classifies as clickable on the event path, which is what keeps the bar's controls clickable, and `WindowChrome.test.tsx` asserts one drag region on the bar, no control of ours, and nothing in the tab order. Unexecuted: no Windows or Linux run, where dragging, double-click zoom, Snap Layouts, and the caption buttons are the native frame's and are untouched by this change.
   - Acceptance: Drag and zoom behave natively; caption buttons hit-test correctly
-- [ ] **PG-E1-04** `S` · deps PG-E1-01 · Single-instance enforcement with argument forwarding
+- [ ] **PG-E1-04** *(doing)* `S` · deps PG-E1-01 · Single-instance enforcement with argument forwarding
   - Acceptance: Second launch focuses the first and forwards the deep link
 - [ ] **PG-E1-05** `M` · deps PG-E1-01, PG-E16-02 · Graceful shutdown sequence
   - Acceptance: mpv and ffmpeg reaped, journal checkpointed, no orphan on next boot
 - [ ] **PG-E1-06** `M` · deps PG-E1-05 · Orphan child-process reaper keyed by PID and start time
   - Acceptance: A killed app leaves no mpv behind after relaunch
-- [ ] **PG-E1-07** `M` · deps PG-E1-01 · plat mac · App menu and shortcuts: macOS app menu, Edit menu, Window, Help
+- [ ] **PG-E1-07** *(doing)* `M` · deps PG-E1-01 · plat mac · App menu and shortcuts: macOS app menu, Edit menu, Window, Help
   - Acceptance: Cut/copy/paste/select-all work in inputs on macOS
 - [ ] **PG-E1-08** `M` · deps PG-E1-07 · Shortcut registry with conflict detection and platform rendering
   - Acceptance: Shortcuts list in Settings is generated from the registry
@@ -166,7 +166,7 @@ graph LR
   - Acceptance: Quit dialog states the seed count and offers both options
 - [ ] **PG-E1-11** `S` · deps PG-E1-04 · Deep link handling: `peregrine://title/...`, `peregrine://magnet/...`
   - Acceptance: Cold start and warm start both route correctly
-- [ ] **PG-E1-12** `S` · deps PG-E1-01 · Native file and folder pickers wrapped in a typed API
+- [ ] **PG-E1-12** *(doing)* `S` · deps PG-E1-01 · Native file and folder pickers wrapped in a typed API
   - Acceptance: Returns resolved paths, never raw strings
 - [ ] **PG-E1-13** `S` · deps PG-E1-09 · Autostart registration per OS, off by default
   - Acceptance: Toggle survives reboot; removed cleanly on uninstall
@@ -240,7 +240,7 @@ graph LR
   - Acceptance: Round-trip property test for every entity
 - [x] **PG-E3-11** `S` · deps PG-E3-10 · Keyset pagination helper used by every list query
   - Acceptance: `OFFSET` is absent from the codebase, enforced by grep gate
-- [ ] **PG-E3-12** `M` · deps PG-E3-04 · FTS5 contentless table with explicit maintenance and rebuild command
+- [ ] **PG-E3-12** *(doing)* `M` · deps PG-E3-04 · FTS5 contentless table with explicit maintenance and rebuild command
   - Acceptance: Rebuild reproduces identical search results
 - [x] **PG-E3-13** `M` · deps PG-E3-03 · Migration runner with pre-migration backup and rotation
   - Acceptance: A failing migration leaves the database untouched and backed up
