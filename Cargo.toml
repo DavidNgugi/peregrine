@@ -88,6 +88,12 @@ tracing = { version = "0.1.44" }
 tracing-appender = { version = "0.2.5" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "registry"] }
 ulid = { version = "3.0.0", features = ["serde"] }
+# `pnpm-lock.yaml` is YAML, and a hand-rolled reader in a gate is a correctness
+# risk (docs/DEPENDENCIES.md §4), so `check-notices` reads the frontend runtime
+# closure with a real YAML parser (PG-E0-18). The default `encoding` feature is
+# off: `pnpm-lock.yaml` is UTF-8 text we already hold, and enabling it would add
+# `encoding_rs` to the graph for a conversion the gate never performs.
+yaml-rust2 = { version = "0.13.0", default-features = false }
 zeroize = { version = "1.9.1" }
 
 [workspace.lints.rust]

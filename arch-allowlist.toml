@@ -368,6 +368,10 @@ runtime = [
   "serde_json",
   "sha2",
   "toml",
+  # `pnpm-lock.yaml` is YAML, and a hand-rolled reader in a gate would be the
+  # correctness risk docs/DEPENDENCIES.md §4 already paid a crate to avoid for
+  # TOML.
+  "yaml-rust2",
 ]
 build = []
 pure = false

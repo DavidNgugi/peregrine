@@ -110,7 +110,7 @@ cargo xtask check-offset     # no query pages with OFFSET; list reads use a curs
 cargo xtask check-dead-deps  # unused Rust dependencies (needs cargo-machete on PATH)
 cargo xtask check-docs       # broken links and mermaid block parity
 cargo xtask check-theme      # theme schema and contrast gate
-cargo xtask check-notices    # sidecar licences and source offers
+cargo xtask check-notices    # sidecar, Rust, and bundled-frontend attribution
 cargo xtask icons --check    # platform icon sizes and formats
 cargo xtask gen-ipc          # regenerate TS bindings
 cargo xtask backlog-stats    # task and effort roll-up

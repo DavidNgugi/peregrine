@@ -129,8 +129,8 @@ cargo xtask — repository gates
   check-offset               no query pages with OFFSET; list reads are keyset-paginated
   check-dead-deps            no manifest declares a dependency its sources never use
   check-theme                every shipped theme clears the DESIGN_SYSTEM §2.2 contrast matrix
-  check-notices              sidecar licences and source offers; THIRD_PARTY.md is current
-  check-notices --update     rewrite THIRD_PARTY.md from sidecars.toml and Cargo.lock
+  check-notices              sidecar, Rust, and frontend attribution; THIRD_PARTY.md is current
+  check-notices --update     rewrite THIRD_PARTY.md from sidecars.toml and the two lockfiles
   gen-ipc                    the committed TS bindings match a fresh export
   gen-ipc --check            the same, stated explicitly
   gen-ipc --update           rewrite the TS bindings from the Rust command surface
