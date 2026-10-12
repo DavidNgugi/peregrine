@@ -264,10 +264,11 @@ sequenceDiagram
     alt Blocked
         Acq->>DB: state=blocked, persist report, error_code=UNSAFE_CONTENT
         Acq-->>UI: blocked with per-file reasons
-        Note over UI: No bytes were written. Override is offered only for<br/>warn-level findings, never for executables or traversal.
-    else Warnings
+        Note over UI: No bytes were written. A hard block has no override at all —<br/>executables, traversal, and link entries never can be accepted.
+    else Opt-in required
         Acq-->>UI: confirmation with the exact findings
         UI->>Acq: confirm_download(job_id, acknowledged[])
+        Note over Acq: the gate is re-run with the opt-in granted, and the job<br/>advances only if that second report says Allowed
     else Clean
         Acq->>DB: persist report
     end
@@ -835,12 +836,18 @@ stateDiagram-v2
     downloading --> removed: user removes
     paused --> removed: user removes
     blocked --> removed: user dismisses
+    queued --> removed: user cancels
+    inspecting --> removed: user cancels
+    metadata --> removed: user cancels
+    seeding --> removed: user removes
     failed --> queued: retry with a different release
     completed --> [*]
     removed --> [*]
 ```
 
 Terminal states: `completed`, `removed`, `failed` (after retry exhaustion). Every non-terminal state has a persisted `engine_state_json`, so a restart reattaches rather than restarting the transfer. Progress writes are coalesced to at most 1 Hz per job.
+
+`removed` is reachable from **every** non-terminal state, because a user has to be able to cancel a job they are still waiting for. Without the edges from `queued`, `inspecting`, and `metadata`, a job parked behind the active-set limit — which can be hours — has no way out, and a download manager that cannot cancel a queued download is not one. `download::transition` (PG-E4-11) currently rejects `Removed` in those four states, so the machine owes this row.
 
 ### SM2 — Media availability
 

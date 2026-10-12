@@ -1030,7 +1030,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I1 | Exactly one `external_id` row per `(provider, value)`; a title never claims another title's ID. | `UNIQUE (provider, value)` |
 | I2 | A `media_item` for an episode exists at most once per episode; a movie item exists at most once per movie. | Partial unique indices |
 | I3 | A `media_file.path` is unique and canonical. Two items never claim one file. | `UNIQUE (path)` |
-| I4 | Every non-terminal `download_job` has a `safety_report_json` before `state` advances past `inspecting`. | State transition guard in the repository, plus a CHECK-adjacent test |
+| I4 | Every non-terminal `download_job` has a `safety_report_json` before `state` advances past `inspecting`. | `download::transition` in the domain makes it a type: the only events that reach `metadata` carry a `SafetyReport`, which only `TorrentInspector::inspect` or the persisted JSON can produce. The repository calls that guard rather than re-deciding (PG-E4-11) |
 | I5 | No `download_file.path` may be absolute, contain `..`, or escape the job's `save_path`. | Validated at insert; re-validated on read of the persisted report |
 | I6 | `watch_progress.percent = position_ms / duration_ms`, and `watched = 1` implies `percent ≥ 0.92` unless set manually. **This is a floor, not the playback threshold:** [FLOWS](./FLOWS.md) F10 marks a title watched at ≥ 0.95 or at the credits, and the lower bound here exists so that a manual or imported mark between the two is representable. | Domain function is the only writer |
 | I7 | `episode.season_number`/`episode_number` are unique within a title. | `UNIQUE (title_id, season_number, episode_number)` |
