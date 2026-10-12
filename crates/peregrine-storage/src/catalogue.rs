@@ -26,115 +26,13 @@ use sqlx::Connection as _;
 use crate::error::StorageError;
 use crate::page::PageRequest;
 
-/// A title's kind, as `title.kind` stores it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TitleKind {
-    /// A film.
-    Movie,
-    /// A series.
-    Show,
-}
-
-impl TitleKind {
-    /// The spelling the `CHECK` constraint accepts.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Movie => "movie",
-            Self::Show => "show",
-        }
-    }
-
-    /// Parses the stored spelling, or `None` when it is not one this build knows.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "movie" => Some(Self::Movie),
-            "show" => Some(Self::Show),
-            _ => None,
-        }
-    }
-}
-
-/// A title's subtype, as `title.subtype` stores it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TitleSubtype {
-    /// An ordinary film or series.
-    Standard,
-    /// Animated, ordered by absolute numbering as often as not.
-    Anime,
-    /// Non-fiction.
-    Documentary,
-    /// Unscripted.
-    Reality,
-}
-
-impl TitleSubtype {
-    /// The spelling the `CHECK` constraint accepts.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Anime => "anime",
-            Self::Documentary => "documentary",
-            Self::Reality => "reality",
-        }
-    }
-
-    /// Parses the stored spelling, or `None` when it is not one this build knows.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "standard" => Some(Self::Standard),
-            "anime" => Some(Self::Anime),
-            "documentary" => Some(Self::Documentary),
-            "reality" => Some(Self::Reality),
-            _ => None,
-        }
-    }
-}
-
-/// How complete a title's metadata is, as `title.metadata_state` stores it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MetadataState {
-    /// The identity exists and nothing else does.
-    Stub,
-    /// Some fields are filled.
-    Partial,
-    /// Every field the providers supply is filled.
-    Complete,
-    /// Filled, but past its refresh window.
-    Stale,
-    /// The last refresh failed; what is stored is still shown.
-    Failed,
-}
-
-impl MetadataState {
-    /// The spelling the `CHECK` constraint accepts.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Stub => "stub",
-            Self::Partial => "partial",
-            Self::Complete => "complete",
-            Self::Stale => "stale",
-            Self::Failed => "failed",
-        }
-    }
-
-    /// Parses the stored spelling, or `None` when it is not one this build knows.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "stub" => Some(Self::Stub),
-            "partial" => Some(Self::Partial),
-            "complete" => Some(Self::Complete),
-            "stale" => Some(Self::Stale),
-            "failed" => Some(Self::Failed),
-            _ => None,
-        }
-    }
-}
+// The three stored enums are the domain's. Declaring them here as well gave one `CHECK`
+// constraint two definitions that could drift apart with nothing noticing, and `DATA_MODEL`
+// §2 says the matching Rust enum is the source of truth. This module re-exports it, which
+// keeps `peregrine_storage::catalogue::TitleKind` and the crate-root re-export working for
+// every existing caller, and the schema test below asserts the spellings against the live
+// database rather than restating them.
+pub use peregrine_domain::{MetadataState, TitleKind, TitleSubtype};
 
 /// The identity a stub title needs, and nothing more.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -499,40 +397,91 @@ mod tests {
         }
     }
 
-    /// Every spelling is the one the schema's `CHECK` constraints list, so the enums and the
-    /// database cannot drift apart without this failing.
+    /// The spellings of the `CHECK (column IN (...))` clause the migration wrote.
+    ///
+    /// Read out of `CREATE TABLE` text rather than a table of names, because the point of the
+    /// test below is to compare the enum against what the database actually accepts.
+    fn constraint_spellings(create_table: &str, column: &str) -> Vec<String> {
+        let marker = format!("CHECK ({column} IN (");
+        let start = create_table
+            .find(&marker)
+            .unwrap_or_else(|| panic!("`{column}` has no IN constraint"))
+            + marker.len();
+        let rest = &create_table[start..];
+        let end = rest
+            .find("))")
+            .unwrap_or_else(|| panic!("`{column}`'s constraint does not close"));
+        let mut spellings: Vec<String> = rest[..end]
+            .split(',')
+            .map(|literal| literal.trim().trim_matches('\'').to_owned())
+            .collect();
+        spellings.sort();
+        spellings
+    }
+
+    /// Each enum's spellings are exactly the ones the live schema accepts.
+    ///
+    /// The constraint text is read from `sqlite_master` after a real migration run. The test
+    /// this replaced compared a hardcoded list against itself, so it could not fail and its
+    /// claim that the enum and the database "cannot drift apart" was not true; this one fails
+    /// when a migration widens a `CHECK` and the enum is not widened with it, which is the
+    /// drift that matters.
+    #[tokio::test]
+    async fn every_enum_spelling_is_the_one_the_schema_constraint_lists() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+        drop(Database::open(&path).await.unwrap());
+
+        let mut connection = open_writer_connection(&path).await.unwrap();
+        let create_table: String = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'title'",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+
+        let mut expected: Vec<String> = TitleKind::ALL
+            .iter()
+            .map(|kind| kind.as_str().to_owned())
+            .collect();
+        expected.sort();
+        assert_eq!(constraint_spellings(&create_table, "kind"), expected);
+
+        let mut expected: Vec<String> = TitleSubtype::ALL
+            .iter()
+            .map(|subtype| subtype.as_str().to_owned())
+            .collect();
+        expected.sort();
+        assert_eq!(constraint_spellings(&create_table, "subtype"), expected);
+
+        let mut expected: Vec<String> = MetadataState::ALL
+            .iter()
+            .map(|state| state.as_str().to_owned())
+            .collect();
+        expected.sort();
+        assert_eq!(
+            constraint_spellings(&create_table, "metadata_state"),
+            expected
+        );
+    }
+
+    /// Every spelling an enum can produce is one it can parse back, so a value read from the
+    /// database always round-trips and an unknown one is refused rather than defaulted.
     #[test]
-    fn every_spelling_matches_the_schema_constraint() {
-        let kinds = [(TitleKind::Movie, "movie"), (TitleKind::Show, "show")];
-        for (kind, spelling) in kinds {
-            assert_eq!(kind.as_str(), spelling);
-            assert_eq!(TitleKind::parse(spelling), Some(kind));
+    fn every_spelling_round_trips_and_unknown_ones_are_refused() {
+        for kind in TitleKind::ALL {
+            assert_eq!(TitleKind::parse(kind.as_str()), Some(*kind));
         }
         assert_eq!(TitleKind::parse("series"), None);
         assert_eq!(TitleKind::parse(""), None);
 
-        let subtypes = [
-            (TitleSubtype::Standard, "standard"),
-            (TitleSubtype::Anime, "anime"),
-            (TitleSubtype::Documentary, "documentary"),
-            (TitleSubtype::Reality, "reality"),
-        ];
-        for (subtype, spelling) in subtypes {
-            assert_eq!(subtype.as_str(), spelling);
-            assert_eq!(TitleSubtype::parse(spelling), Some(subtype));
+        for subtype in TitleSubtype::ALL {
+            assert_eq!(TitleSubtype::parse(subtype.as_str()), Some(*subtype));
         }
         assert_eq!(TitleSubtype::parse("cartoon"), None);
 
-        let states = [
-            (MetadataState::Stub, "stub"),
-            (MetadataState::Partial, "partial"),
-            (MetadataState::Complete, "complete"),
-            (MetadataState::Stale, "stale"),
-            (MetadataState::Failed, "failed"),
-        ];
-        for (state, spelling) in states {
-            assert_eq!(state.as_str(), spelling);
-            assert_eq!(MetadataState::parse(spelling), Some(state));
+        for state in MetadataState::ALL {
+            assert_eq!(MetadataState::parse(state.as_str()), Some(*state));
         }
         assert_eq!(MetadataState::parse("fresh"), None);
     }
