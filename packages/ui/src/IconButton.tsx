@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { clsx } from "clsx";
 import type { ButtonHTMLAttributes, ReactElement } from "react";
-import { twMerge } from "tailwind-merge";
+import { twMerge } from "./merge.js";
 import { Icon, type IconName } from "./Icon.js";
 
 const iconButtonVariants = cva(

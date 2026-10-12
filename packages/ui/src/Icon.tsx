@@ -1,6 +1,6 @@
 import { clsx } from "clsx";
 import type { ReactElement, ReactNode } from "react";
-import { twMerge } from "tailwind-merge";
+import { twMerge } from "./merge.js";
 
 /**
  * The icon set (docs/DESIGN_SYSTEM.md §9).

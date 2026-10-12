@@ -53,7 +53,7 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
       setScreen(target);
     }
   }, []);
-  useShortcutDispatch(shortcuts, openScreen);
+  useShortcutDispatch(shortcuts.bindings, openScreen);
 
   return (
     <div className="flex h-full flex-col bg-surface-0 text-text-primary">
@@ -84,7 +84,7 @@ export function AppShell({ platform }: AppShellProps): ReactElement {
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {screen === "discover" ? <DiscoverScreen /> : null}
           {screen === "jobs" ? <JobsScreen /> : null}
-          {screen === "settings" ? <SettingsScreen bindings={shortcuts} /> : null}
+          {screen === "settings" ? <SettingsScreen shortcuts={shortcuts} /> : null}
         </main>
       </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />

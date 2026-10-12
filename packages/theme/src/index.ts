@@ -7,5 +7,6 @@ export {
   THEME_ATTRIBUTE,
   TYPOGRAPHY_FONT_TOKENS,
   TYPOGRAPHY_SIZE_TOKENS,
+  TYPOGRAPHY_SIZE_UTILITIES,
 } from "./tokens.js";
 export type { ThemeName } from "./tokens.js";

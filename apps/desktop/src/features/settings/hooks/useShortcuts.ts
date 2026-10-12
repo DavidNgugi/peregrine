@@ -1,36 +1,64 @@
+/**
+ * The hook layer for the shortcut list: one hook for the registry, and one for the keys
+ * the shell acts on.
+ *
+ * The registry is the core's, so a failed read and an empty registry are different facts and
+ * the screen has to be able to tell them apart: an unreachable core answers nothing, and a
+ * list reading "no shortcuts are registered" would be telling the user something the app
+ * does not know. `useAutoStart` reports `busy` and `failed` for the same reason.
+ */
+
 import { listShortcuts, normalizeIpcError } from "@peregrine/ipc-client";
 import type { ShortcutBinding } from "@peregrine/ipc-client";
 import { useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 import { shortcutFor } from "../shortcut-dispatch.js";
 
+/** The core's shortcut registry, and whether reading it worked. */
+export interface ShortcutRegistry {
+  /** The registry as the core sent it; empty until the read answers. */
+  readonly bindings: readonly ShortcutBinding[];
+  /** The read is still in flight. */
+  readonly loading: boolean;
+  /** The read failed, so the list is unknown rather than empty. */
+  readonly failed: boolean;
+}
+
 /**
  * The shortcut registry as the core declares it.
  *
- * An unreachable core answers with the empty list rather than throwing: the shell still
- * has a window, a menu, and a tray, and a keyboard registry that cannot be read must not
- * stop it from starting (docs/ARCHITECTURE.md §15).
+ * An unreachable core answers with the empty list rather than throwing: the shell still has
+ * a window, a menu, and a tray, and a keyboard registry that cannot be read must not stop it
+ * from starting (docs/ARCHITECTURE.md §15). The failure is reported beside the list rather
+ * than instead of the shell.
  */
-export function useShortcuts(): readonly ShortcutBinding[] {
-  const [bindings, setBindings] = useState<readonly ShortcutBinding[]>([]);
+export function useShortcuts(): ShortcutRegistry {
+  const [state, setState] = useState<ShortcutRegistry>({
+    bindings: [],
+    loading: true,
+    failed: false,
+  });
 
   useEffect(() => {
     let cancelled = false;
     listShortcuts()
-      .then((loaded) => {
+      .then((bindings) => {
         if (!cancelled) {
-          setBindings(loaded);
+          setState({ bindings, loading: false, failed: false });
         }
       })
       .catch((caught: unknown) => {
         logUiError("listShortcuts", normalizeIpcError(caught));
+        if (!cancelled) {
+          setState({ bindings: [], loading: false, failed: true });
+        }
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  return bindings;
+  return state;
 }
 
 /**

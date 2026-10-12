@@ -74,6 +74,11 @@ export const en = {
       shortcuts: {
         title: "Keyboard shortcuts",
         description: "Every shortcut this build has, written the way this platform writes them.",
+        empty: "No shortcut is registered in this build.",
+        unavailable: {
+          title: "The shortcut list could not be read.",
+          body: "Peregrine's core did not answer, so this list is unknown rather than short. Reopening the app tries the read again.",
+        },
       },
       autostart: {
         title: "Start with your computer",

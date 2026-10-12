@@ -34,6 +34,21 @@ describe("Button", () => {
     expect(classes).toContain("text-caption");
   });
 
+  it("keeps the variant's colour token when the size sets a font size", () => {
+    // `--text-on-accent` is what clears §2.1's contrast requirement on the accent, and the
+    // size's `text-caption` sits in the same group as a colour to a merge library that has
+    // not been told the scale. It was being dropped here, silently, until this test.
+    const classes = classesOf(
+      renderToStaticMarkup(
+        <Button variant="primary" size="sm">
+          Play
+        </Button>,
+      ),
+    );
+    expect(classes).toContain("text-text-on-accent");
+    expect(classes).toContain("text-caption");
+  });
+
   it("lets the call site win a conflicting utility", () => {
     const classes = classesOf(
       renderToStaticMarkup(

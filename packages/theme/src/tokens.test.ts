@@ -7,6 +7,7 @@ import {
   SEMANTIC_COLOUR_TOKENS,
   TYPOGRAPHY_FONT_TOKENS,
   TYPOGRAPHY_SIZE_TOKENS,
+  TYPOGRAPHY_SIZE_UTILITIES,
 } from "./index.js";
 
 // The stylesheet is the only place the values live, so the test reads it: a token
@@ -83,6 +84,21 @@ describe("tokens.css", () => {
           expect(value).toMatch(/^(oklch\(|var\()/u);
         }
       }
+    }
+  });
+});
+
+describe("TYPOGRAPHY_SIZE_UTILITIES", () => {
+  it("carries the class suffix rather than the custom property name", () => {
+    // `packages/ui` registers these as Tailwind's font-size utilities so a class merge
+    // cannot read a size as a colour. A value that still carried `--text-` would register
+    // a class Tailwind never generates, and would silently stop protecting the real one.
+    expect(TYPOGRAPHY_SIZE_UTILITIES).toHaveLength(TYPOGRAPHY_SIZE_TOKENS.length);
+    expect(new Set(TYPOGRAPHY_SIZE_UTILITIES).size).toBe(TYPOGRAPHY_SIZE_UTILITIES.length);
+    for (const utility of TYPOGRAPHY_SIZE_UTILITIES) {
+      expect(utility).not.toContain("--");
+      expect(utility).not.toContain("text-");
+      expect(utility.length).toBeGreaterThan(0);
     }
   });
 });

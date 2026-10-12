@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { clsx } from "clsx";
 import type { ButtonHTMLAttributes, ReactElement, ReactNode } from "react";
-import { twMerge } from "tailwind-merge";
+import { twMerge } from "./merge.js";
 
 const buttonVariants = cva(
   [

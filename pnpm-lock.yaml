@@ -150,6 +150,9 @@ importers:
         specifier: 3.7.0
         version: 3.7.0
     devDependencies:
+      '@peregrine/theme':
+        specifier: workspace:*
+        version: link:../theme
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0

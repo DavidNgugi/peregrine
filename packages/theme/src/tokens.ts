@@ -79,3 +79,16 @@ export const TYPOGRAPHY_SIZE_TOKENS = [
   "--text-caption",
   "--text-micro",
 ] as const;
+
+/**
+ * The Tailwind utility each size token produces: `--text-caption` → `caption`, so
+ * `text-caption` is the class.
+ *
+ * It exists because a class-merging library has to be told which `text-*` classes are
+ * *sizes* and which are *colours*, and it cannot know a private scale. Derived here rather
+ * than written out again in `packages/ui`, so a token renamed in this file cannot leave a
+ * stale name behind in the merge configuration.
+ */
+export const TYPOGRAPHY_SIZE_UTILITIES = TYPOGRAPHY_SIZE_TOKENS.map((token) =>
+  token.replace(/^--text-/u, ""),
+);
