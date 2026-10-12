@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use peregrine_domain::Clock;
-use peregrine_platform::SystemClock;
+use peregrine_domain::{Clock, IdGenerator};
+use peregrine_platform::{SystemClock, UlidGenerator};
 use peregrine_storage::{
     Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
 };
@@ -182,7 +182,14 @@ impl Runtime {
         // A recovery is logged where it happens, in `Database::open`; the runtime carries
         // the signal on to health.
         let database = Arc::new(Database::open(config.database_path()).await?);
-        let scheduler = Arc::new(Scheduler::new(SchedulerConfig::defaults()));
+        // The composition root is the one place the production adapters are chosen
+        // (AGENTS R8); the scheduler is handed both ports rather than reaching for them.
+        let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
+        let ids: Arc<dyn IdGenerator + Send + Sync> = Arc::new(UlidGenerator);
+        let scheduler = Arc::new(Scheduler::new(SchedulerConfig::new(
+            Arc::clone(&clock),
+            ids,
+        )));
         let bus = Arc::new(EventBus::new(Arc::clone(&config.sink)));
 
         let startup = started.elapsed();
@@ -197,7 +204,7 @@ impl Runtime {
             database,
             scheduler,
             bus,
-            clock: Arc::new(SystemClock),
+            clock,
             live: Mutex::new(HashMap::new()),
             _logging: logging,
             startup,

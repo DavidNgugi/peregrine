@@ -7,7 +7,8 @@ use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use xtask::{
-    arch, backlog, commands, deaddeps, genipc, migrations, notices, offset, theme, todos, workspace,
+    arch, backlog, commands, deaddeps, determinism, genipc, migrations, notices, offset, theme,
+    todos, workspace,
 };
 
 fn main() -> ExitCode {
@@ -65,6 +66,7 @@ fn run() -> Result<bool> {
 
     match command.as_str() {
         "check-arch" => arch::run(&root),
+        "check-determinism" => determinism::run(&root),
         "check-migrations" => {
             if update {
                 let added = migrations::update(&root)?;
@@ -122,6 +124,7 @@ fn print_help() {
 cargo xtask — repository gates
 
   check-arch                 dependency edges and pure-crate sources against arch-allowlist.toml
+  check-determinism          no shipping crate reads the wall clock or a random source
   check-migrations           migrations are append-only and journaled
   check-migrations --update  record new migrations (never rewrites an existing entry)
   check-todos                every deferral marker names a task or an issue

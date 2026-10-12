@@ -1,0 +1,16 @@
+# The `[determinism]` section is absent here on purpose: a policy with no forbidden
+# pattern has nothing to check for, and the gate must fail loudly rather than pass.
+[workspace]
+members = ["shipping"]
+
+[dev-dependencies]
+allowed = []
+
+[purity]
+forbidden_paths = []
+
+[crates.shipping]
+may_depend_on = []
+runtime = []
+build = []
+pure = false

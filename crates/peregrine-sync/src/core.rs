@@ -49,6 +49,9 @@ pub const DEFAULT_MAX_CONCURRENCY: usize = 4;
 pub const DEFAULT_MAX_ATTEMPTS: u32 = 5;
 
 /// How the scheduler is built.
+///
+/// Build it with [`SchedulerConfig::new`], which requires the two ports; the fields below
+/// are public so a caller can replace a tunable without a builder for each one.
 pub struct SchedulerConfig {
     /// Issues job identities. Injected so a test can predict every id it sees.
     pub id_generator: Arc<dyn IdGenerator + Send + Sync>,
@@ -223,11 +226,6 @@ impl Scheduler {
             config,
             engine: Mutex::new(Some(engine)),
         }
-    }
-
-    /// Builds a scheduler with ULID identities, the system clock, and four workers.
-    pub fn with_defaults() -> Self {
-        Self::new(SchedulerConfig::default())
     }
 
     /// Submits `work` and returns a handle to its lifecycle.
@@ -407,12 +405,6 @@ impl Prepared {
     }
 }
 
-impl Default for Scheduler {
-    fn default() -> Self {
-        Self::with_defaults()
-    }
-}
-
 impl Drop for Scheduler {
     fn drop(&mut self) {
         // Tripping the root token is what stops running work: it is the parent of every
@@ -440,43 +432,25 @@ impl SchedulerConfig {
         self
     }
 
-    /// The default configuration: ULID identities, the system clock, four workers.
-    pub fn defaults() -> Self {
+    /// The scheduler's policy defaults, with its two dependencies injected.
+    ///
+    /// The clock and the id generator are ports, and both production implementations live
+    /// in an adapter crate (AGENTS R8), so they arrive as arguments rather than as
+    /// defaults: nothing here may read a clock or a random source.
+    #[must_use]
+    pub fn new(
+        clock: Arc<dyn Clock + Send + Sync>,
+        id_generator: Arc<dyn IdGenerator + Send + Sync>,
+    ) -> Self {
         Self {
-            id_generator: Arc::new(UlidGenerator),
-            clock: Arc::new(SystemClock),
+            id_generator,
+            clock,
             max_concurrency: NonZeroUsize::new(DEFAULT_MAX_CONCURRENCY)
                 .unwrap_or(NonZeroUsize::MIN),
             classes: SchedulerClasses::new(),
             backoff: Arc::new(Backoff::default()),
             shutdown: CancellationToken::new(),
         }
-    }
-}
-
-impl Default for SchedulerConfig {
-    fn default() -> Self {
-        Self::defaults()
-    }
-}
-
-/// Issues ULIDs, one per submission.
-#[derive(Debug, Default)]
-struct UlidGenerator;
-
-impl IdGenerator for UlidGenerator {
-    fn next_id(&self) -> Ulid {
-        Ulid::generate()
-    }
-}
-
-/// Reads the system clock.
-#[derive(Debug, Default)]
-struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> jiff::Timestamp {
-        jiff::Timestamp::now()
     }
 }
 

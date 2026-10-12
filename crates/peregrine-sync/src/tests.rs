@@ -60,12 +60,8 @@ fn clock() -> Arc<dyn Clock + Send + Sync> {
 /// jobs both start and their order stops being a property of the queue.
 fn scheduler_with_one_worker() -> Scheduler {
     Scheduler::new(
-        SchedulerConfig {
-            id_generator: Arc::new(CountingIds(AtomicUsize::new(0))),
-            clock: clock(),
-            ..SchedulerConfig::defaults()
-        }
-        .with_max_concurrency(NonZeroUsize::MIN),
+        SchedulerConfig::new(clock(), Arc::new(CountingIds(AtomicUsize::new(0))))
+            .with_max_concurrency(NonZeroUsize::MIN),
     )
 }
 
@@ -588,13 +584,11 @@ async fn a_deferred_job_retries_on_schedule_and_with_a_growing_delay() {
 async fn a_job_that_always_defers_is_abandoned_when_its_retry_budget_runs_out() {
     let scheduler = Scheduler::new(
         SchedulerConfig {
-            id_generator: Arc::new(CountingIds(AtomicUsize::new(0))),
-            clock: clock(),
             backoff: Arc::new(Backoff {
                 initial: Duration::from_millis(1),
                 ..Backoff::default()
             }),
-            ..SchedulerConfig::defaults()
+            ..SchedulerConfig::new(clock(), Arc::new(CountingIds(AtomicUsize::new(0))))
         }
         .with_max_concurrency(NonZeroUsize::MIN),
     );

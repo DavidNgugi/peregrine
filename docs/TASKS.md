@@ -291,8 +291,8 @@ graph LR
   - Acceptance: Round-trip of styling-bearing ASS preserves italics and positioning
 - [ ] **PG-E4-16** `S` · deps PG-E4-11, PG-E4-13 · Domain event enum covering every state-changing operation
   - Acceptance: Repository layer emits only declared events
-- [ ] **PG-E4-17** *(doing)* `S` · deps PG-E4-01 · `Clock` and `IdGenerator` ports for determinism in tests **Remaining:** Ports and local test fakes exist; production adapters and the rule forbidding clock/randomness outside adapters must be verified before completion. **Verified against the tree, and the rule does not hold:** `peregrine-platform::SystemClock` documents itself as "the one place that reads the machine's clock", but `peregrine-sync` declares its own **private production** `SystemClock` (`jiff::Timestamp::now()`) and `UlidGenerator` (`Ulid::generate()`) at `core.rs:463-481` and wires them into `SchedulerConfig::defaults()` at `core.rs:446-447`. So a shipping crate reads the wall clock and a random source outside the designated adapter, one port has two production implementations, and the clock adapter's own doc comment is false. Nothing uses `SystemTime` directly, and every `Instant::now()` in the tree is the monotonic clock, which is correct and is what `tokio::time` controls in tests — so the gate's pattern set has to catch `Timestamp::now` and `Ulid::generate`, not `SystemTime` alone.
-  - Acceptance: No `SystemTime::now` or random call outside an adapter (grep gate)
+- [x] **PG-E4-17** `S` · deps PG-E4-01 · `Clock` and `IdGenerator` ports for determinism in tests
+  - Acceptance: `cargo xtask check-determinism` fails on a wall-clock or random read outside an adapter crate
 - [ ] **PG-E4-18** `M` · deps PG-E4-03, PG-E4-04, PG-E4-15 · Fuzz targets for release-name, filename, and subtitle parsers
   - Acceptance: 24 h fuzz run without panic in Phase 4
 - [ ] **PG-E4-19** `M` · deps PG-E4-17 · `Conformance`-friendly fake implementations for all ports

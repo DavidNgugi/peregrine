@@ -40,6 +40,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Dependency direction and pure-crate sources
         run: cargo xtask check-arch
+      - name: No wall clock or randomness outside an adapter crate
+        run: cargo xtask check-determinism
       - name: Migrations are append-only
         run: cargo xtask check-migrations
       - name: Every deferral names a task or an issue
