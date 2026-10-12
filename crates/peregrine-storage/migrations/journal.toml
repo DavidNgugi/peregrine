@@ -38,3 +38,7 @@ sha256 = "ba22a658cc5b7c20719fb197045a7fa9ab13c553e56334debcb100a10b1b266a"
 [[migration]]
 file = "0009_search_index.sql"
 sha256 = "21cd9fbb0bd503e3251439d3b2f79c75a427d1a05b23a96d01778e2fcf0d546d"
+
+[[migration]]
+file = "0010_watch_state_index.sql"
+sha256 = "aa959b40dd57430e8d32d3c486f52a00180d9be088ba6f5b1942c081f58e6534"

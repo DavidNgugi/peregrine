@@ -125,6 +125,20 @@ pub enum StorageError {
         found: String,
     },
 
+    /// A column whose JSON encoding this build cannot read.
+    ///
+    /// Distinct from [`StorageError::UnexpectedValue`] because there is no short spelling to
+    /// report: the column holds a document, and what is wrong with it is the parse. Like
+    /// that variant it means the file was written by a different version or edited by hand,
+    /// and the mapper reports it rather than substituting a default.
+    #[error("the column `{column}` does not hold the JSON this build writes: {detail}")]
+    InvalidJsonField {
+        /// The column that holds it.
+        column: &'static str,
+        /// What the parse objected to.
+        detail: String,
+    },
+
     /// A connection cannot be brought to the documented PRAGMA set.
     ///
     /// Only the required pragmas produce this. The connection must be discarded: without
