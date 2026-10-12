@@ -457,7 +457,11 @@ mod tests {
             let nested = media.join(format!("Collection {index}"));
             fs::create_dir_all(&nested).unwrap();
             for part in 0..8 {
-                fs::write(nested.join(format!("Feature {part}.mkv")), b"a film").unwrap();
+                // A year in the name, so the filler indexes rather than parking: `Feature 7.mkv` is
+                // genuinely ambiguous — `7` could be an episode number or part of the title — and
+                // the parser refuses it, which is correct and would have made this fixture prove
+                // nothing about the indexer.
+                fs::write(nested.join(format!("Feature {part} (2019).mkv")), b"a film").unwrap();
             }
         }
 
@@ -633,6 +637,20 @@ mod tests {
             library.journal_row(journal_id).await.state.is_terminal(),
             "and the journal row closed"
         );
+        // The wiring, asserted rather than implied: the corpus holds files the library had never
+        // seen, so a scan that completed and indexed nothing would mean the indexer was not called
+        // — or failed into `roots_failed`, which the success above would not have shown.
+        let summary = summary_of(completion.outcome());
+        assert_eq!(summary.roots_failed, Vec::new(), "{summary:?}");
+        assert_eq!(summary.roots_scanned, 1, "{summary:?}");
+        // Eight names across four collections: thirty-two files, eight titles, eight items. The
+        // sharing is the point — the same film in four folders is one title, which is what the
+        // sort-name lookup exists for — so a test that asserted thirty-two titles would be
+        // asserting the defect.
+        assert_eq!(summary.indexed.created_titles, 8, "{summary:?}");
+        assert_eq!(summary.indexed.created_items, 8, "{summary:?}");
+        assert_eq!(summary.indexed.created_files, 32, "{summary:?}");
+        assert_eq!(summary.indexed.unmatched, 0, "{summary:?}");
     }
 
     #[tokio::test]
