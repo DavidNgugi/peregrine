@@ -358,6 +358,14 @@ A task is complete only when all of the following hold.
 9. Documentation that the change invalidates is updated in the same PR.
 10. No commented-out code, no `TODO` without an issue reference, no dead abstraction.
 
+**Three of these ten cannot hold for Phase 0's foundation work, and saying so is better than letting a reader conclude the work is unjustified.** They are written for a task that reaches a user, and Phase 0 builds the layer underneath that:
+
+- **Item 1 — reachable from the UI or an IPC command.** The command surface is six commands (`system::build_info`, `system::health`, `system::log_tail`, `jobs::start_hello`, `jobs::cancel`, `jobs::list`), and none of them calls the domain core built in Phase 0: the release and filename parsers, the quality ranker, the per-scheme ordering, the availability derivation, the session machine, or the event vocabulary. That is the design — the catalogue screen, the acquisition flow and the player are later phases — but it means a literal reading of item 1 marks the whole domain core undone. The honest statement is that the behaviour is reachable **from a test and from the services that will own it**, and item 1 starts to bite when the screens land.
+- **Item 7 — performance measured on a hot path.** There is no bench harness in the tree and no `criterion` dependency in any manifest; `PG-E27-08` owns both. A hot-path change therefore cannot be measured today, and the figures in `TASKS.md`'s status section are one-off measurements explicitly recorded as *not* budgets. Note the asymmetry: item 7 is unsatisfiable rather than skipped, and `TASKS.md`'s `PG-E4-06` records the ranker as unbenchmarked for exactly this reason.
+- **Item 8 — strings extracted, layout at 1.4×.** The domain layer produces no user-facing strings, so extraction has nothing to extract and the expansion check has no layout to measure. It applies to frontend work, where `@peregrine/i18n` and the chrome tests already exercise it.
+
+The other seven hold and are enforced: tests with boundaries and failure cases, offline fakes for every port, the structured error model, `check-arch` and the determinism gate, the document-updating rule, and the dead-code gates (`check-todos`, `check-dead-deps`).
+
 ---
 
 ## 9. Development metrics worth watching
