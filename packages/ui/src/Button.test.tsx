@@ -22,6 +22,15 @@ describe("Button", () => {
     expect(markup).toContain("disabled");
   });
 
+  it("never breaks a two-word label across lines", () => {
+    // Found by looking at the settings screen rather than by a test: "Scan now" sat in a row whose
+    // description was wide, and the label drew as "Scan" over "now" — which reads as a rendering
+    // fault, not as a wrapped label. The class is the contract; this is what keeps it.
+    const markup = renderToStaticMarkup(<Button size="sm">Scan now</Button>);
+
+    expect(classesOf(markup)).toContain("whitespace-nowrap");
+  });
+
   it("renders the requested variant and size", () => {
     const classes = classesOf(
       renderToStaticMarkup(

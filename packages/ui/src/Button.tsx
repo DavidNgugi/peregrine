@@ -5,7 +5,10 @@ import { twMerge } from "./merge.js";
 
 const buttonVariants = cva(
   [
-    "inline-flex items-center justify-center gap-2 rounded-md font-medium",
+    // `whitespace-nowrap` is not decoration: without it a two-word label wraps inside the button
+    // when the row it sits in is wide enough for its description and not for the control, which
+    // draws "Scan" over "now" and reads as a rendering fault rather than as a wrapped label.
+    "inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap",
     "transition-colors motion-reduce:transition-none",
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
     "disabled:pointer-events-none disabled:opacity-50",
