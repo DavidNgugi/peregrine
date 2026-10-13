@@ -70,6 +70,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_match_rules,
             library::get_title,
             discover::search_providers,
+            discover::home_rails,
+            discover::refresh_rails,
             library::refresh_title,
             library::search_titles,
             library::list_episodes,

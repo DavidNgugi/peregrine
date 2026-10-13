@@ -8,7 +8,7 @@ use peregrine_domain::id::ExternalId;
 use peregrine_domain::id::Provider;
 use peregrine_providers::{
     CachePolicy, Capabilities, Capability, MetadataProvider, ProviderDescriptor, ProviderError,
-    ProviderFuture, RatePolicy, SearchCandidate, SearchQuery,
+    ProviderFuture, RailKind, RatePolicy, SearchCandidate, SearchQuery,
 };
 
 /// A descriptor that is well formed for the capabilities it is given.
@@ -46,12 +46,20 @@ pub fn fake_descriptor(provider: Provider, capabilities: Capabilities) -> Provid
 /// state machine no provider has. When a test needs one call to differ from the next it is
 /// describing a scenario — a 429 and then a success — and the place for that is a fixture in
 /// the adapter's own crate (PG-E5-17), not here.
+///
+/// **A rail is one answer for every rail.** A fake that answered per [`RailKind`] would be
+/// modelling a provider with seven lists it does not have, and a test that needs two rails to
+/// differ builds two fakes: one is the provider's answer and the other is the second list.
 #[derive(Debug)]
 pub struct FakeMetadataProvider {
     descriptor: ProviderDescriptor,
     answer: Result<Vec<SearchCandidate>, ProviderError>,
     title_answer: Result<TitleDetails, ProviderError>,
     image_answer: Result<Vec<u8>, ProviderError>,
+    /// What every rail answers. Defaults to `Ok(Vec::new())` in every constructor below, which is
+    /// the honest default for a fixture whose caller is testing a search: a fake built for one
+    /// operation is not also claiming a provider's trending list is empty.
+    rail_answer: Result<Vec<SearchCandidate>, ProviderError>,
     /// What a probe answers. Defaults to `Ok(())` in every constructor below: a fake built to test a
     /// search is not also claiming its credential is bad, and a test that wants the refusal asks for it
     /// by name.
@@ -80,6 +88,7 @@ impl FakeMetadataProvider {
                 provider,
                 capability: "images",
             }),
+            rail_answer: Ok(Vec::new()),
             check_answer: Ok(()),
         }
     }
@@ -100,6 +109,7 @@ impl FakeMetadataProvider {
                 provider,
                 capability: "images",
             }),
+            rail_answer: Ok(Vec::new()),
             check_answer: Ok(()),
         }
     }
@@ -118,6 +128,7 @@ impl FakeMetadataProvider {
             answer: Ok(Vec::new()),
             title_answer: Ok(details),
             image_answer: Ok(bytes),
+            rail_answer: Ok(Vec::new()),
             check_answer: Ok(()),
         }
     }
@@ -136,8 +147,86 @@ impl FakeMetadataProvider {
                 provider,
                 capability: "images",
             }),
+            rail_answer: Ok(Vec::new()),
             check_answer: Err(ProviderError::Unauthorized { provider }),
         }
+    }
+
+    /// A provider that declares `trending` and answers `candidates` to every rail.
+    ///
+    /// It declares `search` and `title` as well, because the port's conformance suite walks a
+    /// provider through every operation it has, and a fake that could only be asked for a rail
+    /// would be a fake that cannot stand in for the provider a screen actually talks to.
+    #[must_use]
+    pub fn publishing_rails(provider: Provider, candidates: Vec<SearchCandidate>) -> Self {
+        let mut fake = Self::new(
+            fake_descriptor(
+                provider,
+                Capabilities::EMPTY
+                    .with(Capability::Search)
+                    .with(Capability::Trending),
+            ),
+            Ok(Vec::new()),
+        );
+        fake.rail_answer = Ok(candidates);
+        fake
+    }
+
+    /// The same fake, answering `candidates` to every rail.
+    ///
+    /// A builder rather than another constructor, and the descriptor is *not* rewritten: a fake
+    /// built by [`FakeMetadataProvider::serving_images`] declares `search`, `title`, and `images`,
+    /// and this method answers a rail the descriptor does not declare. That is deliberate — the
+    /// conformance suite is the thing that decides whether a provider may do that, and a builder
+    /// that silently widened the capability set would make the fake agree with itself instead of
+    /// with the port. Use [`FakeMetadataProvider::publishing_rails`] for a provider that *declares*
+    /// trending.
+    #[must_use]
+    pub fn with_rail_answer(mut self, candidates: Vec<SearchCandidate>) -> Self {
+        self.rail_answer = Ok(candidates);
+        self
+    }
+
+    /// A provider that declares `search`, `trending`, `title`, and `images`, and answers each with
+    /// what the caller scripted.
+    ///
+    /// One constructor for the four answers together because they are one scenario: the Discover
+    /// rails job lists titles *and* fills their artwork, so a fixture for it needs a provider that
+    /// can do both, and composing four separate builders would be four chances to build a provider
+    /// the job cannot actually be driven with.
+    #[must_use]
+    pub fn publishing_rails_and_serving_images(
+        provider: Provider,
+        details: TitleDetails,
+        image: Vec<u8>,
+        rails: Vec<SearchCandidate>,
+    ) -> Self {
+        Self {
+            descriptor: fake_descriptor(
+                provider,
+                Capabilities::EMPTY
+                    .with(Capability::Search)
+                    .with(Capability::Title)
+                    .with(Capability::Images)
+                    .with(Capability::Trending),
+            ),
+            answer: Ok(Vec::new()),
+            title_answer: Ok(details),
+            image_answer: Ok(image),
+            rail_answer: Ok(rails),
+            check_answer: Ok(()),
+        }
+    }
+
+    /// The same fake, failing every rail with `error`.
+    ///
+    /// Distinct from [`FakeMetadataProvider::failing`], which refuses `search`: this one declares
+    /// `trending` in its descriptor — so the port says it must answer — and then fails the call,
+    /// which is the provider-having-a-bad-day case the rails job reports.
+    #[must_use]
+    pub fn failing_rails(mut self, error: ProviderError) -> Self {
+        self.rail_answer = Err(error);
+        self
     }
 
     /// A provider that declares `search` and returns `candidates`.
@@ -201,6 +290,21 @@ impl MetadataProvider for FakeMetadataProvider {
         // owns its response and a fake whose future borrowed from itself would let a test
         // pass that the real thing cannot reproduce.
         let answer = self.answer.clone();
+        Box::pin(async move { answer })
+    }
+
+    fn rail(&self, _rail: RailKind, _page: NonZeroU32) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+        // The same refusal `search` makes, for the same reason: a capability the descriptor does
+        // not declare is one the provider has said it cannot serve, and answering anyway is what
+        // the conformance suite exists to catch.
+        if !self.descriptor.can(Capability::Trending) {
+            let refusal = ProviderError::Unsupported {
+                provider: self.descriptor.provider(),
+                capability: Capability::Trending.as_str(),
+            };
+            return Box::pin(async move { Err(refusal) });
+        }
+        let answer = self.rail_answer.clone();
         Box::pin(async move { answer })
     }
 }
@@ -305,5 +409,34 @@ mod tests {
                 capability: "search",
             })
         );
+    }
+
+    #[test]
+    fn a_fake_that_was_not_told_about_a_rail_answers_an_empty_one() {
+        // The default every constructor uses except `publishing_rails`: a fake built to test a
+        // search is not also claiming a provider's trending list is empty, so the rail answer is
+        // empty and the descriptor is what decides whether it is served at all.
+        let scripted = FakeMetadataProvider::searching(Provider::Tmdb, Vec::new());
+
+        assert_eq!(
+            block_on(scripted.rail(RailKind::PopularMovies, page())),
+            Err(ProviderError::Unsupported {
+                provider: Provider::Tmdb,
+                capability: "trending",
+            }),
+            "a fake that declares only search must refuse a rail"
+        );
+
+        let publishing = FakeMetadataProvider::publishing_rails(Provider::Tmdb, Vec::new());
+
+        assert_eq!(
+            block_on(publishing.rail(RailKind::PopularMovies, page())),
+            Ok(Vec::new())
+        );
+    }
+
+    /// One page for the rail reading above.
+    fn page() -> NonZeroU32 {
+        NonZeroU32::new(1).expect("one is not zero")
     }
 }

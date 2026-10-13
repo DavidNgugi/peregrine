@@ -330,6 +330,26 @@ fn refresh_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `home_rails` reads through the runtime and touches nothing else, so a runtime that never
+/// started is the only failure it has — which is the point of the command: it is a cache read, and
+/// a read that could fail on a provider would be a screen that could not paint.
+fn home_rails_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::home_rails(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+/// `refresh_rails` journals a row and submits a job, both of which need a running runtime.
+fn refresh_rails_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::refresh_rails(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
 fn search_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::library::search_titles(harness.dead_state(), "alien".to_owned(), None)
@@ -503,6 +523,22 @@ fn provider_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: search_providers_without_a_runtime,
+        },
+        ContractCase {
+            command: "home_rails",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: home_rails_without_a_runtime,
+        },
+        ContractCase {
+            command: "refresh_rails",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: refresh_rails_without_a_runtime,
         },
     ]
 }

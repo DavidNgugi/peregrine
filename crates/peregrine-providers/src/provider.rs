@@ -16,15 +16,17 @@
 //! method returns a boxed future through [`ProviderFuture`], which costs one allocation per
 //! network request and buys object safety without a proc-macro dependency.
 //!
-//! # Why the port has four operations and not eight
+//! # Why the port has five operations and not eight
 //!
 //! `ARCHITECTURE` §13 lists eight capabilities. `search` was the first, and it is the one whose
 //! request and response the flows fixed early — FLOWS F3 has the sync service call `search` and get
 //! candidates back to upsert as stub titles. `title` (PG-E5-07) and `image` (PG-E5-15) followed as
-//! their flows arrived. The rest return *drafts* of the catalogue entities, which carry no row id and
-//! therefore cannot be the domain's stored types; those drafts are the normal form, and the normal
-//! form is designed against real provider payloads in PG-E5-06 to PG-E5-16 rather than guessed at
-//! here from the providers' documentation.
+//! their flows arrived, and `rail` followed with the Discover screen's rails (PG-E7-08): it answers
+//! the same [`SearchCandidate`] a search does, which is the whole reason it needed no new type. The
+//! rest return *drafts* of the catalogue entities, which carry no row id and therefore cannot be the
+//! domain's stored types; those drafts are the normal form, and the normal form is designed against
+//! real provider payloads in PG-E5-06 to PG-E5-16 rather than guessed at here from the providers'
+//! documentation.
 //!
 //! [`MetadataProvider::check`] is the one operation that is **not** one of those eight, and it is here
 //! because it belongs to no single capability: it asks whether the provider can be used at all. A
@@ -43,6 +45,104 @@ use peregrine_domain::text::NonEmptyText;
 
 use crate::descriptor::ProviderDescriptor;
 use crate::error::ProviderError;
+
+/// The most candidates one rail page may answer with.
+///
+/// A rail takes no limit argument — a home screen draws a page and nothing else — so "no more than
+/// a page" needs a number somewhere or it is not a claim anything can check. This is it: the
+/// conformance suite refuses a rail answer larger than this, and an adapter whose provider pages
+/// larger than this truncates. Twenty is the bound the first adapter's lists arrive in
+/// (`PG-E5-06`), which is what makes it a *page* rather than a guess, and it is deliberately a
+/// constant rather than a parameter: a caller that wants fewer items draws fewer.
+pub const RAIL_PAGE_LIMIT: usize = 20;
+
+/// One named list a provider publishes, as a *home screen* names it.
+///
+/// # Why the vocabulary stops at "what a home screen can show"
+///
+/// The obvious alternative is to mirror the provider's own catalogue of paths — TMDB alone has
+/// `/trending/movie/week`, `/movie/popular`, `/movie/top_rated`, `/movie/upcoming`,
+/// `/tv/popular`, `/tv/on_the_air`, `/tv/top_rated`, and a `discover` endpoint with a filter set
+/// large enough to be its own task (`PG-E5-06`). A port that copied those names would make every
+/// other provider answer in TMDB's vocabulary: TVDB has no `/movie/upcoming`, and a second
+/// metadata source would spend its adapter mapping its own lists onto names it did not choose.
+///
+/// What a rail *means* — the week's most watched, the most popular, the best reviewed, the soonest
+/// to arrive, the ones on air now — is a question a person asks of any provider, and each adapter
+/// answers it with whatever endpoint (or composition of endpoints) it has. An endpoint this
+/// vocabulary cannot express is an endpoint no home screen has a place for, and growing it is a
+/// deliberate act with a place to put the list.
+///
+/// # What a rail is not
+///
+/// A rail is not a search and not a filter: it takes no text and no arguments beyond the page, it
+/// is ordered by the provider rather than by the caller, and the answer is the same stub a search
+/// answers with (see [`SearchCandidate`]) because the sync layer already knows how to upsert one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum RailKind {
+    /// What the provider's audience watched most this week, films and series together.
+    TrendingWeek,
+    /// The most popular films.
+    PopularMovies,
+    /// The best reviewed films.
+    TopRatedMovies,
+    /// Films not yet released.
+    UpcomingMovies,
+    /// The most popular series.
+    PopularShows,
+    /// Series with an episode airing around now.
+    OnTheAirShows,
+    /// The best reviewed series.
+    TopRatedShows,
+}
+
+impl RailKind {
+    /// Every rail, in the order a home screen shows them.
+    pub const ALL: [Self; 7] = [
+        Self::TrendingWeek,
+        Self::PopularMovies,
+        Self::TopRatedMovies,
+        Self::UpcomingMovies,
+        Self::PopularShows,
+        Self::OnTheAirShows,
+        Self::TopRatedShows,
+    ];
+
+    /// The stable identifier a rail carries across IPC, logs, and a journal payload.
+    ///
+    /// It is deliberately not the heading: a heading is copy and belongs in the catalogue of
+    /// translations (`packages/i18n`), so renaming "On the air" is a copy change rather than a
+    /// change to what a caller asks for.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TrendingWeek => "trending_week",
+            Self::PopularMovies => "popular_movies",
+            Self::TopRatedMovies => "top_rated_movies",
+            Self::UpcomingMovies => "upcoming_movies",
+            Self::PopularShows => "popular_shows",
+            Self::OnTheAirShows => "on_the_air_shows",
+            Self::TopRatedShows => "top_rated_shows",
+        }
+    }
+
+    /// The kind every item of this rail is, or `None` for a rail that mixes the two.
+    ///
+    /// It is what lets an adapter tell a provider which endpoint to read — a `movie/popular` list
+    /// cannot answer a series — and it is `None` for exactly the rails whose answer carries its own
+    /// media type, which is why the adapter and not the caller decides what an item is.
+    #[must_use]
+    pub const fn kind(self) -> Option<TitleKind> {
+        match self {
+            Self::TrendingWeek => None,
+            Self::PopularMovies | Self::TopRatedMovies | Self::UpcomingMovies => {
+                Some(TitleKind::Movie)
+            }
+            Self::PopularShows | Self::OnTheAirShows | Self::TopRatedShows => Some(TitleKind::Show),
+        }
+    }
+}
 
 /// What a provider operation answers with, as a future the caller can await.
 ///
@@ -219,6 +319,26 @@ pub trait MetadataProvider: Send + Sync {
         kind: TitleKind,
     ) -> ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>;
 
+    /// Reads one page of a named rail.
+    ///
+    /// `page` is a [`NonZeroU32`] because a provider's lists are paged from one, so "the zeroth
+    /// page" is unrepresentable rather than refused — the mistake a home screen is most likely to
+    /// make, since it draws the first page and nothing else.
+    ///
+    /// `Unsupported` is not the only refusal worth naming: a provider may declare
+    /// [`crate::capability::Capability::Trending`] and still have no list for one rail. That is
+    /// also [`ProviderError::Unsupported`], and it is why the conformance suite asks a provider to
+    /// refuse a rail it does not serve rather than to answer an empty list — an empty answer is a
+    /// real statement about a provider's catalogue, and a screen draws the two differently.
+    ///
+    /// An answer is at most [`RAIL_PAGE_LIMIT`] candidates, because that is what a page is.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when the descriptor does not declare
+    /// [`crate::capability::Capability::Trending`], and otherwise as [`MetadataProvider::search`].
+    fn rail(&self, rail: RailKind, page: NonZeroU32) -> ProviderFuture<'_, Vec<SearchCandidate>>;
+
     /// Reads one image's bytes.
     ///
     /// `path` is the provider-relative path a title's details carry, not a URL: only the adapter knows
@@ -300,6 +420,19 @@ mod tests {
 
         fn search(&self, _query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>> {
             Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn rail(
+            &self,
+            _rail: RailKind,
+            _page: NonZeroU32,
+        ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
         }
     }
 
@@ -390,5 +523,42 @@ mod tests {
         let query = SearchQuery::new(text("anything"), limit(1), None);
         let future: Pin<Box<dyn Future<Output = _> + Send + '_>> = stub.search(&query);
         assert_send(&future);
+    }
+
+    #[test]
+    fn every_rail_has_a_stable_name_and_the_kind_it_carries() {
+        // The name crosses IPC and a journal payload, so a rename is a wire change rather than
+        // copy; the kind is what tells an adapter which endpoint can answer a rail.
+        let named: Vec<&str> = RailKind::ALL.iter().map(|rail| rail.as_str()).collect();
+
+        assert_eq!(
+            named,
+            [
+                "trending_week",
+                "popular_movies",
+                "top_rated_movies",
+                "upcoming_movies",
+                "popular_shows",
+                "on_the_air_shows",
+                "top_rated_shows",
+            ]
+        );
+        assert_eq!(RailKind::PopularMovies.kind(), Some(TitleKind::Movie));
+        assert_eq!(RailKind::TopRatedShows.kind(), Some(TitleKind::Show));
+        assert!(
+            RailKind::TrendingWeek.kind().is_none(),
+            "the trending list mixes films and series, so its items carry their own kind"
+        );
+    }
+
+    #[test]
+    fn no_two_rails_share_a_name() {
+        // Two rails with one name would be two lists a caller cannot tell apart, and a screen
+        // would show the same one twice.
+        let mut names: Vec<&str> = RailKind::ALL.iter().map(|rail| rail.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+
+        assert_eq!(names.len(), RailKind::ALL.len());
     }
 }

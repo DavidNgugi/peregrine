@@ -38,5 +38,7 @@ pub use capability::{Capabilities, Capability};
 pub use descriptor::{Attribution, CachePolicy, DescriptorError, ProviderDescriptor, RatePolicy};
 pub use error::{ProviderError, TransportFailure};
 pub use hygiene::{Body, BodyCap};
-pub use provider::{MetadataProvider, ProviderFuture, SearchCandidate, SearchQuery};
+pub use provider::{
+    MetadataProvider, ProviderFuture, RAIL_PAGE_LIMIT, RailKind, SearchCandidate, SearchQuery,
+};
 pub use rate::RateLimiter;

@@ -183,6 +183,34 @@ export const commands = {
 	 */
 	searchProviders: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit })),
 	/**
+	 *  Every rail the Discover screen draws, from what the catalogue and the cache already hold.
+	 * 
+	 *  **Cache-first, and it never waits for a provider.** The rails were filled by
+	 *  [`refresh_rails`]'s job; this read is a lock and a clone, which is what makes the first paint of
+	 *  the screen possible before any request has left the machine (`FLOWS F2`). A rail nobody has
+	 *  fetched yet is answered as an empty rail rather than omitted, so the screen has its geometry
+	 *  from the first frame.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running. Nothing else: the read cannot fail, which is the
+	 *  point of it.
+	 */
+	homeRails: () => typedError<HomeRailDto[], AppError_Serialize>(__TAURI_INVOKE("home_rails")),
+	/**
+	 *  Fills the rails the configured providers publish, artwork included, and answers with the job.
+	 * 
+	 *  A job and not a command that waits, because it is one request per rail and then one per title it
+	 *  has artwork for — a screen that blocked on that would freeze on a provider having a slow day
+	 *  (`ARCHITECTURE §7` rule 2). Two visits inside one fetch share it, and the answer says which
+	 *  happened through [`JobStarted::coalesced`].
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the journal or the queue refuses the job.
+	 */
+	refreshRails: () => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("refresh_rails")),
+	/**
 	 *  Starts filling one title from its provider, artwork included, and answers with the job.
 	 * 
 	 *  A job and not a command that waits, because it leaves the machine twice — once for the title's
@@ -440,6 +468,21 @@ export type Health = {
 	rescanRequired: boolean,
 };
 
+/**
+ *  One rail: its stable identity and the titles in it.
+ * 
+ *  **The heading is not here.** A rail's heading is a sentence — "On the air", "Top rated films" —
+ *  and a sentence is translated, so it lives in `packages/i18n` keyed by the rail's `rail` field.
+ *  Sending an English heading over IPC would put untranslatable copy in the core's mouth, which is
+ *  the mistake `AGENTS R7` names from the other direction.
+ */
+export type HomeRailDto = {
+	/**  The rail's stable identity, which is what a translation is keyed by. */
+	rail: string,
+	/**  Its titles, in the order the provider listed them. */
+	items: RailItemDto[],
+};
+
 /**  One row of the job journal. */
 export type JobRecord = JobRecord_Serialize | JobRecord_Deserialize;
 
@@ -519,6 +562,14 @@ export type JobStarted = {
 	 *  both stay well inside the 2^53 a JavaScript number represents exactly.
 	 */
 	journalId: number,
+	/**
+	 *  Whether the runtime joined a job that was already running rather than starting one.
+	 * 
+	 *  A screen tells the user "a refresh is already under way" from this rather than decoding the
+	 *  nil job id, and it follows the *journal* row either way: every `job://state` payload carries
+	 *  both ids, and the journal one exists before the job runs.
+	 */
+	coalesced: boolean,
 };
 
 /**
@@ -642,6 +693,40 @@ export type ProviderStatusDto = {
 	/**  The providers this build knows, whether or not they can be used. */
 	known: ProviderDto[],
 };
+
+/**  One title in a rail, as the screen draws it. */
+export type RailItemDto = {
+	/**  The catalogue row, which is what opening the title needs. */
+	titleId: number,
+	/**  Film or series. */
+	kind: RailKindDto,
+	/**  The name to draw. */
+	name: string,
+	/**  The release year, when the provider or the catalogue stated one. */
+	year: number | null,
+	/**
+	 *  Where the cached poster is on this machine, as an absolute path, or `null` while it has not
+	 *  been fetched.
+	 * 
+	 *  A path rather than a URL: the webview turns it into an `asset:` URL, and the scheme the shell
+	 *  scopes is the shell's business rather than this layer's.
+	 */
+	poster: string | null,
+};
+
+/**
+ *  Which of the two a rail item is, as the wire spells it.
+ * 
+ *  Not `library::RootKind`: a rail holds titles, and `RootKind` also spells `mixed` and
+ *  `downloads` — folder kinds that no provider can publish. A screen branching on `RootKind` for a
+ *  poster tile would have to invent an answer for two cases that cannot occur, and a type that says
+ *  what cannot occur is cheaper than a branch nobody can test.
+ */
+export type RailKindDto = 
+/**  A film. */
+"movie" | 
+/**  A series. */
+"show";
 
 /**  What a root is expected to hold, as the webview spells it. */
 export type RootKind = 

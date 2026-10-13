@@ -275,7 +275,11 @@ mod tests {
     fn a_job_handle_names_the_scheduler_job_and_its_journal_row() {
         let job = peregrine_app::jobs::parse_job_id("01ARZ3NDEKTSV4RRFFQ69G5FAV")
             .expect("a well-formed id");
-        let handle = JobStarted::from(peregrine_app::StartedJob { job, journal_id: 7 });
+        let handle = JobStarted::from(peregrine_app::StartedJob {
+            job,
+            journal_id: 7,
+            coalesced: false,
+        });
 
         assert_eq!(handle.job_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
         assert_eq!(handle.journal_id, 7);

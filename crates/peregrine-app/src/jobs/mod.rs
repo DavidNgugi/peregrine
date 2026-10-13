@@ -6,6 +6,7 @@
 //! the UI reads. `peregrine-ipc`'s test deserializes values built here into its own types,
 //! so a change to one that is not made to the other fails the build rather than the UI.
 
+pub mod discover_rails;
 pub mod hello;
 pub mod library_scan;
 pub mod provider_credential;

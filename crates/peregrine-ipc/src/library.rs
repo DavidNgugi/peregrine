@@ -445,10 +445,7 @@ pub async fn refresh_title(
         .await?;
     Ok(guard_response(
         "library::refresh_title",
-        JobStarted {
-            job_id: started.job.to_string(),
-            journal_id: started.journal_id,
-        },
+        JobStarted::from(started),
     ))
 }
 
@@ -668,10 +665,7 @@ pub async fn scan_now(state: State<'_, RuntimeState>) -> Result<JobStarted, AppE
     let started = state.runtime()?.start_library_scan().await?;
     Ok(guard_response(
         "library::scan_now",
-        JobStarted {
-            job_id: started.job.to_string(),
-            journal_id: started.journal_id,
-        },
+        JobStarted::from(started),
     ))
 }
 

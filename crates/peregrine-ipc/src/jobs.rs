@@ -31,15 +31,12 @@ pub struct JobStarted {
     /// both stay well inside the 2^53 a JavaScript number represents exactly.
     #[specta(type = Number)]
     pub journal_id: i64,
-}
-
-impl From<peregrine_app::StartedJob> for JobStarted {
-    fn from(started: peregrine_app::StartedJob) -> Self {
-        Self {
-            job_id: started.job.to_string(),
-            journal_id: started.journal_id,
-        }
-    }
+    /// Whether the runtime joined a job that was already running rather than starting one.
+    ///
+    /// A screen tells the user "a refresh is already under way" from this rather than decoding the
+    /// nil job id, and it follows the *journal* row either way: every `job://state` payload carries
+    /// both ids, and the journal one exists before the job runs.
+    pub coalesced: bool,
 }
 
 /// The lifecycle phase, as the UI reads it.
@@ -161,11 +158,22 @@ pub async fn start_hello(
     let started = state.runtime()?.start_hello(steps).await?;
     Ok(guard_response(
         "jobs::start_hello",
-        JobStarted {
+        JobStarted::from(started),
+    ))
+}
+
+/// A submission the runtime accepted, for the two commands that answer one.
+///
+/// The conversion lives here rather than at each call site because [`JobStarted`] is this crate's
+/// wire type and a fourth field added to it would otherwise be a change in four places.
+impl From<peregrine_app::StartedJob> for JobStarted {
+    fn from(started: peregrine_app::StartedJob) -> Self {
+        Self {
             job_id: started.job.to_string(),
             journal_id: started.journal_id,
-        },
-    ))
+            coalesced: started.coalesced,
+        }
+    }
 }
 
 /// Asks a running job to stop.

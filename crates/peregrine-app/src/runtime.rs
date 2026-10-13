@@ -200,9 +200,21 @@ impl RuntimeConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StartedJob {
     /// The scheduler's identity for the job; the key progress events carry.
+    ///
+    /// **The nil ULID when a submission coalesced onto a live job.** The scheduler owns that
+    /// identity and the journal does not store it, so a second caller that joined work already
+    /// happening has no id of its own to be given — it has the *journal* row instead, which every
+    /// `job://state` and `job://progress` payload carries beside the scheduler id. A caller
+    /// following a job therefore matches on `journal_id` and not on this, which is correct for a
+    /// fresh submission too: the two are equal in what they identify.
     pub job: Ulid,
     /// The journal row this job reports into.
     pub journal_id: i64,
+    /// Whether this caller joined a job that was already live rather than starting one.
+    ///
+    /// Stated rather than inferred from the nil ULID, because a caller that wanted to tell the user
+    /// "a refresh is already running" needs a fact and not a sentinel to decode.
+    pub coalesced: bool,
 }
 
 /// What to do with one provider's credential.
@@ -233,6 +245,21 @@ pub struct LibraryTitleDetail {
     /// Whether opening the screen should ask a provider for this title, which is
     /// [`crate::artwork::refresh_due`]'s rule and not a screen's.
     pub refresh_due: bool,
+}
+
+/// One rail the Discover screen draws: its identity, the copy's fallback name, and its items.
+///
+/// The screen renders what the core answers (`AGENTS R7`), so the rail's *membership* is here and
+/// the rail's *heading* is copy in `packages/i18n` — the heading is translated and a translated
+/// string is not a stable key. [`RailKind`](peregrine_providers::RailKind)'s own name travels
+/// beside it so the screen can key a translation on something that does not change when the words
+/// do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeRail {
+    /// The rail's stable identity.
+    pub rail: peregrine_providers::RailKind,
+    /// The titles in it, in the provider's order.
+    pub items: Vec<crate::jobs::discover_rails::RailItem>,
 }
 
 /// What the diagnostics surface reports about the running process.
@@ -289,6 +316,9 @@ pub struct Runtime {
     secrets: Arc<dyn SecretStore>,
     /// Where fetched artwork lives, content-addressed (see `peregrine_sync::ImageCache`).
     artwork: Arc<peregrine_sync::ImageCache>,
+    /// What the Discover screen reads and the rails job writes, in memory for this slice (see
+    /// `crate::jobs::discover_rails::HomeRails` for the cold-start cost).
+    rails: Arc<crate::jobs::discover_rails::HomeRails>,
     startup: Duration,
 }
 
@@ -371,6 +401,7 @@ impl Runtime {
             providers,
             secrets,
             artwork: Arc::new(peregrine_sync::ImageCache::new(artwork_root)),
+            rails: Arc::new(crate::jobs::discover_rails::HomeRails::new()),
             startup,
         })
     }
@@ -453,6 +484,7 @@ impl Runtime {
         let started = StartedJob {
             job: handle.id(),
             journal_id,
+            coalesced: false,
         };
         info!(
             job = %started.job,
@@ -602,12 +634,150 @@ impl Runtime {
             .await?)
     }
 
+    /// Every rail the Discover screen draws, cache-first.
+    ///
+    /// **It reads no network and answers from what is here** (`FLOWS F2`): the membership and the
+    /// resolved artwork paths were written by the rails job, so this is a lock read and a clone
+    /// rather than a query or a request. A rail nobody has fetched yet is answered as an empty rail
+    /// rather than omitted, which is what gives the screen its geometry on the first frame of a
+    /// cold start (`DESIGN_SYSTEM §11` rule 2).
+    ///
+    /// # Errors
+    ///
+    /// Nothing: the read cannot fail, which is the point of it. The `Result` is the shape every
+    /// command surface in this build shares (`ARCHITECTURE §7` rule 3).
+    pub fn home_rails(&self) -> Result<Vec<HomeRail>, RuntimeError> {
+        Ok(self
+            .rails
+            .read()
+            .into_iter()
+            .map(|(rail, items)| HomeRail { rail, items })
+            .collect())
+    }
+
+    /// Starts filling the Discover screen's rails, artwork included.
+    ///
+    /// A job rather than a command because it is one request per rail and then one per title it has
+    /// artwork to fetch for (`ARCHITECTURE §7` rule 2). Two attempts, because every failure it can
+    /// report is a provider having a bad minute.
+    ///
+    /// **The dedupe key is one key for the screen.** `Scheduler::submit_if_absent` is documented as
+    /// coalescing a second submission onto the live job that owns the key — and the engine does
+    /// drop the second submission's work — but it still answers `Ok(Some(handle))`, so a caller
+    /// cannot tell a coalesced submission from a fresh one. What this method therefore reads is the
+    /// *journal*: a live row with this key means a run is already queued or running, and its id is
+    /// answered rather than a second row being written. Two visits to Discover inside one fetch
+    /// share it; the `insert_job` partial unique index would refuse the second row anyway, which is
+    /// why the read comes first.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the journal cannot be read or written and
+    /// [`RuntimeError::Scheduler`] when the queue refuses the job.
+    pub async fn start_discover_rails(&self) -> Result<StartedJob, RuntimeError> {
+        let now = self.clock.now().as_millisecond();
+        let key = crate::jobs::discover_rails::dedupe_key();
+        if let Some(live) = self.live_job_for(&key).await? {
+            info!(
+                journal_id = live.journal_id,
+                "the discover rails job is already running"
+            );
+            return Ok(live);
+        }
+
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: crate::jobs::discover_rails::KIND.to_owned(),
+                priority: crate::jobs::discover_rails::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: "{}".to_owned(),
+                max_attempts: 2,
+                created_at: now,
+            })
+            .await?;
+
+        let spec = JobSpec {
+            kind: crate::jobs::discover_rails::KIND.to_owned(),
+            priority: crate::jobs::discover_rails::PRIORITY,
+            dedupe_key: Some(key),
+            max_attempts: 2,
+        };
+        let job = crate::jobs::discover_rails::DiscoverRailsJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
+            Arc::clone(&self.providers),
+            Arc::clone(&self.artwork),
+            Arc::clone(&self.rails),
+            journal_id,
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                    coalesced: false,
+                };
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some(INTERNAL_CODE.to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
+    }
+
+    /// The journal row a live job holds `dedupe_key` under, if one does.
+    ///
+    /// The journal's partial unique index is on `(kind, dedupe_key)` over the three non-terminal
+    /// phases, and `list_jobs` pages newest first, so the newest page is where a live row for a key
+    /// is. A page is bounded by `MAX_PAGE_ROWS`, which is well above the number of jobs a screen
+    /// starts, and a row older than that page is not live anyway.
+    async fn live_job_for(&self, key: &str) -> Result<Option<StartedJob>, RuntimeError> {
+        let page = self
+            .database
+            .list_jobs(PageRequest::first(peregrine_storage::MAX_PAGE_ROWS))
+            .await?;
+        Ok(page
+            .into_iter()
+            .find(|row| {
+                row.dedupe_key.as_deref() == Some(key)
+                    && matches!(
+                        row.state,
+                        JobPhase::Queued | JobPhase::Running | JobPhase::Deferred
+                    )
+            })
+            .map(|row| StartedJob {
+                // The scheduler's own id is what a *fresh* submission's events carry, and the
+                // journal does not store it — so a caller that joined a job already running is
+                // answered the nil ULID and the journal row instead. Every `job://state` and
+                // `job://progress` payload carries both ids, and a screen following a job matches
+                // on the journal one, which exists before the job runs and outlives it.
+                job: Ulid::from_parts(0, 0),
+                journal_id: row.id,
+                coalesced: true,
+            }))
+    }
+
     /// Starts filling one title from its provider, artwork included.
     ///
     /// A job rather than a command, because it leaves the machine twice — once for the title's details
     /// and once for its poster — and `ARCHITECTURE §7` rule 2 puts anything that slow behind the
-    /// scheduler. Keyed by the title, so opening the same screen twice waits on one refresh rather than
-    /// spending two requests on the same answer.
+    /// scheduler. Keyed by the title, so opening the same screen twice waits on one refresh rather
+    /// than spending two requests on the same answer.
     ///
     /// # Errors
     ///
@@ -652,6 +822,7 @@ impl Runtime {
                 let started = StartedJob {
                     job: handle.id(),
                     journal_id,
+                    coalesced: false,
                 };
                 self.remember(handle, journal_id);
                 Ok(started)
@@ -771,6 +942,7 @@ impl Runtime {
                 let started = StartedJob {
                     job: handle.id(),
                     journal_id,
+                    coalesced: false,
                 };
                 info!(
                     job = %started.job,
@@ -1063,6 +1235,7 @@ impl Runtime {
         let started = StartedJob {
             job: handle.id(),
             journal_id,
+            coalesced: false,
         };
         info!(job = %started.job, journal_id, "accepted the library scan");
         self.remember(handle, journal_id);
@@ -1943,6 +2116,76 @@ mod tests {
             !health.rescan_required,
             "a first install has no library to rebuild"
         );
+        runtime.shutdown().await;
+    }
+
+    /// The Discover read is a lock and a clone, and a cold start answers empty rails rather than
+    /// nothing: the screen has its geometry from the first frame (`DESIGN_SYSTEM §11` rule 2) and
+    /// pays for it with rails that are empty until the fetch lands.
+    #[tokio::test]
+    async fn a_fresh_runtime_answers_every_rail_as_empty() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let rails = runtime.home_rails().unwrap();
+
+        assert_eq!(rails.len(), peregrine_providers::RailKind::ALL.len());
+        assert!(rails.iter().all(|rail| rail.items.is_empty()));
+        runtime.shutdown().await;
+    }
+
+    /// A live job holding the key is found before a second row is written, which is what makes two
+    /// visits to Discover share one fetch.
+    ///
+    /// **This is the coalescing, and it is a journal read rather than
+    /// `Scheduler::submit_if_absent`** — that method's own doc says it answers `Ok(None)` when an
+    /// existing job took the submission, and it does not: it maps `enqueue_one`'s `Ok(handle)` to
+    /// `Ok(Some(handle))` unconditionally. The engine *does* drop a coalesced submission's work,
+    /// but a caller holding the returned handle cannot tell that from a fresh job, and the journal
+    /// row it would have written stays `queued` forever. The pre-check is the honest version of the
+    /// same intention, and it is what this pins.
+    #[tokio::test]
+    async fn a_live_rails_job_is_found_by_its_key_rather_than_duplicated() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let key = crate::jobs::discover_rails::dedupe_key();
+
+        assert!(
+            runtime.live_job_for(&key).await.unwrap().is_none(),
+            "nothing is live before anything is started"
+        );
+
+        let journal_id = runtime
+            .database
+            .insert_job(NewJob {
+                kind: crate::jobs::discover_rails::KIND.to_owned(),
+                priority: crate::jobs::discover_rails::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: "{}".to_owned(),
+                max_attempts: 2,
+                created_at: runtime.clock.now().as_millisecond(),
+            })
+            .await
+            .unwrap();
+
+        let live = runtime
+            .live_job_for(&key)
+            .await
+            .unwrap()
+            .expect("a queued row holding the key is live");
+        assert_eq!(live.journal_id, journal_id);
+        assert!(
+            live.coalesced,
+            "a joined job says so rather than looking new"
+        );
+
+        // And the same answer through the method a screen actually calls: the second start joins the
+        // first rather than writing a second row, which the journal's partial unique index would
+        // refuse. No provider is configured in this runtime, so the row found is the one written
+        // above.
+        let joined = runtime.start_discover_rails().await.unwrap();
+        assert_eq!(joined.journal_id, journal_id);
+        assert!(joined.coalesced, "two visits to Discover share one fetch");
         runtime.shutdown().await;
     }
 

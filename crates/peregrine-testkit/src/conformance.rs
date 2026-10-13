@@ -12,10 +12,12 @@
 //! frozen fake — and the fake is the only implementation whose instant a test can pin.
 
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 
 use jiff::Timestamp;
 use peregrine_providers::{
-    Capability, MetadataProvider, ProviderError, SearchCandidate, SearchQuery,
+    Capability, MetadataProvider, ProviderError, RAIL_PAGE_LIMIT, RailKind, SearchCandidate,
+    SearchQuery,
 };
 use ulid::Ulid;
 
@@ -88,12 +90,16 @@ pub fn id_generator_satisfies_the_port(next_id: impl Fn() -> Ulid) -> Set<Ulid> 
 }
 
 /// Asserts that `provider` satisfies the [`MetadataProvider`] contract, and returns the
-/// candidates the probe drew.
+/// candidates the search probe drew.
 ///
 /// The suite observes only the port, and it takes a `dyn` reference on purpose: that the port
 /// is object safe is itself part of the contract, because the registry holds one list of
 /// providers of different types (PG-E5-12) and a signature that quietly stopped being
 /// `dyn`-compatible would only be discovered there.
+///
+/// `rail` and `rail_page` are the rail probe: a caller names one list and one page, because the
+/// suite cannot invent either — a rail's answer is a statement about a provider's catalogue, and
+/// only the provider's own fixtures know what is in it.
 ///
 /// What it asserts, for a provider that either declares `search` or does not:
 ///
@@ -111,6 +117,13 @@ pub fn id_generator_satisfies_the_port(next_id: impl Fn() -> Ulid) -> Set<Ulid> 
 ///   it is the one fact about a candidate the suite can check without knowing the provider's
 ///   fixtures.
 ///
+/// And the same shape for `rail`, with the two differences a rail has: the bound is
+/// [`RAIL_PAGE_LIMIT`] rather than a caller's limit, and a provider that *declares* `trending` and
+/// then refuses one rail is conforming — a provider may have a trending list and no "on the air"
+/// one, and the port names that case. What is *not* conforming is declaring the capability and
+/// refusing with [`ProviderError::Unsupported`] attributing it to another provider, which is the
+/// same misattribution the search refusal is checked for.
+///
 /// It deliberately says nothing about *which* candidates come back: that is what the
 /// provider's recorded fixtures are for (PG-E5-17), and a suite that guessed at them would be
 /// asserting its own guess.
@@ -121,6 +134,8 @@ pub fn id_generator_satisfies_the_port(next_id: impl Fn() -> Ulid) -> Set<Ulid> 
 pub async fn metadata_provider_satisfies_the_port(
     provider: &dyn MetadataProvider,
     probe: &SearchQuery,
+    rail: RailKind,
+    rail_page: NonZeroU32,
 ) -> Vec<SearchCandidate> {
     let descriptor = provider.descriptor();
     let named = descriptor.provider();
@@ -139,6 +154,10 @@ pub async fn metadata_provider_satisfies_the_port(
 
     let declared = descriptor.can(Capability::Search);
     let answer = provider.search(probe).await;
+
+    // The rail probe runs whatever the search probe did: the two capabilities are independent, and
+    // a provider that cannot search may still publish a rail.
+    check_rail(provider, rail, rail_page).await;
 
     if !declared {
         match answer {
@@ -185,6 +204,65 @@ pub async fn metadata_provider_satisfies_the_port(
     }
 
     candidates
+}
+
+/// The rail half of the contract, which is the search half's shape with a rail's two differences.
+///
+/// Written as a panic rather than a `Result` because that is what the search half does and because
+/// a suite that returned its failures would be a suite a caller could ignore.
+async fn check_rail(provider: &dyn MetadataProvider, rail: RailKind, page: NonZeroU32) {
+    let descriptor = provider.descriptor();
+    let named = descriptor.provider();
+
+    if !descriptor.can(Capability::Trending) {
+        match provider.rail(rail, page).await {
+            Err(ProviderError::Unsupported {
+                provider: reported,
+                capability,
+            }) => {
+                assert_eq!(
+                    reported, named,
+                    "a rail refusal must name the provider that refused"
+                );
+                assert_eq!(
+                    capability,
+                    Capability::Trending.as_str(),
+                    "a rail refusal must name the capability as it is declared"
+                );
+            }
+            other => panic!(
+                "{named} does not declare trending, so it must refuse a rail rather than {other:?}"
+            ),
+        }
+        return;
+    }
+
+    match provider.rail(rail, page).await {
+        Ok(candidates) => {
+            assert!(
+                candidates.len() <= RAIL_PAGE_LIMIT,
+                "{named} answered {} candidates for a page, which holds at most {RAIL_PAGE_LIMIT}",
+                candidates.len()
+            );
+            for candidate in &candidates {
+                assert_eq!(
+                    candidate.external_id().provider(),
+                    named,
+                    "{named} answered a rail candidate identified by {}",
+                    candidate.external_id().provider()
+                );
+            }
+        }
+        // A provider with a trending list and no list for this particular rail is conforming, and
+        // the refusal has to be about this provider — the same misattribution rule as everywhere.
+        Err(ProviderError::Unsupported {
+            provider: reported, ..
+        }) => assert_eq!(
+            reported, named,
+            "{named} refused a rail in another provider's name"
+        ),
+        Err(error) => panic!("{named} declares trending but answered a rail with {error}"),
+    }
 }
 
 #[cfg(test)]
@@ -282,9 +360,19 @@ mod tests {
         // The fake must pass the same suite every adapter passes. If this fails, the fake is
         // not a stand-in for the port and every test built on it is measuring something else.
         let fake = searching_fake(vec![candidate(Provider::Tmdb, "1396", "Breaking Bad")]);
-        let answered = block_on(metadata_provider_satisfies_the_port(&fake, &probe()));
+        let answered = block_on(metadata_provider_satisfies_the_port(
+            &fake,
+            &probe(),
+            RailKind::PopularMovies,
+            page(1),
+        ));
 
         assert_eq!(answered.len(), 1);
+    }
+
+    /// One page, for the rail probe. `NonZeroU32` because that is what the port takes.
+    fn page(number: u32) -> NonZeroU32 {
+        NonZeroU32::new(number).expect("the test passes a non-zero page")
     }
 
     #[test]
@@ -299,7 +387,12 @@ mod tests {
             Ok(vec![candidate(Provider::Tvdb, "81189", "Breaking Bad")]),
         );
 
-        let answered = block_on(metadata_provider_satisfies_the_port(&silent, &probe()));
+        let answered = block_on(metadata_provider_satisfies_the_port(
+            &silent,
+            &probe(),
+            RailKind::PopularMovies,
+            page(1),
+        ));
 
         assert_eq!(answered, Vec::new());
     }
@@ -309,7 +402,13 @@ mod tests {
         // Three ways a provider can break the contract, each pinned against one that does.
         let liar = searching_fake(vec![candidate(Provider::Tvdb, "81189", "Breaking Bad")]);
         assert!(
-            catch_async(metadata_provider_satisfies_the_port(&liar, &probe())).is_err(),
+            catch_async(metadata_provider_satisfies_the_port(
+                &liar,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
             "a provider answering with another provider's ids must not conform"
         );
 
@@ -321,7 +420,9 @@ mod tests {
         assert!(
             catch_async(metadata_provider_satisfies_the_port(
                 &over_answering,
-                &probe()
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
             ))
             .is_err(),
             "a provider ignoring the limit must not conform"
@@ -335,8 +436,178 @@ mod tests {
             },
         );
         assert!(
-            catch_async(metadata_provider_satisfies_the_port(&failing, &probe())).is_err(),
+            catch_async(metadata_provider_satisfies_the_port(
+                &failing,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
             "a provider that declares search and then fails must not conform"
+        );
+    }
+
+    #[test]
+    fn a_provider_that_declares_trending_must_answer_a_rail() {
+        let publishing = FakeMetadataProvider::publishing_rails(
+            Provider::Tmdb,
+            vec![candidate(Provider::Tmdb, "603", "The Matrix")],
+        );
+
+        block_on(metadata_provider_satisfies_the_port(
+            &publishing,
+            &probe(),
+            RailKind::PopularMovies,
+            page(1),
+        ));
+    }
+
+    #[test]
+    fn a_provider_without_trending_satisfies_the_port_by_refusing_a_rail() {
+        let silent = FakeMetadataProvider::searching(Provider::Tvdb, Vec::new());
+
+        block_on(metadata_provider_satisfies_the_port(
+            &silent,
+            &probe(),
+            RailKind::PopularMovies,
+            page(1),
+        ));
+    }
+
+    #[test]
+    fn the_rail_half_of_the_suite_fails_a_provider_that_misattributes_or_over_answers() {
+        // Two ways to break the rail contract: a candidate identified by another provider — the
+        // coupling ADR 0007 rule 2 exists to prevent, which the fake can be handed and cannot
+        // produce by accident — and a page larger than a page.
+        let liar = FakeMetadataProvider::publishing_rails(
+            Provider::Tmdb,
+            vec![candidate(Provider::Tvdb, "81189", "Breaking Bad")],
+        );
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &liar,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
+            "a rail answering with another provider's ids must not conform"
+        );
+
+        let over_answering = FakeMetadataProvider::publishing_rails(
+            Provider::Tmdb,
+            (0..=RAIL_PAGE_LIMIT)
+                .map(|index| candidate(Provider::Tmdb, &index.to_string(), "Breaking Bad"))
+                .collect(),
+        );
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &over_answering,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
+            "a rail answering more than a page must not conform"
+        );
+    }
+
+    #[test]
+    fn a_rail_refusal_that_names_the_wrong_provider_fails_the_suite() {
+        // The same rule the search refusal is held to, applied to the rail: an `Unsupported`
+        // naming a provider nobody asked is a user sent to the wrong settings pane. The fixture
+        // declares `trending` — so it must answer — and refuses in another provider's name.
+        struct MisnamingRail {
+            descriptor: peregrine_providers::ProviderDescriptor,
+        }
+
+        impl MetadataProvider for MisnamingRail {
+            fn descriptor(&self) -> &peregrine_providers::ProviderDescriptor {
+                &self.descriptor
+            }
+
+            fn check(&self) -> peregrine_providers::ProviderFuture<'_, ()> {
+                Box::pin(async { Ok(()) })
+            }
+
+            fn image(
+                &self,
+                _path: &str,
+                _kind: peregrine_domain::catalogue::ImageKind,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<u8>> {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+
+            fn title(
+                &self,
+                _id: &peregrine_domain::id::ExternalId,
+                _kind: peregrine_domain::catalogue::TitleKind,
+            ) -> peregrine_providers::ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>
+            {
+                Box::pin(async {
+                    Ok(peregrine_domain::catalogue::TitleDetails {
+                        kind: peregrine_domain::TitleKind::Movie,
+                        name: NonEmptyText::new("A title").expect("the fixture is not empty"),
+                        original_name: None,
+                        overview: None,
+                        tagline: None,
+                        released: None,
+                        runtime_minutes: None,
+                        original_language: None,
+                        origin_country: None,
+                        rating: None,
+                        votes: None,
+                        popularity: None,
+                        adult: None,
+                        in_production: None,
+                        season_count: None,
+                        episode_count: None,
+                        homepage: None,
+                        poster_path: None,
+                        backdrop_path: None,
+                    })
+                })
+            }
+
+            fn search(
+                &self,
+                _query: &SearchQuery,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<SearchCandidate>> {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+
+            fn rail(
+                &self,
+                _rail: RailKind,
+                _page: NonZeroU32,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<SearchCandidate>> {
+                Box::pin(async {
+                    Err(ProviderError::Unsupported {
+                        provider: Provider::Tvdb,
+                        capability: Capability::Trending.as_str(),
+                    })
+                })
+            }
+        }
+
+        let wrong = MisnamingRail {
+            descriptor: fake_descriptor(
+                Provider::Tmdb,
+                peregrine_providers::Capabilities::EMPTY
+                    .with(Capability::Search)
+                    .with(Capability::Trending),
+            ),
+        };
+
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &wrong,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
+            "a rail refusal naming another provider must not conform"
         );
     }
 
@@ -400,6 +671,16 @@ mod tests {
                     })
                 })
             }
+
+            fn rail(
+                &self,
+                _rail: RailKind,
+                _page: NonZeroU32,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<SearchCandidate>> {
+                // Healthy on purpose, for the reason the probe is: this fixture misnames a *search*
+                // refusal, and a rail refined for a different reason would mask it.
+                Box::pin(async { Ok(Vec::new()) })
+            }
         }
 
         let wrong = Misnaming {
@@ -409,7 +690,15 @@ mod tests {
             ),
         };
 
-        assert!(catch_async(metadata_provider_satisfies_the_port(&wrong, &probe())).is_err());
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &wrong,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err()
+        );
     }
 
     #[test]
@@ -462,6 +751,17 @@ mod tests {
             ) -> peregrine_providers::ProviderFuture<'_, Vec<SearchCandidate>> {
                 Box::pin(async { Ok(Vec::new()) })
             }
+
+            fn rail(
+                &self,
+                _rail: RailKind,
+                _page: NonZeroU32,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<SearchCandidate>> {
+                // Declares `trending` in its descriptor below, so this must answer rather than
+                // refuse: the fixture exists to misname a *probe* failure, and a rail refusal here
+                // would panic for a different rule than the one this test is named for.
+                Box::pin(async { Ok(Vec::new()) })
+            }
         }
 
         let wrong = Misprobe {
@@ -471,6 +771,14 @@ mod tests {
             ),
         };
 
-        assert!(catch_async(metadata_provider_satisfies_the_port(&wrong, &probe())).is_err());
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &wrong,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err()
+        );
     }
 }

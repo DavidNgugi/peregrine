@@ -26,7 +26,7 @@ use crate::descriptor::{Attribution, CachePolicy, ProviderDescriptor, RatePolicy
 use crate::error::ProviderError;
 use crate::http::{HttpClient, HttpPolicy, Request};
 use crate::hygiene::{Body, BodyCap};
-use crate::provider::{MetadataProvider, ProviderFuture, SearchCandidate, SearchQuery};
+use crate::provider::{MetadataProvider, ProviderFuture, RailKind, SearchCandidate, SearchQuery};
 
 /// The largest search answer this adapter will read.
 ///
@@ -66,13 +66,34 @@ impl Tmdb {
     /// [`ProviderError`] when the descriptor cannot be built or the HTTP client cannot be constructed,
     /// which is a failure of the policy rather than of anything a provider said.
     pub fn new(base: &str, image_base: &str, credential: String) -> Result<Self, ProviderError> {
-        let descriptor = ProviderDescriptor::new(
-            Provider::Tmdb,
-            "TMDB",
+        Self::with_capabilities(
+            base,
+            image_base,
+            credential,
             Capabilities::EMPTY
                 .with(Capability::Search)
                 .with(Capability::Title)
-                .with(Capability::Images),
+                .with(Capability::Images)
+                .with(Capability::Trending),
+        )
+    }
+
+    /// Builds an adapter declaring exactly `capabilities`.
+    ///
+    /// The capability set is a parameter rather than a literal inside [`Tmdb::new`] for one reason:
+    /// the refusal path — a provider that has said it cannot serve a capability must refuse rather
+    /// than answer — is else unreachable in this adapter, and a rule with no test is a rule nobody
+    /// has run. Nothing in the shipping path calls this with a set other than the full one.
+    fn with_capabilities(
+        base: &str,
+        image_base: &str,
+        credential: String,
+        capabilities: Capabilities,
+    ) -> Result<Self, ProviderError> {
+        let descriptor = ProviderDescriptor::new(
+            Provider::Tmdb,
+            "TMDB",
+            capabilities,
             // TMDB's documented limit is fifty requests a second; this is far below it, because the
             // cost of being wrong in this direction is a slower sync and in the other is a ban.
             RatePolicy::new(nonzero(20), Duration::from_secs(1), nonzero(10), true).map_err(
@@ -140,6 +161,41 @@ impl Tmdb {
             .append_pair("query", query.text().as_str())
             .append_pair("include_adult", "false")
             .append_pair("page", "1");
+        Ok(url)
+    }
+
+    /// The URL one rail page goes to.
+    ///
+    /// The mapping from [`RailKind`] to a path is the whole of what this adapter adds to the port's
+    /// vocabulary, and it is deliberately total: a rail this build knows and this endpoint does not
+    /// serve would be a silent empty list, so the `match` has no catch-all and a new rail fails the
+    /// build here rather than at a user's screen.
+    ///
+    /// `page` is the caller's, and it is sent as-is: a provider's paging is one-based, which is why
+    /// the port takes a [`NonZeroU32`](std::num::NonZeroU32) rather than an offset.
+    ///
+    /// `/trending/all/week` is the endpoint for [`RailKind::TrendingWeek`] rather than
+    /// `/trending/movie/week` or `/trending/tv/week`, because a rail that named one kind would be a
+    /// rail that lies about the other half of what it shows — the answer carries each item's own
+    /// `media_type`, and the candidate mapping already reads it.
+    fn rail_url(&self, rail: RailKind, page: std::num::NonZeroU32) -> Result<Url, ProviderError> {
+        let endpoint = match rail {
+            RailKind::TrendingWeek => "trending/all/week",
+            RailKind::PopularMovies => "movie/popular",
+            RailKind::TopRatedMovies => "movie/top_rated",
+            RailKind::UpcomingMovies => "movie/upcoming",
+            RailKind::PopularShows => "tv/popular",
+            RailKind::OnTheAirShows => "tv/on_the_air",
+            RailKind::TopRatedShows => "tv/top_rated",
+        };
+        let mut url = Url::parse(&format!("{}/{endpoint}", self.base)).map_err(|_| {
+            ProviderError::Transport {
+                provider: Provider::Tmdb,
+                kind: crate::error::TransportFailure::Connect,
+            }
+        })?;
+        url.query_pairs_mut()
+            .append_pair("page", &page.get().to_string());
         Ok(url)
     }
 }
@@ -213,6 +269,61 @@ impl MetadataProvider for Tmdb {
                 }
             }
             Ok(candidates)
+        })
+    }
+
+    fn rail(
+        &self,
+        rail: RailKind,
+        page: std::num::NonZeroU32,
+    ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+        // The refusal comes first, before a URL is built or a token spent: a provider either
+        // answers or refuses, and it never spends a request finding out which (`crate::provider`).
+        if !self
+            .descriptor
+            .capabilities()
+            .contains(Capability::Trending)
+        {
+            let unsupported = ProviderError::Unsupported {
+                provider: Provider::Tmdb,
+                capability: "trending",
+            };
+            return Box::pin(async move { Err(unsupported) });
+        }
+        // This adapter serves every rail this build names, and the mapping is total, so a rail it
+        // cannot serve cannot be constructed. The page, however, is a backend's own ceiling: TMDB
+        // documents 500 pages, and asking past it is the provider's answer to give, not this
+        // adapter's to invent.
+        let url = match self.rail_url(rail, page) {
+            Ok(url) => url.to_string(),
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let fixed = rail.kind();
+
+        Box::pin(async move {
+            let fetched = self
+                .client
+                .fetch(
+                    Provider::Tmdb,
+                    Request {
+                        url: &url,
+                        credential: Some(&self.credential),
+                    },
+                )
+                .await?;
+
+            let answer: SearchAnswer =
+                Body::new(Provider::Tmdb, &fetched.bytes, fetched.media_type())
+                    .decode(SEARCH_BODY_CAP)?;
+
+            // The answer's bound is the port's page: `RAIL_PAGE_LIMIT` and not a `.take(limit)`,
+            // because a rail has no caller-supplied limit to respect.
+            Ok(answer
+                .results
+                .into_iter()
+                .filter_map(|result| result.into_candidate_for(fixed))
+                .take(crate::provider::RAIL_PAGE_LIMIT)
+                .collect())
         })
     }
 
@@ -440,10 +551,28 @@ impl SearchResult {
     /// build does not have are all skipped: a search that answered four titles and a person is a
     /// search that found four titles.
     fn into_candidate(self) -> Option<SearchCandidate> {
-        let kind = match self.media_type.as_deref() {
-            Some("movie") => TitleKind::Movie,
-            Some("tv") => TitleKind::Show,
-            _ => return None,
+        self.into_candidate_for(None)
+    }
+
+    /// The same, when the endpoint that answered already fixed the kind.
+    ///
+    /// `/search/multi` sends a `media_type` per result and it is the only thing that can say
+    /// whether a result is a film or a series, so a search passes `None` and reads it. Every other
+    /// endpoint this adapter reads is already one kind — `/movie/popular` cannot answer a series —
+    /// and those answers carry no `media_type` at all, so passing the kind the endpoint promises is
+    /// what keeps a rail from answering an empty list because a field TMDB never sends was missing.
+    ///
+    /// The promised kind is a fact about the *endpoint*, and it is stated here rather than in the
+    /// rail mapping because this is where a result becomes a candidate: a rail that asked
+    /// `/movie/upcoming` and labelled the answer `Show` would be a mistake nothing else would catch.
+    fn into_candidate_for(self, fixed: Option<TitleKind>) -> Option<SearchCandidate> {
+        let kind = match fixed {
+            Some(kind) => kind,
+            None => match self.media_type.as_deref() {
+                Some("movie") => TitleKind::Movie,
+                Some("tv") => TitleKind::Show,
+                _ => return None,
+            },
         };
         let name = self
             .title
@@ -476,8 +605,9 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::Tmdb;
+    use crate::capability::Capability;
     use crate::error::ProviderError;
-    use crate::provider::{MetadataProvider, SearchQuery};
+    use crate::provider::{MetadataProvider, RailKind, SearchQuery};
 
     /// A multi-search answer with the three shapes that matter: a film, a series, and a person.
     const MULTI: &str = r#"{
@@ -888,5 +1018,233 @@ mod tests {
         assert_eq!(descriptor.provider(), Provider::Tmdb);
         assert_eq!(descriptor.display_name(), "TMDB");
         assert!(descriptor.can(crate::capability::Capability::Search));
+        assert!(
+            descriptor.can(crate::capability::Capability::Trending),
+            "the rail operation is gated on this capability"
+        );
+    }
+
+    /// One rail and the documented path that answers it.
+    ///
+    /// A table because the mapping *is* the test: every row is one endpoint the task names, and a
+    /// rail whose path changed would fail its row rather than a shared assertion.
+    const RAIL_PATHS: [(RailKind, &str); 7] = [
+        (RailKind::TrendingWeek, "/trending/all/week"),
+        (RailKind::PopularMovies, "/movie/popular"),
+        (RailKind::TopRatedMovies, "/movie/top_rated"),
+        (RailKind::UpcomingMovies, "/movie/upcoming"),
+        (RailKind::PopularShows, "/tv/popular"),
+        (RailKind::OnTheAirShows, "/tv/on_the_air"),
+        (RailKind::TopRatedShows, "/tv/top_rated"),
+    ];
+
+    /// One page of a rail, in the shape `/movie/popular` documents: no `media_type`, because the
+    /// endpoint has already said what kind it answers.
+    const MOVIE_RAIL: &str = r#"{
+      "page": 1,
+      "results": [
+        {"id": 603, "title": "The Matrix", "release_date": "1999-03-31"},
+        {"id": 27205, "title": "Inception", "release_date": "2010-07-16"}
+      ],
+      "total_pages": 500
+    }"#;
+
+    /// One page of `/trending/all/week`, which does carry a `media_type` per result — and a person,
+    /// which is not a title.
+    const TRENDING_RAIL: &str = r#"{
+      "page": 1,
+      "results": [
+        {"media_type": "movie", "id": 603, "title": "The Matrix", "release_date": "1999-03-31"},
+        {"media_type": "tv", "id": 1396, "name": "Breaking Bad", "first_air_date": "2008-01-20"},
+        {"media_type": "person", "id": 6384, "name": "Keanu Reeves"}
+      ]
+    }"#;
+
+    fn page(number: u32) -> std::num::NonZeroU32 {
+        std::num::NonZeroU32::new(number).expect("the test passes a non-zero page")
+    }
+
+    #[tokio::test]
+    async fn every_rail_reads_the_endpoint_it_names() {
+        for (rail, endpoint) in RAIL_PATHS {
+            let server = MockServer::start().await;
+            let body = if rail == RailKind::TrendingWeek {
+                TRENDING_RAIL
+            } else {
+                MOVIE_RAIL
+            };
+            Mock::given(method("GET"))
+                .and(path(endpoint))
+                .and(query_param("page", "1"))
+                .and(header("authorization", "Bearer test-token"))
+                .respond_with(json(body))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let found = adapter(&server)
+                .rail(rail, page(1))
+                .await
+                .unwrap_or_else(|error| panic!("{} answered {error:?}", rail.as_str()));
+
+            assert!(!found.is_empty(), "{} answered nothing", rail.as_str());
+            for candidate in &found {
+                assert_eq!(candidate.external_id().provider(), Provider::Tmdb);
+                // The endpoint fixes the kind for every rail but the mixed one, and a candidate
+                // labelled against the endpoint that answered it is the mistake this pins.
+                if let Some(kind) = rail.kind() {
+                    assert_eq!(candidate.kind(), kind, "{}", rail.as_str());
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_trending_rail_carries_both_kinds_and_drops_what_is_not_a_title() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/trending/all/week"))
+            .respond_with(json(TRENDING_RAIL))
+            .mount(&server)
+            .await;
+
+        let found = adapter(&server)
+            .rail(RailKind::TrendingWeek, page(1))
+            .await
+            .expect("the rail answers");
+
+        assert_eq!(found.len(), 2, "a person is not a title: {found:?}");
+        assert_eq!(
+            found[0].kind(),
+            peregrine_domain::catalogue::TitleKind::Movie
+        );
+        assert_eq!(
+            found[1].kind(),
+            peregrine_domain::catalogue::TitleKind::Show
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rail_page_is_the_callers_and_not_always_the_first() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/movie/top_rated"))
+            .and(query_param("page", "3"))
+            .respond_with(json(MOVIE_RAIL))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        adapter(&server)
+            .rail(RailKind::TopRatedMovies, page(3))
+            .await
+            .expect("the third page answers");
+    }
+
+    #[tokio::test]
+    async fn a_rail_that_needs_details_does_not_need_a_media_type() {
+        // The bug this pins: `/movie/popular` sends no `media_type`, so a mapping that read one
+        // would answer an empty list for every single-kind rail — a screen with rails that are
+        // permanently empty and no error anywhere to explain it.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/movie/popular"))
+            .respond_with(json(MOVIE_RAIL))
+            .mount(&server)
+            .await;
+
+        let found = adapter(&server)
+            .rail(RailKind::PopularMovies, page(1))
+            .await
+            .expect("the rail answers");
+
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].name().as_str(), "The Matrix");
+    }
+
+    #[tokio::test]
+    async fn a_refused_credential_on_a_rail_is_unauthorized_and_a_broken_provider_is_not() {
+        for (status, unauthorized) in [(401, true), (500, false)] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/movie/popular"))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+
+            let error = adapter(&server)
+                .rail(RailKind::PopularMovies, page(1))
+                .await
+                .expect_err("the status is final");
+
+            if unauthorized {
+                assert_eq!(
+                    error,
+                    ProviderError::Unauthorized {
+                        provider: Provider::Tmdb
+                    },
+                    "status {status}"
+                );
+            } else {
+                assert!(
+                    matches!(error, ProviderError::Transport { .. }),
+                    "status {status} became {error:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rail_answer_that_is_not_what_the_provider_documents_is_drift() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/tv/on_the_air"))
+            .respond_with(json("{\"results\": \"not a list\"}"))
+            .mount(&server)
+            .await;
+
+        let error = adapter(&server)
+            .rail(RailKind::OnTheAirShows, page(1))
+            .await
+            .expect_err("the shape drifted");
+
+        assert!(
+            matches!(error, ProviderError::SchemaDrift { .. }),
+            "got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rail_the_descriptor_does_not_declare_is_refused_without_a_request() {
+        // The port's rule, at the layer that decides it: an adapter that has said it cannot serve
+        // trending must refuse, name itself and the capability, and spend no token finding out. The
+        // server below would answer 200 to everything, so an implementation that asked first would
+        // pass a weaker test — `.expect(0)` is what makes this one about the refusal.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(json(MOVIE_RAIL))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let refusing = Tmdb::with_capabilities(
+            &server.uri(),
+            &server.uri(),
+            "test-token".to_owned(),
+            crate::capability::Capabilities::EMPTY.with(Capability::Search),
+        )
+        .expect("the adapter builds");
+        let error = refusing
+            .rail(RailKind::PopularMovies, page(1))
+            .await
+            .expect_err("the capability is not declared");
+
+        assert_eq!(
+            error,
+            ProviderError::Unsupported {
+                provider: Provider::Tmdb,
+                capability: "trending",
+            }
+        );
     }
 }

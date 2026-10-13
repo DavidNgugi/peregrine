@@ -32,9 +32,12 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
 pub use runtime::{
-    CredentialRequest, Health, LibraryTitleDetail, Runtime, RuntimeConfig, RuntimeError,
+    CredentialRequest, Health, HomeRail, LibraryTitleDetail, Runtime, RuntimeConfig, RuntimeError,
     ShellStatus, StartedJob,
 };
+// What one rail holds, for the reason the block above gives: the command surface answers a DTO
+// built from a `RailItem`, and it may not reach into `peregrine-app`'s job module to name it.
+pub use jobs::discover_rails::RailItem;
 // The credential commands hand the runtime a candidate, and the wrapper that makes one safe to
 // hold belongs to the secrets crate: re-exported for the reason above, so the command surface can
 // name what it passes without a second dependency edge (AGENTS R6, SECURITY.md T13).
@@ -55,3 +58,7 @@ pub use peregrine_storage::{
 pub use jiff::Timestamp;
 
 pub use peregrine_providers::error::ProviderError;
+// The rail vocabulary, for the same reason: the command surface answers a DTO whose `rail` field
+// is one of these, and a caller that had to reach for `peregrine-providers` to name it would be a
+// second dependency edge for a string (AGENTS R6).
+pub use peregrine_providers::provider::RailKind;

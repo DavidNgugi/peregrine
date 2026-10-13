@@ -582,6 +582,19 @@ mod tests {
                 })
             })
         }
+
+        fn rail(
+            &self,
+            _rail: peregrine_providers::RailKind,
+            _page: std::num::NonZeroU32,
+        ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
     }
 
     /// One database, bus, registry, and scheduler, with the store a test chose.

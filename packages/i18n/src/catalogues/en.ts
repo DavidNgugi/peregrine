@@ -30,7 +30,34 @@ export const en = {
       title: "Discover",
       empty: {
         title: "Nothing here yet",
-        body: "Peregrine has no catalogue data yet. Titles appear here once discovery is available.",
+        body: "Peregrine has no catalogue data yet. Refresh to ask the providers — a provider key is set up in Settings.",
+      },
+      refresh: {
+        action: "Refresh",
+        running: "Refreshing…",
+        failed: "The refresh could not be started. Nothing was lost — try again.",
+      },
+      hero: {
+        label: "Featured title",
+        open: "Open this title",
+      },
+      kind: {
+        movie: "Film",
+        show: "Series",
+      },
+      rail: {
+        trendingWeek: "Trending this week",
+        popularMovies: "Popular films",
+        topRatedMovies: "Top rated films",
+        upcomingMovies: "Coming soon",
+        popularShows: "Popular series",
+        onTheAirShows: "On the air",
+        topRatedShows: "Top rated series",
+        unknown: "More to watch",
+        empty: {
+          title: "Nothing in this rail yet",
+          body: "Refresh to ask the providers, or add a provider key in Settings.",
+        },
       },
       search: {
         label: "Search for a title",
@@ -38,9 +65,13 @@ export const en = {
         action: "Search",
         searching: "Searching the providers…",
       },
-      failed: {
+      searchFailed: {
         title: "The search could not be made",
         body: "Nothing was lost — the library is unchanged. Check the provider's API key in Settings, then try again.",
+      },
+      failed: {
+        title: "The rails could not be read",
+        body: "Nothing was lost. Try again, or open Diagnostics to see what the core reported.",
       },
       none: {
         title: "Nothing matched",

@@ -14,6 +14,7 @@
 import { commands } from "./generated/bindings.js";
 import type {
   BuildInfo,
+  HomeRailDto,
   JobStarted,
   LibraryRootDto,
   EpisodeDto,
@@ -126,6 +127,29 @@ export async function searchTitles(query: string, limit?: number): Promise<Title
  */
 export async function searchProviders(query: string, limit?: number): Promise<TitleMatchDto[]> {
   return unwrap(commands.searchProviders(query, limit ?? null));
+}
+
+/**
+ * Every rail the Discover screen draws, from what the catalogue and the cache already hold.
+ *
+ * A cache read and never a request: the core answers from the rails a job filled, and reports a
+ * rail nobody has fetched yet as an empty rail rather than omitting it, which is what gives the
+ * screen its layout before anything has painted (`FLOWS F2`). `poster` is an absolute path or
+ * nothing, for the reason `getTitle`'s is.
+ */
+export async function homeRails(): Promise<HomeRailDto[]> {
+  return unwrap(commands.homeRails());
+}
+
+/**
+ * Fills the rails the configured providers publish, artwork included, and answers with the job.
+ *
+ * A job rather than a wait, and the screen follows it through `job://state`. `coalesced` says
+ * whether a fetch was already under way and this call joined it, so a screen can say so rather
+ * than pretending it started one.
+ */
+export async function refreshRails(): Promise<JobStarted> {
+  return unwrap(commands.refreshRails());
 }
 
 /**
