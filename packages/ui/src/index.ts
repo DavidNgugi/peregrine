@@ -35,8 +35,12 @@ export type { ShortcutKeysProps } from "./ShortcutKeys.js";
 export { Sidebar, SidebarItem } from "./Sidebar.js";
 export type { SidebarItemProps, SidebarProps } from "./Sidebar.js";
 export { Switch } from "./Switch.js";
-export { TextInput } from "./TextInput.js";
-export type { TextInputProps } from "./TextInput.js";
 export type { SwitchProps } from "./Switch.js";
 export { Table } from "./Table.js";
 export type { TableColumn, TableProps } from "./Table.js";
+export { TextInput } from "./TextInput.js";
+export type { TextInputProps } from "./TextInput.js";
+export { CARD_SIZES, TitleCard } from "./TitleCard.js";
+// `posterVisible` and `formatRating` are the card's own decisions rather than primitives, so they are
+// not exported as ones: the card's tests import them from the module, the way the link's do.
+export type { CardAvailability, CardSize, TitleCardProps } from "./TitleCard.js";

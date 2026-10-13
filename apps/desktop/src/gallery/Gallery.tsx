@@ -21,6 +21,7 @@
 
 import {
   Button,
+  CARD_SIZES,
   Dialog,
   EmptyState,
   ErrorState,
@@ -40,6 +41,7 @@ import {
   Switch,
   Table,
   TextInput,
+  TitleCard,
   type TableColumn,
 } from "@peregrine/ui";
 import type { ReactElement, ReactNode } from "react";
@@ -72,6 +74,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "Switch",
   "Table",
   "TextInput",
+  "TitleCard",
 ];
 
 /** The two themes the token pipeline ships. */
@@ -138,8 +141,7 @@ const COLUMNS: readonly TableColumn<Row>[] = [
   { id: "size", header: "Size", numeric: true, cell: (row) => row.size },
 ];
 
-/** The dialog's demo: closed until the reader opens it, because an open one covers the gallery. */
-function GalleryDialog(): ReactElement {
+/** The dialog's demo: closed until the reader opens it, because an open one covers the gallery. */function GalleryDialog(): ReactElement {
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col items-start gap-2">
@@ -185,6 +187,29 @@ function GalleryDialog(): ReactElement {
     </div>
   );
 }
+
+/**
+ * A stand-in poster for the card section.
+ *
+ * The gallery has no image cache and no provider, and a tile with nothing in it cannot be reviewed.
+ * A data URI rather than a file in `public/`: the app's own CSP already allows `img-src … data:`, so
+ * this adds no asset the build has to carry and no second copy of the same picture for a screenshot.
+ */
+const POSTER = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#1b1d3a"/>
+        <stop offset="0.55" stop-color="#4a3a63"/>
+        <stop offset="1" stop-color="#8a5a52"/>
+      </linearGradient>
+    </defs>
+    <rect width="200" height="300" fill="url(#sky)"/>
+    <circle cx="132" cy="96" r="34" fill="#f2e6c8" opacity="0.92"/>
+    <path d="M0 214c38-16 74 4 106-8s66-30 94-18v112H0Z" fill="#241f36"/>
+    <path d="M0 250c46-12 82 12 118 2s58-16 82-8v56H0Z" fill="#15121f"/>
+  </svg>`,
+)}`;
 
 export function Gallery(): ReactElement {
   const [theme, toggleTheme] = useGalleryTheme();
@@ -376,6 +401,68 @@ export function Gallery(): ReactElement {
         <div className="flex flex-col items-start gap-2">
           <Link href="/title/movie/7">A title's own screen</Link>
           <Link href="/library">The library</Link>
+        </div>
+      </Section_>
+
+      <Section_
+        component="TitleCard"
+        description="A poster tile. The 2:3 box is reserved before the bytes arrive, so a late, failed, or never-cached image never moves the grid; the chip's word and the rating's spoken form come from the caller, because the kit holds no copy."
+      >
+        <div className="flex w-full flex-col gap-6">
+          <div className="flex flex-wrap items-end gap-3">
+            {CARD_SIZES.map((size) => (
+              <div className="flex flex-col items-start gap-1" key={size}>
+                <TitleCard
+                  availability="acquiring"
+                  availabilityLabel="Downloading"
+                  href="/title/movie/1"
+                  meta="1979 · Film"
+                  poster={POSTER}
+                  rating={8.5}
+                  ratingLabel="rated 8.5 out of 10"
+                  size={size}
+                  title="Alien"
+                />
+                <span className="text-micro text-text-tertiary">{size}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-start gap-3">
+            <TitleCard
+              href="/title/movie/2"
+              meta="2010 · Film"
+              poster={POSTER}
+              rating={7.25}
+              size="lg"
+              title="Inception"
+            />
+            <TitleCard
+              availability="unavailable"
+              availabilityLabel="Unavailable"
+              href="/title/movie/3"
+              meta="1999 · Film"
+              poster={POSTER}
+              size="lg"
+              title="The Matrix"
+            />
+            <TitleCard
+              availability="watchlisted"
+              availabilityLabel=""
+              href="/title/movie/4"
+              meta="2019 · Film"
+              placeholder="oklch(0.45 0.06 250)"
+              poster={null}
+              size="lg"
+              title="No poster cached"
+            />
+            <TitleCard
+              href="/title/series/5"
+              meta="2008 · Series"
+              priority
+              size="lg"
+              title="No artwork at all"
+            />
+          </div>
         </div>
       </Section_>
 

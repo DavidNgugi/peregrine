@@ -62,6 +62,8 @@ const PATHS = {
   ),
   /** The dark theme is one toggle away. */
   moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+  /** A rating figure: the one mark that says a number on a badge is a score. */
+  star: <path d="m12 3.6 2.6 5.4 5.9.8-4.3 4.1 1.1 5.9-5.3-2.9-5.3 2.9 1.1-5.9-4.3-4.1 5.9-.8Z" />,
 } as const;
 
 /** The geometry of one icon, as elements inside the shared `svg`. */

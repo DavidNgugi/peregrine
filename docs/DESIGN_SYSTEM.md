@@ -171,6 +171,8 @@ Rules: no web fonts are loaded (a font flash is the most common "this is a websi
 
 Cards use the same radius and shadow at every size; a poster is never individually styled. Fixed tile aspect ratios (2:3 poster, 16:9 still) are what keep virtualization and the scrollbar stable.
 
+A poster tile has five widths, all on the 8 px rhythm so a rail of them sits on the space scale: **88** (`xs`), **112** (`sm`), **144** (`md`), **176** (`lg`), **216** (`xl`). The height is never set — it is the ratio applied to the width — which is what makes a late, failed, or never-cached poster occupy the same rectangle as a loaded one. `md` is the default a grid uses before the density control (PG-E7-18) says otherwise, and `xs` is dense enough that a status chip truncates rather than overflowing the tile.
+
 ---
 
 ## 5. Motion
