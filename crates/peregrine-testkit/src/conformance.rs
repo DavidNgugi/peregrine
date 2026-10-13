@@ -15,6 +15,7 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use jiff::Timestamp;
+use peregrine_domain::id::Provider;
 use peregrine_providers::{
     Capability, MetadataProvider, ProviderError, RAIL_PAGE_LIMIT, RailKind, SearchCandidate,
     SearchQuery,
@@ -115,7 +116,10 @@ pub fn id_generator_satisfies_the_port(next_id: impl Fn() -> Ulid) -> Set<Ulid> 
 ///   provider's ids is the coupling ADR 0007 rule 2 exists to prevent — the reference
 ///   implementation's TVDB adapter called TMDB internally and married the two forever — and
 ///   it is the one fact about a candidate the suite can check without knowing the provider's
-///   fixtures.
+///   fixtures;
+/// - a candidate that carries artwork carries *something*: an empty or whitespace-only path is a
+///   request for an image host's root dressed as a poster, and the cache key it would build names
+///   no image. A provider that has no poster for an item says so with `None`.
 ///
 /// And the same shape for `rail`, with the two differences a rail has: the bound is
 /// [`RAIL_PAGE_LIMIT`] rather than a caller's limit, and a provider that *declares* `trending` and
@@ -195,15 +199,30 @@ pub async fn metadata_provider_satisfies_the_port(
     );
 
     for candidate in &candidates {
-        assert_eq!(
-            candidate.external_id().provider(),
-            named,
-            "{named} answered a candidate identified by {}",
-            candidate.external_id().provider()
-        );
+        check_candidate(candidate, named, "search");
     }
 
     candidates
+}
+
+/// The facts about one candidate the suite can check without knowing a provider's fixtures.
+///
+/// Both halves are identity rules rather than taste: the id must name the provider that answered,
+/// and artwork that is present must address something. `operation` names the call that answered, so
+/// a failure says which endpoint produced it.
+fn check_candidate(candidate: &SearchCandidate, named: Provider, operation: &str) {
+    assert_eq!(
+        candidate.external_id().provider(),
+        named,
+        "{named} answered a {operation} candidate identified by {}",
+        candidate.external_id().provider()
+    );
+    if let Some(path) = candidate.artwork_path() {
+        assert!(
+            !path.trim().is_empty(),
+            "{named} answered a {operation} candidate whose artwork path is blank, which names no image"
+        );
+    }
 }
 
 /// The rail half of the contract, which is the search half's shape with a rail's two differences.
@@ -245,12 +264,7 @@ async fn check_rail(provider: &dyn MetadataProvider, rail: RailKind, page: NonZe
                 candidates.len()
             );
             for candidate in &candidates {
-                assert_eq!(
-                    candidate.external_id().provider(),
-                    named,
-                    "{named} answered a rail candidate identified by {}",
-                    candidate.external_id().provider()
-                );
+                check_candidate(candidate, named, "rail");
             }
         }
         // A provider with a trending list and no list for this particular rail is conforming, and
@@ -359,7 +373,13 @@ mod tests {
     fn the_fake_provider_satisfies_the_port() {
         // The fake must pass the same suite every adapter passes. If this fails, the fake is
         // not a stand-in for the port and every test built on it is measuring something else.
-        let fake = searching_fake(vec![candidate(Provider::Tmdb, "1396", "Breaking Bad")]);
+        // The fixture carries the two fields a list answer adds, because a rule the suite states
+        // about them has to be satisfied by the fake the suite is demonstrated with.
+        let fake = searching_fake(vec![
+            candidate(Provider::Tmdb, "1396", "Breaking Bad")
+                .with_artwork_path(Some("/poster.jpg".to_owned()))
+                .with_rating(Some(9.2)),
+        ]);
         let answered = block_on(metadata_provider_satisfies_the_port(
             &fake,
             &probe(),
@@ -399,7 +419,7 @@ mod tests {
 
     #[test]
     fn the_suite_is_only_worth_running_if_a_broken_provider_fails_it() {
-        // Three ways a provider can break the contract, each pinned against one that does.
+        // Four ways a provider can break the contract, each pinned against one that does.
         let liar = searching_fake(vec![candidate(Provider::Tvdb, "81189", "Breaking Bad")]);
         assert!(
             catch_async(metadata_provider_satisfies_the_port(
@@ -444,6 +464,21 @@ mod tests {
             ))
             .is_err(),
             "a provider that declares search and then fails must not conform"
+        );
+
+        let blank_artwork = searching_fake(vec![
+            candidate(Provider::Tmdb, "603", "The Matrix")
+                .with_artwork_path(Some("   ".to_owned())),
+        ]);
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &blank_artwork,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
+            "artwork that is only whitespace names no image and must not conform"
         );
     }
 

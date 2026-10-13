@@ -254,7 +254,9 @@ pub struct LibraryTitleDetail {
 /// string is not a stable key. [`RailKind`](peregrine_providers::RailKind)'s own name travels
 /// beside it so the screen can key a translation on something that does not change when the words
 /// do.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Not `Eq`, because an item carries the provider's score as a `f64`: a float has no total equality,
+/// and the rail is a projection of answers rather than a value to compare for identity.
+#[derive(Debug, Clone, PartialEq)]
 pub struct HomeRail {
     /// The rail's stable identity.
     pub rail: peregrine_providers::RailKind,

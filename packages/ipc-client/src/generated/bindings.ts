@@ -750,6 +750,14 @@ export type RailItemDto = {
 	 *  scopes is the shell's business rather than this layer's.
 	 */
 	poster: string | null,
+	/**
+	 *  The provider's own score for the title, or `null` when the list answer carried none.
+	 * 
+	 *  `null` is not `0.0`: a provider that sends no score, and one whose value for an unrated item
+	 *  the adapter mapped to absent, both arrive here as "no badge" — which is what the tile draws,
+	 *  and a `0.0` badge would be a claim the provider never made.
+	 */
+	rating: number | null,
 };
 
 /**

@@ -546,6 +546,30 @@ struct SearchResult {
     release_date: Option<String>,
     #[serde(default)]
     first_air_date: Option<String>,
+    /// The poster's path on the image CDN, which every list endpoint sends. Documented as
+    /// nullable, and an empty string is the same answer as `null`.
+    #[serde(default)]
+    poster_path: Option<String>,
+    /// The audience score, out of ten. **`0.0` is what TMDB sends an item nobody has voted on**, so
+    /// it is read together with `vote_count` rather than on its own.
+    #[serde(default)]
+    vote_average: Option<f64>,
+    #[serde(default)]
+    vote_count: Option<u64>,
+}
+
+/// TMDB's score, or `None` when the item is unrated.
+///
+/// A `vote_average` of zero with nothing counting it is not a rating of zero — it is the value TMDB
+/// puts on an item nobody has voted on — and a `0.0` badge on a poster is a claim the provider never
+/// made. A zero *with* votes behind it is a real, if unflattering, score and is kept.
+fn scored_rating(average: Option<f64>, votes: Option<u64>) -> Option<f64> {
+    let average = average?;
+    if average == 0.0 && votes.unwrap_or(0) == 0 {
+        None
+    } else {
+        Some(average)
+    }
 }
 
 impl SearchResult {
@@ -569,6 +593,11 @@ impl SearchResult {
     /// The promised kind is a fact about the *endpoint*, and it is stated here rather than in the
     /// rail mapping because this is where a result becomes a candidate: a rail that asked
     /// `/movie/upcoming` and labelled the answer `Show` would be a mistake nothing else would catch.
+    ///
+    /// The artwork and the score come along because a list answer is where they are free
+    /// (`PG-E7-08`): reading them here is what makes filling a rail of posters cost one request per
+    /// title rather than two. A path that is empty or whitespace is an absent path rather than an
+    /// empty one, for the reason [`SearchCandidate::with_artwork_path`] states.
     fn into_candidate_for(self, fixed: Option<TitleKind>) -> Option<SearchCandidate> {
         let kind = match fixed {
             Some(kind) => kind,
@@ -591,7 +620,13 @@ impl SearchResult {
             .or(self.first_air_date)
             .filter(|date| !date.is_empty())
             .and_then(|date| date.parse().ok());
-        Some(SearchCandidate::new(external_id, name, kind, released))
+        let artwork = self.poster_path.filter(|path| !path.trim().is_empty());
+        let rating = scored_rating(self.vote_average, self.vote_count);
+        Some(
+            SearchCandidate::new(external_id, name, kind, released)
+                .with_artwork_path(artwork)
+                .with_rating(rating),
+        )
     }
 }
 
@@ -614,10 +649,14 @@ mod tests {
     use crate::provider::{MetadataProvider, RailKind, SearchQuery};
 
     /// A multi-search answer with the three shapes that matter: a film, a series, and a person.
+    ///
+    /// The film carries artwork and a score and the series carries neither, because a list answer
+    /// may do either and both are candidates.
     const MULTI: &str = r#"{
       "page": 1,
       "results": [
-        {"media_type": "movie", "id": 603, "title": "The Matrix", "release_date": "1999-03-31"},
+        {"media_type": "movie", "id": 603, "title": "The Matrix", "release_date": "1999-03-31",
+         "poster_path": "/matrix.jpg", "vote_average": 8.2, "vote_count": 24000},
         {"media_type": "tv", "id": 1396, "name": "Breaking Bad", "first_air_date": "2008-01-20"},
         {"media_type": "person", "id": 6384, "name": "Keanu Reeves"}
       ],
@@ -667,8 +706,63 @@ mod tests {
         assert_eq!(found[0].name().as_str(), "The Matrix");
         assert_eq!(found[0].external_id().provider(), Provider::Tmdb);
         assert_eq!(found[0].external_id().value(), "603");
+        assert_eq!(
+            found[0].artwork_path(),
+            Some("/matrix.jpg"),
+            "a list answer's poster is carried rather than fetched again"
+        );
+        assert_eq!(found[0].rating(), Some(8.2));
         assert_eq!(found[1].name().as_str(), "Breaking Bad");
         assert!(found[1].released().is_some(), "the first air date is read");
+        assert_eq!(found[1].artwork_path(), None, "an item with no poster");
+        assert_eq!(found[1].rating(), None, "an item with no score");
+    }
+
+    #[tokio::test]
+    async fn a_list_item_maps_its_artwork_and_its_score_and_an_unrated_one_maps_neither() {
+        // Four items and the four answers a provider can give: both, neither, a score of zero with
+        // nothing counting it, and a path that is only whitespace. **The zero is the one worth
+        // pinning**: TMDB sends `vote_average: 0` for an item nobody has voted on, and a `0.0` badge
+        // on a poster is a claim the provider never made.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/movie/popular"))
+            .respond_with(json(
+                r#"{"results": [
+                    {"id": 1, "title": "Rated", "poster_path": "/one.jpg", "vote_average": 8.2, "vote_count": 24000},
+                    {"id": 2, "title": "Bare"},
+                    {"id": 3, "title": "Unrated", "poster_path": "   ", "vote_average": 0, "vote_count": 0},
+                    {"id": 4, "title": "Zero but voted", "vote_average": 0, "vote_count": 12}
+                ]}"#,
+            ))
+            .mount(&server)
+            .await;
+
+        let found = adapter(&server)
+            .rail(RailKind::PopularMovies, page(1))
+            .await
+            .expect("the rail answers");
+
+        assert_eq!(found.len(), 4);
+        assert_eq!(found[0].artwork_path(), Some("/one.jpg"));
+        assert_eq!(found[0].rating(), Some(8.2));
+        assert_eq!(found[1].artwork_path(), None);
+        assert_eq!(found[1].rating(), None);
+        assert_eq!(
+            found[2].artwork_path(),
+            None,
+            "a whitespace path is an absent path, not an empty one"
+        );
+        assert_eq!(
+            found[2].rating(),
+            None,
+            "a zero an item's own answer gives with no votes is unrated"
+        );
+        assert_eq!(
+            found[3].rating(),
+            Some(0.0),
+            "a zero the provider counted is a score"
+        );
     }
 
     #[tokio::test]
@@ -1043,11 +1137,13 @@ mod tests {
     ];
 
     /// One page of a rail, in the shape `/movie/popular` documents: no `media_type`, because the
-    /// endpoint has already said what kind it answers.
+    /// endpoint has already said what kind it answers. One item carries artwork and a score and the
+    /// other carries neither, which is what a real page looks like.
     const MOVIE_RAIL: &str = r#"{
       "page": 1,
       "results": [
-        {"id": 603, "title": "The Matrix", "release_date": "1999-03-31"},
+        {"id": 603, "title": "The Matrix", "release_date": "1999-03-31",
+         "poster_path": "/matrix.jpg", "vote_average": 7.0, "vote_count": 100},
         {"id": 27205, "title": "Inception", "release_date": "2010-07-16"}
       ],
       "total_pages": 500
@@ -1164,6 +1260,13 @@ mod tests {
 
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].name().as_str(), "The Matrix");
+        assert_eq!(found[0].artwork_path(), Some("/matrix.jpg"));
+        assert_eq!(found[0].rating(), Some(7.0));
+        assert_eq!(
+            found[1].artwork_path(),
+            None,
+            "an item the list gave no poster still comes back"
+        );
     }
 
     #[tokio::test]

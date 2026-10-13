@@ -26,6 +26,9 @@ function item(overrides: Partial<RailItemDto> = {}): RailItemDto {
     // `null` rather than a path: a Node test has no asset protocol, so a poster reference could not
     // become a URL and the markup below is the reserved placeholder the tile draws either way.
     poster: null,
+    // `null` rather than a score: most of what the screen draws has no badge, and a test that wanted
+    // one says so.
+    rating: null,
     ...overrides,
   };
 }
@@ -85,6 +88,17 @@ describe("DiscoverView", () => {
     expect(html).toContain("/title/movie/2");
     // The accessible name a screen reader reads; the tile itself carries no visible caption.
     expect(html).toContain("The Matrix, 1999 · Film");
+  });
+
+  it("draws the score a rail item carries, and no badge when it carries none", () => {
+    // The badge is `TitleCard`'s and is not this screen's to change; what this owns is that the
+    // rating the core answered with reaches the card, and that an item without one draws nothing
+    // rather than a zero the provider never sent.
+    const scored = markup(railsView({ rails: [rail({ items: [item({ rating: 8.2 })] })] }));
+    expect(scored).toContain("8.2");
+
+    const unscored = markup(railsView({ rails: [rail({ items: [item({ rating: null })] })] }));
+    expect(unscored).not.toContain("8.2");
   });
 
   it("gives every rail a heading and its own empty state, fetched or not", () => {

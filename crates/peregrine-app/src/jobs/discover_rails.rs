@@ -6,21 +6,22 @@
 //! from, and this is the only writer (`FLOWS F2`: the screen paints from what is here, and the
 //! network work is a job whose completion re-reads).
 //!
-//! # The two phases, and why the second is bounded
+//! # The two phases, and why the second needs no budget
 //!
-//! A rail answer is a list of *stubs* — an id, a name, a kind, a date — and a stub has no poster.
-//! The screen this exists for is a wall of posters, so phase one syncs the stubs into the catalogue
-//! and publishes them, and phase two fills in details and fetches a poster for as many of them as
-//! [`ARTWORK_BUDGET`] allows, publishing again with what landed.
+//! A rail answer is a list of *candidates* — an id, a name, a kind, a date, and, from a provider
+//! whose list endpoints send them, the poster's path and the title's score. The screen this exists
+//! for is a wall of posters, so phase one syncs every candidate into the catalogue, artwork and
+//! score included, and publishes the rails; phase two fetches each title's poster into the blob
+//! cache, publishing again with what landed.
 //!
-//! The bound is the point worth arguing about. A rail page is twenty titles and a screen has seven
-//! rails, so filling every rail's artwork in one pass is up to a hundred and fifty extra requests
-//! per visit, which is not a thing this application may do to somebody else's API (`AGENTS R24`) or
-//! to the user's connection. What it does instead is: every rail's first titles, interleaved and
-//! de-duplicated ([`artwork_order`]), until the budget is spent — a hero and a first row of posters
-//! on every rail rather than one full rail above six rows of reserved rectangles. The rest keep
-//! their reserved geometry and fill in on a later run, because a title whose poster the cache
-//! already holds is skipped.
+//! **Phase two used to stop after a fixed number of titles, and that bound was the defect.** It
+//! existed because a candidate carried no artwork, so learning a poster's path cost a *details*
+//! request per title — two requests per tile, and a budget of twenty-four kept the wall four-fifths
+//! grey placeholders forever, because there was never a later run to fill the rest in. A list answer
+//! already carries the path (`PG-E7-08`), so the second request is gone, every rail item is filled
+//! in one run, and what paces the requests is the per-host token bucket the provider client already
+//! enforces (`AGENTS R24`) rather than a constant here. A title whose poster the cache already holds
+//! costs a `stat` and no request, which is what keeps a second visit cheap.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
@@ -49,20 +50,12 @@ pub const KIND: &str = "discover.rails";
 /// a screen is waiting, and nothing is on fire.
 pub const PRIORITY: i32 = 10;
 
-/// How many posters one run will fetch.
-///
-/// Enough that the part of the screen a person actually looks at — the hero and the top of every
-/// rail — is artwork rather than geometry. It is a budget over *titles* rather than a page count,
-/// because a title appears in several rails (`/trending/all/week` and `/movie/popular` overlap
-/// freely) and the budget is what bounds the requests a single visit spends.
-pub const ARTWORK_BUDGET: usize = 24;
-
 /// One title as a rail shows it.
 ///
 /// The row id is the stable key a screen navigates with, and the name and year are what the
 /// catalogue holds. Mapping a row into this is the core's business rather than a screen's
 /// (`AGENTS R7`), which is why the DTO the IPC layer answers with is built from it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RailItem {
     /// The catalogue row, which is what opening the title needs.
     pub title_id: i64,
@@ -74,6 +67,9 @@ pub struct RailItem {
     pub year: Option<i32>,
     /// Where the cached poster is on this machine, or `None` while it has not been fetched.
     pub poster: Option<std::path::PathBuf>,
+    /// The provider's own score for the title, when the list answer carried one, so the card a
+    /// screen draws can show its badge without a second read.
+    pub rating: Option<f64>,
 }
 
 /// What the Discover screen reads: every rail, as the catalogue and the cache last answered.
@@ -271,7 +267,7 @@ impl DiscoverRailsJob {
         self.phase(job, attempt, 500).await;
 
         let posters = self
-            .prefetch_artwork(&rails, adapters, &cancellation)
+            .prefetch_artwork(job, attempt, &rails, adapters, &cancellation)
             .await?;
         if !posters.is_empty() {
             let mut with_artwork = rails.clone();
@@ -301,7 +297,10 @@ impl DiscoverRailsJob {
     /// matching rule, then a stub — because a rail item *is* a
     /// [`SearchCandidate`], and there is no second title shape to invent. The sync service's
     /// `sync_search` takes a [`SearchQuery`](peregrine_providers::SearchQuery) and a rail has none,
-    /// which is the only reason this is not a call to it.
+    /// and it leaves a title it already holds alone rather than writing the artwork and score a
+    /// list answer carries, which is the one thing this path has to do; `record_list_answer` is
+    /// that write, so the rule it follows (`COALESCE`, so an absent field never clears a stored
+    /// one) is the sync's rather than this job's.
     async fn sync_rail(
         &self,
         provider: &dyn MetadataProvider,
@@ -337,11 +336,16 @@ impl DiscoverRailsJob {
     }
 
     /// One candidate, in the catalogue, as a rail item — or `None` when it cannot be one.
+    ///
+    /// The write is [`peregrine_sync::record_list_answer`] rather than a details read: a list answer
+    /// already carries the poster's path and the score, so the catalogue is given them here and the
+    /// artwork phase below reads the path back out. That is what turns two requests per title into
+    /// one (`PG-E7-08`).
     async fn upsert(
         &self,
         candidate: SearchCandidate,
         at: i64,
-    ) -> Result<Option<RailItem>, StorageError> {
+    ) -> Result<Option<RailItem>, peregrine_sync::SyncError> {
         let title_id = match self
             .database
             .title_for_external_id(candidate.external_id())
@@ -353,15 +357,18 @@ impl DiscoverRailsJob {
                 None => return Ok(None),
             },
         };
+        let written =
+            peregrine_sync::record_list_answer(&self.database, title_id, &candidate, at).await?;
         Ok(Some(RailItem {
             title_id,
-            kind: candidate.kind(),
-            name: candidate.name().as_str().to_owned(),
+            kind: written.kind,
+            name: written.name.as_str().to_owned(),
             // The date a *candidate* carries is what the provider listed it under; a title the
             // catalogue already holds and a provider dated differently keeps the candidate's,
             // because the rail's own answer is the more recent statement of the two.
-            year: candidate.released().map(|date| i32::from(date.year())),
+            year: written.released.map(|date| i32::from(date.year())),
             poster: None,
+            rating: written.rating,
         }))
     }
 
@@ -425,7 +432,13 @@ impl DiscoverRailsJob {
         }
     }
 
-    /// Fetches posters for the first [`ARTWORK_BUDGET`] titles that do not already have one.
+    /// Fetches every rail title's poster that the cache does not already hold.
+    ///
+    /// **Every title, in one run, and no budget.** The path came from the list answer the candidate
+    /// already was, so filling a tile costs one request rather than two, and what paces those
+    /// requests is the provider client's per-host token bucket (`AGENTS R24`) rather than a constant
+    /// here. [`artwork_order`] still decides *which* poster is worth having first when the network
+    /// is slow; it no longer decides how many are asked for.
     ///
     /// Returns the poster paths it put in the cache, keyed by title. A failure for one title is
     /// logged and does not end the run: a rail whose artwork did not arrive is a rail of reserved
@@ -433,108 +446,86 @@ impl DiscoverRailsJob {
     /// did arrive.
     async fn prefetch_artwork(
         &self,
+        job: ulid::Ulid,
+        attempt: u32,
         rails: &BTreeMap<RailKind, Vec<RailItem>>,
         adapters: &[Arc<dyn MetadataProvider>],
         cancellation: &CancellationToken,
     ) -> Result<BTreeMap<i64, std::path::PathBuf>, JobError> {
-        if adapters.is_empty() {
-            return Ok(BTreeMap::new());
-        }
         let scope = crate::runtime::installation_scope();
+        let ordered = artwork_order(rails);
+        let total = ordered.len();
         let mut posters = BTreeMap::new();
-        for (spent, item) in artwork_order(rails).into_iter().enumerate() {
-            if spent >= ARTWORK_BUDGET {
-                break;
-            }
+        for (done, item) in ordered.into_iter().enumerate() {
+            // Checked between fetches, so a cancelled run stops within one title rather than after
+            // the whole wall. What phase one wrote is committed and published, so the catalogue the
+            // caller is left with is a whole number of titles rather than a half-written one.
             if cancellation.is_cancelled() {
                 return Err(JobError::Cancelled);
             }
-            // A title whose poster is already on disk costs a `stat` and no request, which is what
-            // makes a second visit cheap.
-            match self.already_cached(scope, item.title_id).await {
-                Ok(Some(path)) => {
-                    posters.insert(item.title_id, path);
-                    continue;
-                }
-                Ok(None) => {}
+            // Phase one owns the first half of the band and the artwork the second, and the bus
+            // coalesces a burst of these to the ≤4 Hz the IPC budget allows (`ARCHITECTURE §7`
+            // rule 7) — so reporting one per title costs no extra event. A missing divisor is an
+            // empty set of rail items, which has no progress to report.
+            if let Some(share) = done.saturating_mul(500).checked_div(total) {
+                let permille = 500 + u16::try_from(share).unwrap_or(0);
+                self.phase(job, attempt, permille).await;
+            }
+            let stored = match self.database.library_title(scope, item.title_id).await {
+                Ok(Some(row)) => row.poster,
+                Ok(None) => None,
                 Err(error) => {
                     debug!(title = item.title_id, %error, "a rail poster could not be looked up");
                     continue;
                 }
-            }
-            // **The providers are walked in priority order**, and a title is asked of the provider
-            // that holds an identifier for it: `refresh_title` answers `None` for one that does not,
-            // without a request, which is the same walk `jobs/provider_refresh.rs` makes.
-            for provider in adapters {
-                match self
-                    .fill_artwork(provider.as_ref(), item.title_id, item.kind)
-                    .await
-                {
-                    Ok(Some(path)) => {
-                        posters.insert(item.title_id, path);
-                        break;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        debug!(title = item.title_id, %error, "a rail poster did not arrive");
-                        break;
-                    }
-                }
-            }
-        }
-        Ok(posters)
-    }
-
-    /// Where the cache already holds one title's poster, when it does.
-    ///
-    /// Resolved through `crate::artwork::cached_image` rather than remembered, so a blob an
-    /// eviction removed reads as no poster rather than as a path the webview would be refused.
-    async fn already_cached(
-        &self,
-        scope: peregrine_domain::AccountScope,
-        title_id: i64,
-    ) -> Result<Option<std::path::PathBuf>, StorageError> {
-        let Some(row) = self.database.library_title(scope, title_id).await? else {
-            return Ok(None);
-        };
-        Ok(row.poster.as_ref().and_then(|artwork| {
-            crate::artwork::cached_image(
+            };
+            // No list answer ever gave this title a poster path, so there is nothing to fetch and a
+            // details request would be asking the provider to repeat itself.
+            let Some(artwork) = stored else {
+                continue;
+            };
+            // A blob the cache already holds costs a `stat` and no request, which is what makes a
+            // second visit cheap.
+            if let Some(path) = crate::artwork::cached_image(
                 &self.artwork,
                 artwork.provider,
                 &artwork.path,
                 ImageKind::Poster,
+            ) {
+                posters.insert(item.title_id, path);
+                continue;
+            }
+            // **The provider that serves the artwork is the one that listed it**, which the path's
+            // own row records: a second configured provider must not be asked for a path it never
+            // sent.
+            let Some(provider) = adapters
+                .iter()
+                .find(|adapter| adapter.descriptor().provider() == artwork.provider)
+            else {
+                debug!(
+                    title = item.title_id,
+                    provider = artwork.provider.as_str(),
+                    "no configured provider serves this title's artwork"
+                );
+                continue;
+            };
+            match peregrine_sync::cache_image(
+                provider.as_ref(),
+                &self.artwork,
+                &artwork.path,
+                ImageKind::Poster,
             )
-        }))
-    }
-
-    /// One title's details, its poster, and where the blob landed.
-    ///
-    /// `Ok(None)` is every non-failure with nothing to show: a provider that cannot serve details
-    /// for this title (`refresh_title`'s own answer), one that has no poster path for it, and one
-    /// whose poster request failed. The last is not an `Err` because a rail of reserved boxes is a
-    /// state the screen draws and a failure would discard the rails that did arrive.
-    async fn fill_artwork(
-        &self,
-        provider: &dyn MetadataProvider,
-        title_id: i64,
-        kind: TitleKind,
-    ) -> Result<Option<std::path::PathBuf>, peregrine_sync::SyncError> {
-        let at = self.clock.now().as_millisecond();
-        let Some(details) =
-            peregrine_sync::refresh_title(provider, &self.database, title_id, kind, at).await?
-        else {
-            return Ok(None);
-        };
-        let Some(path) = details.poster_path.as_deref() else {
-            return Ok(None);
-        };
-        match peregrine_sync::cache_image(provider, &self.artwork, path, ImageKind::Poster).await {
-            Ok(poster) => Ok(Some(poster)),
-            Err(error) => {
-                debug!(title = title_id, %error, "a rail poster did not arrive");
-                Ok(None)
+            .await
+            {
+                Ok(path) => {
+                    posters.insert(item.title_id, path);
+                }
+                Err(error) => {
+                    debug!(title = item.title_id, %error, "a rail poster did not arrive");
+                }
             }
         }
+        Ok(posters)
     }
 
     /// Records that the run succeeded and publishes the phase, which is the last thing every
@@ -572,11 +563,12 @@ impl DiscoverRailsJob {
 /// The order artwork is fetched in: interleaved by position, one entry per title.
 ///
 /// **Interleaved, so every rail's first row is reached before any rail's third.** Walking one rail
-/// to its end first would spend a whole budget on the rail the enum lists first, and the screen
-/// would be one row of posters above six rows of reserved boxes — the state the artwork phase exists
-/// to avoid. **De-duplicated, because the budget counts titles rather than list entries**: the same
-/// film appears in `/trending/all/week` and `/movie/popular`, and asking for its poster twice spends
-/// two requests on one answer.
+/// to its end first would put the rail the enum lists first in front of the network while the other
+/// six walls stayed grey, which is a worse first frame for the same number of requests. The order
+/// is therefore a statement about *what a person sees first*, and it no longer implies a stop:
+/// every entry is fetched in one run. **De-duplicated, because the list entries outnumber the
+/// titles**: the same film appears in `/trending/all/week` and `/movie/popular`, and asking for its
+/// poster twice spends two requests on one answer.
 fn artwork_order(rails: &BTreeMap<RailKind, Vec<RailItem>>) -> Vec<RailItem> {
     let deepest = rails.values().map(Vec::len).max().unwrap_or(0);
     let mut ordered = Vec::new();
@@ -621,9 +613,14 @@ pub fn dedupe_key() -> String {
 
 #[cfg(test)]
 mod tests {
-    use peregrine_domain::catalogue::{TitleDetails, TitleKind};
+    use std::num::NonZeroU32;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use peregrine_domain::catalogue::{ImageKind, TitleDetails, TitleKind};
     use peregrine_domain::id::{ExternalId, Provider};
     use peregrine_domain::text::NonEmptyText;
+    use peregrine_providers::descriptor::ProviderDescriptor;
+    use peregrine_providers::provider::{ProviderFuture, SearchQuery};
     use peregrine_testkit::FakeMetadataProvider;
     use tempfile::TempDir;
     use tokio_util::sync::CancellationToken;
@@ -644,6 +641,87 @@ mod tests {
             TitleKind::Movie,
             Some(released.parse().expect("a date")),
         )
+    }
+
+    /// A candidate as a *list* endpoint answers one, which is what the artwork phase consumes.
+    fn listed(id: &str, name: &str, artwork: &str, rating: Option<f64>) -> SearchCandidate {
+        candidate(id, name, "1999-03-31")
+            .with_artwork_path(Some(artwork.to_owned()))
+            .with_rating(rating)
+    }
+
+    /// A provider that counts the image requests it is asked for, and can cancel the run on one.
+    ///
+    /// The count is what makes "every rail item is fetched in one run" and "an already-cached poster
+    /// causes zero requests" assertions rather than intentions: a number no test can read is a
+    /// number nobody is holding the job to (`AGENTS R4`). It wraps a `dyn` provider because that is
+    /// what the job takes, and it delegates every other operation so the fake's own answers are what
+    /// the run sees.
+    struct CountingProvider {
+        inner: Arc<dyn MetadataProvider>,
+        requests: Arc<AtomicUsize>,
+        /// Cancel the run once this many image requests have been *started*.
+        cancel_after: Option<(usize, CancellationToken)>,
+    }
+
+    impl CountingProvider {
+        fn new(inner: Arc<dyn MetadataProvider>, requests: Arc<AtomicUsize>) -> Self {
+            Self {
+                inner,
+                requests,
+                cancel_after: None,
+            }
+        }
+
+        /// The same, cancelling `token` once `after` image requests have been started.
+        fn cancelling(
+            inner: Arc<dyn MetadataProvider>,
+            requests: Arc<AtomicUsize>,
+            token: CancellationToken,
+            after: usize,
+        ) -> Self {
+            Self {
+                inner,
+                requests,
+                cancel_after: Some((after, token)),
+            }
+        }
+    }
+
+    impl MetadataProvider for CountingProvider {
+        fn descriptor(&self) -> &ProviderDescriptor {
+            self.inner.descriptor()
+        }
+
+        fn check(&self) -> ProviderFuture<'_, ()> {
+            self.inner.check()
+        }
+
+        fn search(&self, query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            self.inner.search(query)
+        }
+
+        fn title(&self, id: &ExternalId, kind: TitleKind) -> ProviderFuture<'_, TitleDetails> {
+            self.inner.title(id, kind)
+        }
+
+        fn rail(
+            &self,
+            rail: RailKind,
+            page: NonZeroU32,
+        ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            self.inner.rail(rail, page)
+        }
+
+        fn image(&self, path: &str, kind: ImageKind) -> ProviderFuture<'_, Vec<u8>> {
+            let started = self.requests.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some((after, token)) = &self.cancel_after
+                && started >= *after
+            {
+                token.cancel();
+            }
+            self.inner.image(path, kind)
+        }
     }
 
     fn details(name: &str, poster: Option<&str>) -> TitleDetails {
@@ -699,6 +777,7 @@ mod tests {
                 name: "The Matrix".to_owned(),
                 year: Some(1999),
                 poster: None,
+                rating: None,
             }],
         );
 
@@ -742,14 +821,17 @@ mod tests {
 
     #[test]
     fn artwork_is_ordered_across_rails_and_counts_each_title_once() {
-        // The order decides what a person sees first when the budget runs out, and the de-duplication
-        // decides how many requests that budget buys: one title in two rails is one poster.
+        // The order decides what a person sees *first*: the whole set is fetched in one run now, so
+        // this is about which poster is worth having while the network catches up, and the
+        // de-duplication decides how many requests the run spends — one title in two rails is one
+        // poster.
         let item = |title_id: i64| RailItem {
             title_id,
             kind: TitleKind::Movie,
             name: format!("Title {title_id}"),
             year: None,
             poster: None,
+            rating: None,
         };
         let mut rails = BTreeMap::new();
         rails.insert(RailKind::TrendingWeek, vec![item(1), item(2), item(3)]);
@@ -812,6 +894,17 @@ mod tests {
         /// Runs one attempt over `provider`, which is the job's body without the registry the
         /// crate's tests may not build (`AGENTS R14`: a registry reads a keyring).
         async fn run(&self, provider: Arc<dyn MetadataProvider>) -> peregrine_sync::JobResult {
+            self.run_cancellable(provider, CancellationToken::new())
+                .await
+        }
+
+        /// The same, with a token the caller holds — which is how a run is cancelled from inside a
+        /// provider's own image call rather than from a sleep (`AGENTS R14`).
+        async fn run_cancellable(
+            &self,
+            provider: Arc<dyn MetadataProvider>,
+            cancellation: CancellationToken,
+        ) -> peregrine_sync::JobResult {
             let mut job = DiscoverRailsJob::new(
                 Arc::clone(&self.database),
                 Arc::clone(&self.bus),
@@ -825,7 +918,7 @@ mod tests {
                 ulid::Ulid::from_parts(1_700_000_000_000, 1),
                 1,
                 &[provider],
-                CancellationToken::new(),
+                cancellation,
             )
             .await
         }
@@ -834,13 +927,15 @@ mod tests {
     #[tokio::test]
     async fn a_run_fills_the_rails_the_catalogue_and_the_artwork_cache() {
         // The whole path of one run: a rail answer becomes catalogue rows, the read model answers
-        // with them, and the title's poster is on disk so the screen has something to draw.
+        // with them, and the title's poster is on disk so the screen has something to draw. **One
+        // request per title**, which is what this pins: the candidate already carried the path, so
+        // nothing asked the provider for the title's details.
         let fixture = Fixture::new().await;
         let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
             Provider::Tmdb,
-            details("The Matrix", Some("/poster.jpg")),
+            details("The Matrix", None),
             b"jpeg".to_vec(),
-            vec![candidate("603", "The Matrix", "1999-03-31")],
+            vec![listed("603", "The Matrix", "/poster.jpg", Some(8.2))],
         );
 
         fixture.run(Arc::new(fake)).await.expect("the run succeeds");
@@ -857,6 +952,11 @@ mod tests {
         );
         assert_eq!(popular.1[0].name, "The Matrix");
         assert_eq!(popular.1[0].year, Some(1999));
+        assert_eq!(
+            popular.1[0].rating,
+            Some(8.2),
+            "the list answer's score reaches the card"
+        );
         let poster = popular.1[0]
             .poster
             .as_ref()
@@ -870,7 +970,8 @@ mod tests {
             b"jpeg"
         );
 
-        // And it is in the catalogue, which is what opening it needs.
+        // And it is in the catalogue, which is what opening it needs — with the artwork path a
+        // later run reads the blob's address from.
         let titles = fixture
             .database
             .list_titles(
@@ -883,6 +984,22 @@ mod tests {
             .expect("the catalogue is readable");
         assert_eq!(titles.len(), 1);
         assert_eq!(titles[0].id, popular.1[0].title_id);
+        let stored = fixture
+            .database
+            .library_title(
+                peregrine_domain::AccountScope::unrestricted(
+                    peregrine_domain::AccountId::new(1).expect("account one"),
+                ),
+                titles[0].id,
+            )
+            .await
+            .expect("the title is readable")
+            .expect("the title exists");
+        assert_eq!(
+            stored.poster.as_ref().map(|artwork| artwork.path.as_str()),
+            Some("/poster.jpg"),
+            "the list answer's path is what the catalogue keeps"
+        );
 
         // The row reached a terminal phase, which is what a screen following the job waits for.
         let row = fixture
@@ -894,6 +1011,166 @@ mod tests {
         assert!(
             row.state.is_terminal(),
             "a finished run must close its journal row"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_run_fetches_every_rail_item_rather_than_a_budget_of_them() {
+        // The defect this pins: a fixed budget left every title past the twenty-fourth as a grey
+        // placeholder forever. Thirty titles, every one of them in the rail the fake answers, and
+        // thirty image requests — a number asserted rather than a constant compared, so raising or
+        // reinstating a cap fails here.
+        let fixture = Fixture::new().await;
+        let candidates: Vec<SearchCandidate> = (0..30)
+            .map(|index| {
+                listed(
+                    &index.to_string(),
+                    &format!("Title {index}"),
+                    &format!("/poster-{index}.jpg"),
+                    None,
+                )
+            })
+            .collect();
+        let fake = Arc::new(FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("unused", None),
+            b"jpeg".to_vec(),
+            candidates,
+        ));
+        let requests = Arc::new(AtomicUsize::new(0));
+
+        fixture
+            .run(Arc::new(CountingProvider::new(fake, Arc::clone(&requests))))
+            .await
+            .expect("the run succeeds");
+
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            30,
+            "one request per title, whatever a budget used to say"
+        );
+        let read = fixture.rails.read();
+        let popular = read
+            .iter()
+            .find(|(rail, _)| *rail == RailKind::PopularMovies)
+            .expect("every rail is reported");
+        assert_eq!(popular.1.len(), 30);
+        assert!(
+            popular
+                .1
+                .iter()
+                .all(|item| item.poster.as_ref().is_some_and(|path| path.is_file())),
+            "every tile is a poster rather than a reserved box"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_poster_the_cache_already_holds_costs_no_request() {
+        // The second visit's whole economy: the catalogue records the path, the blob is on disk, and
+        // the run asks the provider for nothing. Without the cache check this is one request per
+        // title on every visit to the screen.
+        let fixture = Fixture::new().await;
+        let fake = Arc::new(FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("The Matrix", None),
+            b"jpeg".to_vec(),
+            vec![listed("603", "The Matrix", "/poster.jpg", Some(8.2))],
+        ));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn MetadataProvider> =
+            Arc::new(CountingProvider::new(fake, Arc::clone(&requests)));
+
+        fixture
+            .run(Arc::clone(&provider))
+            .await
+            .expect("the first run");
+        assert_eq!(requests.load(Ordering::SeqCst), 1, "one blob to fetch");
+        fixture
+            .run(Arc::clone(&provider))
+            .await
+            .expect("the second run");
+
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            1,
+            "a poster the cache holds must not be fetched twice"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_run_mid_artwork_leaves_it_cancelled_and_the_catalogue_whole() {
+        // Cancellation is checked between fetches, so a cancelled run stops within one title. What
+        // it must leave behind is *consistent* rather than empty: every title phase one wrote is in
+        // the catalogue with its artwork path, and the read model still holds the items it published
+        // — so the next run picks the posters up rather than starting the screen over.
+        let fixture = Fixture::new().await;
+        let token = CancellationToken::new();
+        let candidates = vec![
+            listed("603", "The Matrix", "/one.jpg", None),
+            listed("27205", "Inception", "/two.jpg", None),
+            listed("157336", "Interstellar", "/three.jpg", None),
+        ];
+        let fake = Arc::new(FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("unused", None),
+            b"jpeg".to_vec(),
+            candidates,
+        ));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(CountingProvider::cancelling(
+            fake,
+            Arc::clone(&requests),
+            token.clone(),
+            1,
+        ));
+
+        let outcome = fixture.run_cancellable(provider, token).await;
+
+        assert!(
+            matches!(outcome, Err(JobError::Cancelled)),
+            "a cancelled token must come back as a cancellation"
+        );
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            1,
+            "the fetch after the cancellation is never started"
+        );
+
+        let scope = peregrine_domain::AccountScope::unrestricted(
+            peregrine_domain::AccountId::new(1).expect("account one"),
+        );
+        assert_eq!(
+            fixture
+                .database
+                .title_count()
+                .await
+                .expect("the count is readable"),
+            3,
+            "phase one wrote every title before any artwork was attempted"
+        );
+        let titles = fixture
+            .database
+            .list_titles(scope, peregrine_storage::PageRequest::first(10))
+            .await
+            .expect("the catalogue is readable");
+        for title in &titles {
+            let stored = fixture
+                .database
+                .library_title(scope, title.id)
+                .await
+                .expect("the title is readable")
+                .expect("the title exists");
+            assert!(
+                stored.poster.is_some(),
+                "every written title keeps the path the list answer gave it"
+            );
+        }
+        let read = fixture.rails.read();
+        assert!(
+            read.iter()
+                .all(|(_, items)| items.iter().all(|item| item.poster.is_none())),
+            "the artwork phase was cancelled before it could publish, so the items keep their \
+             reserved geometry rather than a half-held set of posters"
         );
     }
 

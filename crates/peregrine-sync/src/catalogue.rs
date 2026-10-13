@@ -5,10 +5,11 @@
 //! the rule calls ambiguous is counted and left alone, because the wrong answer there merges two titles
 //! or splits one.
 
+use peregrine_domain::catalogue::{MetadataState, TitleDetails};
 use peregrine_domain::matching::{Candidate, MatchDecision, match_candidate, sort_name};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_providers::error::ProviderError;
-use peregrine_providers::provider::{MetadataProvider, SearchQuery};
+use peregrine_providers::provider::{MetadataProvider, SearchCandidate, SearchQuery};
 use peregrine_storage::{Database, ProviderTitle, StorageError, TitleExternalId};
 
 use crate::images::{ImageCache, ImageCacheError, ImageKey, ImageVariant};
@@ -155,6 +156,66 @@ pub async fn refresh_title(
     Ok(Some(details))
 }
 
+/// Writes what a *list* answer knows onto a title the catalogue holds, and answers with it.
+///
+/// A list answer — a rail, a search page — is not a title read: it carries an identity, a name, a
+/// date, and at most a poster and a score. Those two are the whole reason this exists, because a
+/// list endpoint already sends them and a screen that had to ask for a title's details to learn its
+/// poster would spend two requests where the provider's answer needed one (`PG-E7-08`).
+///
+/// **It goes through the same statement a details fill does, and inherits the same rule:** every
+/// optional column is written with `COALESCE`, so a later list answer carrying `None` leaves the
+/// stored poster and score alone (`PG-E5-07`). It also inherits the statement's two stamps, and
+/// they are worth naming rather than discovering: `metadata_state` follows `refresh_title`'s
+/// `Partial` — a list answer has filled some fields, not all — and `last_synced_at` is set, which is
+/// what `PG-E6-15`'s staleness policy and `crate::artwork`'s `refresh_due` read. A list answer *is*
+/// a provider answering about the title, so those two travel with it.
+///
+/// # Errors
+///
+/// [`SyncError::Storage`] when the write fails.
+pub async fn record_list_answer(
+    database: &Database,
+    title_id: i64,
+    candidate: &SearchCandidate,
+    at: i64,
+) -> Result<TitleDetails, SyncError> {
+    let details = TitleDetails {
+        kind: candidate.kind(),
+        name: candidate.name().clone(),
+        // Everything a list answer does not carry is left `None`, which is what `COALESCE` turns
+        // into "leave what is stored alone" — the alternative is erasing a synopsis because a rail
+        // listed the title.
+        original_name: None,
+        overview: None,
+        tagline: None,
+        released: candidate.released(),
+        runtime_minutes: None,
+        original_language: None,
+        origin_country: None,
+        rating: candidate.rating(),
+        votes: None,
+        popularity: None,
+        adult: None,
+        in_production: None,
+        season_count: None,
+        episode_count: None,
+        homepage: None,
+        poster_path: candidate.artwork_path().map(str::to_owned),
+        backdrop_path: None,
+    };
+    database
+        .update_title_metadata(
+            title_id,
+            details.clone(),
+            sort_name(candidate.name().as_str()),
+            MetadataState::Partial,
+            candidate.external_id().provider().as_str().to_owned(),
+            at,
+        )
+        .await?;
+    Ok(details)
+}
 /// The candidate as the matching rule's input, or `None` when it cannot be one.
 ///
 /// The port's `NonEmptyText` is already non-empty, so this only fails on a name that is whitespace —

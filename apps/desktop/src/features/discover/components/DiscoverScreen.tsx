@@ -160,6 +160,7 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
               }}
               poster={imageUrl(hero.poster)}
               priority
+              rating={hero.rating}
               size="md"
               title={hero.name}
             />
@@ -226,6 +227,7 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
                     onNavigate(routeFor(item));
                   }}
                   poster={imageUrl(item.poster)}
+                  rating={item.rating}
                   size="sm"
                   tabIndex={tabIndex}
                   title={item.name}

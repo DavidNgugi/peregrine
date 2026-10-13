@@ -326,6 +326,8 @@ mod tests {
             TitleKind::Show,
             Some(Date::constant(2008, 1, 20)),
         )
+        .with_artwork_path(Some("/poster.jpg".to_owned()))
+        .with_rating(Some(9.5))
     }
 
     fn query() -> SearchQuery {
@@ -346,6 +348,12 @@ mod tests {
 
         assert_eq!(answered.len(), 1);
         assert_eq!(answered[0].name().as_str(), "Breaking Bad");
+        assert_eq!(
+            answered[0].artwork_path(),
+            Some("/poster.jpg"),
+            "a fake that was handed artwork answers with it"
+        );
+        assert_eq!(answered[0].rating(), Some(9.5));
     }
 
     #[test]

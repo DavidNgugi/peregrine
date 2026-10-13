@@ -37,7 +37,8 @@ pub enum RailKindDto {
 }
 
 /// One title in a rail, as the screen draws it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+// Not `Eq`: the score a provider reports is an `f64`, and a float has no total equality.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RailItemDto {
     /// The catalogue row, which is what opening the title needs.
@@ -55,6 +56,12 @@ pub struct RailItemDto {
     /// A path rather than a URL: the webview turns it into an `asset:` URL, and the scheme the shell
     /// scopes is the shell's business rather than this layer's.
     pub poster: Option<String>,
+    /// The provider's own score for the title, or `null` when the list answer carried none.
+    ///
+    /// `null` is not `0.0`: a provider that sends no score, and one whose value for an unrated item
+    /// the adapter mapped to absent, both arrive here as "no badge" — which is what the tile draws,
+    /// and a `0.0` badge would be a claim the provider never made.
+    pub rating: Option<f64>,
 }
 
 impl From<peregrine_app::RailItem> for RailItemDto {
@@ -68,6 +75,7 @@ impl From<peregrine_app::RailItem> for RailItemDto {
             name: item.name,
             year: item.year,
             poster: item.poster.map(|path| path.to_string_lossy().into_owned()),
+            rating: item.rating,
         }
     }
 }
@@ -112,7 +120,7 @@ impl From<peregrine_app::RailsState> for RailsStateDto {
 /// seven. It rides on every rail because a list of rails is what this answer is, and the core
 /// answers every rail — so a screen reads it off the answer it already has instead of inventing one
 /// for a list that cannot be empty, and a screen renders it instead of deciding it (`AGENTS R7`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeRailDto {
     /// The rail's stable identity, which is what a translation is keyed by.
@@ -240,6 +248,7 @@ mod tests {
                 name: "Severance".to_owned(),
                 year: Some(2022),
                 poster: Some(std::path::PathBuf::from("/cache/images/abc")),
+                rating: Some(8.7),
             }],
             state: peregrine_app::RailsState::Ready,
         };
@@ -253,6 +262,7 @@ mod tests {
         assert_eq!(dto.items[0].name, "Severance");
         assert_eq!(dto.items[0].year, Some(2022));
         assert_eq!(dto.items[0].poster.as_deref(), Some("/cache/images/abc"));
+        assert_eq!(dto.items[0].rating, Some(8.7));
         assert_eq!(dto.state, RailsStateDto::Ready);
     }
 
@@ -268,6 +278,7 @@ mod tests {
                 name: "Dune".to_owned(),
                 year: None,
                 poster: None,
+                rating: None,
             }],
             state: peregrine_app::RailsState::Ready,
         };
@@ -276,6 +287,10 @@ mod tests {
 
         assert_eq!(dto.items[0].poster, None);
         assert_eq!(dto.items[0].year, None);
+        assert_eq!(
+            dto.items[0].rating, None,
+            "a list answer with no score is no badge, not a badge of zero"
+        );
         assert_eq!(dto.items[0].kind, RailKindDto::Movie);
     }
 

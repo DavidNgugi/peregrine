@@ -197,16 +197,34 @@ impl SearchQuery {
 /// re-ask for in full. It is not a [`peregrine_domain::catalogue::Title`] and cannot be — that
 /// type carries the `i64` row id `peregrine-storage` assigns — so the sync service upserts
 /// these as stub rows and a later `get_title` fills them in (PG-E5-06, PG-E6-01).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// # What a *list* answer carries that a stub did not
+///
+/// A provider's list endpoints — a rail, a search page — already answer with a poster and a
+/// score for every item, so a candidate carries both ([`SearchCandidate::artwork_path`] and
+/// [`SearchCandidate::rating`]). That is what keeps filling a rail of posters from costing a
+/// second request per title (`PG-E7-08`), and it is why the fields belong here rather than on
+/// [`peregrine_domain::catalogue::TitleDetails`], which is what a *details* read answers.
+///
+/// Both are optional, and a provider that sends neither still produces a candidate: not every
+/// list carries artwork, and a provider's own field names never appear on this type.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SearchCandidate {
     external_id: ExternalId,
     name: NonEmptyText,
     kind: TitleKind,
     released: Option<Date>,
+    artwork_path: Option<String>,
+    rating: Option<f64>,
 }
 
 impl SearchCandidate {
-    /// Builds a candidate.
+    /// Builds a candidate that carries only what every provider's list carries.
+    ///
+    /// The artwork and the rating are set with [`SearchCandidate::with_artwork_path`] and
+    /// [`SearchCandidate::with_rating`], because a provider that sends neither is the rule rather
+    /// than the exception and a five-argument constructor would make every call site state a
+    /// `None` it does not mean.
     #[must_use]
     pub const fn new(
         external_id: ExternalId,
@@ -219,7 +237,32 @@ impl SearchCandidate {
             name,
             kind,
             released,
+            artwork_path: None,
+            rating: None,
         }
+    }
+
+    /// The same candidate, carrying the provider-relative path of its poster.
+    ///
+    /// The path is the provider's own spelling and never a URL: only the adapter knows which host
+    /// serves its images (`MetadataProvider::image`). A path that is present but blank is not a
+    /// path — a caller that stored it would ask an image host for its root — and the conformance
+    /// suite refuses one, so an adapter must map an empty field to `None` rather than to `""`.
+    #[must_use]
+    pub fn with_artwork_path(mut self, path: Option<String>) -> Self {
+        self.artwork_path = path;
+        self
+    }
+
+    /// The same candidate, carrying the provider's own score for the title.
+    ///
+    /// The scale is the provider's: this port does not normalize a rating, because a caller that
+    /// drew a provider's score against another provider's ceiling would be inventing a number
+    /// neither of them sent.
+    #[must_use]
+    pub fn with_rating(mut self, rating: Option<f64>) -> Self {
+        self.rating = rating;
+        self
     }
 
     /// The provider's own identifier for the title.
@@ -252,6 +295,24 @@ impl SearchCandidate {
     #[must_use]
     pub const fn released(&self) -> Option<Date> {
         self.released
+    }
+
+    /// The provider-relative path of the title's poster, when the answer carried one.
+    ///
+    /// It is what the cache key is built from (`sha256(provider|path|variant)`), so a caller hands
+    /// it back to [`MetadataProvider::image`] rather than building a URL out of it.
+    #[must_use]
+    pub fn artwork_path(&self) -> Option<&str> {
+        self.artwork_path.as_deref()
+    }
+
+    /// The provider's own score for the title, when the answer carried one.
+    ///
+    /// `None` is not zero: it is "the provider said nothing", and an adapter must map a value its
+    /// provider uses for *unrated* to `None` rather than to a score nobody gave.
+    #[must_use]
+    pub const fn rating(&self) -> Option<f64> {
+        self.rating
     }
 }
 
@@ -511,6 +572,41 @@ mod tests {
         );
 
         assert!(candidate.released().is_none());
+    }
+
+    #[test]
+    fn a_candidate_carries_the_artwork_and_the_score_a_list_answer_gave_it() {
+        // What makes one request per title enough (`PG-E7-08`): the list answer already has both,
+        // and the provider's own field names stop at the adapter.
+        let candidate = SearchCandidate::new(
+            ExternalId::new(Provider::Tmdb, "603").expect("a valid id"),
+            text("The Matrix"),
+            TitleKind::Movie,
+            Some(Date::constant(1999, 3, 31)),
+        )
+        .with_artwork_path(Some("/poster.jpg".to_owned()))
+        .with_rating(Some(8.2));
+
+        assert_eq!(candidate.artwork_path(), Some("/poster.jpg"));
+        assert_eq!(candidate.rating(), Some(8.2));
+    }
+
+    #[test]
+    fn a_candidate_a_list_answer_gave_neither_artwork_nor_a_score_is_still_a_candidate() {
+        // The default every constructor uses: a list endpoint that carries no poster still lists
+        // titles, and a candidate that could not be built without artwork would drop them.
+        let candidate = SearchCandidate::new(
+            ExternalId::new(Provider::Tvdb, "81189").expect("a valid id"),
+            text("Breaking Bad"),
+            TitleKind::Show,
+            None,
+        );
+
+        assert!(candidate.artwork_path().is_none());
+        assert!(
+            candidate.rating().is_none(),
+            "an absent score is not a score of zero"
+        );
     }
 
     #[test]
