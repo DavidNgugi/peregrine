@@ -120,6 +120,12 @@ cargo clippy --workspace -- -D warnings
 pnpm lint && pnpm typecheck
 ```
 
+Cargo keys its artifacts to the *shape* of the invocation and not only to the source: it unifies features over the members a command **selects**, so a narrower selection resolves a shared dependency differently and recompiles it. `cargo xtask gen-ipc` selects `peregrine-ipc` alone by design, and every `cargo test -p <member>` or `cargo check -p <member>` selects one member. A feature that only one member enables must therefore be declared at the workspace level in `Cargo.toml` rather than on the member that uses it — `tauri`'s `tray-icon` and `protocol-asset` are the ones that cost minutes, per PG-E0-20. Keep one shape for a whole session, and do not expect `cargo check` to rescue a loop on its own: an edit to `peregrine-domain` measured about 70 s through `cargo check` and about 70 s through `cargo build` (PG-E0-20), because the cost is front-end analysis across the eight crates that depend on it rather than codegen or linking. What costs minutes is changing shape.
+
+**Everything is built and tested in the development profile, and that is the profile this work is judged in.** `cargo test`, `cargo clippy`, and `cargo xtask` all default to `dev`, `target/debug` holds the artifacts being iterated on, and no gate needs `--release`: a release build is a packaging step, not a verification step, so nothing here reaches for one to make a run faster or a gate pass.
+
+**Run the workspace shape once, at the end of a change, and read its result.** Rebuilding is not a way to make progress and re-running the suite after every edit is not verification — it is the same answer bought again, at the price of the whole front end. While editing, run the one test whose behaviour you just changed, by name; when the change is complete, run the commands in the list above and report what they said. A gate that has not been run is reported as not run, which is a different and more useful statement than a rebuild nobody asked for.
+
 Enable the local pre-commit hooks once per clone. They run formatting, the
 architecture check, the migration check, and lint on staged files, scoped to what
 the commit touches:
