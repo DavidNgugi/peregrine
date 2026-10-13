@@ -21,6 +21,7 @@
 
 import {
   Button,
+  Dialog,
   EmptyState,
   ErrorState,
   Icon,
@@ -51,6 +52,7 @@ import { useState } from "react";
  */
 export const GALLERY_COMPONENTS: readonly string[] = [
   "Button",
+  "Dialog",
   "EmptyState",
   "ErrorState",
   "Icon",
@@ -131,6 +133,54 @@ const COLUMNS: readonly TableColumn<Row>[] = [
   { id: "kind", header: "Kind", cell: (row) => row.kind },
   { id: "size", header: "Size", numeric: true, cell: (row) => row.size },
 ];
+
+/** The dialog's demo: closed until the reader opens it, because an open one covers the gallery. */
+function GalleryDialog(): ReactElement {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <Button
+        onClick={() => {
+          setOpen(true);
+        }}
+        size="sm"
+      >
+        Open the dialog
+      </Button>
+      {open ? (
+        <Dialog
+          closeLabel="Close"
+          description="One decision, and nothing else on the page can be reached until it is answered."
+          onClose={() => {
+            setOpen(false);
+          }}
+          title="Forget this rule?"
+        >
+          <div className="flex justify-end gap-2">
+            <Button
+              onClick={() => {
+                setOpen(false);
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setOpen(false);
+              }}
+              size="sm"
+              variant="danger"
+            >
+              Forget
+            </Button>
+          </div>
+        </Dialog>
+      ) : null}
+    </div>
+  );
+}
 
 export function Gallery(): ReactElement {
   const [theme, toggleTheme] = useGalleryTheme();
@@ -306,6 +356,13 @@ export function Gallery(): ReactElement {
             <p className="text-caption text-text-tertiary">screen content</p>
           </Screen>
         </Box>
+      </Section_>
+
+      <Section_
+        component="Dialog"
+        description="A surface above the page holding one decision: role=dialog with aria-modal, a heading it is labelled by, the scrim behind it, and §4's --elev-3 shadow plus a border. Escape closes the top overlay only, which is the rule overlay-stack owns."
+      >
+        <GalleryDialog />
       </Section_>
 
       <Section_

@@ -19,6 +19,7 @@
   --text-on-accent: oklch(0.3 0 0);
 
   --border-subtle: oklch(0.32 0.01 var(--hue-brand));
+  --elev-3: 0 16px 40px -12px oklch(0 0 0 / 0.55);
   --border-strong: oklch(0.55 0.012 var(--hue-brand));
 
   --accent: oklch(0.68 0.16 var(--hue-brand));

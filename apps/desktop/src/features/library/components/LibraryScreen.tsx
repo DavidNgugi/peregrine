@@ -15,12 +15,21 @@
  * like any other would promise artwork that is not coming yet.
  */
 
-import { Button, EmptyState, ErrorState, Progress, Screen, Section, Table } from "@peregrine/ui";
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  Progress,
+  Screen,
+  Section,
+  Table,
+} from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
 import type { LibraryTitleDto, MatchRuleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
@@ -241,7 +250,7 @@ function queueColumnsOf(
  */
 function ruleColumnsOf(
   t: Translate,
-  forget: (id: number) => void,
+  ask: (rule: MatchRuleDto) => void,
   busy: boolean,
 ): readonly TableColumn<MatchRuleDto>[] {
   return [
@@ -267,7 +276,7 @@ function ruleColumnsOf(
         <Button
           disabled={busy}
           onClick={() => {
-            forget(row.id);
+            ask(row);
           }}
           size="sm"
           variant="ghost"
@@ -290,6 +299,10 @@ export function LibraryScreen({
   const { t } = useTranslation();
   const columns = useMemo(() => columnsOf(t, onOpenTitle), [t, onOpenTitle]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
+  // A rule that keeps acting is worth one question before it is withdrawn: the files it placed stay,
+  // but the answer it remembers stops applying, and a mis-click that changed how the library behaves
+  // from then on would be a change nobody asked for (AGENTS R22).
+  const [forgetting, setForgetting] = useState<MatchRuleDto | null>(null);
 
   // A scan is the only thing that changes this list, so watching one finish is the whole of the
   // subscription: the counter changes once per finished scan, and a boolean would refresh once and
@@ -370,11 +383,44 @@ export function LibraryScreen({
             <ErrorState body={rules.error} title={t("library.rules.refused")} />
           )}
           <Table
-            columns={ruleColumnsOf(t, (id) => void rules.forget(id), rules.busy)}
+            columns={ruleColumnsOf(t, setForgetting, rules.busy)}
             rowKey={(row) => row.id}
             rows={rules.rules}
           />
         </Section>
+      )}
+
+      {forgetting === null ? null : (
+        <Dialog
+          closeLabel={t("common.close")}
+          description={t("library.rules.confirm.body", { pattern: forgetting.pattern })}
+          onClose={() => {
+            setForgetting(null);
+          }}
+          title={t("library.rules.confirm.title")}
+        >
+          <div className="flex justify-end gap-2">
+            <Button
+              onClick={() => {
+                setForgetting(null);
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                void rules.forget(forgetting.id);
+                setForgetting(null);
+              }}
+              size="sm"
+              variant="danger"
+            >
+              {t("library.rules.forget")}
+            </Button>
+          </div>
+        </Dialog>
       )}
     </Screen>
   );

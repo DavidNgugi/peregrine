@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BRAND_HUE_TOKEN,
+  ELEVATION_TOKENS,
   isThemeName,
   LIGHT_THEME_OVERRIDES,
   SEMANTIC_COLOUR_TOKENS,
@@ -42,6 +44,16 @@ const rootTokens = declaredTokens(root);
 const lightTokens = declaredTokens(light);
 
 describe("tokens.css", () => {
+  it("declares every elevation level the design system ships", () => {
+    // §4's table is the contract: a level named there and missing here is a component that cannot be
+    // written, which is exactly how the dialog found this gap.
+    for (const token of ELEVATION_TOKENS) {
+      expect(readFileSync(join(import.meta.dirname, "tokens.css"), "utf8"), token).toContain(
+        `${token}:`,
+      );
+    }
+  });
+
   it("declares the brand hue and every semantic colour in the base theme", () => {
     expect(rootTokens).toContain(BRAND_HUE_TOKEN);
     for (const token of SEMANTIC_COLOUR_TOKENS) {

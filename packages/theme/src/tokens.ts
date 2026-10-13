@@ -21,6 +21,16 @@ export function isThemeName(value: unknown): value is ThemeName {
 /** The single custom property the whole accent family is derived from. */
 export const BRAND_HUE_TOKEN = "--hue-brand";
 
+/**
+ * Elevation (§4): a shadow *plus* a border, never a shadow alone.
+ *
+ * One level, because one thing floats: `--elev-3` is the dialog's, and the menu, popover, and sheet
+ * levels arrive with the components that use them — a token with no consumer is a value nobody can
+ * review, which is the rule the kit's icons already follow. The value is neutral rather than tinted:
+ * a shadow describes height, and branding it would make every surface's depth depend on the accent.
+ */
+export const ELEVATION_TOKENS = ["--elev-3"];
+
 /** Semantic colour layer (§2.1). Components use these and nothing else. */
 export const SEMANTIC_COLOUR_TOKENS = [
   "--surface-0",

@@ -1,4 +1,10 @@
 export { Button } from "./Button.js";
+export { Dialog } from "./Dialog.js";
+export type { DialogProps } from "./Dialog.js";
+// The stack itself is not a primitive and is not exported as one: the dialog defaults to the
+// application's stack, and a consumer that needs its own builds it in a test (`overlay-stack`
+// is imported directly there). Only the *type* travels, because a prop names it.
+export type { OverlayStack } from "./overlay-stack.js";
 export type { ButtonProps } from "./Button.js";
 export { EmptyState } from "./EmptyState.js";
 export type { EmptyStateProps } from "./EmptyState.js";

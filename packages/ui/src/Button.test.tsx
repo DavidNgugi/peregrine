@@ -76,3 +76,14 @@ describe("Button", () => {
     expect(classes).toContain("motion-reduce:transition-none");
   });
 });
+
+describe("Button, destructive", () => {
+  it("paints a destructive action in the danger token rather than the accent", () => {
+    // A red button and an accent button must not look alike when one of them deletes something: the
+    // confirmations AGENTS R22 requires are the callers that made this variant necessary.
+    const markup = renderToStaticMarkup(<Button variant="danger">Forget</Button>);
+
+    expect(markup).toContain("bg-state-danger");
+    expect(markup).not.toContain("bg-accent");
+  });
+});

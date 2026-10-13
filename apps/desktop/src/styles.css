@@ -29,6 +29,8 @@
   --color-state-info: var(--state-info);
   --color-focus-ring: var(--focus-ring);
 
+  --shadow-elev-3: var(--elev-3);
+
   --font-ui: var(--font-ui);
 
   --text-display: var(--text-display);

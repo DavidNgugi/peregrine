@@ -69,6 +69,10 @@ export const en = {
       jobs: "Go to Diagnostics",
       settings: "Go to Settings",
     },
+    common: {
+      close: "Close",
+      cancel: "Cancel",
+    },
     title: {
       section: "In your library",
       column: {
@@ -135,6 +139,10 @@ export const en = {
         readsAs: "remembered from a correction",
         forget: "Forget",
         refused: "That rule could not be forgotten.",
+        confirm: {
+          title: "Forget this rule?",
+          body: "Names that read as “{{pattern}}” will be asked about again. The files it has already placed stay where they are.",
+        },
       },
       column: {
         title: "Title",

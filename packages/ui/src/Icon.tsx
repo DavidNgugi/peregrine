@@ -24,6 +24,13 @@ const PATHS = {
       <path d="M15.6 8.4 10.9 10.9 8.4 15.6 13.1 13.1Z" />
     </>
   ),
+  /** Close: two strokes crossing, which read the same on all three platforms. */
+  close: (
+    <>
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
+    </>
+  ),
   /** Library: spines on a shelf, which read as what is here rather than what could be. */
   library: (
     <>

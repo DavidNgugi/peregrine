@@ -19,6 +19,9 @@ const buttonVariants = cva(
         primary: "bg-accent text-text-on-accent hover:bg-accent-hover",
         secondary: "border border-border-subtle text-text-primary hover:bg-surface-2",
         ghost: "text-text-secondary hover:bg-surface-2 hover:text-text-primary",
+        // Destructive, and deliberately not the accent: a red button and an accent button must not
+        // look alike when one of them deletes something (AGENTS R22's confirmations use this).
+        danger: "bg-state-danger text-text-on-accent hover:opacity-90",
       },
       size: {
         sm: "h-7 px-2 text-caption",
