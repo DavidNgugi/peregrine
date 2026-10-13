@@ -124,6 +124,19 @@ pub async fn metadata_provider_satisfies_the_port(
 ) -> Vec<SearchCandidate> {
     let descriptor = provider.descriptor();
     let named = descriptor.provider();
+
+    // A probe is not one of §13's capabilities, so every provider must be able to answer it — that is
+    // what makes it usable for the key-validation flow (PG-E5-20). It may *fail*, and for a fixture
+    // that is the point, but a failure attributed to another provider is the same misattribution the
+    // search refusal below is checked for, and a user sent to the wrong settings pane.
+    if let Err(failure) = provider.check().await {
+        assert_eq!(
+            failure.provider(),
+            named,
+            "a probe failure must name the provider it is about"
+        );
+    }
+
     let declared = descriptor.can(Capability::Search);
     let answer = provider.search(probe).await;
 
@@ -342,6 +355,13 @@ mod tests {
                 &self.descriptor
             }
 
+            fn check(&self) -> peregrine_providers::ProviderFuture<'_, ()> {
+                // Healthy here on purpose: this fixture exists to misname a *search* refusal, and a
+                // probe that failed first would make the suite error for a different reason than the
+                // one this test is named for. The probe's own misattribution has its own fixture.
+                Box::pin(async { Ok(()) })
+            }
+
             fn image(
                 &self,
                 _path: &str,
@@ -386,6 +406,68 @@ mod tests {
             descriptor: fake_descriptor(
                 Provider::Tvdb,
                 peregrine_providers::Capabilities::EMPTY.with(Capability::Trending),
+            ),
+        };
+
+        assert!(catch_async(metadata_provider_satisfies_the_port(&wrong, &probe())).is_err());
+    }
+
+    #[test]
+    fn a_probe_failure_that_names_the_wrong_provider_fails_the_suite() {
+        // The probe's half of the same rule. A refused credential attributed to a provider nobody
+        // asked would put the right error in front of the wrong settings row, which is worse than the
+        // generic failure PG-E5-20 exists to remove.
+        struct Misprobe {
+            descriptor: peregrine_providers::ProviderDescriptor,
+        }
+
+        impl MetadataProvider for Misprobe {
+            fn descriptor(&self) -> &peregrine_providers::ProviderDescriptor {
+                &self.descriptor
+            }
+
+            fn check(&self) -> peregrine_providers::ProviderFuture<'_, ()> {
+                Box::pin(async {
+                    Err(ProviderError::Unauthorized {
+                        provider: Provider::Tmdb,
+                    })
+                })
+            }
+
+            fn image(
+                &self,
+                _path: &str,
+                _kind: peregrine_domain::catalogue::ImageKind,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<u8>> {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+
+            fn title(
+                &self,
+                _id: &peregrine_domain::id::ExternalId,
+                _kind: peregrine_domain::catalogue::TitleKind,
+            ) -> peregrine_providers::ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>
+            {
+                Box::pin(async {
+                    Err(ProviderError::Unsupported {
+                        provider: Provider::Tvdb,
+                        capability: "title",
+                    })
+                })
+            }
+
+            fn search(
+                &self,
+                _query: &SearchQuery,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<SearchCandidate>> {
+                Box::pin(async { Ok(Vec::new()) })
+            }
+        }
+
+        let wrong = Misprobe {
+            descriptor: fake_descriptor(
+                Provider::Tvdb,
+                peregrine_providers::Capabilities::EMPTY.with(Capability::Search),
             ),
         };
 

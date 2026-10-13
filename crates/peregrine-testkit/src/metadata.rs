@@ -52,6 +52,10 @@ pub struct FakeMetadataProvider {
     answer: Result<Vec<SearchCandidate>, ProviderError>,
     title_answer: Result<TitleDetails, ProviderError>,
     image_answer: Result<Vec<u8>, ProviderError>,
+    /// What a probe answers. Defaults to `Ok(())` in every constructor below: a fake built to test a
+    /// search is not also claiming its credential is bad, and a test that wants the refusal asks for it
+    /// by name.
+    check_answer: Result<(), ProviderError>,
 }
 
 impl FakeMetadataProvider {
@@ -76,6 +80,7 @@ impl FakeMetadataProvider {
                 provider,
                 capability: "images",
             }),
+            check_answer: Ok(()),
         }
     }
 
@@ -95,6 +100,7 @@ impl FakeMetadataProvider {
                 provider,
                 capability: "images",
             }),
+            check_answer: Ok(()),
         }
     }
 
@@ -112,6 +118,25 @@ impl FakeMetadataProvider {
             answer: Ok(Vec::new()),
             title_answer: Ok(details),
             image_answer: Ok(bytes),
+            check_answer: Ok(()),
+        }
+    }
+
+    /// A provider whose stored credential is refused, for the key-validation flow (PG-E5-20).
+    #[must_use]
+    pub fn refusing_credentials(provider: Provider) -> Self {
+        Self {
+            descriptor: fake_descriptor(provider, Capabilities::EMPTY.with(Capability::Search)),
+            answer: Ok(Vec::new()),
+            title_answer: Err(ProviderError::Unsupported {
+                provider,
+                capability: "title",
+            }),
+            image_answer: Err(ProviderError::Unsupported {
+                provider,
+                capability: "images",
+            }),
+            check_answer: Err(ProviderError::Unauthorized { provider }),
         }
     }
 
@@ -137,6 +162,11 @@ impl FakeMetadataProvider {
 impl MetadataProvider for FakeMetadataProvider {
     fn descriptor(&self) -> &ProviderDescriptor {
         &self.descriptor
+    }
+
+    fn check(&self) -> ProviderFuture<'_, ()> {
+        let answer = self.check_answer.clone();
+        Box::pin(async move { answer })
     }
 
     fn image(

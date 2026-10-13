@@ -528,7 +528,7 @@ Five extension points, all compile-time traits with a conformance test suite:
 
 | Port | Trait | Add a new one by | Required tests |
 | --- | --- | --- | --- |
-| Metadata | `MetadataProvider` | Implementing capabilities (`search`, `get_title`, `get_season`, `get_episode`, `trending`, `changes`, `images`, `videos`), normalizing into domain types, declaring a rate limit and a cache policy | Recorded fixture replay, field-normalization snapshots, rate-limit behaviour, malformed/oversized payload rejection |
+| Metadata | `MetadataProvider` | Implementing capabilities (`search`, `get_title`, `get_season`, `get_episode`, `trending`, `changes`, `images`, `videos`), normalizing into domain types, declaring a rate limit and a cache policy, and answering `check` — the one operation that belongs to no capability, because it asks whether a credential works before one is stored (PG-E5-20) | Recorded fixture replay, field-normalization snapshots, rate-limit behaviour, malformed/oversized payload rejection |
 | Subtitles | `SubtitleProvider` | `search(query) -> Vec<SubtitleCandidate>`, `download(candidate) -> Bytes`, declaring auth and quota | Fixture replay, encoding-detection cases, quota-exhaustion behaviour |
 | Torrent engine | `TorrentEngine` | Session lifecycle, add/select/stream/stats/limits | Local seeder↔leecher integration test over loopback, cancellation, restart recovery |
 | Player backend | `PlayerBackend` | Launch/stop, command channel, state stream, position stream, track enumeration | Fake backend conformance suite; real backend smoke test per OS |

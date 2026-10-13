@@ -149,6 +149,27 @@ impl MetadataProvider for Tmdb {
         &self.descriptor
     }
 
+    fn check(&self) -> ProviderFuture<'_, ()> {
+        // `/configuration` rather than a search: it is the smallest answer TMDB has, it is the same
+        // endpoint whatever the credential's scopes are, and it costs almost nothing against the rate
+        // limit. The body is deliberately never decoded — see the port's own doc — so a configuration
+        // shape this build has never read cannot fail a working key.
+        let url = format!("{}/configuration", self.base);
+
+        Box::pin(async move {
+            self.client
+                .fetch(
+                    Provider::Tmdb,
+                    Request {
+                        url: &url,
+                        credential: Some(&self.credential),
+                    },
+                )
+                .await?;
+            Ok(())
+        })
+    }
+
     fn search(&self, query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>> {
         // Everything borrowed is read *before* the async block and moved in as owned data, so the
         // returned future borrows only `self` — which is the lifetime the port's elided signature
@@ -656,6 +677,125 @@ mod tests {
             matches!(error, ProviderError::SchemaDrift { .. }),
             "got {error:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_probe_answers_ok_when_the_credential_is_accepted() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/configuration"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(json(
+                "{\"images\":{\"secure_base_url\":\"https://image.tmdb.org/t/p/\"}}",
+            ))
+            .mount(&server)
+            .await;
+
+        adapter(&server)
+            .check()
+            .await
+            .expect("a working credential answers");
+    }
+
+    #[tokio::test]
+    async fn a_refused_credential_is_unauthorized_rather_than_a_transport_failure() {
+        // PG-E5-20's acceptance, at the layer that decides it. The settings screen says "that key was
+        // refused" or "TMDB could not be reached" and those are different instructions to a person, so
+        // a 401 and a 500 must not arrive as the same typed failure. Nothing about the key itself is
+        // in the error: this crate's vocabulary carries no free text (SECURITY.md T13).
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/configuration"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let refused = adapter(&server)
+            .check()
+            .await
+            .expect_err("the credential was refused");
+
+        assert_eq!(
+            refused,
+            ProviderError::Unauthorized {
+                provider: Provider::Tmdb
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_broken_provider_is_not_reported_as_a_broken_credential() {
+        // The other half of that distinction: a provider having a bad day must not send someone to
+        // re-paste a key that was never the problem.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/configuration"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let failed = adapter(&server)
+            .check()
+            .await
+            .expect_err("the provider failed");
+
+        assert!(
+            matches!(failed, ProviderError::Transport { .. }),
+            "got {failed:?}"
+        );
+        assert_ne!(
+            failed,
+            ProviderError::Unauthorized {
+                provider: Provider::Tmdb
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_probe_reads_no_model_of_the_answer() {
+        // The rule the port states: a probe must not decode what it does not need. A configuration
+        // shape this build has never seen — TMDB adding a section, or a proxy answering with something
+        // else entirely — is still a working credential, and a build that failed here would send
+        // people to fix a key that works.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/configuration"))
+            .respond_with(json(
+                "{\"something\":\"this build does not read\",\"nested\":[1,2,3]}",
+            ))
+            .mount(&server)
+            .await;
+
+        adapter(&server)
+            .check()
+            .await
+            .expect("the credential works whatever the body says");
+    }
+
+    #[tokio::test]
+    async fn a_probe_sends_the_credential_in_the_header_and_never_in_the_url() {
+        // The rule the port's error type exists for: a key in a URL reaches every log, every error,
+        // and any redirect that echoes it. Asserted on the request the server actually received.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/configuration"))
+            .and(header("authorization", "Bearer test-token"))
+            .and(query_param("api_key", "test-token"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/configuration"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(json("{}"))
+            .mount(&server)
+            .await;
+
+        adapter(&server)
+            .check()
+            .await
+            .expect("the credential works");
     }
 
     #[tokio::test]

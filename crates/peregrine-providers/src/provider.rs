@@ -16,14 +16,20 @@
 //! method returns a boxed future through [`ProviderFuture`], which costs one allocation per
 //! network request and buys object safety without a proc-macro dependency.
 //!
-//! # Why only one operation
+//! # Why the port has four operations and not eight
 //!
-//! `ARCHITECTURE` §13 lists eight. `search` is the one whose request and response the flows
-//! already fix — FLOWS F3 has the sync service call `search` and get candidates back to
-//! upsert as stub titles — and the rest return *drafts* of the catalogue entities, which carry
-//! no row id and therefore cannot be the domain's stored types. Those drafts are the normal
-//! form, and the normal form is designed against real provider payloads in PG-E5-06 to
-//! PG-E5-16 rather than guessed at here from the providers' documentation.
+//! `ARCHITECTURE` §13 lists eight capabilities. `search` was the first, and it is the one whose
+//! request and response the flows fixed early — FLOWS F3 has the sync service call `search` and get
+//! candidates back to upsert as stub titles. `title` (PG-E5-07) and `image` (PG-E5-15) followed as
+//! their flows arrived. The rest return *drafts* of the catalogue entities, which carry no row id and
+//! therefore cannot be the domain's stored types; those drafts are the normal form, and the normal
+//! form is designed against real provider payloads in PG-E5-06 to PG-E5-16 rather than guessed at
+//! here from the providers' documentation.
+//!
+//! [`MetadataProvider::check`] is the one operation that is **not** one of those eight, and it is here
+//! because it belongs to no single capability: it asks whether the provider can be used at all. A
+//! credential has to be known to work *before* it is stored (PG-E5-20), and an adapter is the only
+//! thing that knows which of its endpoints answers that question most cheaply.
 
 use std::future::Future;
 use std::num::NonZeroU32;
@@ -162,6 +168,27 @@ pub trait MetadataProvider: Send + Sync {
     /// request — so copying it would be a per-request allocation for no gain.
     fn descriptor(&self) -> &ProviderDescriptor;
 
+    /// Asks whether this provider is reachable and its credential is accepted.
+    ///
+    /// It answers `Ok(())` and nothing else, deliberately: the question is "can this provider be
+    /// used", and a caller that wanted what the answer *said* would be a caller asking a different
+    /// one. The implementation picks the cheapest request it has — TMDB reads its own configuration,
+    /// which is a few hundred bytes — and it must not decode the answer into a model, because a build
+    /// that failed on a shape it does not read would report a working credential as broken the day
+    /// the provider adds a field.
+    ///
+    /// **A refused credential must be [`ProviderError::Unauthorized`] and not a transport failure.**
+    /// That distinction is the whole point of the operation: the settings screen tells a person
+    /// either "that key was refused" or "TMDB could not be reached", and those are different
+    /// instructions. It is also what the conformance suite holds every adapter to.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unauthorized`] when the provider refused the credential,
+    /// [`ProviderError::RateLimited`] or [`ProviderError::Transport`] when the provider could not be
+    /// asked, and [`ProviderError::TooLarge`] when the answer exceeded the cap the caller set.
+    fn check(&self) -> ProviderFuture<'_, ()>;
+
     /// Finds titles whose name matches `query`.
     ///
     /// # Errors
@@ -239,6 +266,10 @@ mod tests {
     impl MetadataProvider for Stub {
         fn descriptor(&self) -> &ProviderDescriptor {
             &self.descriptor
+        }
+
+        fn check(&self) -> ProviderFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
         }
 
         fn image(
