@@ -44,6 +44,21 @@ pub(crate) enum WriteRequest {
     InsertStubSeason(Box<crate::catalogue::StubSeason>),
     /// Insert one `episode` row.
     InsertStubEpisode(Box<crate::catalogue::StubEpisode>),
+    /// Write a provider's answer onto an existing title, and reindex it.
+    UpdateTitleMetadata {
+        /// The title row.
+        id: i64,
+        /// What the provider said.
+        details: Box<peregrine_domain::catalogue::TitleDetails>,
+        /// The name to sort by, already normalized by the caller.
+        sort_name: String,
+        /// The state the sync is putting the title into.
+        state: crate::MetadataState,
+        /// The provider that answered, for the artwork columns.
+        provider: String,
+        /// Unix milliseconds.
+        at: i64,
+    },
     /// Find or create the title one provider id names, and attach the id, in one transaction.
     UpsertProviderTitle(Box<crate::catalogue::ProviderTitle>),
     /// Attach external ids to one title.
@@ -564,6 +579,18 @@ async fn apply_catalogue_write(
             .await
             .map(|removed| WriteResponse::ImagesRemoved { removed }),
         WriteRequest::RemoveMatchRule { id } => remove_match_rule(connection, id).await,
+        WriteRequest::UpdateTitleMetadata {
+            id,
+            details,
+            sort_name,
+            state,
+            provider,
+            at,
+        } => crate::catalogue::update_title_metadata(
+            connection, id, &details, &sort_name, state, &provider, at,
+        )
+        .await
+        .map(|changed| WriteResponse::RowChanged { changed }),
         WriteRequest::UpsertProviderTitle(title) => {
             crate::catalogue::upsert_provider_title(connection, &title)
                 .await

@@ -2,13 +2,13 @@
 
 use std::num::NonZeroU32;
 
-use peregrine_domain::catalogue::{TitleKind, TitleSubtype};
+use peregrine_domain::catalogue::{TitleDetails, TitleKind, TitleSubtype};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{ExternalId, Provider};
 use peregrine_providers::capability::{Capabilities, Capability};
 use peregrine_providers::provider::{SearchCandidate, SearchQuery};
 use peregrine_storage::{Database, StubTitle};
-use peregrine_sync::{SyncOutcome, sync_search};
+use peregrine_sync::{SyncOutcome, refresh_title, sync_search};
 use peregrine_testkit::{FakeMetadataProvider, fake_descriptor};
 
 fn candidate(value: &str, name: &str, released: Option<&str>) -> SearchCandidate {
@@ -118,5 +118,79 @@ async fn a_candidate_that_names_a_title_already_held_attaches_the_id_to_it() {
             .await
             .expect("a lookup"),
         Some(held)
+    );
+}
+
+#[tokio::test]
+async fn a_stub_is_filled_from_the_provider_that_knows_it() {
+    // The point of a stub: the library created the row, and the provider is what makes it a title with a
+    // synopsis, a rating, and a date.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let id = database
+        .insert_stub_title(StubTitle {
+            kind: TitleKind::Movie,
+            subtype: TitleSubtype::Standard,
+            name: "The Matrix".to_owned(),
+            original_name: None,
+            sort_name: "the matrix".to_owned(),
+            at: 1_000,
+        })
+        .await
+        .expect("a stub");
+    database
+        .attach_external_ids(
+            id,
+            &[peregrine_storage::TitleExternalId {
+                id: ExternalId::new(Provider::Tmdb, "603").expect("an id"),
+                is_primary: true,
+                fetched_at: 1_000,
+            }],
+        )
+        .await
+        .expect("the id attaches");
+
+    let provider = FakeMetadataProvider::describing(
+        Provider::Tmdb,
+        TitleDetails {
+            kind: TitleKind::Movie,
+            name: NonEmptyText::new("The Matrix").expect("a name"),
+            original_name: None,
+            overview: Some("A hacker learns the truth.".to_owned()),
+            tagline: None,
+            released: Some("1999-03-31".parse().expect("a date")),
+            runtime_minutes: Some(136),
+            original_language: Some("en".to_owned()),
+            origin_country: None,
+            rating: Some(8.2),
+            votes: Some(24_000),
+            popularity: Some(42.0),
+            adult: Some(false),
+            in_production: None,
+            season_count: None,
+            episode_count: None,
+            homepage: None,
+            poster_path: Some("/poster.jpg".to_owned()),
+            backdrop_path: None,
+        },
+    );
+
+    assert!(
+        refresh_title(&provider, &database, id, TitleKind::Movie, 2_000)
+            .await
+            .expect("the refresh runs")
+    );
+
+    let scope = peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("an account"),
+    );
+    let identity = database
+        .title_identity(scope, id)
+        .await
+        .expect("a read")
+        .expect("the title");
+    assert_eq!(
+        identity.metadata_state,
+        peregrine_domain::catalogue::MetadataState::Partial
     );
 }

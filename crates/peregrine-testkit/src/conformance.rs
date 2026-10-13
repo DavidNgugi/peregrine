@@ -342,6 +342,20 @@ mod tests {
                 &self.descriptor
             }
 
+            fn title(
+                &self,
+                _id: &peregrine_domain::id::ExternalId,
+                _kind: peregrine_domain::catalogue::TitleKind,
+            ) -> peregrine_providers::ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>
+            {
+                Box::pin(async {
+                    Err(ProviderError::Unsupported {
+                        provider: Provider::Tmdb,
+                        capability: "title",
+                    })
+                })
+            }
+
             fn search(
                 &self,
                 _query: &SearchQuery,

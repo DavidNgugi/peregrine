@@ -235,6 +235,37 @@ impl Database {
         }
     }
 
+    /// Writes what a provider said onto an existing title, and reindexes it.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the statement fails.
+    pub async fn update_title_metadata(
+        &self,
+        id: i64,
+        details: peregrine_domain::catalogue::TitleDetails,
+        sort_name: String,
+        state: crate::MetadataState,
+        provider: String,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpdateTitleMetadata {
+                id,
+                details: Box::new(details),
+                sort_name,
+                state,
+                provider,
+                at,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("update_title_metadata", &other)),
+        }
+    }
+
     /// The local titles a candidate name could be, with everything the matching rule reads.
     ///
     /// Unscoped on purpose, like `title_for_external_id`: this is the sync's own view for deciding

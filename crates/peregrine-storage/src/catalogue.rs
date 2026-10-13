@@ -20,6 +20,7 @@
 //! filtered in Rust would still have loaded the row, and the next read to forget the filter
 //! would return it.
 
+use peregrine_domain::catalogue::TitleDetails;
 use peregrine_domain::library::TitleCandidate;
 use peregrine_domain::matching::LocalTitle;
 use peregrine_domain::text::NonEmptyText;
@@ -591,6 +592,103 @@ pub(crate) async fn upsert_provider_title(
         .await
         .map_err(StorageError::from_sqlx)?;
     Ok(id)
+}
+
+/// Writes what a provider said onto an existing title, and reindexes it.
+///
+/// **Every optional field is written with `COALESCE`, so an absent one leaves what is stored alone.** A
+/// provider omits freely and drops fields between releases; treating an omission as a value would erase
+/// a synopsis or a rating the user can already see, and the sync has no way to tell the two apart.
+///
+/// The search index is rewritten in the same transaction, because `title`'s own columns feed it and no
+/// trigger watches the table (`fts` module doc). A title whose name changed without an index rewrite is
+/// a title search cannot find by its new name.
+pub(crate) async fn update_title_metadata(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    details: &TitleDetails,
+    sort_name: &str,
+    state: MetadataState,
+    provider: &str,
+    at: i64,
+) -> Result<bool, StorageError> {
+    let origin_country = details
+        .origin_country
+        .as_ref()
+        .and_then(|codes| serde_json::to_string(codes).ok());
+    let (release, first_air) = match details.kind {
+        TitleKind::Movie => (details.released, None),
+        TitleKind::Show => (None, details.released),
+    };
+    let release = release.map(|date| date.to_string());
+    let first_air = first_air.map(|date| date.to_string());
+
+    let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+    let changed = sqlx::query(
+        "UPDATE title SET \
+            name = ?2, sort_name = ?3, \
+            original_name = COALESCE(?4, original_name), \
+            overview = COALESCE(?5, overview), \
+            tagline = COALESCE(?6, tagline), \
+            release_date = COALESCE(?7, release_date), \
+            first_air_date = COALESCE(?8, first_air_date), \
+            runtime_minutes = COALESCE(?9, runtime_minutes), \
+            original_language = COALESCE(?10, original_language), \
+            origin_country = COALESCE(?11, origin_country), \
+            tmdb_rating = COALESCE(?12, tmdb_rating), \
+            tmdb_votes = COALESCE(?13, tmdb_votes), \
+            popularity = COALESCE(?14, popularity), \
+            adult = COALESCE(?15, adult), \
+            in_production = COALESCE(?16, in_production), \
+            season_count = COALESCE(?17, season_count), \
+            episode_count = COALESCE(?18, episode_count), \
+            homepage = COALESCE(?19, homepage), \
+            poster_provider = COALESCE(?20, poster_provider), \
+            poster_path = COALESCE(?21, poster_path), \
+            backdrop_provider = COALESCE(?20, backdrop_provider), \
+            backdrop_path = COALESCE(?22, backdrop_path), \
+            metadata_state = ?23, last_synced_at = ?24, updated_at = ?24 \
+         WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(details.name.as_str())
+    .bind(sort_name)
+    .bind(details.original_name.as_deref())
+    .bind(details.overview.as_deref())
+    .bind(details.tagline.as_deref())
+    .bind(release)
+    .bind(first_air)
+    .bind(details.runtime_minutes.map(i64::from))
+    .bind(details.original_language.as_deref())
+    .bind(origin_country.as_deref())
+    .bind(details.rating)
+    .bind(details.votes.and_then(|votes| i64::try_from(votes).ok()))
+    .bind(details.popularity)
+    .bind(details.adult.map(i64::from))
+    .bind(details.in_production.map(i64::from))
+    .bind(details.season_count.map(i64::from))
+    .bind(details.episode_count.map(i64::from))
+    .bind(details.homepage.as_deref())
+    .bind(provider)
+    .bind(details.poster_path.as_deref())
+    .bind(details.backdrop_path.as_deref())
+    .bind(state.as_str())
+    .bind(at)
+    .execute(&mut *transaction)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    let changed = changed.rows_affected() > 0;
+    if changed {
+        crate::fts::reindex(&mut transaction, id)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(changed)
 }
 
 /// The local titles a candidate name could be, with everything the matching rule reads.

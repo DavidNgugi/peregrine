@@ -16,7 +16,7 @@
 
 use std::time::Duration;
 
-use peregrine_domain::catalogue::TitleKind;
+use peregrine_domain::catalogue::{TitleDetails, TitleKind};
 use peregrine_domain::{ExternalId, NonEmptyText, Provider};
 use reqwest::Url;
 use serde::Deserialize;
@@ -68,7 +68,9 @@ impl Tmdb {
         let descriptor = ProviderDescriptor::new(
             Provider::Tmdb,
             "TMDB",
-            Capabilities::EMPTY.with(Capability::Search),
+            Capabilities::EMPTY
+                .with(Capability::Search)
+                .with(Capability::Title),
             // TMDB's documented limit is fifty requests a second; this is far below it, because the
             // cost of being wrong in this direction is a slower sync and in the other is a ban.
             RatePolicy::new(nonzero(20), Duration::from_secs(1), nonzero(10), true).map_err(
@@ -187,6 +189,138 @@ impl MetadataProvider for Tmdb {
             Ok(candidates)
         })
     }
+
+    fn title(&self, id: &ExternalId, kind: TitleKind) -> ProviderFuture<'_, TitleDetails> {
+        if !self.descriptor.capabilities().contains(Capability::Title) {
+            let unsupported = ProviderError::Unsupported {
+                provider: Provider::Tmdb,
+                capability: "title",
+            };
+            return Box::pin(async move { Err(unsupported) });
+        }
+        let endpoint = match kind {
+            TitleKind::Movie => "movie",
+            TitleKind::Show => "tv",
+        };
+        let url = format!("{}/{endpoint}/{}", self.base, id.value());
+        let credential = self.credential.clone();
+
+        Box::pin(async move {
+            let fetched = self
+                .client
+                .fetch(
+                    Provider::Tmdb,
+                    Request {
+                        url: &url,
+                        credential: Some(&credential),
+                    },
+                )
+                .await?;
+            let answer: DetailsAnswer =
+                Body::new(Provider::Tmdb, &fetched.bytes, fetched.media_type())
+                    .decode(SEARCH_BODY_CAP)?;
+
+            let name = answer
+                .title
+                .or(answer.name)
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+                .and_then(|name| NonEmptyText::new(&name).ok())
+                .ok_or(ProviderError::SchemaDrift {
+                    provider: Provider::Tmdb,
+                })?;
+            let released = answer
+                .release_date
+                .or(answer.first_air_date)
+                .filter(|date| !date.is_empty())
+                .and_then(|date| date.parse().ok());
+            let own_name = match kind {
+                TitleKind::Movie => answer.original_title,
+                TitleKind::Show => answer.original_name,
+            };
+
+            Ok(TitleDetails {
+                kind,
+                name,
+                original_name: own_name.filter(|name| !name.is_empty()),
+                overview: answer.overview.filter(|text| !text.is_empty()),
+                tagline: answer.tagline.filter(|text| !text.is_empty()),
+                released,
+                runtime_minutes: answer.runtime.or_else(|| {
+                    answer
+                        .episode_run_time
+                        .and_then(|times| times.first().copied())
+                }),
+                original_language: answer.original_language.filter(|code| !code.is_empty()),
+                origin_country: answer.origin_country.filter(|codes| !codes.is_empty()),
+                rating: answer.vote_average,
+                votes: answer.vote_count,
+                popularity: answer.popularity,
+                adult: answer.adult,
+                in_production: answer.in_production,
+                season_count: answer.number_of_seasons,
+                episode_count: answer.number_of_episodes,
+                homepage: answer.homepage.filter(|url| !url.is_empty()),
+                poster_path: answer.poster_path.filter(|path| !path.is_empty()),
+                backdrop_path: answer.backdrop_path.filter(|path| !path.is_empty()),
+            })
+        })
+    }
+}
+
+/// One title's details, as much of the documented object as this adapter reads.
+///
+/// One struct for films and series, because the two objects differ only in which of `title`/`name` and
+/// `release_date`/`first_air_date` are filled. Everything is optional: a provider omits freely, and an
+/// absent field must never be read as "clear this".
+#[derive(Debug, Deserialize)]
+struct DetailsAnswer {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    original_title: Option<String>,
+    #[serde(default)]
+    original_name: Option<String>,
+    #[serde(default)]
+    overview: Option<String>,
+    #[serde(default)]
+    tagline: Option<String>,
+    #[serde(default)]
+    release_date: Option<String>,
+    #[serde(default)]
+    first_air_date: Option<String>,
+    #[serde(default)]
+    runtime: Option<u32>,
+    #[serde(default)]
+    episode_run_time: Option<Vec<u32>>,
+    #[serde(default)]
+    original_language: Option<String>,
+    /// Documented for series. Left absent for films rather than guessed at a shape this build has not
+    /// seen, because a provider's answer is not the place to find out what its documentation says.
+    #[serde(default)]
+    origin_country: Option<Vec<String>>,
+    #[serde(default)]
+    vote_average: Option<f64>,
+    #[serde(default)]
+    vote_count: Option<u64>,
+    #[serde(default)]
+    popularity: Option<f64>,
+    #[serde(default)]
+    adult: Option<bool>,
+    #[serde(default)]
+    in_production: Option<bool>,
+    #[serde(default)]
+    number_of_seasons: Option<u32>,
+    #[serde(default)]
+    number_of_episodes: Option<u32>,
+    #[serde(default)]
+    homepage: Option<String>,
+    #[serde(default)]
+    poster_path: Option<String>,
+    #[serde(default)]
+    backdrop_path: Option<String>,
 }
 
 /// What TMDB answers a search with, as much of it as this adapter reads.
@@ -463,6 +597,55 @@ mod tests {
             matches!(error, ProviderError::SchemaDrift { .. }),
             "got {error:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_film_s_details_are_mapped_into_domain_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/movie/603"))
+            .respond_with(json(
+                r#"{
+                    "title": "The Matrix",
+                    "original_title": "The Matrix",
+                    "overview": "A hacker learns the truth.",
+                    "tagline": "Welcome to the real world.",
+                    "release_date": "1999-03-31",
+                    "runtime": 136,
+                    "original_language": "en",
+                    "vote_average": 8.2,
+                    "vote_count": 24000,
+                    "popularity": 42.5,
+                    "adult": false,
+                    "homepage": "https://thematrix.com",
+                    "poster_path": "/poster.jpg",
+                    "backdrop_path": "/backdrop.jpg"
+                }"#,
+            ))
+            .mount(&server)
+            .await;
+
+        let details = adapter(&server)
+            .title(
+                &peregrine_domain::ExternalId::new(Provider::Tmdb, "603").expect("an id"),
+                peregrine_domain::catalogue::TitleKind::Movie,
+            )
+            .await
+            .expect("the details answer");
+
+        assert_eq!(details.name.as_str(), "The Matrix");
+        assert_eq!(
+            details.overview.as_deref(),
+            Some("A hacker learns the truth.")
+        );
+        assert_eq!(details.runtime_minutes, Some(136));
+        assert_eq!(details.rating, Some(8.2));
+        assert_eq!(details.votes, Some(24_000));
+        assert_eq!(
+            details.released,
+            Some("1999-03-31".parse().expect("a date"))
+        );
+        assert_eq!(details.poster_path.as_deref(), Some("/poster.jpg"));
     }
 
     #[tokio::test]

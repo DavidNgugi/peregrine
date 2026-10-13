@@ -257,6 +257,57 @@ pub struct EpisodePosition {
     pub episode_number: EpisodeNumber,
 }
 
+/// The fields a provider supplies for one title.
+///
+/// Not [`Title`]: that type carries the `i64` row id storage assigns, the timestamps it writes, and the
+/// `metadata_state` the sync decides. This is only what a provider said, so an adapter can build one
+/// without knowing anything about the database, and the layer between them decides what to store.
+///
+/// Every field is optional except the name and the kind, because providers omit freely and an absent
+/// field must never mean "clear what is stored" — a refresh that dropped a field one provider stopped
+/// returning would lose data the user can see.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitleDetails {
+    /// A film or a series.
+    pub kind: TitleKind,
+    /// The name the provider lists it under.
+    pub name: NonEmptyText,
+    /// The name in its original language, when the provider distinguishes one.
+    pub original_name: Option<String>,
+    /// The synopsis.
+    pub overview: Option<String>,
+    /// The marketing line.
+    pub tagline: Option<String>,
+    /// The release date for a film, or the first air date for a series.
+    pub released: Option<Date>,
+    /// The runtime of a film, in minutes.
+    pub runtime_minutes: Option<u32>,
+    /// BCP-47.
+    pub original_language: Option<String>,
+    /// ISO-3166 alpha-2 codes.
+    pub origin_country: Option<Vec<String>>,
+    /// This provider's own rating, on its own scale.
+    pub rating: Option<f64>,
+    /// How many people gave it.
+    pub votes: Option<u64>,
+    /// The provider's popularity figure, comparable only within that provider.
+    pub popularity: Option<f64>,
+    /// Whether the provider flags it adult.
+    pub adult: Option<bool>,
+    /// Whether a series is still being made.
+    pub in_production: Option<bool>,
+    /// How many seasons a series has.
+    pub season_count: Option<u32>,
+    /// How many episodes a series has.
+    pub episode_count: Option<u32>,
+    /// The title's own site.
+    pub homepage: Option<String>,
+    /// The provider-relative path of the primary poster.
+    pub poster_path: Option<String>,
+    /// The provider-relative path of the primary backdrop.
+    pub backdrop_path: Option<String>,
+}
+
 /// One row of `title`: a film or a series, with the denormalized artwork the browse grid
 /// reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

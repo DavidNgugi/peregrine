@@ -3,6 +3,8 @@
 use std::num::NonZeroU32;
 use std::time::Duration;
 
+use peregrine_domain::catalogue::{TitleDetails, TitleKind};
+use peregrine_domain::id::ExternalId;
 use peregrine_domain::id::Provider;
 use peregrine_providers::{
     CachePolicy, Capabilities, Capability, MetadataProvider, ProviderDescriptor, ProviderError,
@@ -48,6 +50,7 @@ pub fn fake_descriptor(provider: Provider, capabilities: Capabilities) -> Provid
 pub struct FakeMetadataProvider {
     descriptor: ProviderDescriptor,
     answer: Result<Vec<SearchCandidate>, ProviderError>,
+    title_answer: Result<TitleDetails, ProviderError>,
 }
 
 impl FakeMetadataProvider {
@@ -57,7 +60,33 @@ impl FakeMetadataProvider {
         descriptor: ProviderDescriptor,
         answer: Result<Vec<SearchCandidate>, ProviderError>,
     ) -> Self {
-        Self { descriptor, answer }
+        let provider = descriptor.provider();
+        Self {
+            descriptor,
+            answer,
+            // A fake built by the constructors above declares only `search`, so reading a title is a
+            // refusal rather than a panic: an adapter that answered a capability it never declared is
+            // exactly what the conformance suite exists to catch, and a fake must model that.
+            title_answer: Err(ProviderError::Unsupported {
+                provider,
+                capability: "title",
+            }),
+        }
+    }
+
+    /// A provider that declares `search` and `title`, answering `details` to every title read.
+    #[must_use]
+    pub fn describing(provider: Provider, details: TitleDetails) -> Self {
+        Self {
+            descriptor: fake_descriptor(
+                provider,
+                Capabilities::EMPTY
+                    .with(Capability::Search)
+                    .with(Capability::Title),
+            ),
+            answer: Ok(Vec::new()),
+            title_answer: Ok(details),
+        }
     }
 
     /// A provider that declares `search` and returns `candidates`.
@@ -82,6 +111,11 @@ impl FakeMetadataProvider {
 impl MetadataProvider for FakeMetadataProvider {
     fn descriptor(&self) -> &ProviderDescriptor {
         &self.descriptor
+    }
+
+    fn title(&self, _id: &ExternalId, _kind: TitleKind) -> ProviderFuture<'_, TitleDetails> {
+        let answer = self.title_answer.clone();
+        Box::pin(async move { answer })
     }
 
     fn search(&self, _query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>> {

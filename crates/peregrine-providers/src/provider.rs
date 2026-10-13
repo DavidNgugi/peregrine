@@ -175,6 +175,22 @@ pub trait MetadataProvider: Send + Sync {
     /// [`ProviderError::TooLarge`], and [`ProviderError::Transport`] are the provider's own
     /// answers, mapped by the adapter from its HTTP stack (PG-E5-02, PG-E5-05).
     fn search(&self, query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>>;
+
+    /// Reads one title's details.
+    ///
+    /// `kind` is a parameter because a provider's identifier space is not always split by kind — TMDB
+    /// numbers films and series in one namespace of integers — so an id alone does not say which
+    /// endpoint answers it.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when the descriptor does not declare
+    /// [`crate::capability::Capability::Title`], and otherwise as [`MetadataProvider::search`].
+    fn title(
+        &self,
+        id: &ExternalId,
+        kind: TitleKind,
+    ) -> ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>;
 }
 
 #[cfg(test)]
@@ -207,6 +223,19 @@ mod tests {
     impl MetadataProvider for Stub {
         fn descriptor(&self) -> &ProviderDescriptor {
             &self.descriptor
+        }
+
+        fn title(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
+        ) -> ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "title",
+                })
+            })
         }
 
         fn search(&self, _query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>> {

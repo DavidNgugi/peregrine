@@ -103,6 +103,54 @@ pub async fn sync_search(
     Ok(outcome)
 }
 
+/// Fills a title the catalogue holds from the provider that knows it.
+///
+/// Answers `false` when this provider cannot serve title details at all, which is a normal state rather
+/// than a failure: a provider that declares only `search` is a provider this step skips. Any other
+/// error is reported, because a refresh that silently did nothing looks exactly like one that worked.
+///
+/// # Errors
+///
+/// [`SyncError::Provider`] when the provider fails, [`SyncError::Storage`] when a read or write does.
+pub async fn refresh_title(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    id: i64,
+    kind: peregrine_domain::catalogue::TitleKind,
+    at: i64,
+) -> Result<bool, SyncError> {
+    // The id of *this* provider: a title may carry several, and asking the wrong provider for the wrong
+    // one's identifier is how a film gets another film's synopsis.
+    let external = database
+        .external_ids_of(id)
+        .await?
+        .into_iter()
+        .map(|held| held.id)
+        .find(|external| external.provider() == provider.descriptor().provider());
+    let Some(external) = external else {
+        return Ok(false);
+    };
+
+    let details = match provider.title(&external, kind).await {
+        Ok(details) => details,
+        Err(ProviderError::Unsupported { .. }) => return Ok(false),
+        Err(error) => return Err(SyncError::Provider(error)),
+    };
+    let sort = sort_name(details.name.as_str());
+    let provider_name = provider.descriptor().provider().as_str().to_owned();
+    database
+        .update_title_metadata(
+            id,
+            details,
+            sort,
+            peregrine_domain::catalogue::MetadataState::Partial,
+            provider_name,
+            at,
+        )
+        .await?;
+    Ok(true)
+}
+
 /// The candidate as the matching rule's input, or `None` when it cannot be one.
 ///
 /// The port's `NonEmptyText` is already non-empty, so this only fails on a name that is whitespace —
