@@ -128,15 +128,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           {route.kind === "discover" ? <DiscoverScreen /> : null}
           {route.kind === "library" ? (
             <LibraryScreen
-              onOpenTitle={(opened) => {
-                // The kind travels in the path because the map says it does, and because a page that
-                // knows what it is before its read answers can name itself (PG-E7-02).
-                setRoute({
-                  kind: "title",
-                  titleKind: opened.kind === "movies" ? "movie" : "show",
-                  id: opened.id,
-                });
-              }}
+              onNavigate={setRoute}
               rules={rules}
               scan={scan}
               titles={library}

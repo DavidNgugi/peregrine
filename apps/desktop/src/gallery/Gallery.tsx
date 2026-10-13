@@ -27,6 +27,7 @@ import {
   Icon,
   ICON_NAMES,
   IconButton,
+  Link,
   Panel,
   Progress,
   Screen,
@@ -58,6 +59,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "ErrorState",
   "Icon",
   "IconButton",
+  "Link",
   "Panel",
   "Progress",
   "Screen",
@@ -365,6 +367,16 @@ export function Gallery(): ReactElement {
         description="A surface above the page holding one decision: role=dialog with aria-modal, a heading it is labelled by, the scrim behind it, and §4's --elev-3 shadow plus a border. Escape closes the top overlay only, which is the rule overlay-stack owns."
       >
         <GalleryDialog />
+      </Section_>
+
+      <Section_
+        component="Link"
+        description="An anchor that says where it goes, with the platform's focus ring. Given onNavigate it takes the click rather than letting the webview reload, and it leaves a modified click to the platform: cmd-click is a request for a new window, not for the app to decide."
+      >
+        <div className="flex flex-col items-start gap-2">
+          <Link href="/title/movie/7">A title's own screen</Link>
+          <Link href="/library">The library</Link>
+        </div>
       </Section_>
 
       <Section_

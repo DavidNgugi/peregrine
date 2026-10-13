@@ -11,6 +11,10 @@ export type { EmptyStateProps } from "./EmptyState.js";
 export { ErrorState } from "./ErrorState.js";
 export type { ErrorStateProps } from "./ErrorState.js";
 export { ICON_NAMES, Icon } from "./Icon.js";
+// `shouldNavigate` is the link's decision rather than a primitive, so it is not exported as one:
+// its tests import it from the module, the way the overlay stack's do.
+export { Link } from "./Link.js";
+export type { LinkProps } from "./Link.js";
 export type { IconName, IconProps, IconSize } from "./Icon.js";
 export { IconButton } from "./IconButton.js";
 export type { IconButtonProps } from "./IconButton.js";

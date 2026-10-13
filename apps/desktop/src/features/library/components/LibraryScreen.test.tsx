@@ -131,7 +131,7 @@ function markup(
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <LibraryScreen
-        onOpenTitle={() => undefined}
+        onNavigate={() => undefined}
         rules={remembered}
         scan={scan}
         titles={state}

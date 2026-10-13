@@ -20,6 +20,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Link,
   Progress,
   Screen,
   Section,
@@ -36,6 +37,7 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
+import { routePath, type Route } from "../../../app/routes.js";
 import { TitlePicker } from "./TitlePicker.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
@@ -46,12 +48,13 @@ interface LibraryScreenProps {
   /** The titles as the shell read them. */
   readonly titles: LibraryTitles;
   /**
-   * Opens one title's own screen.
+   * Moves to a route.
    *
-   * A callback rather than a link because the shell owns the route: the screen says *which* title, and
-   * where that lives is the router's business (`app/routes.ts`).
+   * The shell owns where the application *is*; the screen says where a link points, and the route
+   * table (`app/routes.ts`) is the one place a path is spelled. Passing a route rather than an id
+   * keeps the mapping out of the shell, which had it only because there was no link to carry it.
    */
-  readonly onOpenTitle: (title: LibraryTitleDto) => void;
+  readonly onNavigate: (route: Route) => void;
   /**
    * The scan this screen can start, and the state of the one it is following.
    *
@@ -106,7 +109,7 @@ function sizeLabel(bytes: number, t: Translate): string {
  */
 function columnsOf(
   t: Translate,
-  open: (title: LibraryTitleDto) => void,
+  open: (route: Route) => void,
 ): readonly TableColumn<LibraryTitleDto>[] {
   return [
     {
@@ -114,17 +117,16 @@ function columnsOf(
       header: t("library.column.title"),
       cell: (row) => (
         <span className="flex flex-col items-start">
-          {/* A button rather than a link because the kit has no link yet (`PG-E21-03`'s list) and a
-              title that opened nothing would be worse than one that looks like an action. */}
-          <Button
-            onClick={() => {
-              open(row);
+          {/* A link, because that is what it is: it says where it goes, a screen reader announces it
+              as a link, and a keyboard user opens it with `Enter` rather than activating a button. */}
+          <Link
+            href={routePath(routeFor(row))}
+            onNavigate={() => {
+              open(routeFor(row));
             }}
-            size="sm"
-            variant="ghost"
           >
             {row.name}
-          </Button>
+          </Link>
           {row.stub ? (
             <span className="text-caption text-text-tertiary">{t("library.stub")}</span>
           ) : null}
@@ -168,6 +170,15 @@ function columnsOf(
 function suggestionOf(row: UnmatchedFileDto): string | null {
   const named = row.suggestedTitleName;
   return typeof named === "string" && named !== "" ? named : null;
+}
+
+/** The route a title's own screen lives at, which is also the path its link carries. */
+function routeFor(title: LibraryTitleDto): Route {
+  return {
+    kind: "title",
+    titleKind: title.kind === "movies" ? "movie" : "show",
+    id: title.id,
+  };
 }
 
 /** What the parse read, as the line under a parked file's name. */
@@ -312,13 +323,13 @@ function ruleColumnsOf(
 /** The library screen. */
 export function LibraryScreen({
   titles,
-  onOpenTitle,
+  onNavigate,
   scan,
   unmatched,
   rules,
 }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
-  const columns = useMemo(() => columnsOf(t, onOpenTitle), [t, onOpenTitle]);
+  const columns = useMemo(() => columnsOf(t, onNavigate), [t, onNavigate]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
   // A rule that keeps acting is worth one question before it is withdrawn: the files it placed stay,
   // but the answer it remembers stops applying, and a mis-click that changed how the library behaves
