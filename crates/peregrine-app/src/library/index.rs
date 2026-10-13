@@ -44,7 +44,7 @@ use peregrine_domain::{
     LibraryName, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, TitleKind,
     TitleSubtype, UnmatchedFile,
 };
-use peregrine_storage::{Database, StorageError, StubTitle};
+use peregrine_storage::{Database, NewMatchRule, StorageError, StubTitle};
 use thiserror::Error;
 use tracing::debug;
 
@@ -76,6 +76,12 @@ pub enum IndexError {
 /// What one index pass wrote.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IndexReport {
+    /// The title the file was placed under, or zero when this pass placed none.
+    ///
+    /// One id rather than a list because a report answers for one candidate: the walk folds reports
+    /// together for its counts, and a caller that needs the title a *file* landed under asks the
+    /// placement that placed it.
+    pub placed_title_id: i64,
     /// Titles created for names the catalogue did not hold.
     pub created_titles: usize,
     /// Items created — one per title, or per episode once `PG-E14-07` lands.
@@ -93,6 +99,21 @@ pub struct IndexReport {
 }
 
 impl IndexReport {
+    /// The title this pass placed a file under, which the rule a correction creates points at.
+    ///
+    /// Zero when the pass placed neither a film nor an episode — a parked file's report names no
+    /// title, and a report that invented one would point a rule at a title nothing wrote.
+    #[must_use]
+    pub const fn created_title(&self) -> i64 {
+        self.placed_title_id
+    }
+
+    /// Names the title this pass placed a file under.
+    fn under(&mut self, title_id: i64) -> &mut Self {
+        self.placed_title_id = title_id;
+        self
+    }
+
     /// Whether the pass found anything new to record.
     #[must_use]
     pub const fn is_unchanged(&self) -> bool {
@@ -151,19 +172,30 @@ pub async fn index_candidates(
                     .absorb(&index_parsed(database, root_id, path, &parsed, candidate, at).await?);
             }
             Some(Err(error)) => {
-                // The parse read what it could before it stopped, and `NameError` carries it so the
-                // row loses nothing. Parked rather than dropped: this is the queue a human works
-                // through, and a file that never became a row is a file the user cannot see.
-                park(
-                    database,
-                    path,
-                    candidate,
-                    &error.name,
-                    Some(error.reason.to_string()),
-                    at,
-                )
-                .await?;
-                report.unmatched += 1;
+                // Before parking, the one thing a person may already have answered: a rule for this
+                // naming pattern, which is the title the parse read, normalized. `PG-E14-09`'s
+                // acceptance is this line — the second file that reads the way the first one did is
+                // placed without asking again.
+                if let Some(placed) =
+                    rule_placement(database, root_id, path, &error.name, candidate, at).await?
+                {
+                    report.absorb(&placed);
+                } else {
+                    // The parse read what it could before it stopped, and `NameError` carries it
+                    // so the row loses nothing. Parked rather than dropped: this is the queue a
+                    // human works through, and a file that never became a row is a file the user
+                    // cannot see.
+                    park(
+                        database,
+                        path,
+                        candidate,
+                        &error.name,
+                        Some(error.reason.to_string()),
+                        at,
+                    )
+                    .await?;
+                    report.unmatched += 1;
+                }
             }
             None => {
                 return Err(IndexError::NotText {
@@ -259,27 +291,35 @@ pub async fn match_unmatched(
         mtime_ms: row.mtime_ms.as_millisecond(),
     };
 
-    match (row.parsed_season, row.parsed_episode) {
-        (Some(season_number), Some(episode_number)) => {
-            episode(
-                database,
-                None,
-                path,
-                Placement {
-                    title_name,
-                    season_number: season_number.get(),
-                    episode_number: episode_number.get(),
-                },
-                &candidate,
-                at,
-            )
-            .await?;
-        }
-        _ => {
-            movie_from_title(database, None, path, title_name, &candidate, at).await?;
-        }
-    }
+    let title_id = match (row.parsed_season, row.parsed_episode) {
+        (Some(season_number), Some(episode_number)) => episode(
+            database,
+            None,
+            path,
+            Placement {
+                title_name,
+                season_number: season_number.get(),
+                episode_number: episode_number.get(),
+            },
+            &candidate,
+            at,
+        )
+        .await?
+        .created_title(),
+        _ => movie_from_title(database, None, path, title_name, &candidate, at)
+            .await?
+            .created_title(),
+    };
 
+    // The correction becomes a pattern, so the answer outlives the file it was made for
+    // (`PG-E14-09`): the next name that reads the way this one did is placed without asking.
+    database
+        .insert_match_rule(NewMatchRule {
+            pattern: sort_name_of(title_name),
+            title_id,
+            at: at.as_millisecond(),
+        })
+        .await?;
     database.remove_unmatched_file(id).await?;
     Ok(Matched::Placed)
 }
@@ -333,6 +373,8 @@ async fn index_parsed(
     }
 
     let Some(title_name) = parsed.title() else {
+        // Nothing was read to remember, so a rule cannot exist for this name and the row is parked
+        // for a person instead (`PG-E14-09` matches on the title a parse read, and there is none).
         park(
             database,
             path,
@@ -393,7 +435,35 @@ async fn movie(
     report.created_titles += placed.created_titles;
     report.created_items += placed.created_items;
     report.created_files += placed.created_files;
+    report.under(placed.placed_title_id);
     Ok(report)
+}
+
+/// Places a file under the title a user's rule names, when a rule exists for its pattern.
+///
+/// The placement is a film, and that is a property of where this is called rather than an assumption:
+/// every episode-shaped refusal — a range, an absolute number, a bare season — is decided in
+/// [`index_parsed`] before a rule is ever consulted, because a rule settles *which title* a name means
+/// and never where in it the file sits. The migration that creates `match_rule` states the same thing
+/// at the schema.
+async fn rule_placement(
+    database: &Arc<Database>,
+    root_id: i64,
+    path: &str,
+    parsed: &LibraryName,
+    candidate: &CandidateFile,
+    at: jiff::Timestamp,
+) -> Result<Option<IndexReport>, IndexError> {
+    let Some(title_name) = parsed.title() else {
+        return Ok(None);
+    };
+    let Some(remembered) = database.rule_title_for(&sort_name_of(title_name)).await? else {
+        return Ok(None);
+    };
+    // The name the rule answers with, which is the name the user's correction was made under.
+    Ok(Some(
+        movie_from_title(database, Some(root_id), path, &remembered, candidate, at).await?,
+    ))
 }
 
 /// Places one film from the title name a parse read, whatever read it.
@@ -413,8 +483,10 @@ async fn movie_from_title(
     let sort_name = sort_name_of(title_name);
 
     let (item_id, created) = movie_item(database, title_name, &sort_name, at).await?;
+    report.under(created.title_id);
     report.created_titles += created.titles;
     report.created_items += created.items;
+    report.under(created.title_id);
 
     write_file(database, root_id, path, item_id, candidate, at).await?;
     report.created_files += 1;
@@ -532,6 +604,7 @@ async fn episode(
 
     write_file(database, root_id, path, item_id, candidate, at).await?;
     report.created_files += 1;
+    report.under(title_id);
     Ok(report)
 }
 
@@ -586,6 +659,8 @@ async fn write_file(
 struct Resolved {
     titles: usize,
     items: usize,
+    /// The title the item belongs to, which a rule created from this placement points at.
+    title_id: i64,
 }
 
 /// The item a parsed movie belongs to, creating the title and the item when they are missing.
@@ -620,6 +695,8 @@ async fn movie_item(
         created.titles += 1;
         id
     };
+
+    created.title_id = title_id;
 
     let item_id = if let Some(id) = database.item_id_for(title_id, None).await? {
         id
@@ -801,6 +878,17 @@ mod tests {
                 .into_iter()
                 .map(|row| row.name.as_str().to_owned())
                 .collect()
+        }
+
+        /// Writes more files into the root, for a second pass over the same folder.
+        fn add(&self, names: &[&str]) {
+            for name in names {
+                let path = self.database_root_path().join(name);
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(&path, b"a film, in bytes").unwrap();
+            }
         }
 
         /// The one title the corpus holds, for a test that needs its id.
@@ -1057,6 +1145,68 @@ mod tests {
             0,
             "and it is no longer waiting for an answer"
         );
+    }
+
+    #[tokio::test]
+    async fn a_second_occurrence_of_a_corrected_name_is_placed_without_asking() {
+        // PG-E14-09's acceptance. `The Matrix 2049.mkv` is ambiguous about which number is the year,
+        // so it parks; a person says "the title is The Matrix"; and the *next* name that reads the
+        // same way is placed by that answer rather than parked beside it.
+        let corpus = corpus("remember", &["The Matrix 2049.mkv"]).await;
+        corpus.index().await;
+        let rows = corpus.unmatched_rows().await;
+        let id = rows[0].id;
+        let read = rows[0].file.parsed_title.clone();
+        let scope = AccountScope::unrestricted(AccountId::new(1).expect("account one"));
+        match_unmatched(&corpus.database, scope, id, at(NOW + 1_000))
+            .await
+            .unwrap();
+        // The rule is recorded under the title the parse read, which is what a later name is
+        // matched by; if these two ever diverge the rule is written where nothing looks.
+        assert_eq!(
+            corpus
+                .database
+                .rule_title_for(&sort_name_of(read.as_deref().unwrap_or_default()))
+                .await
+                .unwrap(),
+            read,
+            "the rule is recorded under the parse's own reading"
+        );
+
+        // A second file the parser refuses for the same reason, dropped into the root and walked.
+        corpus.add(&["Disc 2/The Matrix 2049.mkv"]);
+        let second = corpus.index().await;
+
+        assert_eq!(
+            second.unmatched, 0,
+            "the second name is not asked about: {second:?}"
+        );
+        assert_eq!(second.created_files, 1, "{second:?}");
+        assert_eq!(corpus.titles().await.len(), 1, "and it is the same title");
+    }
+
+    #[tokio::test]
+    async fn a_rule_never_settles_a_numbering_question() {
+        // A rule says which title a name means and nothing about where in it the file sits, so an
+        // episode-shaped refusal is decided first: a folder full of `S01E01E02` ranges stays parked
+        // even when a rule exists for the show's name.
+        let corpus = corpus("rule-not-numbering", &["Breaking Bad S01E01E02.mkv"]).await;
+        corpus.index().await;
+        let id = corpus.unmatched_rows().await[0].id;
+        match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            id,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+        corpus.add(&["Breaking Bad S02E03E04.mkv", "Breaking Bad Season 3.mkv"]);
+
+        let second = corpus.index().await;
+
+        assert_eq!(second.unmatched, 2, "both are still questions: {second:?}");
+        assert_eq!(second.created_seasons, 0, "{second:?}");
     }
 
     #[tokio::test]

@@ -42,6 +42,16 @@ pub(crate) async fn apply(
     run(connection, path, &MIGRATOR).await
 }
 
+/// How many migrations the embedded set holds.
+///
+/// The number a test needs without applying anything: a copy holds every applied migration, and a
+/// test that writes the count by hand breaks every time one is added.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn count() -> usize {
+    MIGRATOR.iter().count()
+}
+
 /// Applies `migrator`'s pending migrations, copying an existing database first.
 ///
 /// The migrator is a parameter so a test can run a set that contains a migration designed
@@ -162,7 +172,7 @@ mod tests {
     ];
 
     /// The forty tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 40] = [
+    const DOCUMENTED_TABLES: [&str; 41] = [
         "account",
         "cast_session",
         "company",
@@ -182,6 +192,7 @@ mod tests {
         "job",
         "keyword",
         "library_root",
+        "match_rule",
         "media_file",
         "media_item",
         "notification",
@@ -867,6 +878,7 @@ mod tests {
         ("external_id", "season", "season_id", "id", "CASCADE"),
         ("external_id", "title", "title_id", "id", "CASCADE"),
         ("indexer", "secret_ref", "api_key_ref", "key", "SET NULL"),
+        ("match_rule", "title", "title_id", "id", "CASCADE"),
         ("media_file", "library_root", "root_id", "id", "NO ACTION"),
         ("media_file", "media_item", "media_item_id", "id", "CASCADE"),
         ("media_item", "episode", "episode_id", "id", "CASCADE"),
@@ -1277,8 +1289,9 @@ mod tests {
         let applied = apply(&mut connection, &path).await.unwrap();
 
         assert_eq!(
-            applied, 11,
-            "the embedded set is 0001–0011, one migration per file"
+            applied,
+            super::count(),
+            "one migration per embedded file, whatever the set holds"
         );
         assert_eq!(
             documented_tables(&mut connection).await,
@@ -1287,7 +1300,7 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            (1..=11).collect::<Vec<_>>(),
+            (1..=i64::try_from(super::count()).unwrap()).collect::<Vec<_>>(),
             "every applied migration must be recorded, in order"
         );
     }
@@ -1724,10 +1737,10 @@ mod tests {
         let mut second = open_writer_connection(&path).await.unwrap();
         let applied = apply(&mut second, &path).await.unwrap();
 
-        assert_eq!(applied, 11);
+        assert_eq!(applied, super::count());
         assert_eq!(
             versions(&mut second).await,
-            (1..=11).collect::<Vec<_>>(),
+            (1..=i64::try_from(super::count()).unwrap()).collect::<Vec<_>>(),
             "a second run must not record the migrations twice"
         );
     }
@@ -2155,6 +2168,7 @@ mod tests {
     /// One row in every user-data table, so the I9 test can show that the cache tier's
     /// removal changes none of them. The two cache tables get a row in the test itself.
     const USER_DATA_FIXTURES: &[&str] = &[
+        "INSERT INTO match_rule (pattern, title_id, created_at) VALUES ('alien', 1, 0)",
         "INSERT INTO settings (key, value_json, updated_at) VALUES ('theme', '\"dark\"', 0)",
         "INSERT INTO secret_ref (key, keyring_service, keyring_account, created_at) \
          VALUES ('tmdb.api_key', 'peregrine', 'tmdb', 0)",
@@ -2248,6 +2262,8 @@ mod tests {
         SELECT 'keyword' AS table_name, COUNT(*) AS n FROM keyword
         UNION ALL
         SELECT 'library_root' AS table_name, COUNT(*) AS n FROM library_root
+        UNION ALL
+        SELECT 'match_rule' AS table_name, COUNT(*) AS n FROM match_rule
         UNION ALL
         SELECT 'media_file' AS table_name, COUNT(*) AS n FROM media_file
         UNION ALL
@@ -2705,7 +2721,11 @@ mod tests {
     /// The version the fixture takes, past every merged migration.
     /// The version after the embedded set: this fixture migration is appended to the real
     /// ones, so it moves whenever a migration is added.
-    const FAILING_VERSION: i64 = 12;
+    /// A version past the embedded set, so a migration written by this test cannot collide with one
+    /// the product ships — which is what a hardcoded number did the first time a migration landed.
+    fn failing_version() -> i64 {
+        i64::try_from(super::count()).unwrap() + 1
+    }
 
     /// A corrected version of the fixture, used to prove a failed run can be retried.
     const FIXED_MIGRATION: &str = "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY, note TEXT NOT NULL); \
@@ -2717,7 +2737,7 @@ mod tests {
     /// upgrade of a database that already holds them rather than a replay from empty.
     fn migrator_with_a_failure() -> Migrator {
         with_extra(Migration::new(
-            FAILING_VERSION,
+            failing_version(),
             "deliberately_failing".into(),
             MigrationType::Simple,
             FAILING_MIGRATION.into_sql_str(),
@@ -2781,11 +2801,11 @@ mod tests {
         else {
             panic!("expected a migration failure naming the migration, got {error:?}");
         };
-        assert_eq!(*version, FAILING_VERSION);
+        assert_eq!(*version, failing_version());
         assert_eq!(description, "deliberately_failing");
         let message = error.to_string();
         assert!(
-            message.contains("0012_deliberately_failing"),
+            message.contains(&format!("{:04}_deliberately_failing", failing_version())),
             "the error must name the migration: {message}"
         );
         assert!(
@@ -2811,7 +2831,7 @@ mod tests {
         assert_eq!(schema(&mut connection).await, before);
         assert_eq!(
             versions(&mut connection).await,
-            (1..=11).collect::<Vec<_>>(),
+            (1..=i64::try_from(super::count()).unwrap()).collect::<Vec<_>>(),
             "a failed migration must not be recorded"
         );
         let titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
@@ -2824,7 +2844,11 @@ mod tests {
         // no record of the version that failed.
         let mut copy = open_writer_connection(&backup).await.unwrap();
         assert!(!table_exists(&mut copy, "migration_probe").await);
-        assert_eq!(versions(&mut copy).await, (1..=11).collect::<Vec<_>>());
+        assert_eq!(
+            versions(&mut copy).await,
+            (1..=i64::try_from(super::count()).unwrap()).collect::<Vec<_>>(),
+            "the copy holds what was applied before the failing migration"
+        );
         let copied_titles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM title")
             .fetch_one(&mut copy)
             .await
@@ -2845,7 +2869,7 @@ mod tests {
             .expect_err("the fixture migration always fails");
 
         let fixed = with_extra(Migration::new(
-            FAILING_VERSION,
+            failing_version(),
             "deliberately_failing".into(),
             MigrationType::Simple,
             FIXED_MIGRATION.into_sql_str(),
@@ -2853,10 +2877,11 @@ mod tests {
         ));
         let applied = run(&mut connection, &path, &fixed).await.unwrap();
 
-        assert_eq!(applied, 12);
+        // The embedded set plus the one this test fixed, derived for the same reason.
+        assert_eq!(applied, super::count() + 1);
         assert_eq!(
             versions(&mut connection).await,
-            (1..=12).collect::<Vec<_>>()
+            (1..=i64::try_from(super::count()).unwrap() + 1).collect::<Vec<_>>()
         );
         assert!(table_exists(&mut connection, "migration_probe").await);
     }
@@ -2872,7 +2897,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(applied, 11);
+        // `apply` answers how many migrations the embedded set holds once it has run, not how many
+        // this call applied — the fixture started seven migrations in.
+        assert_eq!(applied, super::count());
         let copies = copies(&directory).await;
         assert_eq!(
             copies,
@@ -2889,7 +2916,7 @@ mod tests {
         );
         assert_eq!(
             versions(&mut connection).await,
-            (1..=11).collect::<Vec<_>>()
+            (1..=i64::try_from(super::count()).unwrap()).collect::<Vec<_>>()
         );
     }
 

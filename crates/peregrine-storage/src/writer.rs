@@ -97,6 +97,8 @@ pub(crate) enum WriteRequest {
         root_id: i64,
         updated_at: i64,
     },
+    /// Record or replace one `match_rule` row.
+    InsertMatchRule(Box<crate::catalogue::NewMatchRule>),
     /// Remove one `unmatched_file` row.
     RemoveUnmatchedFile {
         id: i64,
@@ -294,6 +296,9 @@ async fn apply_library_write(
             .await
             .map(|id| WriteResponse::RowInserted { id })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertMatchRule(rule) => {
+            insert_row(crate::catalogue::insert_match_rule(connection, &rule).await)
+        }
         WriteRequest::RemoveUnmatchedFile { id } => remove_unmatched_file(connection, id).await,
         WriteRequest::InsertUnmatchedFile {
             file,
@@ -305,12 +310,11 @@ async fn apply_library_write(
                 None => WriteResponse::RowIgnored,
             })
             .map_err(StorageError::from_sqlx),
-        WriteRequest::InsertSubtitleTrack(track) => {
+        WriteRequest::InsertSubtitleTrack(track) => insert_row(
             crate::library::insert_subtitle(connection, &track)
                 .await
-                .map(|id| WriteResponse::RowInserted { id })
-                .map_err(StorageError::from_sqlx)
-        }
+                .map_err(StorageError::from_sqlx),
+        ),
         WriteRequest::RemoveLibraryRoot { id } => crate::library::remove_root(connection, id)
             .await
             .map(|removed| WriteResponse::RowChanged { changed: removed })
@@ -407,6 +411,15 @@ async fn refresh_file_stamp(
         .map_err(StorageError::from_sqlx)
 }
 
+/// Wraps an insert's outcome as the response a caller expects.
+///
+/// A season, an episode, and a match rule are three rows with one shape: insert, answer the id. The
+/// helper is what keeps the dispatch a list of what each request *means* rather than of how each
+/// reply is wrapped.
+fn insert_row(result: Result<i64, StorageError>) -> Result<WriteResponse, StorageError> {
+    result.map(|id| WriteResponse::RowInserted { id })
+}
+
 /// Removes one `unmatched_file` row, mapping the statement onto the response the caller expects.
 async fn remove_unmatched_file(
     connection: &mut sqlx::SqliteConnection,
@@ -440,14 +453,10 @@ async fn apply(
             .await
             .map(|id| WriteResponse::TitleInserted { id }),
         WriteRequest::InsertStubSeason(season) => {
-            crate::catalogue::insert_season(connection, &season)
-                .await
-                .map(|id| WriteResponse::RowInserted { id })
+            insert_row(crate::catalogue::insert_season(connection, &season).await)
         }
         WriteRequest::InsertStubEpisode(episode) => {
-            crate::catalogue::insert_episode(connection, &episode)
-                .await
-                .map(|id| WriteResponse::RowInserted { id })
+            insert_row(crate::catalogue::insert_episode(connection, &episode).await)
         }
         WriteRequest::AttachExternalIds { title_id, ids } => {
             crate::catalogue::attach_external_ids(connection, title_id, &ids)

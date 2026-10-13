@@ -95,6 +95,70 @@ pub(crate) async fn insert_episode(
     Ok(result.last_insert_rowid())
 }
 
+/// A match rule as a caller writes one, before the database assigns it an id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewMatchRule {
+    /// The title the parse read, normalized by the caller.
+    pub pattern: String,
+    /// The title the user said it was.
+    pub title_id: i64,
+    /// Unix milliseconds, for `created_at`.
+    pub at: i64,
+}
+
+/// Records a match rule, or moves the existing rule for that pattern to where the user just said.
+///
+/// An upsert rather than an insert, because `UNIQUE (pattern)` means one pattern has one answer: a
+/// user who corrects the same pattern twice is changing their mind, and a second row would leave the
+/// read with two answers and no way to choose.
+pub(crate) async fn insert_match_rule(
+    connection: &mut sqlx::SqliteConnection,
+    rule: &crate::catalogue::NewMatchRule,
+) -> Result<i64, StorageError> {
+    sqlx::query(
+        "INSERT INTO match_rule (pattern, title_id, created_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT (pattern) DO UPDATE SET title_id = excluded.title_id",
+    )
+    .bind(&rule.pattern)
+    .bind(rule.title_id)
+    .bind(rule.at)
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    // The row's id either way, because the caller reports the rule it now has and an upsert's
+    // `last_insert_rowid` is the *previous* row's when the conflict branch ran.
+    let row: (i64,) = sqlx::query_as("SELECT id FROM match_rule WHERE pattern = ?1")
+        .bind(&rule.pattern)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(row.0)
+}
+
+/// The title a user's rule places files under, for one pattern.
+///
+/// The *name* rather than the id, because that is what the placement needs: the indexer places a
+/// file by the name it read, which is the same name the pattern was normalized from, so a rule's
+/// answer and a fresh parse take one path rather than two.
+///
+/// Read on the scanner's side of the boundary, like the placement lookups beside it: the indexer
+/// asks before it parks a file, and a rule is about a naming habit rather than about an account's
+/// right to see a title (`crate::library`'s module doc states the exception).
+pub(crate) async fn rule_title_for(
+    pool: &sqlx::SqlitePool,
+    pattern: &str,
+) -> Result<Option<String>, StorageError> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT t.name FROM match_rule r JOIN title t ON t.id = r.title_id WHERE r.pattern = ?1",
+    )
+    .bind(pattern)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|row| row.0))
+}
+
 /// The id of the season a title and number already name, or `None`.
 pub(crate) async fn season_id_for(
     pool: &sqlx::SqlitePool,
@@ -425,7 +489,7 @@ impl TryFrom<IdentityRow> for TitleIdentity {
 mod episode_tests {
     use tempfile::TempDir;
 
-    use crate::{Database, StubSeason, StubTitle, TitleKind, TitleSubtype};
+    use crate::{Database, NewMatchRule, StubSeason, StubTitle, TitleKind, TitleSubtype};
 
     use super::StubEpisode;
 
@@ -535,6 +599,54 @@ mod episode_tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn one_pattern_has_one_rule() {
+        // I40: a user who corrects the same pattern twice is changing their mind, and the read that
+        // consults a rule has to have one answer. A second row for a pattern would leave it choosing.
+        let directory = TempDir::new().unwrap();
+        let (database, first) = database(&directory).await;
+        let second = database
+            .insert_stub_title(StubTitle {
+                kind: TitleKind::Movie,
+                subtype: TitleSubtype::Standard,
+                name: "The Matrix Reloaded".to_owned(),
+                original_name: None,
+                sort_name: "the matrix reloaded".to_owned(),
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        let rule = |title_id: i64| NewMatchRule {
+            pattern: "the matrix".to_owned(),
+            title_id,
+            at: NOW,
+        };
+
+        database.insert_match_rule(rule(first)).await.unwrap();
+        database.insert_match_rule(rule(second)).await.unwrap();
+
+        assert_eq!(
+            database
+                .rule_title_for("the matrix")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("The Matrix Reloaded"),
+            "the later correction is the rule"
+        );
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("peregrine.sqlite").display()
+        ))
+        .await
+        .unwrap();
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM match_rule")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "one pattern, one row");
     }
 
     #[tokio::test]

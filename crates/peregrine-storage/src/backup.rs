@@ -328,6 +328,12 @@ mod tests {
         assert!(!leftover.exists(), "the leftover must not survive the run");
         assert!(copy.is_file());
         let mut restored = open_writer_connection(&copy).await.unwrap();
-        assert_eq!(versions(&mut restored).await, (1..=11).collect::<Vec<_>>());
+        // Every embedded migration, derived rather than counted by hand: the number this
+        // asserted was the reason adding a migration used to break a backup test.
+        let embedded = i64::try_from(crate::migrations::count()).unwrap();
+        assert_eq!(
+            versions(&mut restored).await,
+            (1..=embedded).collect::<Vec<_>>()
+        );
     }
 }

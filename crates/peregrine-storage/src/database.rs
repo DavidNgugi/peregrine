@@ -824,6 +824,26 @@ impl Database {
         }
     }
 
+    /// Records a match rule, or moves the existing rule for that pattern, and answers its id.
+    pub async fn insert_match_rule(
+        &self,
+        rule: crate::catalogue::NewMatchRule,
+    ) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertMatchRule(Box::new(rule)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_match_rule", &other)),
+        }
+    }
+
+    /// The title a user's rule places files under for one pattern, or `None` when they made none.
+    pub async fn rule_title_for(&self, pattern: &str) -> Result<Option<String>, StorageError> {
+        crate::catalogue::rule_title_for(&self.readers, pattern).await
+    }
+
     /// One unmatched file, when `scope` may be offered its suggestion.
     pub async fn unmatched_file(
         &self,

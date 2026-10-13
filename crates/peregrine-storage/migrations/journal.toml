@@ -46,3 +46,7 @@ sha256 = "aa959b40dd57430e8d32d3c486f52a00180d9be088ba6f5b1942c081f58e6534"
 [[migration]]
 file = "0011_disk_accounting_indexes.sql"
 sha256 = "2c7c039804876026d7f479b38b0fd96b86e5dde0cd3b700139176a166a4a8461"
+
+[[migration]]
+file = "0012_match_rule.sql"
+sha256 = "31640dc788edcabbedd9bd47e600ec0e5f3bd9b24413d9024efb21cc5ebe1480"

@@ -1166,9 +1166,12 @@ mod tests {
         let logs = runtime.config().logs_directory();
         tokio::fs::create_dir_all(&logs).await.unwrap();
 
-        // An older file that must be ignored.
+        // The fixture's dates are far outside any real one, because the choice is made by comparing
+        // names as text: a date written in the past is outranked by whatever the running process has
+        // logged today, and this test would then read the live file instead of the fixture. It did
+        // exactly that on 2026-10-13, which is why these are the extremes of the format's range.
         tokio::fs::write(
-            logs.join("peregrine.2026-10-01.jsonl"),
+            logs.join("peregrine.0001-01-01.jsonl"),
             "{\"message\":\"from-yesterday\"}\n",
         )
         .await
@@ -1183,7 +1186,7 @@ mod tests {
             newest.len() as u64 > LOG_TAIL_BYTES,
             "the fixture must be larger than the window"
         );
-        tokio::fs::write(logs.join("peregrine.2026-10-12.jsonl"), &newest)
+        tokio::fs::write(logs.join("peregrine.9999-12-31.jsonl"), &newest)
             .await
             .unwrap();
 

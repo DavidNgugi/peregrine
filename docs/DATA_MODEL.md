@@ -947,6 +947,16 @@ Accounts and their gating are specified in [adr/0019](../docs/adr/0019-local-acc
 -- translation key, and it is not editable. Enforced here rather than by convention.
 CREATE UNIQUE INDEX account_single_guest_uq ON account (kind) WHERE kind = 'guest';
 
+CREATE TABLE match_rule (
+  id         INTEGER PRIMARY KEY,
+  pattern    TEXT NOT NULL,          -- the title the parse read, normalized
+  title_id   INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  UNIQUE (pattern)
+);
+-- A correction a user makes is stored as a pattern rather than as one answer, so the same naming
+-- habit places every later file it produced (I40, PG-E14-09).
+
 CREATE TABLE account_content_rule (
   id         INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL REFERENCES account(id) ON DELETE CASCADE,
@@ -1096,13 +1106,14 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I36 | Artwork has at most one row per owner, role, provider, path, and language, where "no language" is the empty string rather than NULL; and at most one *live* download job exists per info hash, while terminal jobs may repeat. | `artwork_language_is_a_sentinel_and_never_null`, `the_info_hash_index_is_unique_among_live_jobs_only`, and the two upgrade tests in `peregrine-storage`'s `migrations` module |
 | I37 | Content outside an account's scope is indistinguishable from content that does not exist: a restricted scope cannot see an adult-flagged title or one with no certification, and a read returns the same answer for a hidden title as for an absent one. | `a_restricted_scope_hides_adult_and_unrated_content`, `a_restricted_page_is_still_a_full_page`, `a_fresh_stub_is_not_visible_to_a_restricted_scope`, and `an_unrestricted_scope_sees_every_title` in `peregrine-storage`'s `catalogue` module, and `a_restricted_scope_gets_the_same_answer_for_hidden_and_absent_content` and `a_restricted_page_is_still_a_full_page` in its `fts` module; the scope itself is `peregrine-domain`'s `AccountScope` |
 | I38 | The repository layer emits only declared events: `event_log.kind`, `subject_kind` and `subject_id` can hold no value that `peregrine-domain`'s event vocabulary does not name, and no API accepts a kind as a string. | The seal is a type, not a check: `NewEvent` holds `peregrine_domain::Event`, `Event::as_str` is an exhaustive match so an unnamed variant fails `cargo check`, and a `compile_fail` doctest in `peregrine-storage`'s `writer` module pins that the old string field cannot be constructed. `the_download_vocabulary_covers_the_machine` walks the download machine's own legal-cell matrix in both directions, and `an_appended_event_reads_back_as_the_declared_event` proves a written row parses back to the event that wrote it |
+| I40 | A user's match correction is stored as a pattern and consulted before a file is parked, so the title the parse read places later files that read the same way; a rule settles *which title* a name means and never where in it the file sits. | `UNIQUE (pattern)` on `match_rule`; `the_second_occurrence_of_a_corrected_name_is_placed_without_asking` in `peregrine-app`'s `library::index` module proves the read, `a_rule_never_settles_a_numbering_question` proves an episode-shaped refusal is decided first, and `one_pattern_has_one_rule` proves the upsert |
 | I39 | The search index is derived from `title` and its related tables and rebuilds from them: a rebuild after the index has been made wrong in either direction reproduces the same results for the same query, in the same order. | `a_rebuild_reproduces_identical_search_results` in `peregrine-storage`'s `fts` module, which records the results of several queries, breaks the index by adding a row with no title and removing a title's row, and asserts the rebuild restores them exactly |
 
 ### What each invariant is enforced by today
 
 The "Enforced by" column above states the *mechanism* an invariant is meant to have, which is not the same question as whether that mechanism exists. Audited against the tree (PG-E4-20):
 
-- **Enforced, with a test that names it:** I1, I2, I3, I4, I6, I7, I9, I11, I12, I13, I28, I35, I36, I37, I38, I39. PG-E3-10's library repository puts I2 on the two partial unique indices with `one_movie_item_per_title_and_one_episode_item_per_episode` and I3 on `UNIQUE (path)` with `one_file_cannot_be_claimed_twice`, and I11 on `a_missing_file_keeps_its_row_and_its_first_instant`.
+- **Enforced, with a test that names it:** I1, I2, I3, I4, I6, I7, I9, I11, I12, I13, I28, I35, I36, I37, I38, I39, I40. PG-E3-10's library repository puts I2 on the two partial unique indices with `one_movie_item_per_title_and_one_episode_item_per_episode` and I3 on `UNIQUE (path)` with `one_file_cannot_be_claimed_twice`, and I11 on `a_missing_file_keeps_its_row_and_its_first_instant`.
 - **Enforced by tests that now name them:** I14 by `quiet_hours_never_hold_back_a_critical_event` and `a_critical_event_that_cannot_be_disabled_still_respects_focus`; I15 by `the_scanner_finds_each_forbidden_class`; I25, I26 and I27 by the scoped-read tests in `peregrine-storage`'s `catalogue` module — including the notification reads, by `a_restricted_scope_hides_notifications_about_hidden_subjects` and `a_restricted_scope_hides_notifications_about_an_episode_of_a_hidden_title` in its `notify` module — and by the scoped search tests in its `fts` module. The enforcement was already real; only the cross-reference was missing, and adding it is cheaper than asking a reader to trust the column.
 - **Stated for a table that exists, where the promised mechanism is genuinely absent:** only **I10** — deleting a title must cascade to rows and never to files, and nothing deletes a title at all, because deletion is PG-E15's. Two others that first looked like this group were checked and are narrower than they appear:
   - **I5** is enforced **upstream**, not by the column. No repository writes `download_file` today, and it does not need to: `TorrentInspector` refuses `../escape.mkv` and absolute entries with a typed reason before any row could be written, so a traversing path cannot reach the table through the only path that exists. What the column promises — validating again at insert and on read — is defence in depth that lands with the `download_file` writer, and it should not be described as missing.
