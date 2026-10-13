@@ -28,6 +28,7 @@
 pub mod capability;
 pub mod descriptor;
 pub mod error;
+pub mod http;
 pub mod hygiene;
 pub mod provider;
 pub mod rate;

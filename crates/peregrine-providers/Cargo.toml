@@ -22,6 +22,18 @@ thiserror = { workspace = true }
 # and a client type is what must *not* be here.
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The client stack (PG-E5-02). The retry curve is this crate's own rule — a provider's `429` carries
+# `Retry-After` and its `5xx` does not, and the policy is tested at a deterministic instant — so no
+# retry crate is needed. The version lives in the workspace manifest with its reason.
+reqwest = { workspace = true }
+# The retry curve's wait. `reqwest` needs a runtime either way, and this is the one the application
+# already uses; `sleep` is the only part of it this crate names.
+tokio = { workspace = true }
+
+[dev-dependencies]
+# The provider test harness (docs/ARCHITECTURE.md §13). A dev-dependency rather than a runtime one:
+# nothing in the shipping binary talks to a mock server.
+wiremock = { workspace = true }
 
 [lints]
 workspace = true

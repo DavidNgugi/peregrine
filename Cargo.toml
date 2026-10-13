@@ -75,6 +75,14 @@ specta = { version = "=2.0.0-rc.25", features = ["derive", "function"] }
 # version; naming it directly is what lets the export entry point construct the
 # `Typescript` exporter without reaching through a re-export path.
 specta-typescript = { version = "=0.0.12" }
+# The provider HTTP client (PG-E5-02). `rustls` rather than the platform's TLS because the
+# application ships its own trust roots and must not depend on a system store that differs per
+# platform; `http2` and the compression features are what a provider's CDN answers best with. No
+# default features: `default-tls` would drag native-tls back in and undo the first of those.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "gzip", "brotli", "json", "charset"] }
+# The provider test harness (docs/ARCHITECTURE.md §13): every adapter is tested against recorded or
+# synthesised HTTP rather than a live provider, which AGENTS R14 requires and R24 respects.
+wiremock = { version = "0.6.5" }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "json", "macros"] }
 tauri = { version = "2.12.1" }
 tauri-build = { version = "2.7.1" }

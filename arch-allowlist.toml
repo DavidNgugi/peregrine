@@ -345,6 +345,9 @@ runtime = [
   "serde",
   "serde_json",
   "thiserror",
+  # The retry curve's wait (PG-E5-02). `reqwest` already needs a runtime; this is the application's,
+  # and the only part of it this crate names is `time::sleep`.
+  "tokio",
   "tracing",
 ]
 build = []
