@@ -40,6 +40,7 @@ function parked(overrides: Partial<UnmatchedFileDto> = {}): UnmatchedFileDto {
     parsedSeason: null,
     parsedEpisode: null,
     reason: "`2049` could be a year or part of the title",
+    suggestedTitleName: null,
     sizeBytes: 2_000_000_000,
     ...overrides,
   };
@@ -56,8 +57,8 @@ function queue(
     failed: false,
     busy: false,
     error: null,
-    match: (id: number) => {
-      record.matched.push(id);
+    match: (file: UnmatchedFileDto) => {
+      record.matched.push(file.id);
       return Promise.resolve();
     },
     refresh: () => Promise.resolve(),
@@ -226,6 +227,38 @@ describe("LibraryScreen", () => {
     expect(html).toContain("The Matrix 2049.mkv");
     expect(html).toContain("The Matrix (2049)");
     expect(html).toContain("could be a year or part of the title");
+    expect(html).toContain("Match");
+  });
+
+  it("says which existing title a parked name looks like, and files it there", () => {
+    // The offer is what makes the queue answerable without a picker: the library already holds a
+    // title this name could mean, so the question is a yes rather than a search.
+    const html = markup(
+      library(),
+      scanControl(),
+      queue({ files: [parked({ suggestedTitleName: "The Matrix" })] }),
+    );
+
+    expect(html).toContain("Looks like The Matrix");
+    expect(html).toContain("File under The Matrix");
+  });
+
+  it("asks a plain match when nothing was close enough", () => {
+    const html = markup(library(), scanControl(), queue({ files: [parked()] }));
+
+    expect(html).toContain("Match");
+    expect(html).not.toContain("Looks like");
+  });
+
+  it("treats a missing or empty suggestion as no suggestion at all", () => {
+    // Found by looking at a capture: a payload that omits the field arrives as `undefined`, and a
+    // check for `null` took the suggestion branch with nothing in it — a bare "Looks like" on screen.
+    // A label with a hole in it is worse than no label.
+    const missing = { ...parked() };
+    delete (missing as { suggestedTitleName?: unknown }).suggestedTitleName;
+    const html = markup(library(), scanControl(), queue({ files: [missing] }));
+
+    expect(html).not.toContain("Looks like");
     expect(html).toContain("Match");
   });
 

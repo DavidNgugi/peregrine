@@ -17,6 +17,7 @@ import type {
   JobStarted,
   LibraryRootDto,
   LibraryTitleDto,
+  MatchAsDto,
   MatchRuleDto,
   UnmatchedFileDto,
   RootKind,
@@ -129,13 +130,18 @@ export async function listUnmatchedFiles(limit?: number): Promise<UnmatchedFileD
 }
 
 /**
- * Answers one parked file by placing it as the title its parse read.
+ * Answers one parked file.
  *
- * Answers whether it placed anything: a file a scan reached while the row waited is already indexed,
- * and clearing the stale row is the whole of that answer rather than a failure.
+ * `asTitle` says which title the answer files it under: what its name read, or the title the scan
+ * offered — which joins a title the library already holds rather than creating a near-duplicate of
+ * it. Answers whether it placed anything: a file a scan reached while the row waited is already
+ * indexed, and clearing the stale row is the whole of that answer rather than a failure.
  */
-export async function matchUnmatchedFile(id: number): Promise<boolean> {
-  return unwrap(commands.matchUnmatched({ id }));
+export async function matchUnmatchedFile(
+  id: number,
+  asTitle: MatchAsDto = "parsed",
+): Promise<boolean> {
+  return unwrap(commands.matchUnmatched({ id, asTitle }));
 }
 
 /**

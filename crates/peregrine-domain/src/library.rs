@@ -973,6 +973,185 @@ pub struct SmartCollection {
     pub created_at: Timestamp,
 }
 
+/// A title that already exists, as the suggestion rule sees it.
+///
+/// Two fields and no more: the rule compares a name that could not be placed against the names the
+/// catalogue already holds, and a title's identity is its id. Anything else a caller might want is
+/// its own read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleCandidate {
+    /// The title's id, which is what a suggestion records.
+    pub id: i64,
+    /// The title's sort name, already normalized by whoever built the row.
+    pub sort_name: String,
+}
+
+/// The shortest candidate a suggestion may be built from.
+///
+/// Four characters is where a prefix stops being a coincidence: `it` is a prefix of a great many
+/// titles, and a suggestion is a statement the application makes on a user's behalf.
+pub const MINIMUM_SUGGESTION_LENGTH: usize = 4;
+
+/// The title a name that could not be placed most likely means, when one is close enough to offer.
+///
+/// **The rule is deliberately narrow.** The parked name must *start with* the candidate's whole sort
+/// name, and what follows must hold no letters at all — digits, punctuation, or nothing. So
+/// `the matrix 2049` suggests `the matrix`, because a trailing number is a year far more often than
+/// it is part of a title, and `the matrix reloaded` suggests nothing, because a sequel is a different
+/// film and offering it would be a confident wrong answer. `blade runner 2049` suggests nothing for
+/// the same reason, which is the cost of the rule and the reason it is the *suggestion* rather than
+/// the placement: a person still decides.
+///
+/// A name that already equals a candidate is not a suggestion: that name is placed, not parked, and
+/// the answer would tell a user what they already know.
+///
+/// **Two candidates with the same name offer nothing.** A film and a series can share a sort name,
+/// and the rule has no way to prefer one — answering nothing is the only answer that does not pick a
+/// title for the user. Two *different* prefixes cannot tie: a string has one prefix of any given
+/// length, so the only ambiguity the loop can meet is a duplicate.
+#[must_use]
+pub fn suggest_title<'a>(
+    needs: &str,
+    candidates: &'a [TitleCandidate],
+) -> Option<&'a TitleCandidate> {
+    let mut best: Option<&TitleCandidate> = None;
+    let mut ambiguous = false;
+
+    for candidate in candidates {
+        let name = candidate.sort_name.as_str();
+        if name.len() < MINIMUM_SUGGESTION_LENGTH || name.len() >= needs.len() {
+            continue;
+        }
+        let Some(remainder) = needs.strip_prefix(name) else {
+            continue;
+        };
+        if remainder.chars().any(char::is_alphabetic) {
+            continue;
+        }
+        match best {
+            // The longest candidate wins: it is the most specific thing the name could mean.
+            Some(current) if current.sort_name.len() < name.len() => {
+                best = Some(candidate);
+                ambiguous = false;
+            }
+            Some(current) if current.sort_name == name && current.id != candidate.id => {
+                ambiguous = true;
+            }
+            Some(_) => {}
+            None => best = Some(candidate),
+        }
+    }
+
+    if ambiguous {
+        return None;
+    }
+    best
+}
+
+#[cfg(test)]
+mod suggestion_tests {
+    use super::{TitleCandidate, suggest_title};
+
+    fn candidate(id: i64, sort_name: &str) -> TitleCandidate {
+        TitleCandidate {
+            id,
+            sort_name: sort_name.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_trailing_number_suggests_the_name_without_it() {
+        // The case the rule exists for: `The Matrix 2049.mkv` reads a title of `the matrix 2049` and
+        // the catalogue holds `the matrix`. A trailing number is a year far more often than it is
+        // part of a title, so the name without it is offered — as a *suggestion*, because a person
+        // still decides.
+        let candidates = [candidate(1, "the matrix")];
+
+        assert_eq!(
+            suggest_title("the matrix 2049", &candidates),
+            Some(&candidates[0])
+        );
+    }
+
+    #[test]
+    fn a_sequel_is_not_a_suggestion() {
+        // `the matrix reloaded` is a different film. Offering `the matrix` would be a confident wrong
+        // answer, and the remaining-word check is what refuses it.
+        let candidates = [candidate(1, "the matrix")];
+
+        assert_eq!(suggest_title("the matrix reloaded", &candidates), None);
+        assert_eq!(
+            suggest_title("the matrix 2049 remastered", &candidates),
+            None
+        );
+    }
+
+    #[test]
+    fn a_name_the_catalogue_already_holds_is_not_a_suggestion() {
+        // It is placed rather than parked, and telling a user what they already know is not an offer.
+        let candidates = [candidate(1, "the matrix")];
+
+        assert_eq!(suggest_title("the matrix", &candidates), None);
+    }
+
+    #[test]
+    fn a_short_candidate_is_never_offered() {
+        // `it` is a prefix of a great many titles, and a suggestion is a statement the application
+        // makes on a user's behalf.
+        let candidates = [candidate(1, "it")];
+
+        assert_eq!(suggest_title("it follows 2014", &candidates), None);
+    }
+
+    #[test]
+    fn a_number_in_the_middle_still_leaves_the_candidate_a_prefix() {
+        // `blade runner 2049` reads a title of the same string, and the catalogue holds it: nothing is
+        // offered. The rule is about the *remainder*, so a name that is exactly the candidate plus
+        // digits is offered and one with words after them is not.
+        let candidates = [candidate(1, "blade runner")];
+
+        assert_eq!(
+            suggest_title("blade runner 2049", &candidates),
+            Some(&candidates[0])
+        );
+        assert_eq!(
+            suggest_title("blade runner 2049 remastered", &candidates),
+            None
+        );
+    }
+
+    #[test]
+    fn two_titles_with_one_name_offer_nothing() {
+        // A film and a series can share a sort name, and the rule cannot prefer one. Answering
+        // nothing is the only answer that does not choose for the user.
+        let candidates = [candidate(1, "the matrix"), candidate(2, "the matrix")];
+
+        assert_eq!(suggest_title("the matrix 2049", &candidates), None);
+    }
+
+    #[test]
+    fn the_longest_candidate_wins_when_two_could_fit() {
+        // Contrived on purpose: it is the only shape that puts two different candidates in front of
+        // one name, and it pins the tie-break. A prefix of `the matrix 2 4` that leaves no letters is
+        // either `the matrix` or `the matrix 2`, and the more specific one is the answer.
+        let candidates = [candidate(1, "the matrix"), candidate(2, "the matrix 2")];
+
+        assert_eq!(
+            suggest_title("the matrix 2 4", &candidates),
+            Some(&candidates[1])
+        );
+    }
+
+    #[test]
+    fn a_candidate_with_nothing_after_it_is_never_a_suggestion() {
+        // The empty-string case in the other direction: an empty name is a prefix of everything, and
+        // the length floor is what refuses it.
+        let candidates = [candidate(1, "")];
+
+        assert_eq!(suggest_title("anything at all", &candidates), None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -175,6 +175,28 @@ pub struct UnmatchedRef {
     /// The row id, as the queue returned it.
     #[specta(type = Number)]
     pub id: i64,
+    /// Which title the answer files the file under: the one its name read, or the one the scan
+    /// offered.
+    pub as_title: MatchAsDto,
+}
+
+/// The two titles an answer can file a parked file under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum MatchAsDto {
+    /// What the name read, which is what the row's own values say.
+    Parsed,
+    /// What the scan offered, which joins a title the library already holds when there is one.
+    Suggested,
+}
+
+impl From<MatchAsDto> for peregrine_app::MatchAs {
+    fn from(value: MatchAsDto) -> Self {
+        match value {
+            MatchAsDto::Parsed => Self::Parsed,
+            MatchAsDto::Suggested => Self::Suggested,
+        }
+    }
 }
 
 /// One file a scan could not place, as the queue shows it.
@@ -203,6 +225,11 @@ pub struct UnmatchedFileDto {
     pub parsed_episode: Option<u32>,
     /// Why the scan could not place it.
     pub reason: Option<String>,
+    /// The title the scan offered for it, when one is close enough and this account may see it.
+    ///
+    /// `None` covers both "nothing was close enough" and "the title offered is out of scope", which
+    /// are the same thing to the person answering (I37).
+    pub suggested_title_name: Option<String>,
     /// What the file weighs, in bytes.
     #[specta(type = Number)]
     pub size_bytes: i64,
@@ -228,6 +255,7 @@ impl From<peregrine_app::UnmatchedFileRow> for UnmatchedFileDto {
             parsed_season: file.parsed_season.map(peregrine_app::SeasonNumber::get),
             parsed_episode: file.parsed_episode.map(peregrine_app::EpisodeNumber::get),
             reason: file.reason,
+            suggested_title_name: row.suggested_title_name,
             size_bytes: i64::try_from(file.size_bytes).unwrap_or(i64::MAX),
         }
     }
@@ -396,7 +424,10 @@ pub async fn match_unmatched(
     state: State<'_, RuntimeState>,
     file: UnmatchedRef,
 ) -> Result<bool, AppError> {
-    let placed = state.runtime()?.match_unmatched_file(file.id).await?;
+    let placed = state
+        .runtime()?
+        .match_unmatched_file(file.id, file.as_title.into())
+        .await?;
     Ok(guard_response("library::match_unmatched", placed))
 }
 

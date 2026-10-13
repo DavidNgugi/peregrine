@@ -89,6 +89,12 @@ pub struct UnmatchedFileRow {
     pub id: i64,
     /// The file itself.
     pub file: UnmatchedFile,
+    /// The name of the title the scan offered, when it offered one this scope may see.
+    ///
+    /// `None` covers both "nothing was close enough" and "the title offered is out of scope", and
+    /// that is deliberate rather than lossy (I37): the two read the same to a person, and the
+    /// question the row asks does not depend on the answer.
+    pub suggested_title_name: Option<String>,
 }
 
 /// One row of `subtitle_track`, with the id a page resumes below.
@@ -939,14 +945,21 @@ pub(crate) async fn unmatched(
     scope: AccountScope,
     id: i64,
 ) -> Result<Option<UnmatchedFile>, StorageError> {
+    // The scope is applied to the suggestion and not to the row, which is what the doc above has
+    // always said and what the statement did not do: a row whose *suggestion* was out of scope was
+    // hidden entirely, so a user was never offered the question about a file they own. A suggestion
+    // out of scope now reads as no suggestion, which is what a row with nothing close enough reads
+    // as (I37).
     let row = sqlx::query_as::<_, UnmatchedRow>(
         "SELECT u.id, u.path, u.size_bytes, u.mtime_ms, u.parsed_title, u.parsed_year, \
-         u.parsed_season, u.parsed_episode, u.confidence, u.reason, u.suggested_title_id, \
-         u.suggested_episode_id, u.first_seen_at FROM unmatched_file u \
-         LEFT JOIN title t ON t.id = u.suggested_title_id \
-         WHERE u.id = ?1 \
-           AND (?2 = 0 OR u.suggested_title_id IS NULL \
-                OR (t.adult = 0 AND t.content_rating IS NOT NULL))",
+         u.parsed_season, u.parsed_episode, u.confidence, u.reason, u.suggested_episode_id, \
+         u.first_seen_at, \
+         CASE WHEN ?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL) \
+              THEN u.suggested_title_id END AS suggested_title_id, \
+         CASE WHEN ?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL) THEN t.name END \
+           AS suggested_title_name \
+           FROM unmatched_file u LEFT JOIN title t ON t.id = u.suggested_title_id \
+         WHERE u.id = ?1",
     )
     .bind(id)
     .bind(hidden_by_scope(scope))
@@ -968,13 +981,20 @@ pub(crate) async fn list_unmatched(
     request: PageRequest,
 ) -> Result<Vec<UnmatchedFileRow>, StorageError> {
     let rows = sqlx::query_as::<_, UnmatchedRow>(
+        // The scope is applied to the *suggestion* rather than to the row, which is the difference
+        // I37 makes here: the file is the user's and always needs an answer, while the title the scan
+        // offered is content some accounts may not see. A suggestion out of scope reads as no
+        // suggestion, which is exactly what a row with nothing close enough reads as — the two are
+        // indistinguishable by design, and neither hides the question.
         "SELECT u.id, u.path, u.size_bytes, u.mtime_ms, u.parsed_title, u.parsed_year, \
-         u.parsed_season, u.parsed_episode, u.confidence, u.reason, u.suggested_title_id, \
-         u.suggested_episode_id, u.first_seen_at FROM unmatched_file u \
-         LEFT JOIN title t ON t.id = u.suggested_title_id \
-         WHERE (?2 = 0 OR u.suggested_title_id IS NULL \
-                OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
-           AND (?1 IS NULL OR u.id < ?1) ORDER BY u.id DESC LIMIT ?3",
+         u.parsed_season, u.parsed_episode, u.confidence, u.reason, u.suggested_episode_id, \
+         u.first_seen_at, \
+         CASE WHEN ?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL) \
+              THEN u.suggested_title_id END AS suggested_title_id, \
+         CASE WHEN ?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL) THEN t.name END \
+           AS suggested_title_name \
+           FROM unmatched_file u LEFT JOIN title t ON t.id = u.suggested_title_id \
+         WHERE (?1 IS NULL OR u.id < ?1) ORDER BY u.id DESC LIMIT ?3",
     )
     .bind(request.bindable_cursor())
     .bind(hidden_by_scope(scope))
@@ -984,8 +1004,14 @@ pub(crate) async fn list_unmatched(
     .map_err(StorageError::from_sqlx)?;
     rows.into_iter()
         .map(|row| {
+            // Read before the conversion takes the row: the joined column is not part of the file.
+            let suggested_title_name = row.suggested_title_name.clone();
             let file = UnmatchedFile::try_from(row)?;
-            Ok(UnmatchedFileRow { id: file.id, file })
+            Ok(UnmatchedFileRow {
+                id: file.id,
+                file,
+                suggested_title_name,
+            })
         })
         .collect()
 }
@@ -1279,6 +1305,7 @@ struct UnmatchedRow {
     reason: Option<String>,
     suggested_title_id: Option<i64>,
     suggested_episode_id: Option<i64>,
+    suggested_title_name: Option<String>,
     first_seen_at: i64,
 }
 
@@ -2420,18 +2447,32 @@ mod tests {
                 .is_some(),
             "the file itself is not content"
         );
+        // The file is offered and its *suggestion* is not — which is the same thing a row with nothing
+        // close enough says, so the two are indistinguishable (I37). Hiding the row instead was this
+        // read's first behaviour and it contradicted the assertion above: a user was never asked about
+        // a file they owned because the scan had guessed at a title they may not see.
+        let offered = database
+            .unmatched_file(scope, hidden)
+            .await
+            .unwrap()
+            .expect("the file is offered");
         assert_eq!(
-            database.unmatched_file(scope, hidden).await.unwrap(),
-            None,
+            offered.suggested_title_id, None,
             "a suggestion the scope may not see is not a suggestion"
         );
+        let listed = database
+            .list_unmatched_files(scope, PageRequest::first(10))
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 2, "both files are still questions");
+        let named: Vec<&str> = listed
+            .iter()
+            .filter_map(|row| row.suggested_title_name.as_deref())
+            .collect();
         assert_eq!(
-            database
-                .list_unmatched_files(scope, PageRequest::first(10))
-                .await
-                .unwrap()
-                .len(),
-            1
+            named,
+            vec!["Alien"],
+            "only the suggestion the scope may see is named"
         );
         assert_eq!(
             database

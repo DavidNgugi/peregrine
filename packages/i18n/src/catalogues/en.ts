@@ -93,6 +93,8 @@ export const en = {
           why: "Why not",
         },
         match: "Match",
+        matchUnder: "File under {{title}}",
+        looksLike: "Looks like {{title}}",
         noReason: "—",
         nothingRead: "Nothing was read from this name",
         refused: "That file could not be matched.",

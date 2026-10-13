@@ -232,6 +232,20 @@ impl IndexReport {
     }
 }
 
+/// Which title a user's answer files the parked file under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchAs {
+    /// The title the parse read, which is what the row's own values say.
+    Parsed,
+    /// The title the scan offered as a suggestion, when it offered one.
+    ///
+    /// The better answer when it exists: the suggestion is built from a name the catalogue *already
+    /// holds*, so filing under it joins an existing title rather than creating a near-duplicate of it.
+    /// A row with no suggestion falls back to [`MatchAs::Parsed`] rather than failing, because a
+    /// suggestion can be filtered from view (a restricted account, I37) while the row is not.
+    Suggested,
+}
+
 /// What answering a parked file did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Matched {
@@ -267,6 +281,7 @@ pub async fn match_unmatched(
     database: &Arc<Database>,
     scope: peregrine_domain::AccountScope,
     id: i64,
+    as_title: MatchAs,
     at: jiff::Timestamp,
 ) -> Result<Matched, IndexError> {
     let Some(row) = database.unmatched_file(scope, id).await? else {
@@ -285,6 +300,16 @@ pub async fn match_unmatched(
     let Some(title_name) = row.parsed_title.as_deref() else {
         return Ok(Matched::NoTitle);
     };
+    // The offered title's own name, when the caller asked for it and the scan offered one. Read
+    // rather than taken from the request, so a client cannot name a title it may not see.
+    let suggested = match as_title {
+        MatchAs::Parsed => None,
+        MatchAs::Suggested => match row.suggested_title_id {
+            Some(title_id) => database.title_name(title_id).await?,
+            None => None,
+        },
+    };
+    let title_name = suggested.as_deref().unwrap_or(title_name);
     let candidate = CandidateFile {
         path: std::path::PathBuf::from(path),
         size_bytes: row.size_bytes,
@@ -437,6 +462,32 @@ async fn movie(
     report.created_files += placed.created_files;
     report.under(placed.placed_title_id);
     Ok(report)
+}
+
+/// The title the catalogue already holds that a parked name most likely means.
+///
+/// Two steps, and the split is the architecture's: the statement reads the candidates a prefix could
+/// name, and the *rule* over them is [`peregrine_domain::library::suggest_title`]. A read that
+/// returned nothing is not a failure to suggest — it is the answer "nothing in the catalogue is close
+/// enough", which is what most parked files get.
+async fn suggested_title(
+    database: &Arc<Database>,
+    parsed_title: Option<&str>,
+) -> Result<Option<i64>, IndexError> {
+    let Some(parsed_title) = parsed_title else {
+        return Ok(None);
+    };
+    let needs = sort_name_of(parsed_title);
+    let lower: String = needs
+        .chars()
+        .take(peregrine_domain::library::MINIMUM_SUGGESTION_LENGTH)
+        .collect();
+    if lower.len() < peregrine_domain::library::MINIMUM_SUGGESTION_LENGTH {
+        return Ok(None);
+    }
+
+    let candidates = database.title_candidates_between(&lower, &needs).await?;
+    Ok(peregrine_domain::library::suggest_title(&needs, &candidates).map(|found| found.id))
 }
 
 /// Places a file under the title a user's rule names, when a rule exists for its pattern.
@@ -731,6 +782,11 @@ async fn park(
     at: jiff::Timestamp,
 ) -> Result<(), IndexError> {
     let stamp = jiff::Timestamp::from_millisecond(candidate.mtime_ms).unwrap_or(at);
+
+    // A title the catalogue already holds is offered to the person who answers the row: the parse
+    // read a name that could not be placed, and the catalogue may hold what it meant. The rule is
+    // `peregrine_domain`'s — narrow, and deliberately a suggestion rather than a placement.
+    let suggested = suggested_title(database, parsed.title()).await?;
     database
         .insert_unmatched_file(
             UnmatchedFile {
@@ -746,7 +802,7 @@ async fn park(
                     .map(|span| peregrine_domain::EpisodeNumber::new(span.first())),
                 confidence: None,
                 reason,
-                suggested_title_id: None,
+                suggested_title_id: suggested,
                 suggested_episode_id: None,
                 first_seen_at: at,
             },
@@ -1119,6 +1175,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_parked_name_suggests_a_title_the_library_already_holds() {
+        // The suggestion is what makes the queue answerable without a picker: the film is already
+        // here under the name without the year, and the row says so. It is recorded at park time, so
+        // the read that builds the queue does not have to match anything.
+        let corpus = corpus("suggest", &["Alien (1979).mkv", "Alien 2 1979.mkv"]).await;
+
+        let report = corpus.index().await;
+
+        assert_eq!(
+            report.created_titles, 1,
+            "the clean name is placed: {report:?}"
+        );
+        assert_eq!(
+            report.unmatched, 1,
+            "the ambiguous one is parked: {report:?}"
+        );
+        let rows = corpus.unmatched_rows().await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].file.parsed_title.as_deref(),
+            Some("Alien 2"),
+            "what the parse read, which is what a suggestion is built from"
+        );
+        let suggested = rows[0].file.suggested_title_id;
+        let placed = corpus.only_title().await;
+        assert_eq!(
+            suggested,
+            Some(placed),
+            "the row offers the title the library already holds"
+        );
+    }
+
+    #[tokio::test]
+    async fn answering_with_the_suggestion_files_the_file_under_the_existing_title() {
+        // Why the suggestion is worth recording: answering with it *joins* a title rather than
+        // creating a near-duplicate of it. The parse's reading would have made a second title called
+        // `Alien 2049` beside `Alien`, which is the mistake the queue exists to prevent.
+        let corpus = corpus("suggest-match", &["Alien (1979).mkv", "Alien 2 1979.mkv"]).await;
+        corpus.index().await;
+        let id = corpus.unmatched_rows().await[0].id;
+
+        match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            id,
+            MatchAs::Suggested,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            corpus.titles().await,
+            vec!["Alien".to_owned()],
+            "one title, not two"
+        );
+        assert_eq!(corpus.unmatched_rows().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn answering_with_the_parse_reading_still_works_when_nothing_was_suggested() {
+        // A suggestion can be absent for two reasons — nothing close enough, or the offered title
+        // filtered from view — and neither is a failure. The answer falls back to what the parse read
+        // rather than refusing the row.
+        let corpus = corpus("no-suggestion", &["The Matrix 2049.mkv"]).await;
+        corpus.index().await;
+        let rows = corpus.unmatched_rows().await;
+        assert_eq!(rows[0].file.suggested_title_id, None, "nothing is close");
+
+        match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            rows[0].id,
+            MatchAs::Suggested,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(corpus.titles().await, vec!["The Matrix".to_owned()]);
+    }
+
+    #[tokio::test]
     async fn matching_a_parked_file_places_it_as_the_title_its_parse_read() {
         // PG-E14-08's first half. The row exists because the parse failed, so what it is placed as is
         // the title the parse managed to read: `The Matrix 2049` is ambiguous about which number is
@@ -1131,9 +1270,15 @@ mod tests {
         let (id, parsed_title) = (rows[0].id, rows[0].file.parsed_title.clone());
         let scope = AccountScope::unrestricted(AccountId::new(1).expect("account one"));
 
-        match_unmatched(&corpus.database, scope, id, at(NOW + 1_000))
-            .await
-            .unwrap();
+        match_unmatched(
+            &corpus.database,
+            scope,
+            id,
+            MatchAs::Parsed,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             corpus.titles().await,
@@ -1158,9 +1303,15 @@ mod tests {
         let id = rows[0].id;
         let read = rows[0].file.parsed_title.clone();
         let scope = AccountScope::unrestricted(AccountId::new(1).expect("account one"));
-        match_unmatched(&corpus.database, scope, id, at(NOW + 1_000))
-            .await
-            .unwrap();
+        match_unmatched(
+            &corpus.database,
+            scope,
+            id,
+            MatchAs::Parsed,
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
         // The rule is recorded under the title the parse read, which is what a later name is
         // matched by; if these two ever diverge the rule is written where nothing looks.
         assert_eq!(
@@ -1197,6 +1348,7 @@ mod tests {
             &corpus.database,
             AccountScope::unrestricted(AccountId::new(1).expect("account one")),
             id,
+            MatchAs::Parsed,
             at(NOW + 1_000),
         )
         .await
@@ -1250,6 +1402,7 @@ mod tests {
             &corpus.database,
             AccountScope::unrestricted(AccountId::new(1).expect("account one")),
             row,
+            MatchAs::Parsed,
             at(NOW + 1_000),
         )
         .await
@@ -1272,6 +1425,7 @@ mod tests {
             &corpus.database,
             AccountScope::unrestricted(AccountId::new(1).expect("account one")),
             id,
+            MatchAs::Parsed,
             at(NOW + 1_000),
         )
         .await

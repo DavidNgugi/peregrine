@@ -15,7 +15,9 @@ pub mod runtime;
 mod testing;
 
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
-pub use library::{IndexError, LibraryError, LibraryService, ScanError, ScanOutcome, Scanner};
+pub use library::{
+    IndexError, LibraryError, LibraryService, MatchAs, ScanError, ScanOutcome, Scanner,
+};
 pub use notify::{
     CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, EventPreference,
     NewCentreEntry, NotificationCentre, NotificationId, NotificationPreferences,

@@ -252,7 +252,10 @@ fn match_unmatched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::library::match_unmatched(
             harness.dead_state(),
-            crate::library::UnmatchedRef { id: 1 },
+            crate::library::UnmatchedRef {
+                id: 1,
+                as_title: crate::library::MatchAsDto::Parsed,
+            },
         )
         .await
         .map(drop)

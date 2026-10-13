@@ -122,6 +122,19 @@ function columnsOf(t: Translate): readonly TableColumn<LibraryTitleDto>[] {
   ];
 }
 
+/**
+ * The title a row's suggestion names, or `null` when it has none.
+ *
+ * Defensive on purpose. The contract says this field is a string or `null`, and a payload that omits
+ * it — an older core, a stub, a hand-written fixture — arrives as `undefined`, at which point a check
+ * for `null` takes the *suggestion* branch with nothing in it and renders a bare "Looks like". An
+ * empty string is the same case: a label with a hole in it is worse than no label.
+ */
+function suggestionOf(row: UnmatchedFileDto): string | null {
+  const named = row.suggestedTitleName;
+  return typeof named === "string" && named !== "" ? named : null;
+}
+
 /** What the parse read, as the line under a parked file's name. */
 function parsedLabel(row: UnmatchedFileDto, t: Translate): string {
   const parts = [
@@ -142,7 +155,7 @@ function parsedLabel(row: UnmatchedFileDto, t: Translate): string {
  */
 function queueColumnsOf(
   t: Translate,
-  match: (id: number) => void,
+  match: (file: UnmatchedFileDto) => void,
   busy: boolean,
 ): readonly TableColumn<UnmatchedFileDto>[] {
   return [
@@ -159,23 +172,42 @@ function queueColumnsOf(
     {
       id: "reason",
       header: t("library.queue.column.why"),
-      cell: (row) => row.reason ?? t("library.queue.noReason"),
+      cell: (row) => {
+        const named = suggestionOf(row);
+        return named === null ? (
+          (row.reason ?? t("library.queue.noReason"))
+        ) : (
+          // The offer is what a person needs to answer without a picker: the library already holds a
+          // title this name could mean, and saying so is more useful than repeating why it stopped.
+          <span className="flex flex-col">
+            <span>{t("library.queue.looksLike", { title: named })}</span>
+            <span className="text-caption text-text-tertiary">
+              {row.reason ?? t("library.queue.noReason")}
+            </span>
+          </span>
+        );
+      },
     },
     {
       id: "match",
       header: "",
-      cell: (row) => (
-        <Button
-          disabled={busy || row.parsedTitle === null}
-          onClick={() => {
-            match(row.id);
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          {t("library.queue.match")}
-        </Button>
-      ),
+      cell: (row) => {
+        const named = suggestionOf(row);
+        return (
+          <Button
+            disabled={busy || row.parsedTitle === null}
+            onClick={() => {
+              match(row);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {named === null
+              ? t("library.queue.match")
+              : t("library.queue.matchUnder", { title: named })}
+          </Button>
+        );
+      },
     },
   ];
 }
@@ -303,7 +335,7 @@ export function LibraryScreen({
             />
           ) : (
             <Table
-              columns={queueColumnsOf(t, (id) => void unmatched.match(id), unmatched.busy)}
+              columns={queueColumnsOf(t, (file) => void unmatched.match(file), unmatched.busy)}
               rowKey={(row) => row.id}
               rows={unmatched.files}
             />

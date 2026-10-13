@@ -28,8 +28,14 @@ export interface UnmatchedQueue {
   readonly busy: boolean;
   /** What the last answer failed with, in the core's own words. */
   readonly error: string | null;
-  /** Places one parked file as the title its parse read. */
-  readonly match: (id: number) => Promise<void>;
+  /**
+   * Answers one parked file.
+   *
+   * The suggestion is offered when the core sent one, and it is the better answer: it joins a title
+   * the library already holds rather than creating a near-duplicate of it. The parse's reading is the
+   * fallback, and a row with no suggestion is still answerable.
+   */
+  readonly match: (file: UnmatchedFileDto) => Promise<void>;
   /** Re-reads the queue. */
   readonly refresh: () => Promise<void>;
 }
@@ -60,10 +66,15 @@ export function useUnmatchedFiles(): UnmatchedQueue {
   }, [refresh]);
 
   const match = useCallback(
-    async (id: number): Promise<void> => {
+    async (file: UnmatchedFileDto): Promise<void> => {
       setState((previous) => ({ ...previous, busy: true, error: null }));
       try {
-        await matchUnmatchedFile(id);
+        // The choice is made here rather than by the screen: which title an answer means is a fact
+        // about the row, and a caller that had to remember to pass it would eventually forget.
+        await matchUnmatchedFile(
+          file.id,
+          file.suggestedTitleName === null ? "parsed" : "suggested",
+        );
         await refresh();
       } catch (caught: unknown) {
         const error = normalizeIpcError(caught);

@@ -458,6 +458,13 @@ export type LibraryTitleDto = {
 	missingFiles: number,
 };
 
+/**  The two titles an answer can file a parked file under. */
+export type MatchAsDto = 
+/**  What the name read, which is what the row's own values say. */
+"parsed" | 
+/**  What the scan offered, which joins a title the library already holds when there is one. */
+"suggested";
+
 /**  One rule a user's correction became, as the screen lists it. */
 export type MatchRuleDto = {
 	/**  The row id, which is what a removal names. */
@@ -568,6 +575,13 @@ export type UnmatchedFileDto = {
 	parsedEpisode: number | null,
 	/**  Why the scan could not place it. */
 	reason: string | null,
+	/**
+	 *  The title the scan offered for it, when one is close enough and this account may see it.
+	 * 
+	 *  `None` covers both "nothing was close enough" and "the title offered is out of scope", which
+	 *  are the same thing to the person answering (I37).
+	 */
+	suggestedTitleName: string | null,
 	/**  What the file weighs, in bytes. */
 	sizeBytes: number,
 };
@@ -582,6 +596,11 @@ export type UnmatchedFileDto = {
 export type UnmatchedRef = {
 	/**  The row id, as the queue returned it. */
 	id: number,
+	/**
+	 *  Which title the answer files the file under: the one its name read, or the one the scan
+	 *  offered.
+	 */
+	asTitle: MatchAsDto,
 };
 
 /* Tauri Specta runtime */

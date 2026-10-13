@@ -20,6 +20,7 @@
 //! filtered in Rust would still have loaded the row, and the next read to forget the filter
 //! would return it.
 
+use peregrine_domain::library::TitleCandidate;
 use peregrine_domain::{AccountScope, ExternalId, Provider};
 use sqlx::Connection as _;
 
@@ -135,6 +136,60 @@ pub(crate) async fn insert_match_rule(
         .map_err(StorageError::from_sqlx)?;
     Ok(row.0)
 }
+
+/// One title's name, or `None` when the id names nothing.
+///
+/// The scanner's surface, like the lookups beside it: the match action resolves a suggestion's id to
+/// the name a placement takes, and the suggestion was recorded by a scan.
+pub(crate) async fn title_name(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> Result<Option<String>, StorageError> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT name FROM title WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|row| row.0))
+}
+
+/// The titles whose sort names fall between `lower` and `upper`, for a suggestion lookup.
+///
+/// A range rather than a `LIKE 'prefix%'`: the candidates a suggestion can be built from are
+/// *prefixes* of the parked name, so they lie between the name truncated to the shortest usable
+/// length and the name itself — and a range comparison uses `title_sort_name_idx`, while a pattern on
+/// the right-hand side of `LIKE` cannot. The range is a superset of the answer by design: whether a
+/// candidate really is a prefix, and whether what follows it means anything, is
+/// [`peregrine_domain::library::suggest_title`]'s decision, not the statement's.
+///
+/// Unscoped, like the placement lookups beside it — the *scanner* is what writes a suggestion. The
+/// queue's read is scoped, so a suggestion pointing at a title an account may not see is filtered
+/// where a person would see it rather than where it is recorded.
+pub(crate) async fn title_candidates_between(
+    pool: &sqlx::SqlitePool,
+    lower: &str,
+    upper: &str,
+) -> Result<Vec<TitleCandidate>, StorageError> {
+    let rows = sqlx::query_as::<_, TitleCandidateRow>(
+        "SELECT id, sort_name FROM title WHERE sort_name >= ?1 AND sort_name <= ?2 \
+         ORDER BY length(sort_name) DESC LIMIT ?3",
+    )
+    .bind(lower)
+    .bind(upper)
+    .bind(i64::from(CANDIDATE_LIMIT))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// How many candidates one suggestion lookup reads.
+///
+/// A bound rather than a page: the reading is the scanner's, the row count for a prefix is small by
+/// construction, and a name that matched more than this many titles would be answered by no
+/// suggestion anyway — the domain rule refuses ambiguity, and two titles sharing a sort name is
+/// already one.
+const CANDIDATE_LIMIT: u32 = 32;
 
 /// One rule a user made, with the title it places files under.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -830,6 +885,22 @@ impl From<MatchRuleListRow> for MatchRuleRow {
             id: row.id,
             pattern: row.pattern,
             title_name: row.title_name,
+        }
+    }
+}
+
+/// The row shape of a suggestion lookup.
+#[derive(sqlx::FromRow)]
+struct TitleCandidateRow {
+    id: i64,
+    sort_name: String,
+}
+
+impl From<TitleCandidateRow> for TitleCandidate {
+    fn from(row: TitleCandidateRow) -> Self {
+        Self {
+            id: row.id,
+            sort_name: row.sort_name,
         }
     }
 }

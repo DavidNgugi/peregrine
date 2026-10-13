@@ -14,6 +14,7 @@ export type {
   JobState,
   LibraryRootDto,
   LibraryTitleDto,
+  MatchAsDto,
   MatchRuleDto,
   UnmatchedFileDto,
   RootKind,

@@ -452,11 +452,22 @@ impl Runtime {
     /// # Errors
     ///
     /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
-    pub async fn match_unmatched_file(&self, id: i64) -> Result<bool, RuntimeError> {
+    /// Answers one parked file: under the title its parse read, or under the title the scan offered
+    /// when the caller asks for that one.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn match_unmatched_file(
+        &self,
+        id: i64,
+        as_title: crate::library::MatchAs,
+    ) -> Result<bool, RuntimeError> {
         let matched = crate::library::match_unmatched(
             &self.database,
             installation_scope(),
             id,
+            as_title,
             self.clock.now(),
         )
         .await?;

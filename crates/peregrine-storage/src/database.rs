@@ -839,6 +839,23 @@ impl Database {
         }
     }
 
+    /// One title's name, or `None` when the id names nothing.
+    pub async fn title_name(&self, id: i64) -> Result<Option<String>, StorageError> {
+        crate::catalogue::title_name(&self.readers, id).await
+    }
+
+    /// The titles whose sort names fall between `lower` and `upper`, for a suggestion lookup.
+    ///
+    /// Part of the **scanner's** surface, like the placement lookups beside it: the indexer asks this
+    /// while parking a file, and a *suggestion* is filtered where a person reads it.
+    pub async fn title_candidates_between(
+        &self,
+        lower: &str,
+        upper: &str,
+    ) -> Result<Vec<peregrine_domain::library::TitleCandidate>, StorageError> {
+        crate::catalogue::title_candidates_between(&self.readers, lower, upper).await
+    }
+
     /// A page of the rules a user has made, newest first, under `scope`.
     pub async fn list_match_rules(
         &self,
