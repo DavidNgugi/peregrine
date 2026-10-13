@@ -395,7 +395,7 @@ graph LR
   - Acceptance: Injected panic releases the token (guard test)
 - [ ] **PG-E6-03** `M` · deps PG-E6-01 · Concurrency classes: metadata, image, dataset, subtitle, probe **Remaining:** SchedulerClasses exists; wire each production job kind and prove independent limits under load.
   - Acceptance: Each class has an independent limit asserted under load
-- [ ] **PG-E6-04** `M` · deps PG-E6-01, PG-E5-09 · Incremental change sync with persisted cursors and overlapping windows
+- [ ] **PG-E6-04** `M` · deps PG-E6-01, PG-E5-09 · Incremental change sync with persisted cursors and overlapping windows **The sync's first half landed ahead of this task's cursors.** `peregrine-sync::catalogue::sync_search` asks a provider, decides what the catalogue already holds with PG-E5-13's rule, and writes the rest; `Database::upsert_provider_title` finds-or-creates-and-attaches in **one transaction**, which is the orphan-stub race the storage recon found (`title` has no UNIQUE constraint, so a read-then-insert left a stub nothing points at); and `local_titles_for_sort_name` gives the rule all the locals a name could be, with their aliases and ids. Two tests cover the acceptance's real question — syncing twice makes one title. Owed here still: persisted cursors, overlapping windows, and crash-safety between cursor advance and upsert.
   - Acceptance: Crash between cursor advance and upsert loses nothing
 - [ ] **PG-E6-05** `L` · deps PG-E6-01 · IMDb ratings dataset download, checksum, parse, transactional swap
   - Acceptance: Header change or truncated file leaves the old dataset in place

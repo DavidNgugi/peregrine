@@ -1,0 +1,128 @@
+//! Syncing a provider's answers into the catalogue.
+//!
+//! The last mile of FLOWS F3: ask a provider, decide which answers this catalogue already holds
+//! (`peregrine_domain::matching`), and write the rest. What the sync does *not* do is guess — an answer
+//! the rule calls ambiguous is counted and left alone, because the wrong answer there merges two titles
+//! or splits one.
+
+use peregrine_domain::matching::{Candidate, MatchDecision, match_candidate, sort_name};
+use peregrine_domain::text::NonEmptyText;
+use peregrine_providers::error::ProviderError;
+use peregrine_providers::provider::{MetadataProvider, SearchQuery};
+use peregrine_storage::{Database, ProviderTitle, StorageError, TitleExternalId};
+
+/// What one sync did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncOutcome {
+    /// Candidates that named a title the catalogue already had.
+    pub matched: usize,
+    /// Candidates that became a new title.
+    pub created: usize,
+    /// Candidates the rule could not attribute, left for a person.
+    pub ambiguous: usize,
+}
+
+/// Why a sync stopped.
+#[derive(Debug, thiserror::Error)]
+pub enum SyncError {
+    /// The provider refused or failed.
+    #[error("the provider could not answer")]
+    Provider(#[from] ProviderError),
+    /// A write or read failed.
+    #[error("the catalogue could not be read or written")]
+    Storage(#[from] StorageError),
+}
+
+/// Asks `provider` for `query` and writes what came back into `database`.
+///
+/// # Errors
+///
+/// [`SyncError::Provider`] when the provider fails, [`SyncError::Storage`] when a read or write does.
+pub async fn sync_search(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    query: &SearchQuery,
+    at: i64,
+) -> Result<SyncOutcome, SyncError> {
+    let candidates = provider.search(query).await?;
+    let mut outcome = SyncOutcome::default();
+
+    for candidate in candidates {
+        // Identity first, and it is a read of its own because it settles the common case without
+        // gathering anything: an id the catalogue already carries is this title, whatever it is called.
+        if database
+            .title_for_external_id(candidate.external_id())
+            .await?
+            .is_some()
+        {
+            outcome.matched += 1;
+            continue;
+        }
+
+        let Some(input) = candidate_input(&candidate) else {
+            continue;
+        };
+        let locals = database
+            .local_titles_for_sort_name(
+                candidate.kind().as_str(),
+                &sort_name(candidate.name().as_str()),
+            )
+            .await?;
+
+        match match_candidate(&input, &locals) {
+            MatchDecision::Matched { local_id, .. } => {
+                // Attaching an id counts as a match even when another writer got there first: the id
+                // belongs to a title now, which is the fact this loop is establishing.
+                match database
+                    .attach_external_ids(local_id, &[held(candidate.external_id(), at)])
+                    .await
+                {
+                    Ok(()) | Err(StorageError::Conflict { .. }) => outcome.matched += 1,
+                    Err(error) => return Err(SyncError::Storage(error)),
+                }
+            }
+            MatchDecision::New => {
+                database
+                    .upsert_provider_title(ProviderTitle {
+                        external_id: candidate.external_id().clone(),
+                        kind: candidate.kind(),
+                        subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                        name: candidate.name().as_str().to_owned(),
+                        sort_name: sort_name(candidate.name().as_str()),
+                        is_primary: true,
+                        at,
+                    })
+                    .await?;
+                outcome.created += 1;
+            }
+            // A question, not an answer: counted so the caller can report it, and left alone.
+            MatchDecision::Ambiguous { .. } => outcome.ambiguous += 1,
+        }
+    }
+
+    Ok(outcome)
+}
+
+/// The candidate as the matching rule's input, or `None` when it cannot be one.
+///
+/// The port's `NonEmptyText` is already non-empty, so this only fails on a name that is whitespace —
+/// which the adapter trims away before it gets here.
+fn candidate_input(
+    candidate: &peregrine_providers::provider::SearchCandidate,
+) -> Option<Candidate> {
+    Some(Candidate {
+        external_id: candidate.external_id().clone(),
+        name: NonEmptyText::new(candidate.name().as_str()).ok()?,
+        kind: candidate.kind(),
+        released: candidate.released(),
+    })
+}
+
+/// One external id, in the shape the storage layer attaches.
+fn held(id: &peregrine_domain::ExternalId, at: i64) -> TitleExternalId {
+    TitleExternalId {
+        id: id.clone(),
+        is_primary: true,
+        fetched_at: at,
+    }
+}

@@ -11,6 +11,7 @@
 //! [`JobHandle`] that observes the job's lifecycle across however many retries it takes.
 
 mod backoff;
+pub mod catalogue;
 mod core;
 mod error;
 mod heap;
@@ -20,6 +21,7 @@ mod job;
 mod tests;
 
 pub use backoff::Backoff;
+pub use catalogue::{SyncError, SyncOutcome, sync_search};
 pub use core::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_CONCURRENCY, Scheduler, SchedulerClasses, SchedulerConfig,
     SchedulerMetrics, Submission,

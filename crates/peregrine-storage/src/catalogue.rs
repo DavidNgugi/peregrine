@@ -21,6 +21,8 @@
 //! would return it.
 
 use peregrine_domain::library::TitleCandidate;
+use peregrine_domain::matching::LocalTitle;
+use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{AccountScope, ExternalId, Provider};
 use sqlx::Connection as _;
 
@@ -503,6 +505,157 @@ pub(crate) async fn list_titles(
     .await
     .map_err(StorageError::from_sqlx)?;
     rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// A title a provider has identified, as an upsert creates one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderTitle {
+    /// The provider's own identifier, which is the identity the upsert keys on.
+    pub external_id: ExternalId,
+    /// A film or a series.
+    pub kind: TitleKind,
+    /// Standard, anime, documentary, or reality.
+    pub subtype: TitleSubtype,
+    /// The name the provider lists it under.
+    pub name: String,
+    /// The name to sort by, already normalized by the caller.
+    pub sort_name: String,
+    /// Whether this id is the title's primary one.
+    pub is_primary: bool,
+    /// Unix milliseconds.
+    pub at: i64,
+}
+
+/// Finds the title an external id belongs to, or creates it and attaches the id — in one transaction.
+///
+/// The two steps are one because splitting them leaves a window with no owner: `title` has no UNIQUE
+/// constraint, so two syncs that both read "no such id" would both insert a stub, only one
+/// `attach_external_ids` could win, and the loser would leave **an orphan title that nothing points
+/// at**. One transaction is what makes the id and the row arrive together or not at all.
+pub(crate) async fn upsert_provider_title(
+    connection: &mut sqlx::SqliteConnection,
+    title: &ProviderTitle,
+) -> Result<i64, StorageError> {
+    let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT title_id FROM external_id WHERE provider = ?1 AND value = ?2")
+            .bind(title.external_id.provider().as_str())
+            .bind(title.external_id.value())
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    if let Some((id,)) = existing {
+        transaction
+            .commit()
+            .await
+            .map_err(StorageError::from_sqlx)?;
+        return Ok(id);
+    }
+
+    // The stub row and its index row, in this transaction rather than `insert_stub`'s own: a nested
+    // `begin` would fail, and the index row has to commit with the title or the title is unsearchable
+    // until a rebuild.
+    let inserted = sqlx::query(
+        "INSERT INTO title (kind, subtype, name, sort_name, metadata_state, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 'stub', ?5, ?5)",
+    )
+    .bind(title.kind.as_str())
+    .bind(title.subtype.as_str())
+    .bind(&title.name)
+    .bind(&title.sort_name)
+    .bind(title.at)
+    .execute(&mut *transaction)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    let id = inserted.last_insert_rowid();
+    crate::fts::reindex(&mut transaction, id)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+
+    sqlx::query(
+        "INSERT INTO external_id (title_id, provider, value, is_primary, fetched_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(id)
+    .bind(title.external_id.provider().as_str())
+    .bind(title.external_id.value())
+    .bind(i64::from(title.is_primary))
+    .bind(title.at)
+    .execute(&mut *transaction)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(id)
+}
+
+/// The local titles a candidate name could be, with everything the matching rule reads.
+///
+/// One row per title of that kind whose `sort_name` matches, plus its aliases and external ids — the
+/// whole input `peregrine_domain::matching` needs, gathered here so the sync does not have to know the
+/// schema. Aliases come back too, because a title is often listed under a name a person never typed and
+/// matching only on `sort_name` would miss it.
+pub(crate) async fn local_titles_for_sort_name(
+    pool: &sqlx::SqlitePool,
+    kind: &str,
+    sort_name: &str,
+) -> Result<Vec<LocalTitle>, StorageError> {
+    let rows: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, kind, name, COALESCE(release_date, first_air_date) FROM title \
+         WHERE sort_name = ?1 AND kind = ?2 ORDER BY id",
+    )
+    .bind(sort_name)
+    .bind(kind)
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    let mut titles = Vec::with_capacity(rows.len());
+    for (id, kind, name, released) in rows {
+        // A row with no usable name cannot match anything by name, and `NonEmptyText` is how the rule
+        // says so. A date that does not parse is a date nobody recorded, which is the same answer the
+        // rule reaches either way.
+        let (Some(kind), Ok(name)) = (TitleKind::parse(&kind), NonEmptyText::new(&name)) else {
+            continue;
+        };
+        let external_ids = external_ids(pool, id)
+            .await?
+            .into_iter()
+            .map(|held| held.id)
+            .collect();
+        let aliases = aliases(pool, id)
+            .await?
+            .into_iter()
+            .filter_map(|alias| NonEmptyText::new(&alias).ok())
+            .collect();
+        titles.push(LocalTitle {
+            id,
+            kind,
+            name,
+            released: released.as_deref().and_then(|date| date.parse().ok()),
+            external_ids,
+            aliases,
+        });
+    }
+    Ok(titles)
+}
+
+/// Every alias of one title, which the matching rule reads beside its name.
+pub(crate) async fn aliases(
+    pool: &sqlx::SqlitePool,
+    title_id: i64,
+) -> Result<Vec<String>, StorageError> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT alias FROM title_alias WHERE title_id = ?1 ORDER BY id")
+            .bind(title_id)
+            .fetch_all(pool)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    Ok(rows.into_iter().map(|row| row.0).collect())
 }
 
 /// Reads the title an external id belongs to.

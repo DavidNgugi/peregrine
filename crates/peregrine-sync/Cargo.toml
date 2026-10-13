@@ -13,6 +13,8 @@ publish = false
 futures = { workspace = true }
 jiff = { workspace = true }
 peregrine-domain = { workspace = true }
+peregrine-providers = { workspace = true }
+peregrine-storage = { workspace = true }
 # The image cache's key is `sha256(provider|path|variant)` (DATA_MODEL, `image_cache.key`).
 # The digest is rendered as lowercase hex by `std::fmt`, so no hex crate is needed for it.
 sha2 = { workspace = true }
@@ -25,6 +27,7 @@ ulid = { workspace = true }
 [dev-dependencies]
 # The scheduler's tests inject the shared fakes instead of declaring their own.
 peregrine-testkit = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 

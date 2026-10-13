@@ -37,8 +37,8 @@ mod watch;
 mod writer;
 
 pub use catalogue::{
-    MatchRuleRow, MetadataState, NewMatchRule, StubEpisode, StubSeason, StubTitle, TitleExternalId,
-    TitleIdentity, TitleKind, TitleSubtype,
+    MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StubEpisode, StubSeason, StubTitle,
+    TitleExternalId, TitleIdentity, TitleKind, TitleSubtype,
 };
 pub use database::Database;
 pub use error::StorageError;

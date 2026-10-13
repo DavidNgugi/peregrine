@@ -213,6 +213,45 @@ impl Database {
         crate::catalogue::list_titles(&self.readers, scope, request).await
     }
 
+    /// Finds the title one provider id names, or creates it as a stub and attaches the id.
+    ///
+    /// One write request rather than a read-then-insert, because the two are one fact: see
+    /// `catalogue::upsert_provider_title` for the window that splitting them leaves open.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the statement fails.
+    pub async fn upsert_provider_title(
+        &self,
+        title: crate::catalogue::ProviderTitle,
+    ) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpsertProviderTitle(Box::new(title)))
+            .await?
+        {
+            WriteResponse::TitleInserted { id } => Ok(id),
+            other => Err(unexpected_response("upsert_provider_title", &other)),
+        }
+    }
+
+    /// The local titles a candidate name could be, with everything the matching rule reads.
+    ///
+    /// Unscoped on purpose, like `title_for_external_id`: this is the sync's own view for deciding
+    /// whether an answer is a title it already has, not a read that shows anything to an account.
+    pub async fn local_titles_for_sort_name(
+        &self,
+        kind: &str,
+        sort_name: &str,
+    ) -> Result<Vec<peregrine_domain::matching::LocalTitle>, StorageError> {
+        crate::catalogue::local_titles_for_sort_name(&self.readers, kind, sort_name).await
+    }
+
+    /// Every alias of one title.
+    pub async fn aliases_of(&self, title_id: i64) -> Result<Vec<String>, StorageError> {
+        crate::catalogue::aliases(&self.readers, title_id).await
+    }
+
     /// The title an external id belongs to, or `None` when no title has it.
     pub async fn title_for_external_id(
         &self,

@@ -44,6 +44,8 @@ pub(crate) enum WriteRequest {
     InsertStubSeason(Box<crate::catalogue::StubSeason>),
     /// Insert one `episode` row.
     InsertStubEpisode(Box<crate::catalogue::StubEpisode>),
+    /// Find or create the title one provider id names, and attach the id, in one transaction.
+    UpsertProviderTitle(Box<crate::catalogue::ProviderTitle>),
     /// Attach external ids to one title.
     AttachExternalIds {
         title_id: i64,
@@ -562,6 +564,11 @@ async fn apply_catalogue_write(
             .await
             .map(|removed| WriteResponse::ImagesRemoved { removed }),
         WriteRequest::RemoveMatchRule { id } => remove_match_rule(connection, id).await,
+        WriteRequest::UpsertProviderTitle(title) => {
+            crate::catalogue::upsert_provider_title(connection, &title)
+                .await
+                .map(|id| WriteResponse::TitleInserted { id })
+        }
         WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
             .await
             .map(|id| WriteResponse::TitleInserted { id }),
