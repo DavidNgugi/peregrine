@@ -22,6 +22,7 @@ mod error;
 pub mod guard;
 pub mod jobs;
 pub mod library;
+pub mod providers;
 pub mod runtime;
 pub mod shortcuts;
 pub mod system;
@@ -74,6 +75,10 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_episodes,
             library::match_unmatched,
             library::forget_match_rule,
+            providers::status,
+            providers::set_key,
+            providers::test_connection,
+            providers::clear_key,
         ])
         .events(collect_events![])
 }

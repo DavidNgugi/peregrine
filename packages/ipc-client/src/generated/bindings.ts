@@ -213,6 +213,52 @@ export const commands = {
 	matchUnmatched: (file: UnmatchedRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("match_unmatched", { file })),
 	/**  Removes one rule, reporting whether it was there. */
 	forgetMatchRule: (rule: MatchRuleRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("forget_match_rule", { rule })),
+	/**
+	 *  What this installation has configured.
+	 * 
+	 *  The cached answer: neither this command nor a poll of it ever reads a keyring, which is
+	 *  what keeps a locked keychain from stalling the settings screen.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the application runtime is not running.
+	 */
+	status: () => typedError<ProviderStatusDto, AppError_Serialize>(__TAURI_INVOKE("status")),
+	/**
+	 *  Stores a provider's API key, proving it against the provider first.
+	 * 
+	 *  The key is trimmed, so pasting one with a trailing newline works; a key that is empty once
+	 *  trimmed is refused here rather than stored, because a job whose probe can only fail is a
+	 *  job worth not starting. The candidate is moved into the job and never logged, returned, or
+	 *  put in an error (SECURITY.md T13).
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] when the key is empty or whitespace only, or when this build
+	 *  knows no provider by that name. [`AppError`] when the journal or the queue refuses the job.
+	 */
+	setKey: (provider: string, key: string) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("set_key", { provider, key })),
+	/**
+	 *  Asks the provider whether the stored key still works.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] when this build knows no provider by that name, and [`AppError`]
+	 *  when the journal or the queue refuses the job.
+	 */
+	testConnection: (provider: string) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("test_connection", { provider })),
+	/**
+	 *  Removes whatever credential is stored for a provider.
+	 * 
+	 *  Removal is not a deletion of anything else: titles already filled in stay, and the provider
+	 *  is simply no longer asked until a key is stored again.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] when this build knows no provider by that name, and [`AppError`]
+	 *  when the journal or the queue refuses the job.
+	 */
+	clearKey: (provider: string) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("clear_key", { provider })),
 };
 
 /* Types */
@@ -565,6 +611,36 @@ export type MatchRuleDto = {
 export type MatchRuleRef = {
 	/**  The row id, as the list returned it. */
 	id: number,
+};
+
+/**
+ *  One provider this build knows how to talk to, as a screen renders it.
+ * 
+ *  The display name and the endpoint come from the manifest rather than from the screen, so a
+ *  second provider is a manifest entry and not a table in the interface (AGENTS R7).
+ */
+export type ProviderDto = {
+	/**  The provider's name, which is what the three write commands take. */
+	provider: string,
+	/**  What to call it in the interface. */
+	displayName: string,
+	/**  Where its API lives by default. */
+	endpoint: string,
+	/**  Whether it holds a credential and can therefore be asked. */
+	configured: boolean,
+};
+
+/**
+ *  What this installation has configured, as the settings screen reads it.
+ * 
+ *  One list rather than a known set and a configured set: a provider is known by being here
+ *  and configured by its flag, and two lists of the same entries would be two things to keep
+ *  in step. A provider that needs a credential and has none is here and not configured, which
+ *  is the state every installation starts in.
+ */
+export type ProviderStatusDto = {
+	/**  The providers this build knows, whether or not they can be used. */
+	known: ProviderDto[],
 };
 
 /**  What a root is expected to hold, as the webview spells it. */

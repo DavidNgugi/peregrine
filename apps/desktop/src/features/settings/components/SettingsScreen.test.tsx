@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
+import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { SettingsScreen } from "./SettingsScreen.js";
 
@@ -41,6 +42,21 @@ function noLibraries(): LibraryRoots {
   };
 }
 
+/** The provider read as a resolved, empty one: this suite is about the shortcut list. */
+function noProviders(): ProviderSettings {
+  return {
+    providers: [],
+    loading: false,
+    failed: false,
+    busy: false,
+    outcome: null,
+    error: null,
+    saveKey: () => Promise.resolve(),
+    testConnection: () => Promise.resolve(),
+    removeKey: () => Promise.resolve(),
+  };
+}
+
 /**
  * The screen as markup rather than as a mounted tree.
  *
@@ -48,10 +64,14 @@ function noLibraries(): LibraryRoots {
  * shows what it drew; the login-item hook's effect does not run, which is what keeps this
  * test off the IPC bridge.
  */
-function markup(shortcuts: ShortcutRegistry, libraries: LibraryRoots = noLibraries()): string {
+function markup(
+  shortcuts: ShortcutRegistry,
+  libraries: LibraryRoots = noLibraries(),
+  providers: ProviderSettings = noProviders(),
+): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <SettingsScreen libraries={libraries} shortcuts={shortcuts} />
+      <SettingsScreen libraries={libraries} providers={providers} shortcuts={shortcuts} />
     </I18nextProvider>,
   );
 }

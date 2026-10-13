@@ -17,6 +17,7 @@ export type {
   LibraryTitleDto,
   MatchAsDto,
   MatchRuleDto,
+  ProviderDto,
   TitleDetailDto,
   TitleMatchDto,
   UnmatchedFileDto,

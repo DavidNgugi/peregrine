@@ -32,8 +32,13 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
 pub use runtime::{
-    Health, LibraryTitleDetail, Runtime, RuntimeConfig, RuntimeError, ShellStatus, StartedJob,
+    CredentialRequest, Health, LibraryTitleDetail, Runtime, RuntimeConfig, RuntimeError,
+    ShellStatus, StartedJob,
 };
+// The credential commands hand the runtime a candidate, and the wrapper that makes one safe to
+// hold belongs to the secrets crate: re-exported for the reason above, so the command surface can
+// name what it passes without a second dependency edge (AGENTS R6, SECURITY.md T13).
+pub use peregrine_secrets::Secret;
 // The command surface speaks these too, and `peregrine-ipc` may depend on this crate and not
 // on `peregrine-domain` (AGENTS R6): re-exported rather than duplicated so a kind added to the
 // domain cannot reach the wire in a form the domain does not have. `TitleSubtype` is here for the

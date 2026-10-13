@@ -16,6 +16,7 @@ import {
 import {
   SettingsScreen,
   useLibraryRoots,
+  useProviders,
   useShortcutDispatch,
   useShortcuts,
 } from "../features/settings/index.js";
@@ -83,6 +84,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // the keys this shell acts on, so the two cannot disagree.
   const shortcuts = useShortcuts();
   const libraries = useLibraryRoots();
+  const providers = useProviders();
   const library = useLibraryTitles();
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
@@ -137,7 +139,11 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           ) : null}
           {route.kind === "diagnostics" ? <JobsScreen /> : null}
           {route.kind === "settings" ? (
-            <SettingsScreen libraries={libraries} shortcuts={shortcuts} />
+            <SettingsScreen
+              libraries={libraries}
+              providers={providers}
+              shortcuts={shortcuts}
+            />
           ) : null}
           {route.kind === "title" ? <TitleScreen detail={title} kind={route.titleKind} /> : null}
         </main>

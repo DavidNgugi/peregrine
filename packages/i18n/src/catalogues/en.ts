@@ -262,6 +262,52 @@ export const en = {
         failed:
           "The system would not change whether Peregrine starts with it. Your account may not allow it.",
       },
+      providers: {
+        title: "Metadata providers",
+        description:
+          "The services Peregrine asks about films and series. A key is stored in your operating system's keychain, never in Peregrine's database, and you can remove it again here.",
+        entry: "{{endpoint}} · {{state}}",
+        configured: "Configured",
+        notConfigured: "No key stored",
+        checking: "Asking the provider whether that key works…",
+        remove: "Remove",
+        unavailable: {
+          title: "Your providers could not be read.",
+          body: "Peregrine's core did not answer, so this list is unknown rather than empty. Reopening the app tries the read again.",
+        },
+        empty: {
+          title: "No metadata provider is built in.",
+          body: "This build knows no provider to configure. Peregrine can still scan and play what is already in your library.",
+        },
+        key: {
+          label: "API key",
+          accessible: "{{provider}} API key",
+          placeholder: "Paste the key",
+          description:
+            "Paste the key for {{provider}}. Saving proves it against the provider first, so a key that does not work is never stored.",
+          save: "Save and test",
+          test: "Test connection",
+        },
+        confirm: {
+          title: "Remove the {{provider}} key?",
+          body: "Peregrine forgets the key and stops asking that provider. Titles already in your library stay where they are.",
+        },
+        outcome: {
+          saved: "That key works. Peregrine stored it for {{provider}}.",
+          working: "{{provider}} accepted the stored key.",
+          removed: "The key was removed. {{provider}} is no longer asked.",
+          unauthorized:
+            "That key was refused. Check you copied the API key and not another value.",
+          rateLimited: "{{provider}} is rate limiting this app; try again in a minute.",
+          unreachable: "{{provider}} could not be reached.",
+          store: "Peregrine could not read its credential store, so the key was not saved.",
+          notConfigured:
+            "No key is stored for that provider, so there was nothing to test. Paste one and save it.",
+          cancelled: "That was cancelled. Nothing was changed.",
+          failed:
+            "The key could not be confirmed. Try again, and check the provider's own status if it keeps happening.",
+        },
+      },
     },
     ipc: {
       error: {

@@ -1,10 +1,15 @@
 export { LibrariesSection } from "./components/LibrariesSection.js";
+export { ProvidersSection } from "./components/ProvidersSection.js";
 export { SettingsScreen } from "./components/SettingsScreen.js";
 export { useLibraryRoots } from "./hooks/useLibraryRoots.js";
 export type { LibraryRoots } from "./hooks/useLibraryRoots.js";
+export { useProviders } from "./hooks/useProviders.js";
+export type { CredentialOutcome, ProviderSettings } from "./hooks/useProviders.js";
 export { useAutoStart } from "./hooks/useAutoStart.js";
 export type { AutoStartControl, AutoStartState } from "./hooks/useAutoStart.js";
 export { useShortcutDispatch, useShortcuts } from "./hooks/useShortcuts.js";
 export type { ShortcutRegistry } from "./hooks/useShortcuts.js";
+export { credentialFailureKey, credentialSuccessKey } from "./provider-outcome.js";
+export type { CredentialAction } from "./provider-outcome.js";
 export { shortcutFor } from "./shortcut-dispatch.js";
 export type { KeyPress } from "./shortcut-dispatch.js";

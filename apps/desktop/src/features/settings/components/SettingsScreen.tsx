@@ -11,8 +11,10 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
+import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { LibrariesSection } from "./LibrariesSection.js";
+import { ProvidersSection } from "./ProvidersSection.js";
 
 interface SettingsScreenProps {
   /**
@@ -30,6 +32,14 @@ interface SettingsScreenProps {
    * one here could disagree with the list the rest of the app is working from.
    */
   readonly libraries: LibraryRoots;
+
+  /**
+   * The metadata providers, as the shell read them.
+   *
+   * Passed in for the same reason the other two are: the shell owns the read, and a second one
+   * here could disagree with the provider list the rest of the app is working from.
+   */
+  readonly providers: ProviderSettings;
 }
 
 /**
@@ -45,7 +55,11 @@ interface SettingsScreenProps {
  * ask". The settings registry (PG-E20-01) takes this screen over; nothing here is a setting
  * of our own.
  */
-export function SettingsScreen({ shortcuts, libraries }: SettingsScreenProps): ReactElement {
+export function SettingsScreen({
+  shortcuts,
+  libraries,
+  providers,
+}: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
   const autoStart = useAutoStart();
 
@@ -87,6 +101,8 @@ export function SettingsScreen({ shortcuts, libraries }: SettingsScreenProps): R
       </SettingsSection>
 
       <LibrariesSection libraries={libraries} />
+
+      <ProvidersSection providers={providers} />
     </Screen>
   );
 }

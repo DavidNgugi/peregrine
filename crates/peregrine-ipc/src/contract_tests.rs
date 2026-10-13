@@ -338,6 +338,57 @@ fn search_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `status` reads the cached provider answer through the runtime, so it fails the same way.
+fn providers_status_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::providers::status(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+/// `set_key` refuses a provider this build does not know before it writes anything, and the
+/// candidate is never built into an adapter, so no request leaves the machine (AGENTS R14).
+fn set_key_for_an_unknown_provider(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::providers::set_key(
+            harness.served_state(),
+            "nobody".to_owned(),
+            "a-key".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `set_key` refuses a key that is empty once trimmed, before the runtime is asked anything.
+fn set_key_with_an_empty_key(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::providers::set_key(harness.served_state(), "tmdb".to_owned(), "   ".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+/// `test_connection` names the provider to the runtime, and a name this build does not know is
+/// refused there.
+fn test_connection_for_an_unknown_provider(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::providers::test_connection(harness.served_state(), "nobody".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+/// `clear_key` refuses an unknown provider the same way, before a job is written.
+fn clear_key_for_an_unknown_provider(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::providers::clear_key(harness.served_state(), "nobody".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -381,7 +432,57 @@ struct ContractCase {
 fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
     all.extend(provider_cases());
+    all.extend(credential_cases());
     all
+}
+
+/// The `providers` namespace's cases: the three write commands and the read they start from.
+///
+/// The unknown-provider and empty-key paths are the two a settings screen can reach with a real
+/// hand, and each is refused before a job is written or a request leaves the machine (AGENTS R14).
+fn credential_cases() -> Vec<ContractCase> {
+    vec![
+        ContractCase {
+            command: "status",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: providers_status_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_key",
+            expected: Expected::Fails {
+                code: ErrorCode::InvalidInput,
+                retryable: false,
+            },
+            drive: set_key_for_an_unknown_provider,
+        },
+        ContractCase {
+            command: "set_key",
+            expected: Expected::Fails {
+                code: ErrorCode::InvalidInput,
+                retryable: false,
+            },
+            drive: set_key_with_an_empty_key,
+        },
+        ContractCase {
+            command: "test_connection",
+            expected: Expected::Fails {
+                code: ErrorCode::InvalidInput,
+                retryable: false,
+            },
+            drive: test_connection_for_an_unknown_provider,
+        },
+        ContractCase {
+            command: "clear_key",
+            expected: Expected::Fails {
+                code: ErrorCode::InvalidInput,
+                retryable: false,
+            },
+            drive: clear_key_for_an_unknown_provider,
+        },
+    ]
 }
 
 /// The discover namespace's cases, kept apart so each namespace stays readable as the list grows.

@@ -33,6 +33,15 @@ pub struct JobStarted {
     pub journal_id: i64,
 }
 
+impl From<peregrine_app::StartedJob> for JobStarted {
+    fn from(started: peregrine_app::StartedJob) -> Self {
+        Self {
+            job_id: started.job.to_string(),
+            journal_id: started.journal_id,
+        }
+    }
+}
+
 /// The lifecycle phase, as the UI reads it.
 ///
 /// A separate enum from the storage crate's, because the wire form is part of the IPC
