@@ -29,6 +29,32 @@ members = [
   "crates/peregrine-testkit",
   "xtask",
 ]
+# Every member except the Tauri shell. The shell's link is the most expensive step in the tree by a
+# wide margin, and nothing that iterates on the core needs it: a bare `cargo build`, `cargo test`, or
+# `cargo clippy` now covers the crates instead of rebuilding `tauri`, `wry`, and the plugin stack.
+#
+# This does not narrow a gate. Every command in AGENTS.md §3 spells `--workspace` or selects a member,
+# so the shell is still built, linted, and tested where it matters; what changes is the cost of the
+# loop between edits, which was paying for the whole front end on every iteration. See PG-E0-20.
+default-members = [
+  "crates/peregrine-domain",
+  "crates/peregrine-storage",
+  "crates/peregrine-providers",
+  "crates/peregrine-sync",
+  "crates/peregrine-torrent",
+  "crates/peregrine-indexers",
+  "crates/peregrine-monitor",
+  "crates/peregrine-mcp",
+  "crates/peregrine-playback",
+  "crates/peregrine-stream",
+  "crates/peregrine-cast",
+  "crates/peregrine-secrets",
+  "crates/peregrine-platform",
+  "crates/peregrine-app",
+  "crates/peregrine-ipc",
+  "crates/peregrine-testkit",
+  "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
