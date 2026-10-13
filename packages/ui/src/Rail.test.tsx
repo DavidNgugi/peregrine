@@ -108,6 +108,14 @@ describe("Rail", () => {
     expect(rail({ empty: <p>Nothing here yet</p>, items: [] })).not.toContain("<ul");
   });
 
+  it("keeps its own box narrow enough for the edge affordances to be on screen", () => {
+    // A flex child defaults to `min-width: auto`, so without `min-w-0` this wrapper grows to the
+    // scroller's content width: the chevrons anchor to the far right of the overflow, off-screen, and
+    // the page clips where the rail should scroll. Found by looking at the running app; the class is
+    // the contract, because no static render can measure a box.
+    expect(rail()).toContain('class="group/rail relative min-w-0"');
+  });
+
   it("keeps a stable key from the data, never the position", () => {
     // The caller's `itemKey` is what React reuses tiles by; an index key would reuse a tile for a
     // different title after a filter change, which is the bug the kit's own rules name.

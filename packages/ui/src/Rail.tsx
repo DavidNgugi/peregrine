@@ -193,7 +193,13 @@ export function Rail<T>({
       {items.length === 0 ? (
         (empty ?? null)
       ) : (
-        <div className="group/rail relative">
+        <div className="group/rail relative min-w-0">
+          {/* `min-w-0` above is load-bearing rather than cosmetic. A flex child defaults to
+              `min-width: auto`, so this wrapper grows to the scroller's *content* width instead of the
+              space it was given; the chevrons are positioned against this box, so they anchored
+              off-screen at the far right of the overflowing content and the screen clipped where the
+              rail should have scrolled. Found by looking at the running app against a real provider's
+              rails: ten tiles wide and not one edge affordance visible. */}
           {/* `py-2` is not spacing: the tiles' focus ring is offset 2 px outside their frame, and a
               scroller that clips on both axes would cut it off on the first and last tile. There is
               deliberately no `snap-*` here: snapping moves the resting offset off zero, which is what
