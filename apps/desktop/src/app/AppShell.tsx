@@ -8,6 +8,7 @@ import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
 import {
   LibraryScreen,
   useLibraryTitles,
+  useMatchRules,
   useScan,
   useUnmatchedFiles,
 } from "../features/library/index.js";
@@ -84,6 +85,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const library = useLibraryTitles();
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
+  const rules = useMatchRules();
   const openScreen = useCallback((action: string) => {
     const target = ROUTE_FOR_ACTION[action];
     if (target !== undefined) {
@@ -121,7 +123,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {route.kind === "discover" ? <DiscoverScreen /> : null}
           {route.kind === "library" ? (
-            <LibraryScreen scan={scan} titles={library} unmatched={unmatched} />
+            <LibraryScreen rules={rules} scan={scan} titles={library} unmatched={unmatched} />
           ) : null}
           {route.kind === "diagnostics" ? <JobsScreen /> : null}
           {route.kind === "settings" ? (

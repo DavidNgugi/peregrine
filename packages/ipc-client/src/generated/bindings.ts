@@ -136,6 +136,8 @@ export const commands = {
 	listTitles: (limit: number | null) => typedError<LibraryTitleDto[], AppError_Serialize>(__TAURI_INVOKE("list_titles", { limit })),
 	/**  A page of the files a scan could not place, newest first. */
 	listUnmatched: (limit: number | null) => typedError<UnmatchedFileDto[], AppError_Serialize>(__TAURI_INVOKE("list_unmatched", { limit })),
+	/**  A page of the rules a user's corrections became, newest first. */
+	listMatchRules: (limit: number | null) => typedError<MatchRuleDto[], AppError_Serialize>(__TAURI_INVOKE("list_match_rules", { limit })),
 	/**
 	 *  Answers one parked file by placing it as the title its parse read.
 	 * 
@@ -143,6 +145,8 @@ export const commands = {
 	 *  indexed, and clearing the stale row is the whole of that answer rather than a failure.
 	 */
 	matchUnmatched: (file: UnmatchedRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("match_unmatched", { file })),
+	/**  Removes one rule, reporting whether it was there. */
+	forgetMatchRule: (rule: MatchRuleRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("forget_match_rule", { rule })),
 };
 
 /* Types */
@@ -452,6 +456,22 @@ export type LibraryTitleDto = {
 	bytes: number,
 	/**  How many of them are marked missing. */
 	missingFiles: number,
+};
+
+/**  One rule a user's correction became, as the screen lists it. */
+export type MatchRuleDto = {
+	/**  The row id, which is what a removal names. */
+	id: number,
+	/**  The title a name read, which is what later names are matched by. */
+	pattern: string,
+	/**  The title those names are placed under. */
+	titleName: string,
+};
+
+/**  The rule a command forgets. */
+export type MatchRuleRef = {
+	/**  The row id, as the list returned it. */
+	id: number,
 };
 
 /**  What a root is expected to hold, as the webview spells it. */

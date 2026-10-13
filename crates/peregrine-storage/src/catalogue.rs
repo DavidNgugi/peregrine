@@ -136,6 +136,58 @@ pub(crate) async fn insert_match_rule(
     Ok(row.0)
 }
 
+/// One rule a user made, with the title it places files under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchRuleRow {
+    /// The row id, which is what a removal names.
+    pub id: i64,
+    /// The title the parse read, normalized — what a later name is matched by.
+    pub pattern: String,
+    /// The title the rule places a matching file under.
+    pub title_name: String,
+}
+
+/// A page of the rules a user has made, newest first.
+///
+/// Scoped, unlike the placement lookups beside it: this is a list a *person* reads, so a rule
+/// pointing at a title an account may not see is not offered to it (I37). The placement's own read
+/// takes no scope for the reason the module doc gives — a file exists whether or not anyone may see
+/// the title it belongs to — and the two differ in audience rather than in subject.
+pub(crate) async fn list_match_rules(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    request: PageRequest,
+) -> Result<Vec<MatchRuleRow>, StorageError> {
+    let rows = sqlx::query_as::<_, MatchRuleListRow>(
+        "SELECT r.id, r.pattern, t.name AS title_name \
+           FROM match_rule r JOIN title t ON t.id = r.title_id \
+          WHERE (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+          ORDER BY r.id DESC LIMIT ?2",
+    )
+    .bind(crate::library::hidden_by_scope(scope))
+    .bind(request.limit())
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Removes one rule, reporting whether the row was there.
+///
+/// What makes a wrong rule recoverable: a rule places every later file that reads like the one it was
+/// made from, so a user who answered a question wrongly needs to take the answer back — and the files
+/// it already placed are theirs to keep or remove through the library, which is a different action.
+pub(crate) async fn remove_match_rule(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM match_rule WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *connection)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// The title a user's rule places files under, for one pattern.
 ///
 /// The *name* rather than the id, because that is what the placement needs: the indexer places a
@@ -489,7 +541,11 @@ impl TryFrom<IdentityRow> for TitleIdentity {
 mod episode_tests {
     use tempfile::TempDir;
 
-    use crate::{Database, NewMatchRule, StubSeason, StubTitle, TitleKind, TitleSubtype};
+    use peregrine_domain::{AccountId, AccountScope};
+
+    use crate::{
+        Database, NewMatchRule, PageRequest, StubSeason, StubTitle, TitleKind, TitleSubtype,
+    };
 
     use super::StubEpisode;
 
@@ -602,6 +658,85 @@ mod episode_tests {
     }
 
     #[tokio::test]
+    async fn a_rule_is_listed_with_its_title_and_can_be_taken_back() {
+        // The two halves a user needs to trust a rule: see what it says, and remove it. A rule places
+        // every later file that reads like the one it was made from, so a wrong answer has to be
+        // withdrawable — and the scope is applied here rather than at the call site (I37).
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        let rule = database
+            .insert_match_rule(NewMatchRule {
+                pattern: "the matrix".to_owned(),
+                title_id: title,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+
+        let listed = database
+            .list_match_rules(
+                AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                PageRequest::first(10),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, rule);
+        assert_eq!(listed[0].pattern, "the matrix");
+        assert_eq!(listed[0].title_name, "Breaking Bad", "the fixture's title");
+        assert!(database.remove_match_rule(rule).await.unwrap());
+        assert!(
+            !database.remove_match_rule(rule).await.unwrap(),
+            "removing a rule that is gone reports that nothing changed"
+        );
+        // `assert_eq!` rather than `assert!` so a failure shows what was still there (clippy's
+        // `assert_is_empty`, which is right: "the list is not empty" is not a diagnosis).
+        assert_eq!(
+            database
+                .list_match_rules(
+                    AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                    PageRequest::first(10)
+                )
+                .await
+                .unwrap(),
+            Vec::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rule_for_a_title_a_restricted_scope_cannot_see_is_not_listed() {
+        // I37 at the rules list: the same answer for a hidden rule as for one that does not exist.
+        // The placement read is deliberately not scoped — a file is placed whether or not an account
+        // may see the title — and this list is, because a person is reading it.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        // The fixture's title is a stub, and a stub has no certification — which is exactly what a
+        // restricted scope hides, so no second write is needed to set the case up.
+        database
+            .insert_match_rule(NewMatchRule {
+                pattern: "the matrix".to_owned(),
+                title_id: title,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+
+        let restricted = database
+            .list_match_rules(
+                AccountScope::restricted(AccountId::new(1).expect("account one")),
+                PageRequest::first(10),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            restricted.is_empty(),
+            "an unrated title's rule is not offered"
+        );
+    }
+
+    #[tokio::test]
     async fn one_pattern_has_one_rule() {
         // I40: a user who corrects the same pattern twice is changing their mind, and the read that
         // consults a rule has to have one answer. A second row for a pattern would leave it choosing.
@@ -678,6 +813,24 @@ mod episode_tests {
             .unwrap();
 
         assert_eq!(specials, 1);
+    }
+}
+
+/// The row shape of the scoped rule list.
+#[derive(sqlx::FromRow)]
+struct MatchRuleListRow {
+    id: i64,
+    pattern: String,
+    title_name: String,
+}
+
+impl From<MatchRuleListRow> for MatchRuleRow {
+    fn from(row: MatchRuleListRow) -> Self {
+        Self {
+            id: row.id,
+            pattern: row.pattern,
+            title_name: row.title_name,
+        }
     }
 }
 

@@ -405,6 +405,34 @@ impl Runtime {
         Ok(())
     }
 
+    /// A page of the rules a user's corrections became, newest first.
+    ///
+    /// Read under [`installation_scope`], like every user-facing read: this is a list a person
+    /// reviews and edits.
+    pub async fn match_rules(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<peregrine_storage::MatchRuleRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_match_rules(installation_scope(), PageRequest::first(limit))
+            .await?)
+    }
+
+    /// Removes one rule, reporting whether it was there.
+    ///
+    /// What makes a wrong answer recoverable: a rule places every later file that reads like the one
+    /// it was made from, so withdrawing it is the only way back for a user who answered wrongly. The
+    /// files it already placed stay, because removing a file is a different action with its own
+    /// confirmation (`PG-E15`).
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn forget_match_rule(&self, id: i64) -> Result<bool, RuntimeError> {
+        Ok(self.database.remove_match_rule(id).await?)
+    }
+
     /// A page of the files a scan could not place, newest first.
     ///
     /// Read under [`installation_scope`], like every user-facing read: this is a list a person

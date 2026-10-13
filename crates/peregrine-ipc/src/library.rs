@@ -132,6 +132,38 @@ impl From<peregrine_app::LibraryTitleRow> for LibraryTitleDto {
     }
 }
 
+/// One rule a user's correction became, as the screen lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchRuleDto {
+    /// The row id, which is what a removal names.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The title a name read, which is what later names are matched by.
+    pub pattern: String,
+    /// The title those names are placed under.
+    pub title_name: String,
+}
+
+impl From<peregrine_app::MatchRuleRow> for MatchRuleDto {
+    fn from(row: peregrine_app::MatchRuleRow) -> Self {
+        Self {
+            id: row.id,
+            pattern: row.pattern,
+            title_name: row.title_name,
+        }
+    }
+}
+
+/// The rule a command forgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchRuleRef {
+    /// The row id, as the list returned it.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
 /// The parked file a command acts on.
 ///
 /// A DTO rather than a bare `i64` argument, for the reason `RootRef` gives: specta refuses to export
@@ -314,6 +346,29 @@ pub async fn list_titles(
         .await?;
     let titles = titles.into_iter().map(LibraryTitleDto::from).collect();
     Ok(guard_response("library::list_titles", titles))
+}
+
+/// A page of the rules a user's corrections became, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_match_rules(
+    state: State<'_, RuntimeState>,
+    limit: Option<u32>,
+) -> Result<Vec<MatchRuleDto>, AppError> {
+    let rules = state.runtime()?.match_rules(limit.unwrap_or(100)).await?;
+    let rules = rules.into_iter().map(MatchRuleDto::from).collect();
+    Ok(guard_response("library::list_match_rules", rules))
+}
+
+/// Removes one rule, reporting whether it was there.
+#[tauri::command]
+#[specta::specta]
+pub async fn forget_match_rule(
+    state: State<'_, RuntimeState>,
+    rule: MatchRuleRef,
+) -> Result<bool, AppError> {
+    let removed = state.runtime()?.forget_match_rule(rule.id).await?;
+    Ok(guard_response("library::forget_match_rule", removed))
 }
 
 /// A page of the files a scan could not place, newest first.

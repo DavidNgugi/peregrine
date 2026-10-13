@@ -97,6 +97,10 @@ pub(crate) enum WriteRequest {
         root_id: i64,
         updated_at: i64,
     },
+    /// Remove one `match_rule` row.
+    RemoveMatchRule {
+        id: i64,
+    },
     /// Record or replace one `match_rule` row.
     InsertMatchRule(Box<crate::catalogue::NewMatchRule>),
     /// Remove one `unmatched_file` row.
@@ -296,9 +300,6 @@ async fn apply_library_write(
             .await
             .map(|id| WriteResponse::RowInserted { id })
             .map_err(StorageError::from_sqlx),
-        WriteRequest::InsertMatchRule(rule) => {
-            insert_row(crate::catalogue::insert_match_rule(connection, &rule).await)
-        }
         WriteRequest::RemoveUnmatchedFile { id } => remove_unmatched_file(connection, id).await,
         WriteRequest::InsertUnmatchedFile {
             file,
@@ -420,6 +421,17 @@ fn insert_row(result: Result<i64, StorageError>) -> Result<WriteResponse, Storag
     result.map(|id| WriteResponse::RowInserted { id })
 }
 
+/// Removes one `match_rule` row, mapping the statement onto the response the caller expects.
+async fn remove_match_rule(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<WriteResponse, StorageError> {
+    crate::catalogue::remove_match_rule(connection, id)
+        .await
+        .map(|removed| WriteResponse::RowChanged { changed: removed })
+        .map_err(StorageError::from_sqlx)
+}
+
 /// Removes one `unmatched_file` row, mapping the statement onto the response the caller expects.
 async fn remove_unmatched_file(
     connection: &mut sqlx::SqliteConnection,
@@ -449,15 +461,6 @@ async fn apply(
             .await
             .map(|changed| WriteResponse::JobUpdated { changed })
             .map_err(StorageError::from_sqlx),
-        WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
-            .await
-            .map(|id| WriteResponse::TitleInserted { id }),
-        WriteRequest::InsertStubSeason(season) => {
-            insert_row(crate::catalogue::insert_season(connection, &season).await)
-        }
-        WriteRequest::InsertStubEpisode(episode) => {
-            insert_row(crate::catalogue::insert_episode(connection, &episode).await)
-        }
         WriteRequest::AttachExternalIds { title_id, ids } => {
             crate::catalogue::attach_external_ids(connection, title_id, &ids)
                 .await
@@ -522,6 +525,33 @@ async fn apply(
             .await
             .map(|rows| WriteResponse::RetentionPruned { rows })
             .map_err(StorageError::from_sqlx),
+        other => apply_catalogue_write(connection, other).await,
+    }
+}
+
+/// Applies the requests that write catalogue rows.
+///
+/// Split out of the library dispatch because that function kept reaching the length lint one arm at a
+/// time, and the reason was structural: it was the *last* dispatcher in the chain, so every new
+/// request landed in it whatever it wrote. The chain is now matter, then catalogue, then library.
+async fn apply_catalogue_write(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::InsertMatchRule(rule) => {
+            insert_row(crate::catalogue::insert_match_rule(connection, &rule).await)
+        }
+        WriteRequest::RemoveMatchRule { id } => remove_match_rule(connection, id).await,
+        WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
+            .await
+            .map(|id| WriteResponse::TitleInserted { id }),
+        WriteRequest::InsertStubSeason(season) => {
+            insert_row(crate::catalogue::insert_season(connection, &season).await)
+        }
+        WriteRequest::InsertStubEpisode(episode) => {
+            insert_row(crate::catalogue::insert_episode(connection, &episode).await)
+        }
         other => apply_library_write(connection, other).await,
     }
 }

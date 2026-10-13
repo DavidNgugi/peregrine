@@ -17,12 +17,13 @@
 
 import { Button, EmptyState, ErrorState, Progress, Screen, Section, Table } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
-import type { LibraryTitleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
+import type { LibraryTitleDto, MatchRuleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
+import type { MatchRules } from "../hooks/useMatchRules.js";
 import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
 import type { ScanControl } from "../hooks/useScan.js";
 
@@ -44,6 +45,14 @@ interface LibraryScreenProps {
    * count the user has already been shown.
    */
   readonly unmatched: UnmatchedQueue;
+  /**
+   * The rules a user's answers became.
+   *
+   * Shown because a rule keeps acting: it places every later name that reads the way the one it was
+   * made from did. An answer that cannot be seen cannot be withdrawn, and a wrong one would go on
+   * placing files in silence.
+   */
+  readonly rules: MatchRules;
 }
 
 /** What `useTranslation` hands a component, so the column builder can take it by name. */
@@ -171,8 +180,60 @@ function queueColumnsOf(
   ];
 }
 
+/**
+ * The columns of the rules list.
+ *
+ * Two columns and a button: what a name reads, and the title it is placed under. The button says
+ * "Forget" rather than "Remove" because what is being removed is the *rule*, not the file — the files
+ * it placed stay, and a word that suggested otherwise would make a user think twice about using it.
+ */
+function ruleColumnsOf(
+  t: Translate,
+  forget: (id: number) => void,
+  busy: boolean,
+): readonly TableColumn<MatchRuleDto>[] {
+  return [
+    {
+      id: "pattern",
+      header: t("library.rules.column.name"),
+      cell: (row) => (
+        <span className="flex flex-col">
+          <span>{row.pattern}</span>
+          <span className="text-caption text-text-tertiary">{t("library.rules.readsAs")}</span>
+        </span>
+      ),
+    },
+    {
+      id: "title",
+      header: t("library.rules.column.placedUnder"),
+      cell: (row) => row.titleName,
+    },
+    {
+      id: "forget",
+      header: "",
+      cell: (row) => (
+        <Button
+          disabled={busy}
+          onClick={() => {
+            forget(row.id);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t("library.rules.forget")}
+        </Button>
+      ),
+    },
+  ];
+}
+
 /** The library screen. */
-export function LibraryScreen({ titles, scan, unmatched }: LibraryScreenProps): ReactElement {
+export function LibraryScreen({
+  titles,
+  scan,
+  unmatched,
+  rules,
+}: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
   const columns = useMemo(() => columnsOf(t), [t]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
@@ -247,6 +308,19 @@ export function LibraryScreen({ titles, scan, unmatched }: LibraryScreenProps): 
               rows={unmatched.files}
             />
           )}
+        </Section>
+      )}
+
+      {rules.failed || rules.loading || rules.rules.length === 0 ? null : (
+        <Section description={t("library.rules.description")} title={t("library.rules.title")}>
+          {rules.error === null ? null : (
+            <ErrorState body={rules.error} title={t("library.rules.refused")} />
+          )}
+          <Table
+            columns={ruleColumnsOf(t, (id) => void rules.forget(id), rules.busy)}
+            rowKey={(row) => row.id}
+            rows={rules.rules}
+          />
         </Section>
       )}
     </Screen>

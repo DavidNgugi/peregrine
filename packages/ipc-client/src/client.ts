@@ -17,6 +17,7 @@ import type {
   JobStarted,
   LibraryRootDto,
   LibraryTitleDto,
+  MatchRuleDto,
   UnmatchedFileDto,
   RootKind,
   RootRef,
@@ -99,6 +100,22 @@ export async function addLibraryRoot(
  */
 export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto[]> {
   return unwrap(commands.listTitles(limit ?? null));
+}
+
+/**
+ * A page of the rules a user's corrections became, newest first.
+ *
+ * A rule places every later name that reads the way the one it was made from did, which is why the
+ * screen shows them: an answer a user gave once keeps acting, so it has to be visible and
+ * withdrawable.
+ */
+export async function listMatchRules(limit?: number): Promise<MatchRuleDto[]> {
+  return unwrap(commands.listMatchRules(limit ?? null));
+}
+
+/** Removes one rule, reporting whether it was there. */
+export async function forgetMatchRule(id: number): Promise<boolean> {
+  return unwrap(commands.forgetMatchRule({ id }));
 }
 
 /**

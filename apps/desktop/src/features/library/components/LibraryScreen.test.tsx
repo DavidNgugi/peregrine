@@ -1,10 +1,11 @@
 import { createI18n } from "@peregrine/i18n";
-import type { LibraryTitleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
+import type { LibraryTitleDto, MatchRuleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { ScanControl } from "../hooks/useScan.js";
+import type { MatchRules } from "../hooks/useMatchRules.js";
 import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
 import { LibraryScreen } from "./LibraryScreen.js";
 
@@ -65,6 +66,30 @@ function queue(
   };
 }
 
+/** One remembered rule as the core sends it. */
+function rule(overrides: Partial<MatchRuleDto> = {}): MatchRuleDto {
+  return { id: 3, pattern: "the matrix", titleName: "The Matrix", ...overrides };
+}
+
+/** The rules as a state, with the removal recorded rather than performed. */
+function rules(state: Partial<MatchRules> = {}): MatchRules & { readonly forgotten: number[] } {
+  const record = { forgotten: [] as number[] };
+  return {
+    rules: [],
+    loading: false,
+    failed: false,
+    busy: false,
+    error: null,
+    forget: (id: number) => {
+      record.forgotten.push(id);
+      return Promise.resolve();
+    },
+    refresh: () => Promise.resolve(),
+    ...state,
+    ...record,
+  };
+}
+
 /** The scan control as a state, with its action recorded rather than performed. */
 function scanControl(state: Partial<ScanControl> = {}): ScanControl & { readonly starts: number } {
   const record = { starts: 0 };
@@ -96,10 +121,11 @@ function markup(
   state: LibraryTitles,
   scan: ScanControl = scanControl(),
   unmatched: UnmatchedQueue = queue(),
+  remembered: MatchRules = rules(),
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <LibraryScreen scan={scan} titles={state} unmatched={unmatched} />
+      <LibraryScreen rules={remembered} scan={scan} titles={state} unmatched={unmatched} />
     </I18nextProvider>,
   );
 }
@@ -238,6 +264,37 @@ describe("LibraryScreen", () => {
     const busy = markup(library(), scanControl(), queue({ files: [parked()], busy: true }));
 
     expect(busy).toContain(`disabled=""`);
+  });
+
+  it("shows a remembered rule, so an answer that keeps acting can be seen", () => {
+    // A rule places every later name that reads the same way, so it acts without the user present.
+    // The screen's job is to make that visible: what a name reads, and where it is filed.
+    const html = markup(library(), scanControl(), queue(), rules({ rules: [rule()] }));
+
+    expect(html).toContain("Remembered");
+    expect(html).toContain("the matrix");
+    expect(html).toContain("The Matrix");
+    expect(html).toContain("Forget");
+  });
+
+  it("says nothing about rules when there are none or the read failed", () => {
+    // An empty "Remembered" section would be a heading with nothing under it, and a failed read must
+    // not look like a library with no rules — the same distinction every other read on this screen
+    // makes.
+    const none = markup(library(), scanControl(), queue(), rules());
+    const failed = markup(library(), scanControl(), queue(), rules({ failed: true }));
+
+    expect(none).not.toContain("Remembered");
+    expect(failed).not.toContain("Remembered");
+  });
+
+  it("says a rule is withdrawn as forgetting, not as deleting the file", () => {
+    // The word matters: the files a rule placed stay, and a label that suggested otherwise would
+    // make a user hesitate to withdraw a wrong answer.
+    const html = markup(library(), scanControl(), queue(), rules({ rules: [rule()] }));
+
+    expect(html).toContain("Forg");
+    expect(html).not.toContain("Delete");
   });
 
   it("shows why a scan was refused, in the core's own words", () => {

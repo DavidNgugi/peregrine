@@ -839,6 +839,27 @@ impl Database {
         }
     }
 
+    /// A page of the rules a user has made, newest first, under `scope`.
+    pub async fn list_match_rules(
+        &self,
+        scope: AccountScope,
+        request: PageRequest,
+    ) -> Result<Vec<crate::catalogue::MatchRuleRow>, StorageError> {
+        crate::catalogue::list_match_rules(&self.readers, scope, request).await
+    }
+
+    /// Removes one rule, reporting whether the row was there.
+    pub async fn remove_match_rule(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RemoveMatchRule { id })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("remove_match_rule", &other)),
+        }
+    }
+
     /// The title a user's rule places files under for one pattern, or `None` when they made none.
     pub async fn rule_title_for(&self, pattern: &str) -> Result<Option<String>, StorageError> {
         crate::catalogue::rule_title_for(&self.readers, pattern).await

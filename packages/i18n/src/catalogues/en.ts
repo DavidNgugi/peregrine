@@ -101,6 +101,18 @@ export const en = {
           body: "Every file a scan found has been placed.",
         },
       },
+      rules: {
+        title: "Remembered",
+        description:
+          "Answers you have given: when a name reads this way, it is filed under that title without asking again. Forgetting a rule does not move the files it has already placed.",
+        column: {
+          name: "A name that reads",
+          placedUnder: "Is filed under",
+        },
+        readsAs: "remembered from a correction",
+        forget: "Forget",
+        refused: "That rule could not be forgotten.",
+      },
       column: {
         title: "Title",
         kind: "Kind",

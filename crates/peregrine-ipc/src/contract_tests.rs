@@ -259,6 +259,27 @@ fn match_unmatched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `list_match_rules` reads through the runtime, so it fails the same way.
+fn list_match_rules_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::list_match_rules(harness.dead_state(), None)
+            .await
+            .map(drop)
+    })
+}
+
+/// `forget_match_rule` writes through the runtime, so a dead runtime is the failure it has.
+fn forget_match_rule_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::forget_match_rule(
+            harness.dead_state(),
+            crate::library::MatchRuleRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -430,6 +451,22 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: list_unmatched_without_a_runtime,
+        },
+        ContractCase {
+            command: "list_match_rules",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_match_rules_without_a_runtime,
+        },
+        ContractCase {
+            command: "forget_match_rule",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: forget_match_rule_without_a_runtime,
         },
         ContractCase {
             command: "match_unmatched",
