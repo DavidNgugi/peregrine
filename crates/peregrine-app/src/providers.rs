@@ -141,6 +141,46 @@ impl ProviderRegistry {
     }
 }
 
+/// The manifest entry for `provider`, when this build knows one.
+///
+/// The one place a string a caller supplied — a provider name from a settings screen — becomes an
+/// entry. A name that is not here is a request this build cannot serve, and the caller refuses it
+/// rather than guessing at an endpoint.
+#[must_use]
+pub fn entry(provider: &str) -> Option<&'static ProviderManifest> {
+    MANIFEST.iter().find(|entry| entry.provider == provider)
+}
+
+/// Builds the adapter for one manifest entry from a credential the caller already holds.
+///
+/// **This is what makes a credential testable before it is stored** (PG-E5-20): the same constructor
+/// the registry uses, given a candidate instead of the keyring's answer, so a key that does not work
+/// is a key that never reaches the keychain.
+///
+/// # Errors
+///
+/// [`BuildError::Provider`] when the adapter refuses its configuration, and [`BuildError::Unknown`]
+/// when the entry names a provider this build has no arm for — a manifest entry added without one,
+/// which the compiler cannot catch because the match is on a string.
+pub fn build_with(
+    entry: &ProviderManifest,
+    credential: &peregrine_secrets::Secret,
+) -> Result<std::sync::Arc<dyn peregrine_providers::provider::MetadataProvider>, BuildError> {
+    let adapter = match entry.provider {
+        "tmdb" => Tmdb::new(
+            entry.endpoint,
+            peregrine_providers::tmdb::IMAGE_BASE,
+            credential.expose_secret().to_owned(),
+        )?,
+        unknown => {
+            return Err(BuildError::Unknown {
+                provider: unknown.to_owned(),
+            });
+        }
+    };
+    Ok(std::sync::Arc::new(adapter))
+}
+
 /// Reads which providers hold a credential.
 ///
 /// **Synchronous and blocking**, because every OS keyring API is: the caller that runs on an async
@@ -183,15 +223,7 @@ pub fn build(
     let Some(credential) = credential else {
         return Ok(None);
     };
-    let adapter = match entry.provider {
-        "tmdb" => Tmdb::new(
-            entry.endpoint,
-            peregrine_providers::tmdb::IMAGE_BASE,
-            credential.expose_secret().to_owned(),
-        )?,
-        _ => return Ok(None),
-    };
-    Ok(Some(std::sync::Arc::new(adapter)))
+    build_with(entry, &credential).map(Some)
 }
 
 /// Why an adapter could not be built.
@@ -203,6 +235,12 @@ pub enum BuildError {
     /// The provider refused its configuration.
     #[error("the provider could not be built from its configuration")]
     Provider(#[from] peregrine_providers::error::ProviderError),
+    /// The manifest names a provider this build has no constructor for.
+    #[error("this build has no adapter for `{provider}`")]
+    Unknown {
+        /// The name the manifest used.
+        provider: String,
+    },
 }
 
 #[cfg(test)]
@@ -270,6 +308,31 @@ mod tests {
         assert_eq!(status.known, vec!["tmdb"]);
         assert_eq!(status.configured.len(), 0);
         assert!(status.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_provider_name_is_not_an_entry() {
+        // The settings screen sends a string, so the lookup is the boundary that has to answer
+        // `None` rather than build something from a name nobody registered.
+        assert!(super::entry("tmdb").is_some());
+        assert!(super::entry("nobody").is_none());
+        assert!(super::entry("").is_none());
+    }
+
+    #[test]
+    fn a_candidate_credential_builds_without_a_store() {
+        // What makes PG-E5-20 possible: the same constructor the registry uses, given a credential
+        // the caller holds, so a key can be proved before it is written anywhere.
+        let manifest = super::entry("tmdb").expect("tmdb is known");
+        let adapter = super::build_with(
+            manifest,
+            &peregrine_secrets::Secret::new("a-key".to_owned()),
+        )
+        .expect("the adapter builds");
+        assert_eq!(
+            adapter.descriptor().provider(),
+            peregrine_domain::id::Provider::Tmdb
+        );
     }
 
     #[test]
