@@ -32,6 +32,27 @@ export interface RailsFollow {
 /** Following nothing, which is where every visit starts. */
 export const NOT_FOLLOWING: RailsFollow = { journalId: null, finished: 0 };
 
+/** The job kind that fills the rails, as `peregrine-app::jobs::discover_rails::KIND` spells it. */
+const RAILS_KIND = "discover.rails";
+
+/**
+ * Whether an envelope is a rails fetch reaching a terminal phase.
+ *
+ * **The fetch a *read* starts is the one this exists for.** The read answers the state, not the
+ * journal row, so a screen that only followed rows it submitted itself would never re-read after the
+ * fetch the core enqueued on its behalf — and the rails would sit empty behind a "being fetched"
+ * line (`FLOWS F2` has the UI read again once the sync lands). It is matched by *kind* rather than
+ * by row on purpose: any rails fetch stopping has changed what this screen would read, whoever
+ * started it, and there is one such row live at a time because the key coalesces.
+ */
+export function railsFetchStopped(envelope: unknown): boolean {
+  const payload = eventPayload(envelope);
+  if (payload === null || payload["kind"] !== RAILS_KIND) {
+    return false;
+  }
+  return isTerminal(jobPhase(payload["phase"]));
+}
+
 /**
  * Folds one `job://state` envelope into the follow.
  *

@@ -26,10 +26,13 @@ import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
  * from the first frame — a rail nobody has fetched yet is an *empty rail*, not an absent one, which
  * is what keeps the headings below it from moving when the fetch lands. What the screen says while
  * it waits is nothing; what it says when there is nothing is the empty state, and its copy names
- * the thing to do about it.
+ * the thing to do about it — except when the core says a provider is configured and the first fetch
+ * is in the air, where the section says so in one line instead of telling the user to set up the key
+ * they already set up.
  *
  * **No business rule lives here** (`AGENTS R7`): which titles are in which rail, whether artwork was
- * fetched, and whether a title is a film or a series all arrive as answers. The screen picks the
+ * fetched, whether a title is a film or a series, and whether the rails are empty because nothing
+ * can fill them or because the fetch is still running all arrive as answers. The screen picks the
  * hero — the first item of the first non-empty rail — because "which rectangle is biggest" is
  * layout rather than policy, and it maps a cached path to a URL through `lib/media.ts`, the one
  * place that names the asset protocol.
@@ -108,6 +111,9 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
 
   const hero = heroItem(rails.rails);
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
+  // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
+  // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
+  const firstFetch = rails.state === "fetching";
 
   return (
     <Screen title={t("discover.title")}>
@@ -132,6 +138,15 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
 
       {rails.failed ? (
         <ErrorState body={t("discover.failed.body")} title={t("discover.failed.title")} />
+      ) : null}
+
+      {/* The section's own line, said here rather than drawn as a spinner over the rails
+          (`DESIGN_SYSTEM §11` rule 2). It is the core's answer, not a guess from an empty list: an
+          empty rail is what a fetch in the air and a missing key both look like. */}
+      {firstFetch ? (
+        <p className="text-body text-text-secondary" role="status">
+          {t("discover.fetching.body")}
+        </p>
       ) : null}
 
       {hero === null ? null : (
@@ -164,7 +179,8 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
         </section>
       )}
 
-      {rails.rails.length === 0 && !rails.failed ? (        <EmptyState
+      {rails.rails.length === 0 && !rails.failed && !firstFetch ? (
+        <EmptyState
           body={t("discover.empty.body")}
           className="m-auto max-w-md items-center text-center"
           size="page"
@@ -177,7 +193,7 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
           {/* Nothing fetched yet, or a fetch that found nothing. Every rail below still draws its
               own empty state, so "no provider has answered yet" stays distinguishable from "this
               rail is empty on purpose". */}
-          {nothingAtAll ? (
+          {nothingAtAll && !firstFetch ? (
             <EmptyState
               body={t("discover.empty.body")}
               className="max-w-md"
@@ -188,11 +204,16 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
           {rails.rails.map((rail) => (
             <Rail
               empty={
-                <EmptyState
-                  body={t("discover.rail.empty.body")}
-                  size="inline"
-                  title={t("discover.rail.empty.title")}
-                />
+                /* While the first fetch is in the air the rails keep their geometry and stay
+                   silent: the section's line above already says what is happening, and "add a
+                   provider key in Settings" is the wrong sentence for a user who has one. */
+                firstFetch ? null : (
+                  <EmptyState
+                    body={t("discover.rail.empty.body")}
+                    size="inline"
+                    title={t("discover.rail.empty.title")}
+                  />
+                )
               }
               itemKey={(item) => item.titleId}
               items={rail.items}

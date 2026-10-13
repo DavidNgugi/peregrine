@@ -132,7 +132,11 @@ describe("ProvidersSection", () => {
     const html = markup(
       settings({
         providers: [provider()],
-        outcome: { key: credentialFailureKey("PROVIDER_UNAUTHORIZED"), provider: "tmdb", ok: false },
+        outcome: {
+          key: credentialFailureKey("PROVIDER_UNAUTHORIZED"),
+          provider: "tmdb",
+          ok: false,
+        },
       }),
     );
 

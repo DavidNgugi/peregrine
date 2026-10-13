@@ -1,5 +1,13 @@
 import { clsx } from "clsx";
-import { useCallback, useEffect, useRef, useState, type Key, type ReactElement, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Key,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { twMerge } from "./merge.js";
 
 /**
@@ -205,8 +213,7 @@ export function Grid<T>({
     };
   }, [measure]);
 
-  const columns =
-    pinnedColumns ?? gridColumns(viewport.width, tileWidth, gap);
+  const columns = pinnedColumns ?? gridColumns(viewport.width, tileWidth, gap);
   const window_ = gridWindow({
     columns,
     itemCount: items.length,

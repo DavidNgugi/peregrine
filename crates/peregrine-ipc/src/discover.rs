@@ -72,12 +72,46 @@ impl From<peregrine_app::RailItem> for RailItemDto {
     }
 }
 
-/// One rail: its stable identity and the titles in it.
+/// What the Discover screen's rails are doing.
+///
+/// **The screen's whole vocabulary for this section**, and it is the core's to state (`AGENTS R7`):
+/// an installation nobody has given a key to, one whose fetch is in the air, and one with rails to
+/// draw are three different sentences, and "the items are empty" is what the first two look like
+/// from here. A screen that derived this would tell a user who already set a key up to go and set
+/// one up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RailsStateDto {
+    /// No provider holds a credential, so nothing can fill a rail until one is set up in Settings.
+    NoProvider,
+    /// A provider is configured and the fetch that fills the rails is under way.
+    Fetching,
+    /// The rails hold what the providers answered.
+    Ready,
+}
+
+impl From<peregrine_app::RailsState> for RailsStateDto {
+    fn from(state: peregrine_app::RailsState) -> Self {
+        match state {
+            peregrine_app::RailsState::NoProvider => Self::NoProvider,
+            peregrine_app::RailsState::Fetching => Self::Fetching,
+            peregrine_app::RailsState::Ready => Self::Ready,
+        }
+    }
+}
+
+/// One rail: its stable identity, the titles in it, and what the rails are doing.
 ///
 /// **The heading is not here.** A rail's heading is a sentence — "On the air", "Top rated films" —
 /// and a sentence is translated, so it lives in `packages/i18n` keyed by the rail's `rail` field.
 /// Sending an English heading over IPC would put untranslatable copy in the core's mouth, which is
 /// the mistake `AGENTS R7` names from the other direction.
+///
+/// **`state` is one fact about the read rather than about this rail**: whether a provider is
+/// configured at all, and whether the fetch that fills the rails is in the air, is the same for all
+/// seven. It rides on every rail because a list of rails is what this answer is, and the core
+/// answers every rail — so a screen reads it off the answer it already has instead of inventing one
+/// for a list that cannot be empty, and a screen renders it instead of deciding it (`AGENTS R7`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeRailDto {
@@ -85,6 +119,9 @@ pub struct HomeRailDto {
     pub rail: String,
     /// Its titles, in the order the provider listed them.
     pub items: Vec<RailItemDto>,
+    /// Whether the rails are empty because nothing can fill them, empty because a fetch is in the
+    /// air, or here.
+    pub state: RailsStateDto,
 }
 
 impl From<peregrine_app::HomeRail> for HomeRailDto {
@@ -92,6 +129,7 @@ impl From<peregrine_app::HomeRail> for HomeRailDto {
         Self {
             rail: rail.rail.as_str().to_owned(),
             items: rail.items.into_iter().map(RailItemDto::from).collect(),
+            state: RailsStateDto::from(rail.state),
         }
     }
 }
@@ -134,14 +172,18 @@ pub async fn search_providers(
 /// fetched yet is answered as an empty rail rather than omitted, so the screen has its geometry
 /// from the first frame.
 ///
+/// **A cold read also starts the fetch** (`FLOWS F2`), through the same call [`refresh_rails`]
+/// makes, so a screen with a configured provider fills without anyone pressing a button. What each
+/// rail's `state` adds is how the screen tells a cold fetch from a missing key rather than assuming
+/// one from an empty list.
+///
 /// # Errors
 ///
-/// [`AppError`] when the runtime is not running. Nothing else: the read cannot fail, which is the
-/// point of it.
+/// [`AppError`] when the runtime is not running, or when the cold read cannot start the fetch.
 #[tauri::command]
 #[specta::specta]
 pub async fn home_rails(state: State<'_, RuntimeState>) -> Result<Vec<HomeRailDto>, AppError> {
-    let rails = state.runtime()?.home_rails()?;
+    let rails = state.runtime()?.home_rails().await?;
     Ok(guard_response(
         "discover::home_rails",
         rails.into_iter().map(HomeRailDto::from).collect(),
@@ -199,6 +241,7 @@ mod tests {
                 year: Some(2022),
                 poster: Some(std::path::PathBuf::from("/cache/images/abc")),
             }],
+            state: peregrine_app::RailsState::Ready,
         };
 
         let dto = HomeRailDto::from(rail);
@@ -210,6 +253,7 @@ mod tests {
         assert_eq!(dto.items[0].name, "Severance");
         assert_eq!(dto.items[0].year, Some(2022));
         assert_eq!(dto.items[0].poster.as_deref(), Some("/cache/images/abc"));
+        assert_eq!(dto.state, RailsStateDto::Ready);
     }
 
     #[test]
@@ -225,6 +269,7 @@ mod tests {
                 year: None,
                 poster: None,
             }],
+            state: peregrine_app::RailsState::Ready,
         };
 
         let dto = HomeRailDto::from(rail);
@@ -246,8 +291,49 @@ mod tests {
             let dto = HomeRailDto::from(HomeRail {
                 rail,
                 items: Vec::new(),
+                state: peregrine_app::RailsState::NoProvider,
             });
             assert_eq!(dto.rail, name);
         }
+    }
+
+    /// The three states the screen switches copy on, as the core states them.
+    #[test]
+    fn every_rails_state_survives_the_crossing() {
+        for (state, expected) in [
+            (
+                peregrine_app::RailsState::NoProvider,
+                RailsStateDto::NoProvider,
+            ),
+            (peregrine_app::RailsState::Fetching, RailsStateDto::Fetching),
+            (peregrine_app::RailsState::Ready, RailsStateDto::Ready),
+        ] {
+            let dto = HomeRailDto::from(HomeRail {
+                rail: peregrine_app::RailKind::TrendingWeek,
+                items: Vec::new(),
+                state,
+            });
+
+            assert_eq!(dto.state, expected);
+        }
+    }
+
+    /// The wire spelling is what the screen switches on, so a rename is a deliberate edit here
+    /// rather than a screen that silently matches no state and draws nothing.
+    #[test]
+    fn the_wire_spelling_of_a_state_is_pinned() {
+        let spelled = |state| {
+            serde_json::to_value(HomeRailDto::from(HomeRail {
+                rail: peregrine_app::RailKind::TrendingWeek,
+                items: Vec::new(),
+                state,
+            }))
+            .expect("a state serializes")["state"]
+                .clone()
+        };
+
+        assert_eq!(spelled(peregrine_app::RailsState::NoProvider), "noProvider");
+        assert_eq!(spelled(peregrine_app::RailsState::Fetching), "fetching");
+        assert_eq!(spelled(peregrine_app::RailsState::Ready), "ready");
     }
 }

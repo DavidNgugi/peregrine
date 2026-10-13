@@ -6,9 +6,9 @@ import { TitleCard } from "./TitleCard.js";
 const TILE = 144;
 const ROW = 228;
 
-function windowOf(overrides: Partial<Parameters<typeof gridWindow>[0]> = {}): ReturnType<
-  typeof gridWindow
-> {
+function windowOf(
+  overrides: Partial<Parameters<typeof gridWindow>[0]> = {},
+): ReturnType<typeof gridWindow> {
   return gridWindow({
     columns: 4,
     itemCount: 1000,
@@ -115,7 +115,10 @@ describe("gridWindow", () => {
 });
 
 describe("Grid", () => {
-  function grid(itemCount: number, overrides: Partial<Parameters<typeof Grid<number>>[0]> = {}): string {
+  function grid(
+    itemCount: number,
+    overrides: Partial<Parameters<typeof Grid<number>>[0]> = {},
+  ): string {
     const items = Array.from({ length: itemCount }, (_, index) => index);
     return renderToStaticMarkup(
       <Grid
@@ -124,7 +127,9 @@ describe("Grid", () => {
         itemKey={(item) => item}
         items={items}
         label="Results"
-        renderItem={(item) => <TitleCard href={`/title/movie/${String(item)}`} title={`#${String(item)}`} />}
+        renderItem={(item) => (
+          <TitleCard href={`/title/movie/${String(item)}`} title={`#${String(item)}`} />
+        )}
         rowHeight={ROW}
         tileWidth={TILE}
         {...overrides}

@@ -35,7 +35,11 @@ use crate::provider::{MetadataProvider, ProviderFuture, RailKind, SearchCandidat
 pub const SEARCH_BODY_CAP: BodyCap = BodyCap::new(std::num::NonZeroU64::new(1_048_576).unwrap());
 
 /// The attribution TMDB's terms require (`PG-E5-19` renders it).
-const ATTRIBUTION_NOTICE: &str =
+///
+/// Public because the notice has to be readable by a layer that has no adapter: a settings screen
+/// lists what this build is obliged to say about the providers it *offers*, whether or not one is
+/// configured. The descriptor is built from this same constant, so there is one string and not two.
+pub const ATTRIBUTION_NOTICE: &str =
     "This product uses the TMDB API but is not endorsed or certified by TMDB.";
 
 /// The TMDB adapter.

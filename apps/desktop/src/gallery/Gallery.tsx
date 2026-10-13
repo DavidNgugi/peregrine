@@ -145,7 +145,7 @@ const COLUMNS: readonly TableColumn<Row>[] = [
   { id: "size", header: "Size", numeric: true, cell: (row) => row.size },
 ];
 
-/** The dialog's demo: closed until the reader opens it, because an open one covers the gallery. */function GalleryDialog(): ReactElement {
+/** The dialog's demo: closed until the reader opens it, because an open one covers the gallery. */ function GalleryDialog(): ReactElement {
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col items-start gap-2">
@@ -295,7 +295,12 @@ export function Gallery(): ReactElement {
             items={GRID_TITLES}
             label="Five thousand titles"
             renderItem={(item) => (
-              <TitleCard href={`/title/movie/${String(item.id)}`} poster={POSTER} size="sm" title={item.title} />
+              <TitleCard
+                href={`/title/movie/${String(item.id)}`}
+                poster={POSTER}
+                size="sm"
+                title={item.title}
+              />
             )}
             rowHeight={180}
             tileWidth={112}

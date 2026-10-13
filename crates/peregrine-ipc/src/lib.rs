@@ -54,6 +54,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         .commands(collect_commands![
             system::build_info::<tauri::Wry>,
             system::health,
+            system::provider_attribution,
             system::log_tail,
             shortcuts::list_shortcuts,
             autostart::autostart_enabled::<tauri::Wry>,

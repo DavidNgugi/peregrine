@@ -59,7 +59,9 @@ function ProviderRow({ busy, entry, onRemove, onSave, onTest }: ProviderRowProps
       <SettingsRow
         description={describe(
           entry,
-          t(entry.configured ? "settings.providers.configured" : "settings.providers.notConfigured"),
+          t(
+            entry.configured ? "settings.providers.configured" : "settings.providers.notConfigured",
+          ),
         )}
         label={entry.displayName}
       >

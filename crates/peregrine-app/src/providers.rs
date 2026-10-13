@@ -24,6 +24,13 @@ pub struct ProviderManifest {
     pub requires_credential: bool,
     /// Where its API lives by default.
     pub endpoint: &'static str,
+    /// The notice this provider's terms require to be reproduced verbatim.
+    pub notice: &'static str,
+    /// Whether those terms also require the provider's logo beside the notice.
+    ///
+    /// `true` for TMDB. The logo itself is not in this build yet, and that is a compliance gap rather
+    /// than an unimplemented nicety — recorded in `PG-E5-19` rather than quietly defaulted away.
+    pub requires_logo: bool,
 }
 
 /// Every provider this build can talk to.
@@ -35,6 +42,8 @@ pub const MANIFEST: &[ProviderManifest] = &[ProviderManifest {
     display_name: "TMDB",
     requires_credential: true,
     endpoint: Tmdb::BASE_URL,
+    notice: peregrine_providers::tmdb::ATTRIBUTION_NOTICE,
+    requires_logo: true,
 }];
 
 /// What this installation has configured.
@@ -138,6 +147,22 @@ impl ProviderRegistry {
             .read()
             .expect("the lock is not poisoned")
             .clone()
+    }
+
+    /// Replaces the built adapters and leaves the status the store last answered.
+    ///
+    /// **For this crate's own tests, and for one reason** (`AGENTS R14`): a runtime-level test can
+    /// have a provider configured by injecting a [`SecretStore`], but the adapter that store builds
+    /// is the real one and its rail answer is an HTTP request. This is where a scripted adapter goes
+    /// so a test can watch the runtime decide to fetch without a request leaving the machine. The
+    /// status is deliberately not replaced: half of what is on test is the runtime's own rule, and
+    /// "a provider is configured" still has to come from the store the runtime was started with.
+    #[cfg(test)]
+    pub(crate) fn use_adapters(
+        &self,
+        adapters: Vec<std::sync::Arc<dyn peregrine_providers::provider::MetadataProvider>>,
+    ) {
+        *self.adapters.write().expect("the lock is not poisoned") = adapters;
     }
 }
 

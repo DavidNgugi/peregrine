@@ -175,6 +175,42 @@ pub async fn log_tail(
     Ok(guard_response("system::log_tail", tail))
 }
 
+/// What this build is obliged to say about the providers it can talk to (`PG-E5-19`).
+///
+/// **A read with no runtime behind it**, deliberately: the notices are fixed strings the providers'
+/// terms set, and a settings screen has to show them on an installation where nothing is configured
+/// and no runtime started. A command that failed there would hide an obligation exactly when a user
+/// is looking for it.
+///
+/// # Errors
+///
+/// [`AppError`] only if the response exceeds the dev-time payload guard.
+#[tauri::command]
+#[specta::specta]
+pub fn provider_attribution() -> Result<Vec<AttributionDto>, AppError> {
+    let replies = peregrine_app::providers::MANIFEST
+        .iter()
+        .map(|entry| AttributionDto {
+            provider: entry.display_name.to_owned(),
+            notice: entry.notice.to_owned(),
+            requires_logo: entry.requires_logo,
+        })
+        .collect();
+    Ok(guard_response("system::provider_attribution", replies))
+}
+
+/// One provider's attribution, as the interface reproduces it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttributionDto {
+    /// What to call the provider.
+    pub provider: String,
+    /// The notice, verbatim.
+    pub notice: String,
+    /// Whether the provider's terms also require its logo beside the notice.
+    pub requires_logo: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

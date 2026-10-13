@@ -28,6 +28,19 @@ export const commands = {
 	 */
 	health: () => typedError<Health, AppError_Serialize>(__TAURI_INVOKE("health")),
 	/**
+	 *  What this build is obliged to say about the providers it can talk to (`PG-E5-19`).
+	 * 
+	 *  **A read with no runtime behind it**, deliberately: the notices are fixed strings the providers'
+	 *  terms set, and a settings screen has to show them on an installation where nothing is configured
+	 *  and no runtime started. A command that failed there would hide an obligation exactly when a user
+	 *  is looking for it.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] only if the response exceeds the dev-time payload guard.
+	 */
+	providerAttribution: () => typedError<AttributionDto[], AppError_Serialize>(__TAURI_INVOKE("provider_attribution")),
+	/**
 	 *  The last lines of the newest log file, newest last.
 	 * 
 	 *  The runtime bounds the read — a 64 KiB window and at most `peregrine_app::runtime::
@@ -191,10 +204,14 @@ export const commands = {
 	 *  fetched yet is answered as an empty rail rather than omitted, so the screen has its geometry
 	 *  from the first frame.
 	 * 
+	 *  **A cold read also starts the fetch** (`FLOWS F2`), through the same call [`refresh_rails`]
+	 *  makes, so a screen with a configured provider fills without anyone pressing a button. What each
+	 *  rail's `state` adds is how the screen tells a cold fetch from a missing key rather than assuming
+	 *  one from an empty list.
+	 * 
 	 *  # Errors
 	 * 
-	 *  [`AppError`] when the runtime is not running. Nothing else: the read cannot fail, which is the
-	 *  point of it.
+	 *  [`AppError`] when the runtime is not running, or when the cold read cannot start the fetch.
 	 */
 	homeRails: () => typedError<HomeRailDto[], AppError_Serialize>(__TAURI_INVOKE("home_rails")),
 	/**
@@ -342,6 +359,16 @@ export type AppError_Serialize = {
 	cause?: string | null,
 };
 
+/**  One provider's attribution, as the interface reproduces it. */
+export type AttributionDto = {
+	/**  What to call the provider. */
+	provider: string,
+	/**  The notice, verbatim. */
+	notice: string,
+	/**  Whether the provider's terms also require its logo beside the notice. */
+	requiresLogo: boolean,
+};
+
 /**  What the About box and the diagnostics bundle need to identify this build. */
 export type BuildInfo = {
 	/**  The application name the bundle was built under. */
@@ -469,18 +496,29 @@ export type Health = {
 };
 
 /**
- *  One rail: its stable identity and the titles in it.
+ *  One rail: its stable identity, the titles in it, and what the rails are doing.
  * 
  *  **The heading is not here.** A rail's heading is a sentence — "On the air", "Top rated films" —
  *  and a sentence is translated, so it lives in `packages/i18n` keyed by the rail's `rail` field.
  *  Sending an English heading over IPC would put untranslatable copy in the core's mouth, which is
  *  the mistake `AGENTS R7` names from the other direction.
+ * 
+ *  **`state` is one fact about the read rather than about this rail**: whether a provider is
+ *  configured at all, and whether the fetch that fills the rails is in the air, is the same for all
+ *  seven. It rides on every rail because a list of rails is what this answer is, and the core
+ *  answers every rail — so a screen reads it off the answer it already has instead of inventing one
+ *  for a list that cannot be empty, and a screen renders it instead of deciding it (`AGENTS R7`).
  */
 export type HomeRailDto = {
 	/**  The rail's stable identity, which is what a translation is keyed by. */
 	rail: string,
 	/**  Its titles, in the order the provider listed them. */
 	items: RailItemDto[],
+	/**
+	 *  Whether the rails are empty because nothing can fill them, empty because a fetch is in the
+	 *  air, or here.
+	 */
+	state: RailsStateDto,
 };
 
 /**  One row of the job journal. */
@@ -727,6 +765,23 @@ export type RailKindDto =
 "movie" | 
 /**  A series. */
 "show";
+
+/**
+ *  What the Discover screen's rails are doing.
+ * 
+ *  **The screen's whole vocabulary for this section**, and it is the core's to state (`AGENTS R7`):
+ *  an installation nobody has given a key to, one whose fetch is in the air, and one with rails to
+ *  draw are three different sentences, and "the items are empty" is what the first two look like
+ *  from here. A screen that derived this would tell a user who already set a key up to go and set
+ *  one up.
+ */
+export type RailsStateDto = 
+/**  No provider holds a credential, so nothing can fill a rail until one is set up in Settings. */
+"noProvider" | 
+/**  A provider is configured and the fetch that fills the rails is under way. */
+"fetching" | 
+/**  The rails hold what the providers answered. */
+"ready";
 
 /**  What a root is expected to hold, as the webview spells it. */
 export type RootKind = 

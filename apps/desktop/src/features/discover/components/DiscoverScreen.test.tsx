@@ -31,12 +31,13 @@ function item(overrides: Partial<RailItemDto> = {}): RailItemDto {
 }
 
 function rail(overrides: Partial<HomeRailDto> = {}): HomeRailDto {
-  return { rail: "popular_movies", items: [item()], ...overrides };
+  return { rail: "popular_movies", items: [item()], state: "ready", ...overrides };
 }
 
 function railsView(overrides: Partial<HomeRailsView> = {}): HomeRailsView {
   return {
     rails: [rail()],
+    state: "ready",
     loading: false,
     failed: false,
     refreshing: false,
@@ -124,6 +125,48 @@ describe("DiscoverView", () => {
     expect(html).not.toContain('role="progressbar"');
   });
 
+  it("asks for a key when the core says no provider is configured", () => {
+    const html = markup(
+      railsView({ rails: [rail({ items: [], state: "noProvider" })], state: "noProvider" }),
+    );
+
+    expect(html).toContain("Nothing here yet");
+    expect(html).toContain("a provider key is set up in Settings");
+    expect(html).not.toContain("Fetching the rails");
+  });
+
+  it("says the rails are being fetched rather than asking for a key the user has set up", () => {
+    // Two rails, both empty and both saying the same thing: the state is one fact about the read, so
+    // whichever rail the screen reads it from, the sentence is the same.
+    const html = markup(
+      railsView({
+        rails: [
+          rail({ rail: "trending_week", items: [], state: "fetching" }),
+          rail({ items: [], state: "fetching" }),
+        ],
+        state: "fetching",
+      }),
+    );
+
+    expect(html).toContain("Fetching the rails from your provider");
+    expect(html).not.toContain("Nothing here yet");
+    expect(html).not.toContain("add a provider key in Settings");
+    // A sentence in the section's own line, not a spinner over geometry that is already drawn.
+    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain('role="progressbar"');
+  });
+
+  it("draws the rails once the providers have answered", () => {
+    const html = markup(
+      railsView({ rails: [rail({ items: [item({ titleId: 4 })], state: "ready" })], state: "ready" }),
+    );
+
+    expect(html).toContain("Popular films");
+    expect(html).toContain("/title/movie/4");
+    expect(html).not.toContain("Fetching the rails");
+    expect(html).not.toContain("Nothing here yet");
+  });
+
   it("keeps the search box, which is what a person came to type in", () => {
     const html = markup(railsView());
 
@@ -163,10 +206,8 @@ describe("the hero and the tile caption", () => {
     expect(heroItem([rail({ items: [] })])).toBeNull();
     expect(heroItem([rail({ items: [item({ titleId: 3 })] })])?.titleId).toBe(3);
     expect(
-      heroItem([
-        rail({ items: [] }),
-        rail({ items: [item({ titleId: 4 }), item({ titleId: 5 })] }),
-      ])?.titleId,
+      heroItem([rail({ items: [] }), rail({ items: [item({ titleId: 4 }), item({ titleId: 5 })] })])
+        ?.titleId,
     ).toBe(4);
   });
 

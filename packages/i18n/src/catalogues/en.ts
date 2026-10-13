@@ -32,6 +32,9 @@ export const en = {
         title: "Nothing here yet",
         body: "Peregrine has no catalogue data yet. Refresh to ask the providers — a provider key is set up in Settings.",
       },
+      fetching: {
+        body: "Fetching the rails from your provider. They appear as the answers arrive.",
+      },
       refresh: {
         action: "Refresh",
         running: "Refreshing…",
@@ -327,8 +330,7 @@ export const en = {
           saved: "That key works. Peregrine stored it for {{provider}}.",
           working: "{{provider}} accepted the stored key.",
           removed: "The key was removed. {{provider}} is no longer asked.",
-          unauthorized:
-            "That key was refused. Check you copied the API key and not another value.",
+          unauthorized: "That key was refused. Check you copied the API key and not another value.",
           rateLimited: "{{provider}} is rate limiting this app; try again in a minute.",
           unreachable: "{{provider}} could not be reached.",
           store: "Peregrine could not read its credential store, so the key was not saved.",

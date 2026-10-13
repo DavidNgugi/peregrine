@@ -260,6 +260,30 @@ pub struct HomeRail {
     pub rail: peregrine_providers::RailKind,
     /// The titles in it, in the provider's order.
     pub items: Vec<crate::jobs::discover_rails::RailItem>,
+    /// What the rails are doing, which is one fact about the whole read rather than about this rail:
+    /// whether a provider is configured at all, and whether the fetch that fills them is in the air,
+    /// is the same for all seven. It rides on every rail because a rail is what this answer is made
+    /// of and the core answers every rail — so a screen reads it without inventing an answer for a
+    /// list that cannot be empty.
+    pub state: RailsState,
+}
+
+/// What the Discover screen's rails are doing.
+///
+/// **One fact about the whole answer**, and the screen renders it rather than reading it off an
+/// empty list (`AGENTS R7`): an empty rail is what a missing key and a fetch in flight both look
+/// like, and telling a user who already set a key up to go and set one up is the answer this keeps
+/// apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RailsState {
+    /// No provider holds a credential, so nothing can fill a rail until the user sets a key up in
+    /// Settings.
+    NoProvider,
+    /// A provider is configured and the fetch that fills the rails is under way. The rails are
+    /// answered empty and drawn anyway, which is the geometry rule (`DESIGN_SYSTEM §11` rule 2).
+    Fetching,
+    /// The rails hold what the providers answered.
+    Ready,
 }
 
 /// What the diagnostics surface reports about the running process.
@@ -634,7 +658,7 @@ impl Runtime {
             .await?)
     }
 
-    /// Every rail the Discover screen draws, cache-first.
+    /// Every rail the Discover screen draws, and the fetch that fills them.
     ///
     /// **It reads no network and answers from what is here** (`FLOWS F2`): the membership and the
     /// resolved artwork paths were written by the rails job, so this is a lock read and a clone
@@ -642,16 +666,34 @@ impl Runtime {
     /// rather than omitted, which is what gives the screen its geometry on the first frame of a
     /// cold start (`DESIGN_SYSTEM §11` rule 2).
     ///
+    /// **A cold read is also what starts the fetch.** `FLOWS F2` has the core answer the rail shells
+    /// and enqueue the refresh in the same breath, and the Refresh command is not a second path to
+    /// that: every rail empty with a provider configured goes through
+    /// [`start_discover_rails`](Self::start_discover_rails), the same call the screen's button makes.
+    /// That call reads the journal by its dedupe key before it writes anything, so a read while the
+    /// fetch is in flight — or a read racing a press of Refresh — joins the live job rather than
+    /// writing a second row. With no provider configured there is nothing to ask and the answer says
+    /// so; with rails already in hand there is nothing to fetch.
+    ///
     /// # Errors
     ///
-    /// Nothing: the read cannot fail, which is the point of it. The `Result` is the shape every
-    /// command surface in this build shares (`ARCHITECTURE §7` rule 3).
-    pub fn home_rails(&self) -> Result<Vec<HomeRail>, RuntimeError> {
-        Ok(self
-            .rails
-            .read()
+    /// [`RuntimeError::Storage`] when the journal cannot be read or written and
+    /// [`RuntimeError::Scheduler`] when the queue refuses the job. Reported rather than swallowed,
+    /// because a read that answered "fetching" while nothing was queued would be a screen waiting
+    /// for a job that does not exist.
+    pub async fn home_rails(&self) -> Result<Vec<HomeRail>, RuntimeError> {
+        let rails = self.rails.read();
+        let state = if rails.iter().any(|(_, items)| !items.is_empty()) {
+            RailsState::Ready
+        } else if self.providers.status().is_empty() {
+            RailsState::NoProvider
+        } else {
+            self.start_discover_rails().await?;
+            RailsState::Fetching
+        };
+        Ok(rails
             .into_iter()
-            .map(|(rail, items)| HomeRail { rail, items })
+            .map(|(rail, items)| HomeRail { rail, items, state })
             .collect())
     }
 
@@ -1620,6 +1662,155 @@ mod tests {
         .expect("the job must reach a terminal state")
     }
 
+    /// The journal rows the Discover fetch has written, whatever phase they are in.
+    ///
+    /// What "queues one fetch" is asserted against: the row is the thing a duplicate would add, and
+    /// its phase is not what says so.
+    async fn rails_rows(runtime: &Runtime) -> Vec<i64> {
+        runtime
+            .jobs(None, peregrine_storage::MAX_PAGE_ROWS)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.kind == crate::jobs::discover_rails::KIND)
+            .map(|row| row.id)
+            .collect()
+    }
+
+    /// The state the read answered, which is one fact about it and therefore the same on every rail.
+    ///
+    /// Asserted rather than picked, because the repetition is only honest while the values agree:
+    /// two rails disagreeing would be a screen whose copy depended on which one it read first.
+    fn rails_state(rails: &[HomeRail]) -> RailsState {
+        let first = rails
+            .first()
+            .expect("the core answers every rail, including the ones nobody has fetched")
+            .state;
+        assert!(
+            rails.iter().all(|rail| rail.state == first),
+            "one read answers one state"
+        );
+        first
+    }
+
+    /// Starts a runtime whose injected store holds a provider key and whose adapter is `adapter`.
+    ///
+    /// **Waited for, and that is the safety of it.** The registry is refreshed off the start-up path,
+    /// so a swap that landed first would be overwritten by the real adapter the store builds — and
+    /// the adapter the store builds is TMDB, whose rail answer is a request (`AGENTS R14`). Once the
+    /// refresh has published its status, the swap is the last write to the adapters and nothing this
+    /// test does leaves the machine.
+    async fn runtime_with_a_provider(
+        directory: &TempDir,
+        adapter: Arc<dyn peregrine_providers::provider::MetadataProvider>,
+    ) -> (Runtime, Arc<RecordingSink>) {
+        let secrets = Arc::new(MemorySecretStore::with_provider("tmdb", "a-key"));
+        let (runtime, sink) =
+            runtime_with(directory, Arc::clone(&secrets) as Arc<dyn SecretStore>).await;
+        let status = await_cached_status(&runtime).await;
+        assert_eq!(
+            status.configured,
+            vec!["tmdb"],
+            "the injected store is what says a provider is configured"
+        );
+        runtime.providers.use_adapters(vec![adapter]);
+        (runtime, sink)
+    }
+
+    /// One rail candidate, which is what a provider lists in a rail.
+    fn candidate(id: &str, name: &str) -> peregrine_providers::provider::SearchCandidate {
+        peregrine_providers::provider::SearchCandidate::new(
+            peregrine_domain::id::ExternalId::new(peregrine_domain::id::Provider::Tmdb, id)
+                .expect("a fixture id"),
+            peregrine_domain::text::NonEmptyText::new(name).expect("the fixture passes real text"),
+            peregrine_domain::catalogue::TitleKind::Movie,
+            None,
+        )
+    }
+
+    /// A provider whose rail answer waits for the test, so a fetch a read started is still in the air
+    /// when the next read asks.
+    ///
+    /// Idempotence is a statement about a fetch *in flight*, and a scripted provider that answered
+    /// instantly would have finished before the second read — leaving the test to race the scheduler
+    /// instead of measuring it. The gate is a `watch` the test closes when it is done, so nothing
+    /// here waits on a clock or a sleep (`AGENTS R14`); everything but `rail` is the testkit fake,
+    /// which is the same adapter the rails job's own tests drive.
+    struct GatedRailProvider {
+        inner: peregrine_testkit::FakeMetadataProvider,
+        released: tokio::sync::watch::Receiver<bool>,
+    }
+
+    impl GatedRailProvider {
+        /// A provider that publishes the rails and holds the first answer until the sender says so.
+        fn holding_the_rails() -> (Self, tokio::sync::watch::Sender<bool>) {
+            let (sender, released) = tokio::sync::watch::channel(false);
+            (
+                Self {
+                    inner: peregrine_testkit::FakeMetadataProvider::publishing_rails(
+                        peregrine_domain::id::Provider::Tmdb,
+                        Vec::new(),
+                    ),
+                    released,
+                },
+                sender,
+            )
+        }
+    }
+
+    impl peregrine_providers::provider::MetadataProvider for GatedRailProvider {
+        fn descriptor(&self) -> &peregrine_providers::ProviderDescriptor {
+            self.inner.descriptor()
+        }
+
+        fn check(&self) -> peregrine_providers::ProviderFuture<'_, ()> {
+            self.inner.check()
+        }
+
+        fn search(
+            &self,
+            query: &peregrine_providers::provider::SearchQuery,
+        ) -> peregrine_providers::ProviderFuture<
+            '_,
+            Vec<peregrine_providers::provider::SearchCandidate>,
+        > {
+            self.inner.search(query)
+        }
+
+        fn title(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>
+        {
+            self.inner.title(id, kind)
+        }
+
+        fn image(
+            &self,
+            path: &str,
+            kind: peregrine_domain::catalogue::ImageKind,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<u8>> {
+            self.inner.image(path, kind)
+        }
+
+        fn rail(
+            &self,
+            _rail: peregrine_providers::provider::RailKind,
+            _page: std::num::NonZeroU32,
+        ) -> peregrine_providers::ProviderFuture<
+            '_,
+            Vec<peregrine_providers::provider::SearchCandidate>,
+        > {
+            let mut released = self.released.clone();
+            Box::pin(async move {
+                // A sender that is gone is a finished test, not a locked gate.
+                while !*released.borrow_and_update() && released.changed().await.is_ok() {}
+                Ok(Vec::new())
+            })
+        }
+    }
+
     /// What a provider answered for one title, with only the two fields a test reads set.
     fn details(name: &str, poster: Option<&str>) -> peregrine_domain::catalogue::TitleDetails {
         peregrine_domain::catalogue::TitleDetails {
@@ -2121,16 +2312,22 @@ mod tests {
 
     /// The Discover read is a lock and a clone, and a cold start answers empty rails rather than
     /// nothing: the screen has its geometry from the first frame (`DESIGN_SYSTEM §11` rule 2) and
-    /// pays for it with rails that are empty until the fetch lands.
+    /// pays for it with rails that are empty until the fetch lands. With no provider configured
+    /// there is nothing to fetch, and the answer says which of the three states this is.
     #[tokio::test]
     async fn a_fresh_runtime_answers_every_rail_as_empty() {
         let directory = TempDir::new().unwrap();
         let (runtime, _sink) = runtime(&directory).await;
 
-        let rails = runtime.home_rails().unwrap();
+        let rails = runtime.home_rails().await.unwrap();
 
         assert_eq!(rails.len(), peregrine_providers::RailKind::ALL.len());
         assert!(rails.iter().all(|rail| rail.items.is_empty()));
+        assert_eq!(
+            rails_state(&rails),
+            RailsState::NoProvider,
+            "a key nobody has set up is what keeps these rails empty"
+        );
         runtime.shutdown().await;
     }
 
@@ -2186,6 +2383,96 @@ mod tests {
         let joined = runtime.start_discover_rails().await.unwrap();
         assert_eq!(joined.journal_id, journal_id);
         assert!(joined.coalesced, "two visits to Discover share one fetch");
+        runtime.shutdown().await;
+    }
+
+    /// `FLOWS F2`'s cold start: the read answers the shells *and* starts the fetch, so nobody has to
+    /// press Refresh — and the second read, which is what a screen does every time it paints, joins
+    /// the fetch in flight rather than writing a second row.
+    #[tokio::test]
+    async fn a_cold_read_with_a_provider_starts_one_fetch_and_the_second_read_joins_it() {
+        let directory = TempDir::new().unwrap();
+        let (provider, released) = GatedRailProvider::holding_the_rails();
+        let (runtime, _sink) = runtime_with_a_provider(&directory, Arc::new(provider)).await;
+
+        let first = runtime.home_rails().await.unwrap();
+        assert_eq!(rails_state(&first), RailsState::Fetching);
+        assert_eq!(first.len(), peregrine_providers::RailKind::ALL.len());
+        assert!(
+            first.iter().all(|rail| rail.items.is_empty()),
+            "the shells are answered before anything has been fetched"
+        );
+        let queued = rails_rows(&runtime).await;
+        assert_eq!(queued.len(), 1, "a cold read queues exactly one fetch");
+
+        let second = runtime.home_rails().await.unwrap();
+        assert_eq!(
+            rails_state(&second),
+            RailsState::Fetching,
+            "the fetch is still in the air, which is what the screen says"
+        );
+        assert_eq!(
+            rails_rows(&runtime).await,
+            queued,
+            "a second read joins the fetch in flight rather than starting another"
+        );
+
+        // Released before the scheduler is shut down: the job is waiting on a gate this test owns,
+        // and a shutdown that joined it would wait for ever.
+        let _ = released.send(true);
+        runtime.shutdown().await;
+    }
+
+    /// The state that has to keep saying "configure a provider key in Settings": with no provider
+    /// there is nothing to ask, so a cold read queues nothing and answers `NoProvider`.
+    #[tokio::test]
+    async fn a_cold_read_with_no_provider_queues_nothing() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let rails = runtime.home_rails().await.unwrap();
+
+        assert_eq!(rails_state(&rails), RailsState::NoProvider);
+        assert!(
+            rails_rows(&runtime).await.is_empty(),
+            "there is no provider to fetch from"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// Rails already in hand are not fetched again: the read that finds them answers `Ready` and
+    /// queues nothing, which is what makes a warm Discover a read and no work.
+    #[tokio::test]
+    async fn a_read_with_rails_already_present_queues_nothing() {
+        let directory = TempDir::new().unwrap();
+        let adapter = Arc::new(peregrine_testkit::FakeMetadataProvider::publishing_rails(
+            peregrine_domain::id::Provider::Tmdb,
+            vec![candidate("603", "The Matrix")],
+        ));
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let cold = runtime.home_rails().await.unwrap();
+        assert_eq!(rails_state(&cold), RailsState::Fetching);
+        let queued = rails_rows(&runtime).await;
+        assert_eq!(queued.len(), 1);
+        let row = await_terminal(&runtime, queued[0]).await;
+        assert_eq!(
+            row.state,
+            JobPhase::Succeeded,
+            "the fetch lands and publishes: {row:?}"
+        );
+
+        let warm = runtime.home_rails().await.unwrap();
+        assert_eq!(rails_state(&warm), RailsState::Ready);
+        assert!(
+            warm.iter().any(|rail| !rail.items.is_empty()),
+            "the fetch published the rails it was answered"
+        );
+        assert_eq!(
+            rails_rows(&runtime).await,
+            queued,
+            "a warm read queues nothing"
+        );
         runtime.shutdown().await;
     }
 

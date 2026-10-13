@@ -32,8 +32,8 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
 pub use runtime::{
-    CredentialRequest, Health, HomeRail, LibraryTitleDetail, Runtime, RuntimeConfig, RuntimeError,
-    ShellStatus, StartedJob,
+    CredentialRequest, Health, HomeRail, LibraryTitleDetail, RailsState, Runtime, RuntimeConfig,
+    RuntimeError, ShellStatus, StartedJob,
 };
 // What one rail holds, for the reason the block above gives: the command surface answers a DTO
 // built from a `RailItem`, and it may not reach into `peregrine-app`'s job module to name it.

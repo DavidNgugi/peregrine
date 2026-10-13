@@ -139,11 +139,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           ) : null}
           {route.kind === "diagnostics" ? <JobsScreen /> : null}
           {route.kind === "settings" ? (
-            <SettingsScreen
-              libraries={libraries}
-              providers={providers}
-              shortcuts={shortcuts}
-            />
+            <SettingsScreen libraries={libraries} providers={providers} shortcuts={shortcuts} />
           ) : null}
           {route.kind === "title" ? <TitleScreen detail={title} kind={route.titleKind} /> : null}
         </main>

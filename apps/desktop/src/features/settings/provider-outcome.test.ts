@@ -27,9 +27,7 @@ describe("credentialFailureKey", () => {
     expect(sentence(credentialFailureKey("PROVIDER_STORE"))).toBe(
       "Peregrine could not read its credential store, so the key was not saved.",
     );
-    expect(sentence(credentialFailureKey("PROVIDER_NOT_CONFIGURED"))).toContain(
-      "nothing to test",
-    );
+    expect(sentence(credentialFailureKey("PROVIDER_NOT_CONFIGURED"))).toContain("nothing to test");
     expect(sentence(credentialFailureKey("CANCELLED"))).toContain("cancelled");
   });
 

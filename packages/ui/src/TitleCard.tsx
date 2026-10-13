@@ -179,8 +179,7 @@ export function TitleCard({
   const signal = availability === undefined ? null : AVAILABILITY_SIGNALS[availability];
   // An empty word is no word: a chip with a dot and nothing else would carry its state by colour
   // alone, which §2.2 forbids, so the state draws nothing rather than a swatch.
-  const showsChip =
-    signal !== null && availabilityLabel !== undefined && availabilityLabel !== "";
+  const showsChip = signal !== null && availabilityLabel !== undefined && availabilityLabel !== "";
 
   const spoken = [title, meta, ratingLabel, showsChip ? availabilityLabel : undefined]
     .filter((part): part is string => part !== undefined && part !== "")

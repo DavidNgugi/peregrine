@@ -120,9 +120,9 @@ describe("TitleCard badges", () => {
 
     // A quiet state wears nothing, which is four of the nine by design.
     for (const quiet of ["discovered", "watchlisted", "available"] as const) {
-      expect(everyClass(card({ availability: quiet, availabilityLabel: "Should not show" }))).not.toContain(
-        "bg-state-info",
-      );
+      expect(
+        everyClass(card({ availability: quiet, availabilityLabel: "Should not show" })),
+      ).not.toContain("bg-state-info");
       expect(card({ availability: quiet, availabilityLabel: "Should not show" })).not.toContain(
         "Should not show",
       );
@@ -146,7 +146,9 @@ describe("TitleCard badges", () => {
   it("keeps the chip inside the tile however long the word is", () => {
     // The smallest tile is 88 px: a chip that sized itself to its text would run off the poster and
     // be clipped mid-word by the frame's own overflow.
-    const classes = everyClass(card({ availability: "acquiring", availabilityLabel: "Wird heruntergeladen" }));
+    const classes = everyClass(
+      card({ availability: "acquiring", availabilityLabel: "Wird heruntergeladen" }),
+    );
     expect(classes).toContain("max-w-[calc(100%-0.5rem)]");
     expect(classes).toContain("truncate");
   });

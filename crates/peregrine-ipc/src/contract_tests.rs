@@ -126,6 +126,14 @@ fn build_info_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 
 /// `health` reports the running process's own counters, so a runtime that is not running is
 /// the only failure it has.
+/// `provider_attribution` reproduces fixed strings, so it has nothing to fail at — and that is the
+/// point of it: an installation with no runtime and no configured provider still has to be able to
+/// show what this build owes the providers it offers.
+fn provider_attribution_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    let _ = harness;
+    Box::pin(async move { system::provider_attribution().map(drop) })
+}
+
 fn health_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { system::health(harness.dead_state()).await.map(drop) })
 }
@@ -331,8 +339,9 @@ fn refresh_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 }
 
 /// `home_rails` reads through the runtime and touches nothing else, so a runtime that never
-/// started is the only failure it has — which is the point of the command: it is a cache read, and
-/// a read that could fail on a provider would be a screen that could not paint.
+/// started is the only failure a warm read has — which is the point of the command: it is a cache
+/// read, and a read that could fail on a provider would be a screen that could not paint. A cold
+/// read has one failure more, the journal the fetch is queued in, and that is still not a provider.
 fn home_rails_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::discover::home_rails(harness.dead_state())
@@ -554,6 +563,13 @@ fn cases_by_namespace() -> Vec<ContractCase> {
 /// The commands that answer about the process and the shell rather than about work.
 fn shell_cases() -> Vec<ContractCase> {
     vec![
+        ContractCase {
+            command: "provider_attribution",
+            expected: Expected::CannotFail {
+                reason: "the notices are fixed strings this build ships, not a read",
+            },
+            drive: provider_attribution_without_a_runtime,
+        },
         ContractCase {
             command: "build_info",
             expected: Expected::CannotFail {
