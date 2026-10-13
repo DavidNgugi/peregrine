@@ -113,6 +113,19 @@ impl Fetched {
     }
 }
 
+/// One request: where it goes, and the credential it carries when it needs one.
+///
+/// The credential is borrowed rather than owned because it belongs to the adapter — which reads it
+/// from the keyring once (`PG-E2`) and holds it for the client's lifetime — and a copy per request
+/// would be a secret in a dozen places instead of one.
+#[derive(Debug, Clone, Copy)]
+pub struct Request<'a> {
+    /// The absolute URL.
+    pub url: &'a str,
+    /// The bearer credential, when the provider needs one.
+    pub credential: Option<&'a str>,
+}
+
 /// The provider HTTP client.
 #[derive(Debug, Clone)]
 pub struct HttpClient {
@@ -147,6 +160,22 @@ impl HttpClient {
         })
     }
 
+    /// Fetches one URL with nothing but the policy's own headers.
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpClient::fetch`].
+    pub async fn get(&self, provider: Provider, url: &str) -> Result<Fetched, ProviderError> {
+        self.fetch(
+            provider,
+            Request {
+                url,
+                credential: None,
+            },
+        )
+        .await
+    }
+
     /// Fetches one URL, retrying what the policy says is worth retrying.
     ///
     /// # Errors
@@ -154,11 +183,15 @@ impl HttpClient {
     /// [`ProviderError`]: `RateLimited` when the provider refused with `429` and the attempts ran
     /// out, `NotFound` and `Unauthorized` for the two statuses that are final and named, and
     /// `Transport` for a timeout, a connection failure, or any other status.
-    pub async fn get(&self, provider: Provider, url: &str) -> Result<Fetched, ProviderError> {
+    pub async fn fetch(
+        &self,
+        provider: Provider,
+        request: Request<'_>,
+    ) -> Result<Fetched, ProviderError> {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            let outcome = self.attempt(provider, url).await;
+            let outcome = self.attempt(provider, request).await;
             match outcome {
                 Ok(fetched) => return Ok(fetched),
                 Err((error, retry_after)) => {
@@ -182,9 +215,16 @@ impl HttpClient {
     async fn attempt(
         &self,
         provider: Provider,
-        url: &str,
+        request: Request<'_>,
     ) -> Result<Fetched, (ProviderError, Option<Duration>)> {
-        let response = match self.client.get(url).send().await {
+        let mut builder = self.client.get(request.url);
+        if let Some(credential) = request.credential {
+            // A bearer header rather than a query parameter, and that is a security decision rather
+            // than a taste one: a key in a URL reaches every log, every error, and any redirect that
+            // echoes it, and this crate's error deliberately carries no URL for the same reason.
+            builder = builder.bearer_auth(credential);
+        }
+        let response = match builder.send().await {
             Ok(response) => response,
             Err(error) => {
                 // A timeout and a refused connection are both worth another attempt: neither says

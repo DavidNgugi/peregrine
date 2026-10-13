@@ -32,6 +32,7 @@ pub mod http;
 pub mod hygiene;
 pub mod provider;
 pub mod rate;
+pub mod tmdb;
 
 pub use capability::{Capabilities, Capability};
 pub use descriptor::{Attribution, CachePolicy, DescriptorError, ProviderDescriptor, RatePolicy};
