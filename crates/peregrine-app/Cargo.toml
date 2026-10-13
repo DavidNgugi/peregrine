@@ -13,6 +13,7 @@ publish = false
 peregrine-domain = { workspace = true }
 peregrine-platform = { workspace = true }
 peregrine-secrets = { workspace = true }
+peregrine-providers = { workspace = true }
 peregrine-storage = { workspace = true }
 peregrine-sync = { workspace = true }
 jiff = { workspace = true }

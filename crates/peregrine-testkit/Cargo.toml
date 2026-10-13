@@ -23,6 +23,8 @@ peregrine-providers = { workspace = true }
 jiff = { workspace = true }
 ulid = { workspace = true }
 
+peregrine-secrets = { workspace = true }
+
 [dev-dependencies]
 # The metadata provider suite is asynchronous, because the port is: a caller awaits a
 # provider. `futures` brings the executor this crate's own tests drive it with, and it is

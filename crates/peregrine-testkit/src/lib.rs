@@ -25,6 +25,7 @@ mod clock;
 mod conformance;
 mod ids;
 mod metadata;
+mod secrets;
 
 pub use clock::{DEFAULT_EPOCH_MILLISECONDS, FakeClock};
 pub use conformance::{
@@ -32,3 +33,4 @@ pub use conformance::{
 };
 pub use ids::CountingIds;
 pub use metadata::{FakeMetadataProvider, fake_descriptor};
+pub use secrets::MemorySecretStore;

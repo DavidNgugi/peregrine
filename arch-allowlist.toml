@@ -444,6 +444,11 @@ may_depend_on = [
   # assert a copy's contract. The edge points from a test crate to a leaf, never the other
   # way, so it is not a cycle and no shipping build changes.
   "peregrine-providers",
+  # Added for PG-E24-05. The keyring port lives in `peregrine-secrets`, and a test that builds a
+  # provider registry has to hand it a store — the shared fake belongs here rather than in every
+  # caller's test module. Same shape as the `peregrine-providers` edge above: a test crate depending
+  # on a leaf, never the other way.
+  "peregrine-secrets",
 ]
 runtime = [
   # Both are the vocabulary of the ports: a fake clock answers with `jiff::Timestamp`

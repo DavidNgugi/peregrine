@@ -10,6 +10,7 @@ pub mod jobs;
 pub mod library;
 pub mod notify;
 mod observability;
+pub mod providers;
 pub mod runtime;
 #[cfg(test)]
 mod testing;

@@ -158,7 +158,7 @@ pub struct StartedJob {
 }
 
 /// What the diagnostics surface reports about the running process.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Health {
     /// How long startup took, from the first directory check to a ready runtime.
     pub startup: Duration,
@@ -169,6 +169,9 @@ pub struct Health {
     /// Whether the boot-time integrity check had to rebuild the database, which means the
     /// library it held is gone and has to be rebuilt by scanning (ARCHITECTURE §15).
     pub rescan_required: bool,
+    /// Which metadata providers hold a credential (`PG-E5-12`). A provider nobody has configured is
+    /// not an error, and the interface shows an empty state rather than a failure for it.
+    pub providers: crate::providers::ProviderStatus,
 }
 
 /// What the shell's tray shows about background work (PG-E1-09).
@@ -202,6 +205,8 @@ pub struct Runtime {
     // writer thread. Losing it before shutdown would silently drop the lines that explain
     // the shutdown.
     _logging: Observability,
+    /// Which providers hold a credential, refreshed off the command path (see `providers`).
+    providers: Arc<crate::providers::ProviderRegistry>,
     startup: Duration,
 }
 
@@ -255,6 +260,18 @@ impl Runtime {
             "the runtime is ready"
         );
 
+        let providers = Arc::new(crate::providers::ProviderRegistry::new());
+        // Off the start-up path and off the command path: a keyring read is blocking and can raise an OS
+        // prompt, so it happens once, on a blocking thread, and everything else reads the cache.
+        {
+            let providers = Arc::clone(&providers);
+            tokio::task::spawn_blocking(move || {
+                if let Err(error) = providers.refresh(&peregrine_secrets::KeyringStore::new()) {
+                    tracing::debug!(%error, "no credential store answered, so no provider is configured");
+                }
+            });
+        }
+
         Ok(Self {
             config,
             database,
@@ -263,6 +280,7 @@ impl Runtime {
             clock,
             live: Mutex::new(HashMap::new()),
             _logging: logging,
+            providers,
             startup,
         })
     }
@@ -714,6 +732,9 @@ impl Runtime {
             scheduler: self.scheduler.metrics().await,
             events: self.bus.stats(),
             rescan_required: self.database.recovery().requires_rescan(),
+            // From the cache the refresh task fills, never from the keyring: reading one is blocking
+            // and can raise an OS prompt, which is what the command budget test exists to catch.
+            providers: self.providers.status(),
         }
     }
 

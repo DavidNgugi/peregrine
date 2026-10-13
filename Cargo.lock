@@ -3293,6 +3293,7 @@ dependencies = [
  "jiff",
  "peregrine-domain",
  "peregrine-platform",
+ "peregrine-providers",
  "peregrine-secrets",
  "peregrine-storage",
  "peregrine-sync",
@@ -3470,6 +3471,7 @@ dependencies = [
  "jiff",
  "peregrine-domain",
  "peregrine-providers",
+ "peregrine-secrets",
  "ulid",
 ]
 
