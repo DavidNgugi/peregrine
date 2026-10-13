@@ -1,0 +1,3651 @@
+[
+  {
+    "why": "An external id carried by one local decides matched on external_id.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 1,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "603"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 1,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "An external id decides matched even when the local name shares nothing with the candidate.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "550",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": "1999-10-15"
+    },
+    "locals": [
+      {
+        "id": 2,
+        "name": "El club de la lucha",
+        "kind": "movie",
+        "released": "1999-10-15",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "550"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 2,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "Two locals claiming the same external id make the decision ambiguous.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "121361",
+      "name": "Game of Thrones",
+      "kind": "show",
+      "released": "2011-04-17"
+    },
+    "locals": [
+      {
+        "id": 4,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": "2011-04-17",
+        "external_ids": [
+          {
+            "provider": "tvdb",
+            "value": "121361"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 7,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": "2011-04-17",
+        "external_ids": [
+          {
+            "provider": "tvdb",
+            "value": "121361"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        4,
+        7
+      ]
+    }
+  },
+  {
+    "why": "An external id hit outranks a name collision that would otherwise be ambiguous.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "680",
+      "name": "Pulp Fiction",
+      "kind": "movie",
+      "released": "1994-09-10"
+    },
+    "locals": [
+      {
+        "id": 5,
+        "name": "Pulp Fiction",
+        "kind": "movie",
+        "released": "1994-09-10",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "680"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 6,
+        "name": "Pulp Fiction",
+        "kind": "movie",
+        "released": "1994-09-10",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 5,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "The same value under a different provider is not an external-id hit.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "81189",
+      "name": "Breaking Bad",
+      "kind": "show",
+      "released": "2008-01-20"
+    },
+    "locals": [
+      {
+        "id": 8,
+        "name": "Metastasis",
+        "kind": "show",
+        "released": "2014-06-03",
+        "external_ids": [
+          {
+            "provider": "anidb",
+            "value": "81189"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An external id hit decides matched even when the local kind differs from the candidate's.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 9,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "603"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 9,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "An external id hit is found on any entry of a local's external id list.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0111161",
+      "name": "The Shawshank Redemption",
+      "kind": "movie",
+      "released": "1994-10-14"
+    },
+    "locals": [
+      {
+        "id": 13,
+        "name": "Shawshank Redemption",
+        "kind": "movie",
+        "released": "1994-10-14",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0111161"
+          },
+          {
+            "provider": "tvdb",
+            "value": "tt0111161"
+          },
+          {
+            "provider": "tmdb",
+            "value": "278"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 13,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "An external id from the mal provider is honoured like any other.",
+    "candidate": {
+      "provider": "mal",
+      "value": "16498",
+      "name": "Shingeki no Kyojin",
+      "kind": "show",
+      "released": "2013-04-07"
+    },
+    "locals": [
+      {
+        "id": 14,
+        "name": "Attack on Titan",
+        "kind": "show",
+        "released": "2013-04-07",
+        "external_ids": [
+          {
+            "provider": "mal",
+            "value": "16498"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 14,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "An external id from the anidb provider decides matched ahead of name matching.",
+    "candidate": {
+      "provider": "anidb",
+      "value": "101922",
+      "name": "Demon Slayer: Kimetsu no Yaiba",
+      "kind": "show",
+      "released": "2019-04-06"
+    },
+    "locals": [
+      {
+        "id": 15,
+        "name": "Kimetsu no Yaiba",
+        "kind": "show",
+        "released": "2019-04-06",
+        "external_ids": [
+          {
+            "provider": "anidb",
+            "value": "101922"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 15,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "Three locals claiming one external id make the decision ambiguous.",
+    "candidate": {
+      "provider": "imdb",
+      "value": "tt0903747",
+      "name": "Breaking Bad",
+      "kind": "show",
+      "released": "2008-01-20"
+    },
+    "locals": [
+      {
+        "id": 21,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0903747"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 22,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0903747"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 23,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0903747"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        21,
+        22,
+        23
+      ]
+    }
+  },
+  {
+    "why": "An external id hit outranks a name-and-year hit on a different local.",
+    "candidate": {
+      "provider": "imdb",
+      "value": "tt0068646",
+      "name": "The Godfather",
+      "kind": "movie",
+      "released": "1972-03-24"
+    },
+    "locals": [
+      {
+        "id": 19,
+        "name": "The Godfather",
+        "kind": "movie",
+        "released": "1972-03-24",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 20,
+        "name": "The Godfather",
+        "kind": "movie",
+        "released": "1972-03-24",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0068646"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 20,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "An external id hit is decided before any name is compared, even under a working title.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "305288",
+      "name": "Stranger Things",
+      "kind": "show",
+      "released": "2016-07-15"
+    },
+    "locals": [
+      {
+        "id": 24,
+        "name": "Montauk",
+        "kind": "show",
+        "released": "2016-07-15",
+        "external_ids": [
+          {
+            "provider": "tvdb",
+            "value": "305288"
+          },
+          {
+            "provider": "imdb",
+            "value": "tt4574334"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 24,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "The same external id twice on one local is still one local, not ambiguous.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "121361",
+      "name": "Game of Thrones",
+      "kind": "show",
+      "released": "2011-04-17"
+    },
+    "locals": [
+      {
+        "id": 25,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": "2011-04-17",
+        "external_ids": [
+          {
+            "provider": "tvdb",
+            "value": "121361"
+          },
+          {
+            "provider": "tvdb",
+            "value": "121361"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 25,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "Ambiguous local ids are reported in ascending order.",
+    "candidate": {
+      "provider": "imdb",
+      "value": "tt0111161",
+      "name": "The Shawshank Redemption",
+      "kind": "movie",
+      "released": "1994-10-14"
+    },
+    "locals": [
+      {
+        "id": 3,
+        "name": "The Shawshank Redemption",
+        "kind": "movie",
+        "released": "1994-10-14",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0111161"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 1,
+        "name": "The Shawshank Redemption",
+        "kind": "movie",
+        "released": "1994-10-14",
+        "external_ids": [
+          {
+            "provider": "imdb",
+            "value": "tt0111161"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        1,
+        3
+      ]
+    }
+  },
+  {
+    "why": "An external id from the trakt provider decides matched.",
+    "candidate": {
+      "provider": "trakt",
+      "value": "8f3471b5-7e6a-4a1c-9d2b-0c3f5a6b7c8d",
+      "name": "Amy",
+      "kind": "movie",
+      "released": "2015-07-03"
+    },
+    "locals": [
+      {
+        "id": 26,
+        "name": "Amy",
+        "kind": "movie",
+        "released": "2015-07-03",
+        "external_ids": [
+          {
+            "provider": "trakt",
+            "value": "8f3471b5-7e6a-4a1c-9d2b-0c3f5a6b7c8d"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 26,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "Only entries with the candidate's provider count, even when another provider shares the value.",
+    "candidate": {
+      "provider": "anidb",
+      "value": "21",
+      "name": "One Piece",
+      "kind": "show",
+      "released": "1999-10-20"
+    },
+    "locals": [
+      {
+        "id": 170,
+        "name": "One Piece",
+        "kind": "show",
+        "released": "1999-10-20",
+        "external_ids": [
+          {
+            "provider": "mal",
+            "value": "21"
+          },
+          {
+            "provider": "imdb",
+            "value": "tt0388629"
+          },
+          {
+            "provider": "anidb",
+            "value": "21"
+          },
+          {
+            "provider": "tvdb",
+            "value": "81797"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 171,
+        "name": "One Piece",
+        "kind": "show",
+        "released": "1999-10-20",
+        "external_ids": [
+          {
+            "provider": "mal",
+            "value": "21"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 170,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "External-id ambiguity counts locals of every kind.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 180,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "603"
+          }
+        ],
+        "aliases": []
+      },
+      {
+        "id": 181,
+        "name": "The Matrix",
+        "kind": "show",
+        "released": "1999-03-31",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "603"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        180,
+        181
+      ]
+    }
+  },
+  {
+    "why": "A candidate whose external id matches no local falls through to name matching.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "99999",
+      "name": "Casablanca",
+      "kind": "movie",
+      "released": "1942-11-26"
+    },
+    "locals": [
+      {
+        "id": 30,
+        "name": "Casablanca",
+        "kind": "movie",
+        "released": "1942-11-26",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "289"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 30,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A candidate with an id that matches nothing (null value) falls through to name matching.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "0",
+      "name": "Seven Samurai",
+      "kind": "movie",
+      "released": "1954-04-26"
+    },
+    "locals": [
+      {
+        "id": 31,
+        "name": "Seven Samurai",
+        "kind": "movie",
+        "released": "1954-04-26",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "346"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 31,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An external id on the local with a different value does not hit and the name decides.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "81189",
+      "name": "Breaking Bad",
+      "kind": "show",
+      "released": "2008-01-20"
+    },
+    "locals": [
+      {
+        "id": 32,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [
+          {
+            "provider": "tvdb",
+            "value": "99999"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 32,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An external id that matches no local leaves the candidate new when the name matches nothing.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0000001",
+      "name": "Nosferatu",
+      "kind": "movie",
+      "released": "1922-03-04"
+    },
+    "locals": [
+      {
+        "id": 33,
+        "name": "Casablanca",
+        "kind": "movie",
+        "released": "1942-11-26",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A candidate with an id that matches nothing and no name match is new.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "0",
+      "name": "Firefly Lane",
+      "kind": "show",
+      "released": "2021-02-03"
+    },
+    "locals": [
+      {
+        "id": 34,
+        "name": "Casablanca",
+        "kind": "movie",
+        "released": "1942-11-26",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Same sort name and same calendar year decide matched on name_and_year.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "27205",
+      "name": "Inception",
+      "kind": "movie",
+      "released": "2010-07-16"
+    },
+    "locals": [
+      {
+        "id": 40,
+        "name": "Inception",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 40,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A release date in the same calendar year matches even when the day differs.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0076759",
+      "name": "Star Wars",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 41,
+        "name": "Star Wars",
+        "kind": "movie",
+        "released": "1977-12-01",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 41,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A local whose year nobody recorded matches a candidate with a year, by name: a year the catalogue does not have is not evidence that the title is a different one, and treating it as if it were would duplicate the library's own stubs on the first sync.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "11",
+      "name": "Star Wars",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 42,
+        "name": "Star Wars",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 42,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "A remake with the same name but a different year is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "13885",
+      "name": "The Fly",
+      "kind": "movie",
+      "released": "1986-08-15"
+    },
+    "locals": [
+      {
+        "id": 43,
+        "name": "The Fly",
+        "kind": "movie",
+        "released": "1958-08-29",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named series from another decade is new when the years differ.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "73545",
+      "name": "Battlestar Galactica",
+      "kind": "show",
+      "released": "2004-10-18"
+    },
+    "locals": [
+      {
+        "id": 44,
+        "name": "Battlestar Galactica",
+        "kind": "show",
+        "released": "1978-09-17",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Three same-named locals where one carries the candidate's year decide matched.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "9426",
+      "name": "The Thing",
+      "kind": "movie",
+      "released": "1982-06-25"
+    },
+    "locals": [
+      {
+        "id": 45,
+        "name": "The Thing",
+        "kind": "movie",
+        "released": "1982-06-25",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 46,
+        "name": "The Thing",
+        "kind": "movie",
+        "released": "1951-04-27",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 47,
+        "name": "The Thing",
+        "kind": "movie",
+        "released": "2011-10-14",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 45,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A same-named title whose only local is from another decade is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "121",
+      "name": "The Lord of the Rings",
+      "kind": "movie",
+      "released": "1978-11-15"
+    },
+    "locals": [
+      {
+        "id": 48,
+        "name": "The Lord of the Rings",
+        "kind": "movie",
+        "released": "2001-12-19",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Two locals with the same name and the same year make the decision ambiguous.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "313369",
+      "name": "La La Land",
+      "kind": "movie",
+      "released": "2016-12-09"
+    },
+    "locals": [
+      {
+        "id": 49,
+        "name": "La La Land",
+        "kind": "movie",
+        "released": "2016-12-09",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 50,
+        "name": "La La Land",
+        "kind": "movie",
+        "released": "2016-12-09",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        49,
+        50
+      ]
+    }
+  },
+  {
+    "why": "Two locals with the same name where only one shares the candidate's year decide matched.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "81189",
+      "name": "Breaking Bad",
+      "kind": "show",
+      "released": "2008-01-20"
+    },
+    "locals": [
+      {
+        "id": 51,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 52,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2013-08-11",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 51,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A same-year local with a different name does not match and the candidate is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "27205",
+      "name": "Inception",
+      "kind": "movie",
+      "released": "2010-07-16"
+    },
+    "locals": [
+      {
+        "id": 53,
+        "name": "Interstellar",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A matching name in a different year is not a match and the candidate is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "27205",
+      "name": "Inception",
+      "kind": "movie",
+      "released": "2010-07-16"
+    },
+    "locals": [
+      {
+        "id": 54,
+        "name": "Inception",
+        "kind": "movie",
+        "released": "2011-01-01",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A sequel numeral is part of the name, so the original does not match it.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "604",
+      "name": "The Matrix Reloaded",
+      "kind": "movie",
+      "released": "2003-05-15"
+    },
+    "locals": [
+      {
+        "id": 55,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A sequel matches its own local even when the original is also present.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "604",
+      "name": "The Matrix Reloaded",
+      "kind": "movie",
+      "released": "2003-05-15"
+    },
+    "locals": [
+      {
+        "id": 56,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 57,
+        "name": "The Matrix Reloaded",
+        "kind": "movie",
+        "released": "2003-05-15",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 57,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A Roman numeral is not the same name as its Arabic numeral.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "1366",
+      "name": "Rocky II",
+      "kind": "movie",
+      "released": "1979-06-15"
+    },
+    "locals": [
+      {
+        "id": 58,
+        "name": "Rocky 2",
+        "kind": "movie",
+        "released": "1979-06-15",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A candidate sharing its name with one local and its year with another is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 59,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "2021-12-22",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 60,
+        "name": "The Matrix Resurrections",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Two locals sharing the candidate's year make the decision ambiguous despite a third same-named local.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "11",
+      "name": "Star Wars",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 61,
+        "name": "Star Wars",
+        "kind": "movie",
+        "released": "1977-05-25",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 62,
+        "name": "Star Wars",
+        "kind": "movie",
+        "released": "1977-05-25",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 63,
+        "name": "Star Wars",
+        "kind": "movie",
+        "released": "2005-05-19",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        61,
+        62
+      ]
+    }
+  },
+  {
+    "why": "Three same-named locals where the last carries the candidate's year decide matched.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "948",
+      "name": "Halloween",
+      "kind": "movie",
+      "released": "2018-10-19"
+    },
+    "locals": [
+      {
+        "id": 64,
+        "name": "Halloween",
+        "kind": "movie",
+        "released": "1978-10-25",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 65,
+        "name": "Halloween",
+        "kind": "movie",
+        "released": "2007-08-31",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 66,
+        "name": "Halloween",
+        "kind": "movie",
+        "released": "2018-10-19",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 66,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A remake of the same name in another year is new even with a sequel local present.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "218",
+      "name": "The Terminator",
+      "kind": "movie",
+      "released": "1984-10-26"
+    },
+    "locals": [
+      {
+        "id": 67,
+        "name": "The Terminator",
+        "kind": "movie",
+        "released": "1984-10-26",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 68,
+        "name": "Terminator 2: Judgment Day",
+        "kind": "movie",
+        "released": "1991-07-03",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 67,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A spelling variant of a sequel title is not normalized away.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "280",
+      "name": "Terminator 2: Judgment Day",
+      "kind": "movie",
+      "released": "1991-07-03"
+    },
+    "locals": [
+      {
+        "id": 69,
+        "name": "Terminator 2: Judgement Day",
+        "kind": "movie",
+        "released": "1991-07-03",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A leading article is never stripped, so the two names differ.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 70,
+        "name": "Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A name that is a prefix of the local name does not match it.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "34851",
+      "name": "Alien",
+      "kind": "movie",
+      "released": "1979-05-25"
+    },
+    "locals": [
+      {
+        "id": 71,
+        "name": "Aliens",
+        "kind": "movie",
+        "released": "1986-07-18",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A short franchise name does not match its retitled full name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "11",
+      "name": "Star Wars",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 72,
+        "name": "Star Wars: Episode IV - A New Hope",
+        "kind": "movie",
+        "released": "1977-05-25",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A stylized numeral spelling is a different name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "807",
+      "name": "Se7en",
+      "kind": "movie",
+      "released": "1995-09-22"
+    },
+    "locals": [
+      {
+        "id": 73,
+        "name": "Seven",
+        "kind": "movie",
+        "released": "1995-09-22",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An Arabic numeral in a title is not equivalent to the spelled-out word.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "121",
+      "name": "Ocean's Eleven",
+      "kind": "movie",
+      "released": "2001-12-07"
+    },
+    "locals": [
+      {
+        "id": 74,
+        "name": "Ocean's 11",
+        "kind": "movie",
+        "released": "2001-12-07",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Case-only differences match even across a stylized capital letter.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "97020",
+      "name": "RoboCop",
+      "kind": "movie",
+      "released": "2014-02-12"
+    },
+    "locals": [
+      {
+        "id": 75,
+        "name": "Robocop",
+        "kind": "movie",
+        "released": "2014-02-12",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 75,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A remake in a later year is new rather than a match to the original.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "98566",
+      "name": "Poltergeist",
+      "kind": "movie",
+      "released": "2015-05-22"
+    },
+    "locals": [
+      {
+        "id": 76,
+        "name": "Poltergeist",
+        "kind": "movie",
+        "released": "1982-06-04",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named remake of a horror classic is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "133805",
+      "name": "Carrie",
+      "kind": "movie",
+      "released": "2013-10-16"
+    },
+    "locals": [
+      {
+        "id": 77,
+        "name": "Carrie",
+        "kind": "movie",
+        "released": "1976-11-03",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named remake of a family film is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "38575",
+      "name": "The Karate Kid",
+      "kind": "movie",
+      "released": "2010-06-11"
+    },
+    "locals": [
+      {
+        "id": 78,
+        "name": "The Karate Kid",
+        "kind": "movie",
+        "released": "1984-06-22",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named remake of a dance film is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "36592",
+      "name": "Footloose",
+      "kind": "movie",
+      "released": "2011-10-14"
+    },
+    "locals": [
+      {
+        "id": 79,
+        "name": "Footloose",
+        "kind": "movie",
+        "released": "1984-02-17",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named remake of an action film is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "257088",
+      "name": "Point Break",
+      "kind": "movie",
+      "released": "2015-12-25"
+    },
+    "locals": [
+      {
+        "id": 80,
+        "name": "Point Break",
+        "kind": "movie",
+        "released": "1991-07-12",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named remake of a prison drama is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "433502",
+      "name": "Papillon",
+      "kind": "movie",
+      "released": "2017-09-07"
+    },
+    "locals": [
+      {
+        "id": 81,
+        "name": "Papillon",
+        "kind": "movie",
+        "released": "1973-12-16",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named remake of a horror film in another decade is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "421792",
+      "name": "Suspiria",
+      "kind": "movie",
+      "released": "2018-10-26"
+    },
+    "locals": [
+      {
+        "id": 82,
+        "name": "Suspiria",
+        "kind": "movie",
+        "released": "1977-02-01",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A live-action remake of an animated film is new when the years differ.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "420817",
+      "name": "Aladdin",
+      "kind": "movie",
+      "released": "2019-05-24"
+    },
+    "locals": [
+      {
+        "id": 83,
+        "name": "Aladdin",
+        "kind": "movie",
+        "released": "1992-11-25",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A remake of a science-fiction classic is new when the years differ.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "9320",
+      "name": "The Net",
+      "kind": "movie",
+      "released": "1995-07-28"
+    },
+    "locals": [
+      {
+        "id": 84,
+        "name": "The Net",
+        "kind": "movie",
+        "released": "2019-01-01",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A candidate with the same name as the only local and the same year decides matched.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "13",
+      "name": "Forrest Gump",
+      "kind": "movie",
+      "released": "1994-07-06"
+    },
+    "locals": [
+      {
+        "id": 85,
+        "name": "Forrest Gump",
+        "kind": "movie",
+        "released": "1994-07-06",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 85,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A same-named series with the same year decides matched.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "153021",
+      "name": "The Walking Dead",
+      "kind": "show",
+      "released": "2010-10-31"
+    },
+    "locals": [
+      {
+        "id": 86,
+        "name": "The Walking Dead",
+        "kind": "show",
+        "released": "2010-10-31",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 86,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A same-named series in a different start year is new.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "82856",
+      "name": "The Mandalorian",
+      "kind": "show",
+      "released": "2019-11-12"
+    },
+    "locals": [
+      {
+        "id": 87,
+        "name": "The Mandalorian",
+        "kind": "show",
+        "released": "2019-11-12",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 87,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Two same-named series with no candidate year make the decision ambiguous.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "2316",
+      "name": "The Office",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 88,
+        "name": "The Office",
+        "kind": "show",
+        "released": "2001-07-09",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 89,
+        "name": "The Office",
+        "kind": "show",
+        "released": "2005-03-24",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        88,
+        89
+      ]
+    }
+  },
+  {
+    "why": "A same-named series where only one local matches the year decides matched.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "2316",
+      "name": "The Office",
+      "kind": "show",
+      "released": "2005-03-24"
+    },
+    "locals": [
+      {
+        "id": 90,
+        "name": "The Office",
+        "kind": "show",
+        "released": "2001-07-09",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 91,
+        "name": "The Office",
+        "kind": "show",
+        "released": "2005-03-24",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 91,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A name hit with no release date on the candidate decides matched on name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "238",
+      "name": "The Godfather",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 100,
+        "name": "The Godfather",
+        "kind": "movie",
+        "released": "1972-03-24",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 100,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "A name-only hit decides matched even when the local has no release date either.",
+    "candidate": {
+      "provider": "mal",
+      "value": "21",
+      "name": "One Piece",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 101,
+        "name": "One Piece",
+        "kind": "show",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 101,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "Two locals with the same name and no year on the candidate make the decision ambiguous.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0111161",
+      "name": "The Shawshank Redemption",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 102,
+        "name": "The Shawshank Redemption",
+        "kind": "movie",
+        "released": "1994-10-14",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 103,
+        "name": "The Shawshank Redemption",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        102,
+        103
+      ]
+    }
+  },
+  {
+    "why": "Three locals with the same name and no candidate year make the decision ambiguous.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "121361",
+      "name": "Game of Thrones",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 104,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 105,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": "2011-04-17",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 106,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": "2019-05-19",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        104,
+        105,
+        106
+      ]
+    }
+  },
+  {
+    "why": "With no candidate year, locals of the same name in different years are still ambiguous.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 107,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 108,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "2021-12-22",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        107,
+        108
+      ]
+    }
+  },
+  {
+    "why": "A candidate with an id that matches nothing and no year decides matched on name alone.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "0",
+      "name": "Chernobyl",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 109,
+        "name": "Chernobyl",
+        "kind": "show",
+        "released": "2019-05-06",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 109,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "A name match with no candidate year is new when no local shares the name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "76341",
+      "name": "Mad Max: Fury Road",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 110,
+        "name": "Mad Max",
+        "kind": "movie",
+        "released": "1979-04-12",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-name local of another kind is ignored and the candidate is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "1399",
+      "name": "Game of Thrones",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 111,
+        "name": "Game of Thrones",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A candidate with no year whose name matches nothing at all is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "550",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 112,
+        "name": "Casablanca",
+        "kind": "movie",
+        "released": "1942-11-26",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A local matches through an alias when its own name differs.",
+    "candidate": {
+      "provider": "imdb",
+      "value": "tt0111161",
+      "name": "The Shawshank Redemption",
+      "kind": "movie",
+      "released": "1994-10-14"
+    },
+    "locals": [
+      {
+        "id": 120,
+        "name": "Rita Hayworth and Shawshank Redemption",
+        "kind": "movie",
+        "released": "1994-10-14",
+        "external_ids": [],
+        "aliases": [
+          "The Shawshank Redemption"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 120,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Only the last of a local's many aliases matches the candidate.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "109445",
+      "name": "Frozen",
+      "kind": "movie",
+      "released": "2013-11-27"
+    },
+    "locals": [
+      {
+        "id": 121,
+        "name": "Frozen - Una aventura congelada",
+        "kind": "movie",
+        "released": "2013-11-27",
+        "external_ids": [],
+        "aliases": [
+          "Frozen 3D",
+          "Die Eiskoenigin",
+          "Frozen: Una Aventura Congelada",
+          "Frozen"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 121,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An alias that matches by name but not by kind does not help.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "862",
+      "name": "Toy Story",
+      "kind": "movie",
+      "released": "1995-11-22"
+    },
+    "locals": [
+      {
+        "id": 122,
+        "name": "Toy Story Treats",
+        "kind": "show",
+        "released": "1995-11-22",
+        "external_ids": [],
+        "aliases": [
+          "Toy Story"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An alias is compared with the same whitespace and case normalization as a name.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "81189",
+      "name": "Breaking Bad",
+      "kind": "show",
+      "released": "2008-01-20"
+    },
+    "locals": [
+      {
+        "id": 123,
+        "name": "Breaking Bad (2008)",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [],
+        "aliases": [
+          "  BREAKING   BAD  "
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 123,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A local matching by name and another by alias in the same year decide ambiguous.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 124,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 125,
+        "name": "Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": [
+          "The Matrix"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        124,
+        125
+      ]
+    }
+  },
+  {
+    "why": "The candidate's year picks the alias match over a same-named local from another year.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 126,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "2021-12-22",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 127,
+        "name": "Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": [
+          "The Matrix"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 127,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An alias match with no candidate year decides matched on name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "550",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 128,
+        "name": "El club de la lucha",
+        "kind": "movie",
+        "released": "1999-10-15",
+        "external_ids": [],
+        "aliases": [
+          "Fight Club"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 128,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "An alias match on the other kind is filtered out before the count is made.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "862",
+      "name": "Toy Story",
+      "kind": "movie",
+      "released": "1995-11-22"
+    },
+    "locals": [
+      {
+        "id": 129,
+        "name": "Toy Story",
+        "kind": "movie",
+        "released": "1995-11-22",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 130,
+        "name": "Toy Story Treats",
+        "kind": "show",
+        "released": "1996-01-01",
+        "external_ids": [],
+        "aliases": [
+          "Toy Story"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 129,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An alias that differs by punctuation alone does not match.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "862",
+      "name": "Toy Story",
+      "kind": "movie",
+      "released": "1995-11-22"
+    },
+    "locals": [
+      {
+        "id": 131,
+        "name": "Toy Story (1995)",
+        "kind": "movie",
+        "released": "1995-11-22",
+        "external_ids": [],
+        "aliases": [
+          "Toy-Story"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A local whose alias equals the candidate name but whose year differs is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "550",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": "1999-10-15"
+    },
+    "locals": [
+      {
+        "id": 132,
+        "name": "El club de la lucha",
+        "kind": "movie",
+        "released": "2001-01-01",
+        "external_ids": [],
+        "aliases": [
+          "Fight Club"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "The candidate's year picks the alias match over the exact-name local of another year.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "81189",
+      "name": "Breaking Bad",
+      "kind": "show",
+      "released": "2008-01-20"
+    },
+    "locals": [
+      {
+        "id": 133,
+        "name": "Breaking Bad",
+        "kind": "show",
+        "released": "2013-08-11",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 134,
+        "name": "Metastasis",
+        "kind": "show",
+        "released": "2008-01-20",
+        "external_ids": [],
+        "aliases": [
+          "Breaking Bad"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 134,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A local with many aliases matches by its last alias when the candidate has no year.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "109445",
+      "name": "Frozen",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 135,
+        "name": "Frozen - Una aventura congelada",
+        "kind": "movie",
+        "released": "2013-11-27",
+        "external_ids": [],
+        "aliases": [
+          "Frozen 3D",
+          "Die Eiskoenigin",
+          "Frozen"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 135,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "An alias match on a wrong-kind local is ignored when the candidate has no year.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "862",
+      "name": "Toy Story",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 136,
+        "name": "Toy Story Treats",
+        "kind": "show",
+        "released": null,
+        "external_ids": [],
+        "aliases": [
+          "Toy Story"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A foreign-language alias decides matched across an English title.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "327452",
+      "name": "Money Heist",
+      "kind": "show",
+      "released": "2017-05-02"
+    },
+    "locals": [
+      {
+        "id": 137,
+        "name": "La casa de papel",
+        "kind": "show",
+        "released": "2017-05-02",
+        "external_ids": [],
+        "aliases": [
+          "Money Heist"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 137,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A local matching by name and two others by alias with no candidate year decide ambiguous.",
+    "candidate": {
+      "provider": "imdb",
+      "value": "tt0137523",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 138,
+        "name": "Fight Club",
+        "kind": "movie",
+        "released": "1999-10-15",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 139,
+        "name": "El club de la lucha",
+        "kind": "movie",
+        "released": "1999-10-15",
+        "external_ids": [],
+        "aliases": [
+          "Fight Club"
+        ]
+      },
+      {
+        "id": 140,
+        "name": "Fight Club - A luta",
+        "kind": "movie",
+        "released": "2001-01-01",
+        "external_ids": [],
+        "aliases": [
+          "Fight Club"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        138,
+        139,
+        140
+      ]
+    }
+  },
+  {
+    "why": "An alias match on an English-language local decides matched by name only.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0468569",
+      "name": "The Dark Knight",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 141,
+        "name": "El caballero oscuro",
+        "kind": "movie",
+        "released": "2008-07-18",
+        "external_ids": [],
+        "aliases": [
+          "The Dark Knight"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 141,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "A same-name local wrong year plus an alias local right year picks the alias local.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "218",
+      "name": "The Terminator",
+      "kind": "movie",
+      "released": "1984-10-26"
+    },
+    "locals": [
+      {
+        "id": 142,
+        "name": "The Terminator",
+        "kind": "movie",
+        "released": "2015-06-01",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 143,
+        "name": "Terminator",
+        "kind": "movie",
+        "released": "1984-10-26",
+        "external_ids": [],
+        "aliases": [
+          "The Terminator"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 143,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Names differing only in case match.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "27205",
+      "name": "INCEPTION",
+      "kind": "movie",
+      "released": "2010-07-16"
+    },
+    "locals": [
+      {
+        "id": 150,
+        "name": "inception",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 150,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Names differing only in whitespace runs match.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The   Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 151,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 151,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Leading and trailing whitespace is trimmed before comparison.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "121361",
+      "name": "  Game of Thrones ",
+      "kind": "show",
+      "released": "2011-04-17"
+    },
+    "locals": [
+      {
+        "id": 152,
+        "name": "Game of Thrones",
+        "kind": "show",
+        "released": "2011-04-17",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 152,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Tabs and newlines count as whitespace runs.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "11",
+      "name": "Star\tWars",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 153,
+        "name": "Star  Wars",
+        "kind": "movie",
+        "released": "1977-05-25",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 153,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Case normalization applies when the candidate has no year.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0111161",
+      "name": "the shawshank redemption",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 154,
+        "name": "The Shawshank Redemption",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 154,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "Punctuation is not stripped, so a colon distinguishes two names.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "11",
+      "name": "Star Wars: A New Hope",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 155,
+        "name": "Star Wars A New Hope",
+        "kind": "movie",
+        "released": "1977-05-25",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A hyphen is not stripped, so a hyphenated name does not match its spaced form.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "557",
+      "name": "Spider-Man",
+      "kind": "movie",
+      "released": "2002-05-03"
+    },
+    "locals": [
+      {
+        "id": 156,
+        "name": "Spider Man",
+        "kind": "movie",
+        "released": "2002-05-03",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An apostrophe is not stripped, so a name with and without it does not match.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "424",
+      "name": "Schindler's List",
+      "kind": "movie",
+      "released": "1993-12-15"
+    },
+    "locals": [
+      {
+        "id": 157,
+        "name": "Schindlers List",
+        "kind": "movie",
+        "released": "1993-12-15",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A period is not stripped, so it distinguishes two otherwise identical names.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0057012",
+      "name": "Dr. Strangelove",
+      "kind": "movie",
+      "released": "1964-01-29"
+    },
+    "locals": [
+      {
+        "id": 158,
+        "name": "Dr Strangelove",
+        "kind": "movie",
+        "released": "1964-01-29",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An en dash is not the same character as a hyphen, so the names differ.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "353081",
+      "name": "Mission: Impossible - Fallout",
+      "kind": "movie",
+      "released": "2018-07-27"
+    },
+    "locals": [
+      {
+        "id": 159,
+        "name": "Mission: Impossible – Fallout",
+        "kind": "movie",
+        "released": "2018-07-27",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A non-ASCII name matches exactly when its characters agree.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "194",
+      "name": "Amélie",
+      "kind": "movie",
+      "released": "2001-04-25"
+    },
+    "locals": [
+      {
+        "id": 160,
+        "name": "Amélie",
+        "kind": "movie",
+        "released": "2001-04-25",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 160,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Differing diacritics keep two otherwise identical names apart.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "194",
+      "name": "Amelie",
+      "kind": "movie",
+      "released": "2001-04-25"
+    },
+    "locals": [
+      {
+        "id": 161,
+        "name": "Amélie",
+        "kind": "movie",
+        "released": "2001-04-25",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A diacritic spelling without the umlaut does not match the accented name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "109445",
+      "name": "Die Eiskoenigin",
+      "kind": "movie",
+      "released": "2013-11-27"
+    },
+    "locals": [
+      {
+        "id": 162,
+        "name": "Die Eiskönigin",
+        "kind": "movie",
+        "released": "2013-11-27",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Case folding applies to non-ASCII letters too.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "441",
+      "name": "Été 85",
+      "kind": "movie",
+      "released": "2020-07-14"
+    },
+    "locals": [
+      {
+        "id": 163,
+        "name": "été 85",
+        "kind": "movie",
+        "released": "2020-07-14",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 163,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A non-ASCII name matches a local through a non-ASCII alias.",
+    "candidate": {
+      "provider": "mal",
+      "value": "16498",
+      "name": "進撃の巨人",
+      "kind": "show",
+      "released": "2013-04-07"
+    },
+    "locals": [
+      {
+        "id": 164,
+        "name": "Attack on Titan",
+        "kind": "show",
+        "released": "2013-04-07",
+        "external_ids": [],
+        "aliases": [
+          "進撃の巨人"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 164,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A Cyrillic name matches itself without any transliteration.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "305288",
+      "name": "Мажор",
+      "kind": "show",
+      "released": "2014-12-15"
+    },
+    "locals": [
+      {
+        "id": 165,
+        "name": "Мажор",
+        "kind": "show",
+        "released": "2014-12-15",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 165,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Whitespace runs are collapsed inside an alias as well as a name.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "550",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": "1999-10-15"
+    },
+    "locals": [
+      {
+        "id": 166,
+        "name": "El  club   de la lucha",
+        "kind": "movie",
+        "released": "1999-10-15",
+        "external_ids": [],
+        "aliases": [
+          " Fight   Club "
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 166,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A very long name matches itself exactly.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "999001",
+      "name": "Night of the Day of the Dawn of the Son of the Bride of the Return of the Revenge of the Terror of the Attack of the Evil, Mutant, Alien, Flesh Eating, Hellbound, Zombified Living Dead Part 2: In Shocking 2-D",
+      "kind": "movie",
+      "released": "1991-01-01"
+    },
+    "locals": [
+      {
+        "id": 167,
+        "name": "Night of the Day of the Dawn of the Son of the Bride of the Return of the Revenge of the Terror of the Attack of the Evil, Mutant, Alien, Flesh Eating, Hellbound, Zombified Living Dead Part 2: In Shocking 2-D",
+        "kind": "movie",
+        "released": "1991-01-01",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 167,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A very long name matches when it is the last alias of a local.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "999002",
+      "name": "The Persistence of Vision: A Very Long Title About Extremely Long Titles That Keeps Going and Going Until It Finally Stops at the End of the Line",
+      "kind": "movie",
+      "released": "2001-01-01"
+    },
+    "locals": [
+      {
+        "id": 168,
+        "name": "Persistence of Vision",
+        "kind": "movie",
+        "released": "2001-01-01",
+        "external_ids": [],
+        "aliases": [
+          "The Persistence of Vision: A Very Long Title About Extremely Long Titles That Keeps Going and Going Until It Finally Stops at the End of the Line"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 168,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Whitespace-only variation in an alias still counts as a name match without a candidate year.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "2316",
+      "name": "The Office",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 169,
+        "name": "Office (US)",
+        "kind": "show",
+        "released": null,
+        "external_ids": [],
+        "aliases": [
+          "  The   Office  "
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 169,
+      "basis": "name"
+    }
+  },
+  {
+    "why": "A candidate whose name matches nothing is new.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt9999999",
+      "name": "Zyzzyx Road",
+      "kind": "movie",
+      "released": "2006-12-31"
+    },
+    "locals": [
+      {
+        "id": 190,
+        "name": "Casablanca",
+        "kind": "movie",
+        "released": "1942-11-26",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 191,
+        "name": "Inception",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A candidate whose name matches a local of the other kind only is new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "1399",
+      "name": "Game of Thrones",
+      "kind": "show",
+      "released": "2011-04-17"
+    },
+    "locals": [
+      {
+        "id": 192,
+        "name": "Game of Thrones",
+        "kind": "movie",
+        "released": "2011-04-17",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-name local of the other kind never matches, even with no year anywhere.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 193,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An empty local catalogue leaves a candidate with an external id new.",
+    "candidate": {
+      "provider": "imdb",
+      "value": "tt0133093",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "An empty local catalogue leaves a candidate with an id that matches nothing new.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "0",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A local carrying a different external id still matches by name and year.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 194,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "999"
+          },
+          {
+            "provider": "imdb",
+            "value": "tt0133093"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 194,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An external id hit on the other kind still outranks the name-and-year hit.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 195,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 196,
+        "name": "The Matrix",
+        "kind": "show",
+        "released": "1999-03-31",
+        "external_ids": [
+          {
+            "provider": "tmdb",
+            "value": "603"
+          }
+        ],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 196,
+      "basis": "external_id"
+    }
+  },
+  {
+    "why": "A same-name local with no release date is not counted toward the year.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "603",
+      "name": "The Matrix",
+      "kind": "movie",
+      "released": "1999-03-31"
+    },
+    "locals": [
+      {
+        "id": 197,
+        "name": "The Matrix",
+        "kind": "movie",
+        "released": "1999-03-31",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 198,
+        "name": "Matrix",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": [
+          "The Matrix"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 197,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A leading article is part of the name and is never stripped.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "2316",
+      "name": "The Office",
+      "kind": "show",
+      "released": "2005-03-24"
+    },
+    "locals": [
+      {
+        "id": 199,
+        "name": "Office",
+        "kind": "show",
+        "released": "2005-03-24",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "Three locals with the same name and year make the decision ambiguous.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "27205",
+      "name": "Inception",
+      "kind": "movie",
+      "released": "2010-07-16"
+    },
+    "locals": [
+      {
+        "id": 200,
+        "name": "Inception",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 201,
+        "name": "Inception",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 202,
+        "name": "Inception",
+        "kind": "movie",
+        "released": "2010-07-16",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        200,
+        201,
+        202
+      ]
+    }
+  },
+  {
+    "why": "Ambiguous ids from alias matches are also reported in ascending order.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "550",
+      "name": "Fight Club",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 204,
+        "name": "El club de la lucha",
+        "kind": "movie",
+        "released": "1999-10-15",
+        "external_ids": [],
+        "aliases": [
+          "Fight Club"
+        ]
+      },
+      {
+        "id": 203,
+        "name": "Fight Club",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        203,
+        204
+      ]
+    }
+  },
+  {
+    "why": "A different kind local with the candidate's name and year does not match a show candidate.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "153021",
+      "name": "The Walking Dead",
+      "kind": "show",
+      "released": "2010-10-31"
+    },
+    "locals": [
+      {
+        "id": 205,
+        "name": "The Walking Dead",
+        "kind": "movie",
+        "released": "2010-10-31",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-year local with the candidate's year but another name does not match.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "82856",
+      "name": "The Mandalorian",
+      "kind": "show",
+      "released": "2019-11-12"
+    },
+    "locals": [
+      {
+        "id": 206,
+        "name": "The Book of Boba Fett",
+        "kind": "show",
+        "released": "2019-11-12",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A local whose alias matches another candidate's name does not affect this candidate.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "11",
+      "name": "Star Wars",
+      "kind": "movie",
+      "released": "1977-05-25"
+    },
+    "locals": [
+      {
+        "id": 207,
+        "name": "Star Wars: Episode V - The Empire Strikes Back",
+        "kind": "movie",
+        "released": "1980-05-21",
+        "external_ids": [],
+        "aliases": [
+          "Star Wars"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A same-named local with the same year decides matched among unrelated locals.",
+    "candidate": {
+      "provider": "mal",
+      "value": "5114",
+      "name": "Fullmetal Alchemist: Brotherhood",
+      "kind": "show",
+      "released": "2009-04-05"
+    },
+    "locals": [
+      {
+        "id": 208,
+        "name": "Fullmetal Alchemist",
+        "kind": "show",
+        "released": "2003-10-04",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 209,
+        "name": "Fullmetal Alchemist: Brotherhood",
+        "kind": "show",
+        "released": "2009-04-05",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 209,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "A trakt candidate falls through to alias matching when its id matches nothing.",
+    "candidate": {
+      "provider": "trakt",
+      "value": "11111111-2222-3333-4444-555555555555",
+      "name": "Amy",
+      "kind": "movie",
+      "released": "2015-07-03"
+    },
+    "locals": [
+      {
+        "id": 210,
+        "name": "Amy Winehouse: Back to Black",
+        "kind": "movie",
+        "released": "2015-07-03",
+        "external_ids": [],
+        "aliases": [
+          "Amy"
+        ]
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 210,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "An anidb candidate matches a same-named local by name and year.",
+    "candidate": {
+      "provider": "anidb",
+      "value": "101922",
+      "name": "Demon Slayer: Kimetsu no Yaiba",
+      "kind": "show",
+      "released": "2019-04-06"
+    },
+    "locals": [
+      {
+        "id": 211,
+        "name": "Demon Slayer: Kimetsu no Yaiba",
+        "kind": "show",
+        "released": "2019-04-06",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 211,
+      "basis": "name_and_year"
+    }
+  },
+  {
+    "why": "Three locals with the same name and no candidate year make the decision ambiguous.",
+    "candidate": {
+      "provider": "tmdb",
+      "value": "862",
+      "name": "Toy Story",
+      "kind": "movie",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 212,
+        "name": "Toy Story",
+        "kind": "movie",
+        "released": "1995-11-22",
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 213,
+        "name": "Toy Story",
+        "kind": "movie",
+        "released": null,
+        "external_ids": [],
+        "aliases": []
+      },
+      {
+        "id": 214,
+        "name": "Toy Story",
+        "kind": "movie",
+        "released": "2010-06-18",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "ambiguous",
+      "local_ids": [
+        212,
+        213,
+        214
+      ]
+    }
+  },
+  {
+    "why": "A candidate name with a numbered revival does not match the original series.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "305288",
+      "name": "Doctor Who",
+      "kind": "show",
+      "released": "2005-03-26"
+    },
+    "locals": [
+      {
+        "id": 215,
+        "name": "Doctor Who",
+        "kind": "show",
+        "released": "1963-11-23",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "new"
+    }
+  },
+  {
+    "why": "A candidate name with no year matches the local whose name is otherwise identical.",
+    "candidate": {
+      "provider": "tvdb",
+      "value": "tt0108778",
+      "name": "Friends",
+      "kind": "show",
+      "released": null
+    },
+    "locals": [
+      {
+        "id": 216,
+        "name": "Friends",
+        "kind": "show",
+        "released": "1994-09-22",
+        "external_ids": [],
+        "aliases": []
+      }
+    ],
+    "expected": {
+      "decision": "matched",
+      "local_id": 216,
+      "basis": "name"
+    }
+  }
+]

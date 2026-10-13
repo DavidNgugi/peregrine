@@ -20,6 +20,7 @@ pub mod event;
 pub mod id;
 pub mod inspect;
 pub mod library;
+pub mod matching;
 pub mod name;
 pub mod notify;
 pub mod ordering;

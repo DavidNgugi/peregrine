@@ -831,11 +831,11 @@ async fn park(
 /// The` question — is not guessed at here: what this needs is a stable key, and a key that changes
 /// when that task lands is a key that would have to be applied to rows written under the old one.
 fn sort_name_of(title: &str) -> String {
-    title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    // The domain's, not a second copy: the catalogue stores a title's `sort_name` with this rule, the
+    // matching engine compares provider names with it (`PG-E5-13`), and two implementations of
+    // "what counts as the same name" is how a title ends up filed where a search cannot find it.
+    // The body was moved unchanged, and the indexer's tests are what say so.
+    peregrine_domain::matching::sort_name(title)
 }
 
 /// Wraps a path as the non-empty text the schema stores.
