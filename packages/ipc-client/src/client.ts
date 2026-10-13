@@ -16,6 +16,7 @@ import type {
   BuildInfo,
   JobStarted,
   LibraryRootDto,
+  EpisodeDto,
   LibraryTitleDto,
   MatchAsDto,
   MatchRuleDto,
@@ -101,6 +102,21 @@ export async function addLibraryRoot(
  */
 export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto[]> {
   return unwrap(commands.listTitles(limit ?? null));
+}
+
+/**
+ * One title with the counts its screen shows, or `null` when it is not here.
+ *
+ * `null` covers both "this account may not see it" and "no title has that id": the two read the same
+ * to a person, and the screen says the title is not here either way (I37).
+ */
+export async function getTitle(id: number): Promise<LibraryTitleDto | null> {
+  return unwrap(commands.getTitle({ id }));
+}
+
+/** A title's episodes, in the order a person watches them. */
+export async function listEpisodes(titleId: number): Promise<EpisodeDto[]> {
+  return unwrap(commands.listEpisodes({ id: titleId }, null));
 }
 
 /**

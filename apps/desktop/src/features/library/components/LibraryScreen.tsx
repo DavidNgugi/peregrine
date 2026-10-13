@@ -31,6 +31,13 @@ interface LibraryScreenProps {
   /** The titles as the shell read them. */
   readonly titles: LibraryTitles;
   /**
+   * Opens one title's own screen.
+   *
+   * A callback rather than a link because the shell owns the route: the screen says *which* title, and
+   * where that lives is the router's business (`app/routes.ts`).
+   */
+  readonly onOpenTitle: (title: LibraryTitleDto) => void;
+  /**
    * The scan this screen can start, and the state of the one it is following.
    *
    * Passed in rather than created here, for the same reason the shortcut registry is: the shell
@@ -82,14 +89,27 @@ function sizeLabel(bytes: number, t: Translate): string {
  * a flag because a series can have one episode on a drive that is not plugged in and twenty that
  * are.
  */
-function columnsOf(t: Translate): readonly TableColumn<LibraryTitleDto>[] {
+function columnsOf(
+  t: Translate,
+  open: (title: LibraryTitleDto) => void,
+): readonly TableColumn<LibraryTitleDto>[] {
   return [
     {
       id: "name",
       header: t("library.column.title"),
       cell: (row) => (
-        <span className="flex flex-col">
-          <span>{row.name}</span>
+        <span className="flex flex-col items-start">
+          {/* A button rather than a link because the kit has no link yet (`PG-E21-03`'s list) and a
+              title that opened nothing would be worse than one that looks like an action. */}
+          <Button
+            onClick={() => {
+              open(row);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {row.name}
+          </Button>
           {row.stub ? (
             <span className="text-caption text-text-tertiary">{t("library.stub")}</span>
           ) : null}
@@ -262,12 +282,13 @@ function ruleColumnsOf(
 /** The library screen. */
 export function LibraryScreen({
   titles,
+  onOpenTitle,
   scan,
   unmatched,
   rules,
 }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
-  const columns = useMemo(() => columnsOf(t), [t]);
+  const columns = useMemo(() => columnsOf(t, onOpenTitle), [t, onOpenTitle]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
 
   // A scan is the only thing that changes this list, so watching one finish is the whole of the

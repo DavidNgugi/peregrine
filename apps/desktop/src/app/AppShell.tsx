@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DiscoverScreen } from "../features/discover/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
+import { TitleScreen, useTitle } from "../features/title/index.js";
 import {
   LibraryScreen,
   useLibraryTitles,
@@ -86,6 +87,9 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
   const rules = useMatchRules();
+  // One title's screen is the only route with a parameter. The hook is always called — the rules of
+  // hooks — and reads nothing when the route names no title.
+  const title = useTitle(route.kind === "title" ? route.id : null);
   const openScreen = useCallback((action: string) => {
     const target = ROUTE_FOR_ACTION[action];
     if (target !== undefined) {
@@ -123,12 +127,27 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {route.kind === "discover" ? <DiscoverScreen /> : null}
           {route.kind === "library" ? (
-            <LibraryScreen rules={rules} scan={scan} titles={library} unmatched={unmatched} />
+            <LibraryScreen
+              onOpenTitle={(opened) => {
+                // The kind travels in the path because the map says it does, and because a page that
+                // knows what it is before its read answers can name itself (PG-E7-02).
+                setRoute({
+                  kind: "title",
+                  titleKind: opened.kind === "movies" ? "movie" : "show",
+                  id: opened.id,
+                });
+              }}
+              rules={rules}
+              scan={scan}
+              titles={library}
+              unmatched={unmatched}
+            />
           ) : null}
           {route.kind === "diagnostics" ? <JobsScreen /> : null}
           {route.kind === "settings" ? (
             <SettingsScreen libraries={libraries} shortcuts={shortcuts} />
           ) : null}
+          {route.kind === "title" ? <TitleScreen detail={title} kind={route.titleKind} /> : null}
         </main>
       </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />

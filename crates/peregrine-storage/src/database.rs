@@ -640,6 +640,31 @@ impl Database {
         crate::library::list_library_titles(&self.readers, scope, request).await
     }
 
+    /// One title, with the counts a screen shows, or `None` when `scope` may not see it.
+    ///
+    /// Scoped for the reason the page above is, and the `None` is the whole of what a hidden title
+    /// and an absent one have in common (I37).
+    pub async fn library_title(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<crate::library::LibraryTitleRow>, StorageError> {
+        crate::library::library_title(&self.readers, scope, id).await
+    }
+
+    /// A title's episodes, in the order a person watches them.
+    ///
+    /// Bounded rather than paged: a title's episodes are a few hundred rows at most, and a keyset
+    /// cursor over a `(season, episode)` pair would need a two-column cursor for no gain.
+    pub async fn list_title_episodes(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::library::TitleEpisodeRow>, StorageError> {
+        crate::library::list_title_episodes(&self.readers, scope, title_id, limit).await
+    }
+
     /// Inserts one season and answers the id `SQLite` assigned.
     ///
     /// A stub, like [`Database::insert_stub_title`]: the library creates the row so episodes have

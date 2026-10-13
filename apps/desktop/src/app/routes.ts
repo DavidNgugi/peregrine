@@ -23,10 +23,24 @@ export type Route =
   | { readonly kind: "discover" }
   | { readonly kind: "library" }
   | { readonly kind: "diagnostics" }
-  | { readonly kind: "settings" };
+  | { readonly kind: "settings" }
+  /**
+   * One title's own screen.
+   *
+   * The kind travels in the path because `ARCHITECTURE` §6's map says it does, and because it is
+   * what a screen can draw before its read answers: `Film` or `Series` is known from the address
+   * alone, so the page names itself immediately rather than waiting (PG-E7-02's acceptance).
+   */
+  | { readonly kind: "title"; readonly titleKind: TitleKind; readonly id: number };
+
+/** Which of the two a title is, as a path spells it. */
+export type TitleKind = "movie" | "show";
 
 /** What a route is called when it needs naming. */
 export type RouteKind = Route["kind"];
+
+/** The routes that are one fixed path, which are the ones a table can hold. */
+type StaticRouteKind = Exclude<RouteKind, "title">;
 
 /**
  * The path each route lives at, taken from `docs/ARCHITECTURE.md` §6.
@@ -34,7 +48,7 @@ export type RouteKind = Route["kind"];
  * The map spells Diagnostics `/diagnostics` while the feature folder is `jobs`: the screen shows the
  * job journal, and the architecture's name for the screen is the one a link uses.
  */
-const PATHS: Readonly<Record<RouteKind, string>> = {
+const PATHS: Readonly<Record<StaticRouteKind, string>> = {
   discover: "/",
   library: "/library",
   diagnostics: "/diagnostics",
@@ -60,9 +74,21 @@ export function parseRoute(path: string): Route | null {
   const withoutTail = path.split(/[?#]/u, 1)[0] ?? "";
   const normalized = withoutTail.length > 1 ? withoutTail.replace(/\/+$/u, "") : withoutTail;
 
-  for (const [kind, routePath] of Object.entries(PATHS) as [RouteKind, string][]) {
+  for (const [kind, routePath] of Object.entries(PATHS) as [StaticRouteKind, string][]) {
     if (routePath === normalized) {
       return { kind };
+    }
+  }
+
+  // `/title/:kind/:id`, which is the map's row for a title's own screen. The kind is checked against
+  // the two the core names rather than carried through as an opaque string: a path claiming a kind
+  // this build does not have is a path this build does not open.
+  const parts = normalized.split("/");
+  if (parts.length === 4 && parts[0] === "" && parts[1] === "title") {
+    const kind = parts[2];
+    const id = Number(parts[3]);
+    if ((kind === "movie" || kind === "show") && Number.isSafeInteger(id) && id > 0) {
+      return { kind: "title", titleKind: kind, id };
     }
   }
   return null;
@@ -70,7 +96,9 @@ export function parseRoute(path: string): Route | null {
 
 /** The path a route lives at. */
 export function routePath(route: Route): string {
-  return PATHS[route.kind];
+  return route.kind === "title"
+    ? `/title/${route.titleKind}/${String(route.id)}`
+    : PATHS[route.kind];
 }
 
 /** The route a shortcut action opens, or `null` for an action this shell has no screen for. */

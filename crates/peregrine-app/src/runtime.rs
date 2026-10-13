@@ -474,6 +474,37 @@ impl Runtime {
         Ok(matches!(matched, crate::library::Matched::Placed))
     }
 
+    /// One title, with the counts a screen shows, when the scope may see it.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn library_title(
+        &self,
+        id: i64,
+    ) -> Result<Option<peregrine_storage::LibraryTitleRow>, RuntimeError> {
+        Ok(self
+            .database
+            .library_title(installation_scope(), id)
+            .await?)
+    }
+
+    /// A title's episodes, in the order a person watches them.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn title_episodes(
+        &self,
+        title_id: i64,
+        limit: u32,
+    ) -> Result<Vec<peregrine_storage::TitleEpisodeRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_title_episodes(installation_scope(), title_id, limit)
+            .await?)
+    }
+
     /// A page of the titles the library holds, newest first.
     ///
     /// Read under [`installation_scope`], which is the whole of this build's account story: the

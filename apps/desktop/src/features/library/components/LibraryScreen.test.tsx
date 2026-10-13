@@ -126,7 +126,13 @@ function markup(
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <LibraryScreen rules={remembered} scan={scan} titles={state} unmatched={unmatched} />
+      <LibraryScreen
+        onOpenTitle={() => undefined}
+        rules={remembered}
+        scan={scan}
+        titles={state}
+        unmatched={unmatched}
+      />
     </I18nextProvider>,
   );
 }

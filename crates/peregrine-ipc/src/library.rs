@@ -132,6 +132,59 @@ impl From<peregrine_app::LibraryTitleRow> for LibraryTitleDto {
     }
 }
 
+/// The title a command acts on.
+///
+/// A DTO rather than a bare `i64` argument, for the reason `RootRef` gives: specta refuses to export
+/// a large integer as a command argument, so a bare id would be the one thing in the contract with no
+/// type on the other side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleRef {
+    /// The title's id, as a listing returned it.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
+/// One episode of a title, as its screen lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeDto {
+    /// The season it sits in, which zero is for a show's specials.
+    #[specta(type = Number)]
+    pub season_number: u32,
+    /// Its number within the season.
+    #[specta(type = Number)]
+    pub episode_number: u32,
+    /// Its name, when a provider sync has filled one in.
+    pub name: Option<String>,
+    /// How many items the library holds for it.
+    #[specta(type = Number)]
+    pub items: i64,
+    /// How many files those items have.
+    #[specta(type = Number)]
+    pub files: i64,
+    /// What those files weigh together.
+    #[specta(type = Number)]
+    pub bytes: i64,
+    /// How many of them the last scan could not find.
+    #[specta(type = Number)]
+    pub missing_files: i64,
+}
+
+impl From<peregrine_app::TitleEpisodeRow> for EpisodeDto {
+    fn from(row: peregrine_app::TitleEpisodeRow) -> Self {
+        Self {
+            season_number: row.season_number.get(),
+            episode_number: row.episode_number.get(),
+            name: row.name,
+            items: row.items,
+            files: row.files,
+            bytes: row.bytes,
+            missing_files: row.missing_files,
+        }
+    }
+}
+
 /// One rule a user's correction became, as the screen lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -374,6 +427,40 @@ pub async fn list_titles(
         .await?;
     let titles = titles.into_iter().map(LibraryTitleDto::from).collect();
     Ok(guard_response("library::list_titles", titles))
+}
+
+/// One title, with the counts its screen shows, or `null` when it is not here.
+///
+/// `null` rather than an error for the two cases that read the same to a person: a title this
+/// account may not see, and an id that names nothing (I37). A route naming either opens a screen
+/// that says the title is not here.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_title(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+) -> Result<Option<LibraryTitleDto>, AppError> {
+    let title = state.runtime()?.library_title(title.id).await?;
+    Ok(guard_response(
+        "library::get_title",
+        title.map(LibraryTitleDto::from),
+    ))
+}
+
+/// A title's episodes, in the order a person watches them.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_episodes(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+    limit: Option<u32>,
+) -> Result<Vec<EpisodeDto>, AppError> {
+    let episodes = state
+        .runtime()?
+        .title_episodes(title.id, limit.unwrap_or(500))
+        .await?;
+    let episodes = episodes.into_iter().map(EpisodeDto::from).collect();
+    Ok(guard_response("library::list_episodes", episodes))
 }
 
 /// A page of the rules a user's corrections became, newest first.

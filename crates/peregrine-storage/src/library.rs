@@ -633,6 +633,135 @@ pub(crate) async fn list_library_titles(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// One episode of a title, with what the library holds of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleEpisodeRow {
+    /// The season it sits in, which zero is for a show's specials.
+    pub season_number: SeasonNumber,
+    /// Its number within the season.
+    pub episode_number: EpisodeNumber,
+    /// Its name, when a provider sync has filled one in.
+    pub name: Option<String>,
+    /// How many items the library holds for it.
+    pub items: i64,
+    /// How many files those items have.
+    pub files: i64,
+    /// What those files weigh together.
+    pub bytes: i64,
+    /// How many of them the last scan could not find.
+    pub missing_files: i64,
+}
+
+/// One title, with the counts the library screen shows, or `None` when `scope` may not see it.
+///
+/// The same aggregate as [`list_library_titles`] for one row, and the same reason it aggregates: a
+/// screen showing a title's size has to add up its files, and doing it in the statement keeps the
+/// documents off the wire.
+pub(crate) async fn library_title(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    id: i64,
+) -> Result<Option<LibraryTitleRow>, StorageError> {
+    let row = sqlx::query_as::<_, LibraryTitleQueryRow>(
+        // `LEFT JOIN media_item` rather than an inner one: a route can name a title the library
+        // holds nothing of, and the screen it opens has to say so rather than refuse to open. The
+        // page read above stays an inner join for the same reason in reverse — its question is what
+        // the library *has*.
+        "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
+                COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
+                COALESCE(SUM(f.size_bytes), 0) AS bytes, \
+                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
+           FROM title t \
+           LEFT JOIN media_item m ON m.title_id = t.id \
+           LEFT JOIN media_file f ON f.media_item_id = m.id \
+          WHERE t.id = ?2 AND (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+          GROUP BY t.id",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// A title's episodes, in the order a person watches them, when `scope` may see the title.
+///
+/// Ordered by season and then number, which is the order the screen lists them in and not an
+/// arbitrary one: a keyset cursor over a pair is possible but would need a two-column cursor for no
+/// gain, so the read is bounded by a limit and the caller states it (`check-offset` allows a limit
+/// without an offset; a title with more episodes than the bound is a page the screen does not have
+/// yet, which is why the bound is generous).
+pub(crate) async fn list_title_episodes(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    title_id: i64,
+    limit: u32,
+) -> Result<Vec<TitleEpisodeRow>, StorageError> {
+    let rows = sqlx::query_as::<_, TitleEpisodeQueryRow>(
+        "SELECT e.season_number, e.episode_number, e.name, \
+                COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
+                COALESCE(SUM(f.size_bytes), 0) AS bytes, \
+                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
+           FROM episode e \
+           JOIN title t ON t.id = e.title_id \
+           JOIN media_item m ON m.episode_id = e.id \
+           LEFT JOIN media_file f ON f.media_item_id = m.id \
+          WHERE e.title_id = ?2 AND (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+          GROUP BY e.id \
+          ORDER BY e.season_number ASC, e.episode_number ASC LIMIT ?3",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(title_id)
+    .bind(i64::from(limit))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Narrows a stored integer to the unsigned number the domain uses, refusing a negative.
+fn u32_of(value: i64, column: &'static str) -> Result<u32, StorageError> {
+    u32::try_from(value).map_err(|_| StorageError::UnexpectedValue {
+        column,
+        found: value.to_string(),
+    })
+}
+
+/// The columns [`TitleEpisodeRow`] is built from.
+#[derive(sqlx::FromRow)]
+struct TitleEpisodeQueryRow {
+    season_number: i64,
+    episode_number: i64,
+    name: Option<String>,
+    items: i64,
+    files: i64,
+    bytes: i64,
+    missing_files: i64,
+}
+
+impl TryFrom<TitleEpisodeQueryRow> for TitleEpisodeRow {
+    type Error = StorageError;
+
+    fn try_from(row: TitleEpisodeQueryRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            // The schema stores both as integers with no check on their sign, so a negative is a
+            // claim about the database's contents rather than about a caller: it is refused rather
+            // than wrapped.
+            season_number: SeasonNumber::new(u32_of(row.season_number, "episode.season_number")?),
+            episode_number: EpisodeNumber::new(u32_of(
+                row.episode_number,
+                "episode.episode_number",
+            )?),
+            name: row.name,
+            items: row.items,
+            files: row.files,
+            bytes: row.bytes,
+            missing_files: row.missing_files,
+        })
+    }
+}
+
 /// The columns [`LibraryTitleRow`] is built from.
 #[derive(sqlx::FromRow)]
 struct LibraryTitleQueryRow {
@@ -2422,6 +2551,102 @@ mod tests {
 
     /// An unmatched file is visible to a restricted scope, but the title the scanner
     /// *suggests* for it is content and is withheld when the scope may not see it.
+    #[tokio::test]
+    async fn a_title_reads_back_with_its_counts_and_its_episodes_in_order() {
+        // What a title screen needs in two reads: the title's own totals, and its episodes in the
+        // order a person watches them rather than the order they were written.
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _adult) = populated(&directory).await;
+        let scope = any_account();
+
+        // A title with nothing in the library still reads back: a route can name one, and the screen
+        // says it is empty rather than refusing to open.
+        let empty = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("a title with no items is still a title");
+        assert_eq!(empty.items, 0);
+        assert_eq!(empty.files, 0);
+
+        // One film's worth of rows, then an episode with its own.
+        let (film_item, _) = item_with_file(&database, certified, "/media/alien.mkv").await;
+        assert!(film_item > 0);
+        let season = database
+            .insert_stub_season(crate::catalogue::StubSeason {
+                title_id: certified,
+                season_number: 1,
+                at: 0,
+            })
+            .await
+            .unwrap();
+        for number in [2, 1] {
+            let episode_id = database
+                .insert_stub_episode(crate::catalogue::StubEpisode {
+                    title_id: certified,
+                    season_id: season,
+                    season_number: 1,
+                    episode_number: number,
+                    at: 0,
+                })
+                .await
+                .unwrap();
+            let item_id = database
+                .insert_media_item(item(certified, Some(episode_id)))
+                .await
+                .unwrap();
+            database
+                .insert_media_file(file(item_id, &format!("/media/e{number}.mkv")))
+                .await
+                .unwrap();
+        }
+
+        let title = database.library_title(scope, certified).await.unwrap();
+        let title = title.expect("the fixture's title");
+        assert_eq!(title.title.id, certified);
+        assert_eq!(title.items, 3, "one film and two episodes: {title:?}");
+        assert_eq!(title.files, 3, "and a file each: {title:?}");
+
+        let episodes = database
+            .list_title_episodes(scope, certified, 50)
+            .await
+            .unwrap();
+        assert_eq!(episodes.len(), 2, "the film is not an episode");
+        assert!(!episodes.is_empty(), "the fixture has episodes");
+        let order: Vec<(u32, u32)> = episodes
+            .iter()
+            .map(|row| (row.season_number.get(), row.episode_number.get()))
+            .collect();
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(order, sorted, "season and number, ascending");
+    }
+
+    #[tokio::test]
+    async fn a_hidden_title_is_absent_rather_than_refused() {
+        // I37: a restricted scope gets the same answer for a title it may not see as for one that
+        // does not exist, which is `None` for both — and an absent id is not an error either.
+        let directory = TempDir::new().unwrap();
+        let (database, _certified, adult) = populated(&directory).await;
+        let scope = restricted();
+
+        assert_eq!(database.library_title(scope, adult).await.unwrap(), None);
+        assert_eq!(
+            database.library_title(scope, 9_999).await.unwrap(),
+            None,
+            "an id that names nothing"
+        );
+        // `assert_eq!` so a failure shows what was there (clippy's `assert_is_empty`, which is right:
+        // "the list is not empty" is not a diagnosis).
+        assert_eq!(
+            database
+                .list_title_episodes(scope, adult, 50)
+                .await
+                .unwrap(),
+            Vec::new()
+        );
+    }
+
     #[tokio::test]
     async fn a_restricted_scope_is_not_offered_a_hidden_suggestion() {
         let directory = TempDir::new().unwrap();

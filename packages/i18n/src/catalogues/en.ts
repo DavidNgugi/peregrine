@@ -69,6 +69,27 @@ export const en = {
       jobs: "Go to Diagnostics",
       settings: "Go to Settings",
     },
+    title: {
+      section: "In your library",
+      column: {
+        items: "Items",
+        episode: "Episode",
+        name: "Name",
+      },
+      unnamedEpisode: "Not named yet",
+      episodes: {
+        title: "Episodes",
+        description: "Every episode the library holds, in the order they are watched.",
+      },
+      missing: {
+        title: "This title is not here.",
+        body: "Nothing in your library has this id. It may have been a link to something this installation does not have.",
+      },
+      unavailable: {
+        title: "This title could not be read.",
+        body: "Peregrine's core did not answer, so this page is unknown rather than empty. Going back and returning tries the read again.",
+      },
+    },
     library: {
       title: "Library",
       section: "What is here",

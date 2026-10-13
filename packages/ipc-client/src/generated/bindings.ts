@@ -139,6 +139,37 @@ export const commands = {
 	/**  A page of the rules a user's corrections became, newest first. */
 	listMatchRules: (limit: number | null) => typedError<MatchRuleDto[], AppError_Serialize>(__TAURI_INVOKE("list_match_rules", { limit })),
 	/**
+	 *  One title, with the counts its screen shows, or `null` when it is not here.
+	 * 
+	 *  `null` rather than an error for the two cases that read the same to a person: a title this
+	 *  account may not see, and an id that names nothing (I37). A route naming either opens a screen
+	 *  that says the title is not here.
+	 */
+	getTitle: (title: TitleRef) => typedError<{
+	/**  The row id, which is the paging cursor. */
+	id: number,
+	/**  The display name. */
+	name: string,
+	/**  Film or series, as the webview spells it. */
+	kind: RootKind,
+	/**
+	 *  How complete the metadata is: a title the library holds is a stub until a sync fills it in,
+	 *  and a screen that showed a stub as complete would promise artwork and a synopsis it does not
+	 *  have (`PG-E5-06`).
+	 */
+	stub: boolean,
+	/**  How many items of it the library holds. */
+	items: number,
+	/**  How many files those items have. */
+	files: number,
+	/**  What those files add up to, in bytes. */
+	bytes: number,
+	/**  How many of them are marked missing. */
+	missingFiles: number,
+} | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
+	/**  A title's episodes, in the order a person watches them. */
+	listEpisodes: (title: TitleRef, limit: number | null) => typedError<EpisodeDto[], AppError_Serialize>(__TAURI_INVOKE("list_episodes", { title, limit })),
+	/**
 	 *  Answers one parked file by placing it as the title its parse read.
 	 * 
 	 *  Answers whether it placed anything: a file a scan reached while the row waited is already
@@ -213,6 +244,24 @@ export type BuildInfo = {
 	 *  can tell a Windows install from a Linux one without guessing.
 	 */
 	target: string,
+};
+
+/**  One episode of a title, as its screen lists it. */
+export type EpisodeDto = {
+	/**  The season it sits in, which zero is for a show's specials. */
+	seasonNumber: number,
+	/**  Its number within the season. */
+	episodeNumber: number,
+	/**  Its name, when a provider sync has filled one in. */
+	name: string | null,
+	/**  How many items the library holds for it. */
+	items: number,
+	/**  How many files those items have. */
+	files: number,
+	/**  What those files weigh together. */
+	bytes: number,
+	/**  How many of them the last scan could not find. */
+	missingFiles: number,
 };
 
 /**
@@ -551,6 +600,18 @@ export type ShortcutBinding = {
 	alt: boolean,
 	/**  Whether Shift is held. */
 	shift: boolean,
+};
+
+/**
+ *  The title a command acts on.
+ * 
+ *  A DTO rather than a bare `i64` argument, for the reason `RootRef` gives: specta refuses to export
+ *  a large integer as a command argument, so a bare id would be the one thing in the contract with no
+ *  type on the other side.
+ */
+export type TitleRef = {
+	/**  The title's id, as a listing returned it. */
+	id: number,
 };
 
 /**

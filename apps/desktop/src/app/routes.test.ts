@@ -6,6 +6,8 @@ const ROUTES: readonly Route[] = [
   { kind: "library" },
   { kind: "diagnostics" },
   { kind: "settings" },
+  { kind: "title", titleKind: "movie", id: 7 },
+  { kind: "title", titleKind: "show", id: 12_345 },
 ];
 
 describe("parseRoute", () => {
@@ -34,11 +36,39 @@ describe("parseRoute", () => {
     expect(parseRoute("/settings#media")).toEqual({ kind: "settings" });
   });
 
+  it("reads a title's kind and id out of its path", () => {
+    // The map's `/title/:kind/:id`. The kind is in the address so the screen can name itself before
+    // its read answers, and the id is checked rather than trusted: a path is untrusted input.
+    expect(parseRoute("/title/movie/7")).toEqual({ kind: "title", titleKind: "movie", id: 7 });
+    expect(parseRoute("/title/show/12345/")).toEqual({
+      kind: "title",
+      titleKind: "show",
+      id: 12_345,
+    });
+  });
+
+  it("refuses a title path whose kind or id this build cannot use", () => {
+    for (const bad of [
+      "/title/book/7",
+      "/title/movie/0",
+      "/title/movie/-1",
+      "/title/movie/1.5",
+      "/title/movie",
+      "/title/movie/7/extra",
+      "/title/movie/not-a-number",
+      "/title/movie/9007199254740993",
+    ]) {
+      expect(parseRoute(bad), bad).toBeNull();
+    }
+  });
+
   it("answers nothing for a path this build has no screen for", () => {
     // The map's other rows are not guessed at: `/browse` is a real route in ARCHITECTURE and no
     // screen here can open it, and answering with the home route would make a link to it look like
     // a link home.
-    for (const unknown of ["/browse", "/title/movie/1", "/library/../settings", "", "/LIBRARY"]) {
+    // `/title/movie/1` used to be in this list: the route existed in the map and no screen could open
+    // it, which is exactly what this loop is for. It has one now, so it moved to the cases above.
+    for (const unknown of ["/browse", "/search", "/library/../settings", "", "/LIBRARY"]) {
       expect(parseRoute(unknown)).toBeNull();
     }
   });

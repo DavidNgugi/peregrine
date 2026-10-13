@@ -283,6 +283,28 @@ fn forget_match_rule_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `get_title` reads through the runtime, so it fails the same way.
+fn get_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::get_title(harness.dead_state(), crate::library::TitleRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+/// `list_episodes` reads through the runtime, so it fails the same way.
+fn list_episodes_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::list_episodes(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -454,6 +476,22 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: list_unmatched_without_a_runtime,
+        },
+        ContractCase {
+            command: "get_title",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: get_title_without_a_runtime,
+        },
+        ContractCase {
+            command: "list_episodes",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_episodes_without_a_runtime,
         },
         ContractCase {
             command: "list_match_rules",

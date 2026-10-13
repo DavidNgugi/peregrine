@@ -35,7 +35,7 @@ pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, ShellStatus, Sta
 // domain cannot reach the wire in a form the domain does not have.
 pub use peregrine_domain::{EpisodeNumber, LibraryRoot, LibraryRootKind, ScanMode, SeasonNumber};
 pub use peregrine_storage::{
-    LibraryTitleRow, MatchRuleRow, MetadataState, TitleKind, UnmatchedFileRow,
+    LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleKind, UnmatchedFileRow,
 };
 // And the instant a root's fields carry, for the same reason: the command surface has to name
 // the type it converts, and `jiff` is not a dependency it may take (AGENTS R6).
