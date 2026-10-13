@@ -50,3 +50,7 @@ sha256 = "2c7c039804876026d7f479b38b0fd96b86e5dde0cd3b700139176a166a4a8461"
 [[migration]]
 file = "0012_match_rule.sql"
 sha256 = "31640dc788edcabbedd9bd47e600ec0e5f3bd9b24413d9024efb21cc5ebe1480"
+
+[[migration]]
+file = "0013_image_cache_pin.sql"
+sha256 = "07184806ab54771ea95632132d9762a07cf66bac914fd876f445878efc8ea716"

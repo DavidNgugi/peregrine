@@ -29,6 +29,8 @@
 //! that query and therefore the index that serves it (AGENTS §5): adding one now would be an index
 //! for a read nobody has written.
 
+use peregrine_domain::cache::CacheEntry;
+
 use crate::error::StorageError;
 
 /// One row of `image_cache`: a stored image, and what is known about it.
@@ -57,6 +59,100 @@ pub struct ImageCacheEntry {
     /// How many times it has been read. Reported rather than acted on: a second eviction policy
     /// could use it to keep a much-read image, which is a decision for `PG-E6-10` to make.
     pub hits: i64,
+    /// Whether something is using it, in which case the eviction policy never touches it.
+    ///
+    /// Set by whoever displays or is fetching the image and cleared when they are done. It is not
+    /// part of the upsert above: re-discovering a row says nothing about whether anything is using it,
+    /// and a write that cleared the flag would unpin an image that is still on screen.
+    pub pinned: bool,
+}
+
+/// The whole cache, in the order an eviction takes it: least recently used first, unpinned before
+/// pinned, and the key breaking a tie so one cache always yields one plan.
+///
+/// **The whole table, not a page.** The policy has to know what the cache weighs in total to decide
+/// whether anything needs to go, and it has to see every candidate to be sure it evicted enough — a
+/// bounded read would report a cap it cannot meet when it simply did not look. A row here is a key, a
+/// provider path, and a disk path, so the pass is maintenance-scale rather than request-scale, which
+/// is where `PG-E3-16`'s scheduler will run it.
+pub(crate) async fn entries(pool: &sqlx::SqlitePool) -> Result<Vec<CacheEntry>, StorageError> {
+    let rows = sqlx::query_as::<_, CacheEntryRow>(
+        "SELECT key, bytes, last_used_at, pinned FROM image_cache \
+          ORDER BY pinned ASC, last_used_at ASC, key ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// What an eviction run removed, in the order the policy chose.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Evicted {
+    /// The keys whose rows were removed.
+    pub keys: Vec<String>,
+    /// What those rows weighed together.
+    pub bytes: i64,
+    /// How many rows the removal actually took out.
+    ///
+    /// It can be smaller than `keys` — a row another writer removed between the read and the delete is
+    /// gone either way — and it is reported rather than assumed so a caller that logs the run logs
+    /// what happened rather than what was planned.
+    pub removed: u64,
+    /// Whether the cap cannot be met while the pinned entries are in use.
+    pub cap_unreachable: bool,
+}
+
+/// Removes one row, reporting whether it was there.
+pub(crate) async fn remove_many(
+    connection: &mut sqlx::SqliteConnection,
+    keys: &[String],
+) -> Result<u64, StorageError> {
+    let mut removed = 0;
+    for key in keys {
+        let result = sqlx::query("DELETE FROM image_cache WHERE key = ?1")
+            .bind(key)
+            .execute(&mut *connection)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+        removed += result.rows_affected();
+    }
+    Ok(removed)
+}
+
+/// Sets or clears one row's pin.
+pub(crate) async fn set_pinned(
+    connection: &mut sqlx::SqliteConnection,
+    key: &str,
+    pinned: bool,
+) -> Result<bool, StorageError> {
+    let result = sqlx::query("UPDATE image_cache SET pinned = ?2 WHERE key = ?1")
+        .bind(key)
+        .bind(i64::from(pinned))
+        .execute(&mut *connection)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// The columns the eviction policy reads.
+#[derive(sqlx::FromRow)]
+struct CacheEntryRow {
+    key: String,
+    bytes: i64,
+    last_used_at: i64,
+    pinned: i64,
+}
+
+impl From<CacheEntryRow> for CacheEntry {
+    fn from(row: CacheEntryRow) -> Self {
+        Self {
+            key: row.key,
+            bytes: row.bytes,
+            last_used_at: row.last_used_at,
+            pinned: row.pinned != 0,
+        }
+    }
 }
 
 /// Inserts one row, or refreshes the columns a re-discovery can change.
@@ -102,7 +198,7 @@ pub(crate) async fn entry(
 ) -> Result<Option<ImageCacheEntry>, StorageError> {
     let row = sqlx::query_as::<_, EntryRow>(
         "SELECT key, provider, path, variant, disk_path, bytes, width, height, created_at, \
-         last_used_at, hits FROM image_cache WHERE key = ?1",
+         last_used_at, hits, pinned FROM image_cache WHERE key = ?1",
     )
     .bind(key)
     .fetch_optional(pool)
@@ -184,6 +280,7 @@ struct EntryRow {
     created_at: i64,
     last_used_at: i64,
     hits: i64,
+    pinned: i64,
 }
 
 impl From<EntryRow> for ImageCacheEntry {
@@ -200,7 +297,158 @@ impl From<EntryRow> for ImageCacheEntry {
             created_at: row.created_at,
             last_used_at: row.last_used_at,
             hits: row.hits,
+            pinned: row.pinned != 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod eviction_tests {
+    use peregrine_domain::AccountScope;
+    use tempfile::TempDir;
+
+    use crate::Database;
+
+    use super::ImageCacheEntry;
+
+    /// Writes one cache row with the given key, size, and use instant.
+    ///
+    /// A second constructor rather than the module's `entry`, because the eviction policy's whole
+    /// input is the *order* of use, which that fixture fixes at one instant.
+    async fn row(database: &Database, key: &str, bytes: i64, last_used_at: i64) {
+        database
+            .record_image(ImageCacheEntry {
+                key: key.to_owned(),
+                provider: "tmdb".to_owned(),
+                path: format!("/{key}.jpg"),
+                variant: "w342".to_owned(),
+                disk_path: format!("/cache/{key}.jpg"),
+                bytes,
+                width: Some(342),
+                height: None,
+                created_at: 0,
+                last_used_at,
+                hits: 0,
+                pinned: false,
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn eviction_takes_the_least_recently_used_rows_until_the_cap_is_met() {
+        // PG-E6-10's acceptance, first half: the cache never exceeds the cap. Three rows of 100 each
+        // against a cap of 150 means two go, and the one nobody has wanted since the beginning goes
+        // first.
+        let directory = TempDir::new().unwrap();
+        let database = Database::open(directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        row(&database, "old", 100, 10).await;
+        row(&database, "middle", 100, 20).await;
+        row(&database, "new", 100, 30).await;
+
+        let evicted = database.evict_image_cache(150).await.unwrap();
+
+        assert_eq!(evicted.keys, vec!["old", "middle"]);
+        assert_eq!(evicted.removed, 2);
+        assert_eq!(evicted.bytes, 200);
+        assert!(!evicted.cap_unreachable);
+        let left = database.image_cache_totals().await.unwrap();
+        assert_eq!(left.bytes, 100, "the cache is inside its cap");
+        assert_eq!(left.rows, 1);
+    }
+
+    #[tokio::test]
+    async fn eviction_never_touches_an_image_in_use() {
+        // The acceptance's second half. The oldest row is the one on screen, and it stays: a cache
+        // that evicted what a user is looking at would be a cache whose cap cannot be met.
+        let directory = TempDir::new().unwrap();
+        let database = Database::open(directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        row(&database, "on-screen", 100, 1).await;
+        row(&database, "idle", 100, 20).await;
+        row(&database, "newer", 100, 30).await;
+        assert!(database.pin_image("on-screen", true).await.unwrap());
+
+        let evicted = database.evict_image_cache(150).await.unwrap();
+
+        // Two of the three: 300 bytes against a cap of 150 is not met by removing one, and the pinned
+        // row is the one that stays. (The first version of this test said one, which was arithmetic
+        // rather than policy — the policy was right.)
+        assert_eq!(evicted.keys, vec!["idle", "newer"]);
+        assert!(
+            database
+                .image_cache_entry("on-screen")
+                .await
+                .unwrap()
+                .is_some(),
+            "the pinned row is still there"
+        );
+        assert_eq!(database.image_cache_totals().await.unwrap().bytes, 100);
+    }
+
+    #[tokio::test]
+    async fn a_cap_the_pinned_rows_alone_exceed_is_reported_not_broken() {
+        // Pinned rows are in use, so a cap below their total is unsatisfiable while they are held.
+        // The run does what it can and says so, rather than trading a guarantee for a number.
+        let directory = TempDir::new().unwrap();
+        let database = Database::open(directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        row(&database, "on-screen", 500, 1).await;
+        row(&database, "idle", 100, 20).await;
+        database.pin_image("on-screen", true).await.unwrap();
+
+        let evicted = database.evict_image_cache(100).await.unwrap();
+
+        assert_eq!(evicted.keys, vec!["idle"]);
+        assert!(evicted.cap_unreachable);
+        assert_eq!(
+            database.image_cache_totals().await.unwrap().bytes,
+            500,
+            "what is left is the image in use"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cache_inside_its_cap_writes_nothing() {
+        let directory = TempDir::new().unwrap();
+        let database = Database::open(directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        row(&database, "a", 100, 10).await;
+
+        let evicted = database.evict_image_cache(1_000).await.unwrap();
+
+        assert_eq!(evicted.removed, 0);
+        assert_eq!(evicted.keys, Vec::<String>::new());
+        assert!(!evicted.cap_unreachable);
+    }
+
+    #[tokio::test]
+    async fn unpinning_lets_the_next_run_evict_what_it_kept() {
+        // The pin is a state something holds, not a promise the row keeps: when the holder lets go,
+        // the row is evictable again. A one-way pin would be a leak the cap could never recover from.
+        let directory = TempDir::new().unwrap();
+        let database = Database::open(directory.path().join("peregrine.sqlite"))
+            .await
+            .unwrap();
+        row(&database, "held", 100, 1).await;
+        row(&database, "idle", 100, 2).await;
+        database.pin_image("held", true).await.unwrap();
+        let first = database.evict_image_cache(100).await.unwrap();
+        assert_eq!(first.keys, vec!["idle"]);
+
+        assert!(database.pin_image("held", false).await.unwrap());
+        let second = database.evict_image_cache(50).await.unwrap();
+
+        assert_eq!(second.keys, vec!["held"]);
+        assert_eq!(database.image_cache_totals().await.unwrap().rows, 0);
+        // And the scope the disk-accounting read uses is untouched by any of this: the cache is not
+        // account content, and the eviction never asks who may see it.
+        let _ = AccountScope::unrestricted(peregrine_domain::AccountId::new(1).unwrap());
     }
 }
 
@@ -228,6 +476,9 @@ mod tests {
             created_at: NOW,
             last_used_at: NOW,
             hits: 0,
+            // A freshly fetched image is not in use until something displays it: pinning on write
+            // would mean nothing was ever evictable.
+            pinned: false,
         }
     }
 

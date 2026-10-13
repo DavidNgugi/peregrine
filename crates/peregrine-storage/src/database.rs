@@ -588,6 +588,71 @@ impl Database {
 
     /// How many images are cached and how many bytes they account for, which is the number a size
     /// cap is compared against (PG-E6-10) and what the artwork tier reports.
+    /// Sets or clears one cached image's pin.
+    ///
+    /// What "in use" means to the eviction policy: whoever displays or is fetching an image pins it
+    /// and clears the pin when they are done, and the policy never touches a pinned row.
+    pub async fn pin_image(&self, key: &str, pinned: bool) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::PinImage {
+                key: key.to_owned(),
+                pinned,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("pin_image", &other)),
+        }
+    }
+
+    /// Evicts least-recently-used entries until the cache fits `cap_bytes`.
+    ///
+    /// The whole policy is `peregrine_domain`'s: this reads the cache, asks it what to forget, and
+    /// removes that. **Pinned rows are never chosen** — they are in use — and a cap that cannot be met
+    /// while they are held is reported rather than broken.
+    ///
+    /// Deletes the rows only. The blobs on disk are `peregrine-sync`'s store, and nothing writes one
+    /// yet: `PG-E6-09`'s fetch path is what will, and deleting the file alongside the row belongs with
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when a read or a write fails.
+    pub async fn evict_image_cache(
+        &self,
+        cap_bytes: i64,
+    ) -> Result<crate::image_cache::Evicted, StorageError> {
+        let entries = crate::image_cache::entries(&self.readers).await?;
+        let plan = peregrine_domain::cache::plan_eviction(&entries, cap_bytes);
+        if plan.keys.is_empty() {
+            return Ok(crate::image_cache::Evicted {
+                cap_unreachable: plan.cap_unreachable,
+                ..crate::image_cache::Evicted::default()
+            });
+        }
+        let removed = match self
+            .writer
+            .send(WriteRequest::RemoveImages {
+                keys: plan.keys.clone(),
+            })
+            .await?
+        {
+            WriteResponse::ImagesRemoved { removed } => removed,
+            other => return Err(unexpected_response("evict_image_cache", &other)),
+        };
+        Ok(crate::image_cache::Evicted {
+            keys: plan.keys,
+            bytes: plan.bytes,
+            removed,
+            // The plan's answer stands: the cap is unreachable if what is *left* is still over it,
+            // whatever the removal did. A row that vanished between the read and the delete makes the
+            // removal smaller than the plan, not the cap any more reachable.
+            cap_unreachable: plan.cap_unreachable,
+        })
+    }
+
+    /// How many rows the cache holds and what they weigh together.
     pub async fn image_cache_totals(&self) -> Result<crate::image_cache::Totals, StorageError> {
         crate::image_cache::totals(&self.readers).await
     }

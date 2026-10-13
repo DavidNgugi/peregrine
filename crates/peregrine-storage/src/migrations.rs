@@ -707,6 +707,7 @@ mod tests {
         ("created_at", "INTEGER", 1, None, 0),
         ("last_used_at", "INTEGER", 1, None, 0),
         ("hits", "INTEGER", 1, Some("0"), 0),
+        ("pinned", "INTEGER", 1, Some("0"), 0),
     ];
 
     const IMAGE_REF: &[ColumnShape] = &[
@@ -944,7 +945,7 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 40] = [
+    const DOCUMENTED_INDICES: [&str; 41] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "download_job_active_idx",
@@ -956,6 +957,7 @@ mod tests {
         "event_log_at_idx",
         "external_id_episode_idx",
         "external_id_title_idx",
+        "image_cache_eviction_idx",
         "image_cache_lru_idx",
         "job_dedupe_uq",
         "job_ready_idx",
@@ -1077,6 +1079,10 @@ mod tests {
         ("provider_cache_expiry_idx", "(expires_at)"),
         ("provider_cache_resource_idx", "(provider, resource)"),
         ("provider_cache_size_idx", "(size_bytes)"),
+        (
+            "image_cache_eviction_idx",
+            "(last_used_at, key) WHERE pinned = 0",
+        ),
         ("image_cache_lru_idx", "(last_used_at)"),
         (
             "notification_centre_idx",

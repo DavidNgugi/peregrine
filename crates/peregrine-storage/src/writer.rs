@@ -97,6 +97,15 @@ pub(crate) enum WriteRequest {
         root_id: i64,
         updated_at: i64,
     },
+    /// Pin or unpin one cached image.
+    PinImage {
+        key: String,
+        pinned: bool,
+    },
+    /// Remove every cached image whose key is listed.
+    RemoveImages {
+        keys: Vec<String>,
+    },
     /// Remove one `match_rule` row.
     RemoveMatchRule {
         id: i64,
@@ -182,6 +191,8 @@ pub(crate) enum WriteResponse {
     RowIgnored,
     /// Whether a library row was there to change or remove.
     RowChanged { changed: bool },
+    /// How many cached images a removal took out of the table.
+    ImagesRemoved { removed: u64 },
     /// Every row of the request was applied, or a statement that either applies or fails with
     /// nothing to report (`ANALYZE`, the search index's `optimize`).
     Applied,
@@ -542,6 +553,14 @@ async fn apply_catalogue_write(
         WriteRequest::InsertMatchRule(rule) => {
             insert_row(crate::catalogue::insert_match_rule(connection, &rule).await)
         }
+        WriteRequest::PinImage { key, pinned } => {
+            crate::image_cache::set_pinned(connection, &key, pinned)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
+        WriteRequest::RemoveImages { keys } => crate::image_cache::remove_many(connection, &keys)
+            .await
+            .map(|removed| WriteResponse::ImagesRemoved { removed }),
         WriteRequest::RemoveMatchRule { id } => remove_match_rule(connection, id).await,
         WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
             .await

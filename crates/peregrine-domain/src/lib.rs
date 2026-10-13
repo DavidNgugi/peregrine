@@ -11,6 +11,7 @@
 
 pub mod account;
 pub mod availability;
+pub mod cache;
 pub mod catalogue;
 pub mod centre;
 pub mod deeplink;

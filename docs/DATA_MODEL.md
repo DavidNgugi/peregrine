@@ -645,9 +645,13 @@ CREATE TABLE image_cache (
   height       INTEGER,
   created_at   INTEGER NOT NULL,
   last_used_at INTEGER NOT NULL,
-  hits         INTEGER NOT NULL DEFAULT 0
+  hits         INTEGER NOT NULL DEFAULT 0,
+  pinned       INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1))  -- in use: never evicted
 );
 CREATE INDEX image_cache_lru_idx ON image_cache (last_used_at);
+-- The eviction scan's index (PG-E6-10). Partial, because the rows an in-use image leaves behind are
+-- the ones the policy may not touch and the ones the order does not need to carry.
+CREATE INDEX image_cache_eviction_idx ON image_cache (last_used_at, key) WHERE pinned = 0;
 
 CREATE TABLE image_ref (
   id           INTEGER PRIMARY KEY,
