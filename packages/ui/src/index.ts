@@ -16,6 +16,10 @@ export { ICON_NAMES, Icon } from "./Icon.js";
 export { Link } from "./Link.js";
 export type { LinkProps } from "./Link.js";
 export type { IconName, IconProps, IconSize } from "./Icon.js";
+export { Grid } from "./Grid.js";
+// `gridWindow` and `gridColumns` are the grid's own decisions rather than primitives, so they are
+// not exported as ones: the grid's tests import them from the module, the way the rail's do.
+export type { GridProps, GridWindow } from "./Grid.js";
 export { IconButton } from "./IconButton.js";
 export type { IconButtonProps } from "./IconButton.js";
 export { Panel } from "./Panel.js";

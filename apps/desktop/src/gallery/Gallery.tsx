@@ -23,6 +23,7 @@ import {
   Button,
   CARD_SIZES,
   Dialog,
+  Grid,
   EmptyState,
   ErrorState,
   Icon,
@@ -60,6 +61,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "Dialog",
   "EmptyState",
   "ErrorState",
+  "Grid",
   "Icon",
   "IconButton",
   "Link",
@@ -235,6 +237,18 @@ const RAIL_TITLES = [
   { id: 12, kind: "series", meta: "2020 · Series", rating: 8.4, title: "Raised by Wolves" },
 ] as const;
 
+/**
+ * Five thousand tiles for the grid section.
+ *
+ * Five thousand because that is the number PG-E7-06's acceptance names, and a gallery entry that showed
+ * twelve would be showing the case the component does not exist for. The ids are the domain ids the
+ * tiles are keyed by, not positions.
+ */
+const GRID_TITLES = Array.from({ length: 5000 }, (_, index) => ({
+  id: index + 1,
+  title: `Title ${String(index + 1)}`,
+}));
+
 export function Gallery(): ReactElement {
   const [theme, toggleTheme] = useGalleryTheme();
   const [on, setOn] = useState(true);
@@ -268,6 +282,25 @@ export function Gallery(): ReactElement {
         </Button>
         <Button disabled>Disabled</Button>
         <Button variant="primary">Primary with a much longer label</Button>
+      </Section_>
+
+      <Section_
+        component="Grid"
+        description="A virtualized grid of fixed-geometry tiles: 5 000 items in this section, and the DOM holds only the rows on screen plus one of overscan. Scroll inside it, or Tab to it and use the arrow keys the platform gives a scroller."
+      >
+        <div className="h-80 w-full">
+          <Grid
+            gap={12}
+            itemKey={(item) => item.id}
+            items={GRID_TITLES}
+            label="Five thousand titles"
+            renderItem={(item) => (
+              <TitleCard href={`/title/movie/${String(item.id)}`} poster={POSTER} size="sm" title={item.title} />
+            )}
+            rowHeight={180}
+            tileWidth={112}
+          />
+        </div>
       </Section_>
 
       <Section_
