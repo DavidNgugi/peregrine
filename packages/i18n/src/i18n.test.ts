@@ -64,6 +64,15 @@ describe("createI18n", () => {
     const i18n = createI18n();
     expect(i18n.t("discover.empty.missing")).toBe("discover.empty.missing");
   });
+
+  it("counts a tile's votes, singular and plural, around the caller's own number", () => {
+    // `count` picks the plural form and `formatted` is what is written, because i18next does not put
+    // a thousands separator on an interpolated number by itself — and the grouping is the locale's
+    // (`AGENTS R7` keeps a screen from inventing one).
+    const i18n = createI18n();
+    expect(i18n.t("card.votes", { count: 24_000, formatted: "24,000" })).toBe("24,000 votes");
+    expect(i18n.t("card.votes", { count: 1, formatted: "1" })).toBe("1 vote");
+  });
 });
 
 describe("isSupportedLocale", () => {

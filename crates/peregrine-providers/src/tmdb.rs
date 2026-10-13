@@ -556,6 +556,10 @@ struct SearchResult {
     vote_average: Option<f64>,
     #[serde(default)]
     vote_count: Option<u64>,
+    /// The short synopsis every list endpoint sends for an item that has one. Documented as
+    /// nullable, and an empty string is the same answer as `null`.
+    #[serde(default)]
+    overview: Option<String>,
 }
 
 /// TMDB's score, or `None` when the item is unrated.
@@ -594,10 +598,12 @@ impl SearchResult {
     /// rail mapping because this is where a result becomes a candidate: a rail that asked
     /// `/movie/upcoming` and labelled the answer `Show` would be a mistake nothing else would catch.
     ///
-    /// The artwork and the score come along because a list answer is where they are free
-    /// (`PG-E7-08`): reading them here is what makes filling a rail of posters cost one request per
-    /// title rather than two. A path that is empty or whitespace is an absent path rather than an
-    /// empty one, for the reason [`SearchCandidate::with_artwork_path`] states.
+    /// The artwork, the score, the synopsis, and the vote count come along because a list answer is
+    /// where they are free (`PG-E7-08`, `PG-E7-05`): reading them here is what makes filling a rail
+    /// of posters cost one request per title rather than two. A path or a synopsis that is empty or
+    /// whitespace is an absent one rather than an empty one, for the reason
+    /// [`SearchCandidate::with_artwork_path`] states, and a vote count of zero is TMDB saying nobody
+    /// has voted — the same absence [`scored_rating`] reads.
     fn into_candidate_for(self, fixed: Option<TitleKind>) -> Option<SearchCandidate> {
         let kind = match fixed {
             Some(kind) => kind,
@@ -622,10 +628,14 @@ impl SearchResult {
             .and_then(|date| date.parse().ok());
         let artwork = self.poster_path.filter(|path| !path.trim().is_empty());
         let rating = scored_rating(self.vote_average, self.vote_count);
+        let overview = self.overview.filter(|text| !text.trim().is_empty());
+        let votes = self.vote_count.filter(|count| *count > 0);
         Some(
             SearchCandidate::new(external_id, name, kind, released)
                 .with_artwork_path(artwork)
-                .with_rating(rating),
+                .with_rating(rating)
+                .with_overview(overview)
+                .with_votes(votes),
         )
     }
 }
@@ -719,20 +729,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_list_item_maps_its_artwork_and_its_score_and_an_unrated_one_maps_neither() {
-        // Four items and the four answers a provider can give: both, neither, a score of zero with
-        // nothing counting it, and a path that is only whitespace. **The zero is the one worth
-        // pinning**: TMDB sends `vote_average: 0` for an item nobody has voted on, and a `0.0` badge
-        // on a poster is a claim the provider never made.
+    async fn a_list_item_maps_the_four_fields_a_list_answer_carries_and_an_unrated_one_maps_none() {
+        // Four items and the answers a provider can give for each field: everything, nothing, a
+        // score of zero with nothing counting it, and strings that are only whitespace. **The zero
+        // is the one worth pinning**: TMDB sends `vote_average: 0` and `vote_count: 0` for an item
+        // nobody has voted on, and a `0.0` badge or a "0 votes" line on a poster is a claim the
+        // provider never made.
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/movie/popular"))
             .respond_with(json(
                 r#"{"results": [
-                    {"id": 1, "title": "Rated", "poster_path": "/one.jpg", "vote_average": 8.2, "vote_count": 24000},
+                    {"id": 1, "title": "Rated", "poster_path": "/one.jpg", "vote_average": 8.2, "vote_count": 24000,
+                     "overview": "A hacker learns the truth."},
                     {"id": 2, "title": "Bare"},
-                    {"id": 3, "title": "Unrated", "poster_path": "   ", "vote_average": 0, "vote_count": 0},
-                    {"id": 4, "title": "Zero but voted", "vote_average": 0, "vote_count": 12}
+                    {"id": 3, "title": "Unrated", "poster_path": "   ", "vote_average": 0, "vote_count": 0,
+                     "overview": ""},
+                    {"id": 4, "title": "Zero but voted", "vote_average": 0, "vote_count": 12,
+                     "overview": "   "}
                 ]}"#,
             ))
             .mount(&server)
@@ -746,8 +760,12 @@ mod tests {
         assert_eq!(found.len(), 4);
         assert_eq!(found[0].artwork_path(), Some("/one.jpg"));
         assert_eq!(found[0].rating(), Some(8.2));
+        assert_eq!(found[0].overview(), Some("A hacker learns the truth."));
+        assert_eq!(found[0].votes(), Some(24_000));
         assert_eq!(found[1].artwork_path(), None);
         assert_eq!(found[1].rating(), None);
+        assert_eq!(found[1].overview(), None);
+        assert_eq!(found[1].votes(), None);
         assert_eq!(
             found[2].artwork_path(),
             None,
@@ -759,9 +777,25 @@ mod tests {
             "a zero an item's own answer gives with no votes is unrated"
         );
         assert_eq!(
+            found[2].overview(),
+            None,
+            "an empty synopsis is no synopsis, not a blank line"
+        );
+        assert_eq!(
+            found[2].votes(),
+            None,
+            "nothing counted a zero, so there is no count to draw"
+        );
+        assert_eq!(
             found[3].rating(),
             Some(0.0),
             "a zero the provider counted is a score"
+        );
+        assert_eq!(found[3].votes(), Some(12));
+        assert_eq!(
+            found[3].overview(),
+            None,
+            "a whitespace-only synopsis says nothing"
         );
     }
 

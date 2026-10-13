@@ -92,7 +92,7 @@ export interface DiscoverViewProps {
 
 /** The screen as it is drawn, from answers. */
 export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): ReactElement {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
 
   const routeFor = (item: RailItemDto): Route => ({
     id: item.titleId,
@@ -108,6 +108,20 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
     item.kind === "movie" ? t("discover.kind.movie") : t("discover.kind.show");
   const kindForResult = (row: TitleMatchDto): string =>
     row.kind === "movies" ? t("discover.kind.movie") : t("discover.kind.show");
+  // The two spoken forms the tile's name carries, and the panel repeats: the score beside its star
+  // and the count beside it. `null` is the core's "the provider said nothing", which draws and
+  // announces nothing rather than a zero nobody claimed. The count is grouped by the locale the
+  // screen is in, because i18next interpolates a number as it is and "24000 votes" is not a number
+  // anybody writes.
+  const ratingLabel = (item: RailItemDto): string | null =>
+    item.rating === null ? null : t("card.rating", { score: item.rating });
+  const votesLabel = (item: RailItemDto): string | null =>
+    item.votes === null
+      ? null
+      : t("card.votes", {
+          count: item.votes,
+          formatted: new Intl.NumberFormat(i18n.language).format(item.votes),
+        });
 
   const hero = heroItem(rails.rails);
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
@@ -153,16 +167,20 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
         <section aria-label={t("discover.hero.label")} className="flex flex-wrap items-end gap-4">
           <div className="w-[144px] shrink-0">
             <TitleCard
+              detailsLabel={t("card.details")}
               href={routePath(routeFor(hero))}
               meta={itemMeta(hero, kindFor(hero))}
               onNavigate={() => {
                 onNavigate(routeFor(hero));
               }}
+              overview={hero.overview}
               poster={imageUrl(hero.poster)}
               priority
               rating={hero.rating}
+              ratingLabel={ratingLabel(hero)}
               size="md"
               title={hero.name}
+              votesLabel={votesLabel(hero)}
             />
           </div>
           <div className="flex min-w-0 flex-col gap-2">
@@ -221,16 +239,20 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
               key={rail.rail}
               renderItem={(item, tabIndex) => (
                 <TitleCard
+                  detailsLabel={t("card.details")}
                   href={routePath(routeFor(item))}
                   meta={itemMeta(item, kindFor(item))}
                   onNavigate={() => {
                     onNavigate(routeFor(item));
                   }}
+                  overview={item.overview}
                   poster={imageUrl(item.poster)}
                   rating={item.rating}
+                  ratingLabel={ratingLabel(item)}
                   size="sm"
                   tabIndex={tabIndex}
                   title={item.name}
+                  votesLabel={votesLabel(item)}
                 />
               )}
               title={t(RAIL_HEADINGS[rail.rail] ?? "discover.rail.unknown")}

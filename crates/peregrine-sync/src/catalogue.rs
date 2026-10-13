@@ -159,17 +159,19 @@ pub async fn refresh_title(
 /// Writes what a *list* answer knows onto a title the catalogue holds, and answers with it.
 ///
 /// A list answer — a rail, a search page — is not a title read: it carries an identity, a name, a
-/// date, and at most a poster and a score. Those two are the whole reason this exists, because a
-/// list endpoint already sends them and a screen that had to ask for a title's details to learn its
-/// poster would spend two requests where the provider's answer needed one (`PG-E7-08`).
+/// date, and at most a poster, a score, a short synopsis, and a vote count. Those four are the whole
+/// reason this exists, because a list endpoint already sends them and a screen that had to ask for a
+/// title's details to learn them would spend two requests where the provider's answer needed one
+/// (`PG-E7-08`, `PG-E7-05`).
 ///
 /// **It goes through the same statement a details fill does, and inherits the same rule:** every
 /// optional column is written with `COALESCE`, so a later list answer carrying `None` leaves the
-/// stored poster and score alone (`PG-E5-07`). It also inherits the statement's two stamps, and
-/// they are worth naming rather than discovering: `metadata_state` follows `refresh_title`'s
-/// `Partial` — a list answer has filled some fields, not all — and `last_synced_at` is set, which is
-/// what `PG-E6-15`'s staleness policy and `crate::artwork`'s `refresh_due` read. A list answer *is*
-/// a provider answering about the title, so those two travel with it.
+/// stored poster, score, synopsis, and count alone (`PG-E5-07`). It also inherits the statement's two
+/// stamps, and they are worth naming rather than discovering: `metadata_state` follows
+/// `refresh_title`'s `Partial` — a list answer has filled some fields, not all — and
+/// `last_synced_at` is set, which is what `PG-E6-15`'s staleness policy and `crate::artwork`'s
+/// `refresh_due` read. A list answer *is* a provider answering about the title, so those two travel
+/// with it.
 ///
 /// # Errors
 ///
@@ -187,14 +189,14 @@ pub async fn record_list_answer(
         // into "leave what is stored alone" — the alternative is erasing a synopsis because a rail
         // listed the title.
         original_name: None,
-        overview: None,
+        overview: candidate.overview().map(str::to_owned),
         tagline: None,
         released: candidate.released(),
         runtime_minutes: None,
         original_language: None,
         origin_country: None,
         rating: candidate.rating(),
-        votes: None,
+        votes: candidate.votes(),
         popularity: None,
         adult: None,
         in_production: None,

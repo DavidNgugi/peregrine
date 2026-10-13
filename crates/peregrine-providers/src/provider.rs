@@ -200,14 +200,16 @@ impl SearchQuery {
 ///
 /// # What a *list* answer carries that a stub did not
 ///
-/// A provider's list endpoints — a rail, a search page — already answer with a poster and a
-/// score for every item, so a candidate carries both ([`SearchCandidate::artwork_path`] and
-/// [`SearchCandidate::rating`]). That is what keeps filling a rail of posters from costing a
-/// second request per title (`PG-E7-08`), and it is why the fields belong here rather than on
-/// [`peregrine_domain::catalogue::TitleDetails`], which is what a *details* read answers.
+/// A provider's list endpoints — a rail, a search page — already answer with a poster, a score, a
+/// synopsis, and a vote count for every item, so a candidate carries all four
+/// ([`SearchCandidate::artwork_path`], [`SearchCandidate::rating`],
+/// [`SearchCandidate::overview`], and [`SearchCandidate::votes`]). That is what keeps filling a
+/// rail of posters from costing a second request per title (`PG-E7-08`), and it is why the fields
+/// belong here rather than on [`peregrine_domain::catalogue::TitleDetails`], which is what a
+/// *details* read answers.
 ///
-/// Both are optional, and a provider that sends neither still produces a candidate: not every
-/// list carries artwork, and a provider's own field names never appear on this type.
+/// All four are optional, and a provider that sends none of them still produces a candidate: not
+/// every list carries artwork or prose, and a provider's own field names never appear on this type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchCandidate {
     external_id: ExternalId,
@@ -216,15 +218,18 @@ pub struct SearchCandidate {
     released: Option<Date>,
     artwork_path: Option<String>,
     rating: Option<f64>,
+    overview: Option<String>,
+    votes: Option<u64>,
 }
 
 impl SearchCandidate {
     /// Builds a candidate that carries only what every provider's list carries.
     ///
-    /// The artwork and the rating are set with [`SearchCandidate::with_artwork_path`] and
-    /// [`SearchCandidate::with_rating`], because a provider that sends neither is the rule rather
-    /// than the exception and a five-argument constructor would make every call site state a
-    /// `None` it does not mean.
+    /// The artwork, the rating, the synopsis, and the vote count are set with
+    /// [`SearchCandidate::with_artwork_path`], [`SearchCandidate::with_rating`],
+    /// [`SearchCandidate::with_overview`], and [`SearchCandidate::with_votes`], because a provider
+    /// that sends none of them is the rule rather than the exception and an eight-argument
+    /// constructor would make every call site state four `None`s it does not mean.
     #[must_use]
     pub const fn new(
         external_id: ExternalId,
@@ -239,6 +244,8 @@ impl SearchCandidate {
             released,
             artwork_path: None,
             rating: None,
+            overview: None,
+            votes: None,
         }
     }
 
@@ -262,6 +269,31 @@ impl SearchCandidate {
     #[must_use]
     pub fn with_rating(mut self, rating: Option<f64>) -> Self {
         self.rating = rating;
+        self
+    }
+
+    /// The same candidate, carrying the synopsis the list answer sent.
+    ///
+    /// A list endpoint that sends an `overview` is sending prose, and prose is what the hover
+    /// preview draws inside the enlarged card (`PG-E7-05`). It is *not* a details read: a list
+    /// answer's synopsis is the short one, and a later `refresh_title` may replace it.
+    ///
+    /// An empty or whitespace-only string is not prose, so an adapter maps one to `None` for the
+    /// reason [`SearchCandidate::with_artwork_path`] states about a blank path.
+    #[must_use]
+    pub fn with_overview(mut self, overview: Option<String>) -> Self {
+        self.overview = overview;
+        self
+    }
+
+    /// The same candidate, carrying how many people voted on the title.
+    ///
+    /// It travels beside [`SearchCandidate::rating`] because a score without its denominator is a
+    /// claim nobody can weigh, and because a provider that reports `0` for an item nobody has voted
+    /// on is describing an absence rather than a count — an adapter maps that to `None`.
+    #[must_use]
+    pub const fn with_votes(mut self, votes: Option<u64>) -> Self {
+        self.votes = votes;
         self
     }
 
@@ -313,6 +345,25 @@ impl SearchCandidate {
     #[must_use]
     pub const fn rating(&self) -> Option<f64> {
         self.rating
+    }
+
+    /// The synopsis the list answer carried, when it carried one.
+    ///
+    /// `None` is "the provider said nothing about what this is", which is a state the preview draws
+    /// by leaving the line out rather than by inventing a summary (`AGENTS R30` is why this port
+    /// does not guess one).
+    #[must_use]
+    pub fn overview(&self) -> Option<&str> {
+        self.overview.as_deref()
+    }
+
+    /// How many people voted on the title, when the answer carried a count.
+    ///
+    /// Zero is never a count: it is what a provider sends for an item nobody has voted on, and an
+    /// adapter must map it to `None` rather than to a number that reads as "nobody cares".
+    #[must_use]
+    pub const fn votes(&self) -> Option<u64> {
+        self.votes
     }
 }
 
@@ -607,6 +658,28 @@ mod tests {
             candidate.rating().is_none(),
             "an absent score is not a score of zero"
         );
+        assert!(candidate.overview().is_none());
+        assert!(
+            candidate.votes().is_none(),
+            "an absent count is not a count of zero"
+        );
+    }
+
+    #[test]
+    fn a_candidate_carries_the_synopsis_and_the_vote_count_a_list_answer_gave_it() {
+        // What the hover preview draws (`PG-E7-05`): a list answer already sends both, so the panel
+        // costs no second request — and both are optional, because not every provider writes prose.
+        let candidate = SearchCandidate::new(
+            ExternalId::new(Provider::Tmdb, "603").expect("a valid id"),
+            text("The Matrix"),
+            TitleKind::Movie,
+            Some(Date::constant(1999, 3, 31)),
+        )
+        .with_overview(Some("A hacker learns the truth.".to_owned()))
+        .with_votes(Some(24_000));
+
+        assert_eq!(candidate.overview(), Some("A hacker learns the truth."));
+        assert_eq!(candidate.votes(), Some(24_000));
     }
 
     #[test]

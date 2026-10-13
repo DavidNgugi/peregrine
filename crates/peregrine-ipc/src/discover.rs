@@ -62,6 +62,23 @@ pub struct RailItemDto {
     /// the adapter mapped to absent, both arrive here as "no badge" — which is what the tile draws,
     /// and a `0.0` badge would be a claim the provider never made.
     pub rating: Option<f64>,
+    /// The short synopsis the list answer carried, or `null` when it carried none.
+    ///
+    /// It is what the hover preview draws inside the enlarged card (`PG-E7-05`), and it is the
+    /// *list* answer's prose rather than the details read's: a title whose details have been filled
+    /// in may have a longer one, and this field is not that one.
+    pub overview: Option<String>,
+    /// How many people voted on it, or `null` when the answer carried no count.
+    ///
+    /// `null` is not `0`: a provider that sends nothing, and one that sends the zero it uses for an
+    /// item nobody has voted on, both arrive as "no count to draw" — and "0 votes" beside a star is
+    /// a claim the provider never made.
+    ///
+    /// Exported as `Number` rather than Specta's forbidden `u64`, which is the same precision
+    /// argument `title_id` makes: a webview counts in `f64`, and no vote count will ever reach
+    /// 2^53.
+    #[specta(type = Option<Number>)]
+    pub votes: Option<u64>,
 }
 
 impl From<peregrine_app::RailItem> for RailItemDto {
@@ -76,6 +93,8 @@ impl From<peregrine_app::RailItem> for RailItemDto {
             year: item.year,
             poster: item.poster.map(|path| path.to_string_lossy().into_owned()),
             rating: item.rating,
+            overview: item.overview,
+            votes: item.votes,
         }
     }
 }
@@ -249,6 +268,8 @@ mod tests {
                 year: Some(2022),
                 poster: Some(std::path::PathBuf::from("/cache/images/abc")),
                 rating: Some(8.7),
+                overview: Some("A severed employee questions the work.".to_owned()),
+                votes: Some(3_100),
             }],
             state: peregrine_app::RailsState::Ready,
         };
@@ -263,6 +284,12 @@ mod tests {
         assert_eq!(dto.items[0].year, Some(2022));
         assert_eq!(dto.items[0].poster.as_deref(), Some("/cache/images/abc"));
         assert_eq!(dto.items[0].rating, Some(8.7));
+        assert_eq!(
+            dto.items[0].overview.as_deref(),
+            Some("A severed employee questions the work."),
+            "the preview's prose is the core's answer, so the screen computes no rule"
+        );
+        assert_eq!(dto.items[0].votes, Some(3_100));
         assert_eq!(dto.state, RailsStateDto::Ready);
     }
 
@@ -279,6 +306,8 @@ mod tests {
                 year: None,
                 poster: None,
                 rating: None,
+                overview: None,
+                votes: None,
             }],
             state: peregrine_app::RailsState::Ready,
         };
@@ -290,6 +319,14 @@ mod tests {
         assert_eq!(
             dto.items[0].rating, None,
             "a list answer with no score is no badge, not a badge of zero"
+        );
+        assert_eq!(
+            dto.items[0].overview, None,
+            "a list answer with no prose draws no line rather than an empty one"
+        );
+        assert_eq!(
+            dto.items[0].votes, None,
+            "an absent count is no count, not a count of zero"
         );
         assert_eq!(dto.items[0].kind, RailKindDto::Movie);
     }

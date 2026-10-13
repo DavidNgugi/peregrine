@@ -325,6 +325,37 @@ async fn a_list_answer_carries_the_candidates_score_to_the_writer() {
 }
 
 #[tokio::test]
+async fn a_list_answer_carries_the_synopsis_and_the_vote_count_it_was_given() {
+    // The hover preview draws both from the rail item the list answer produced (`PG-E7-05`), and
+    // neither is a column any repository query selects — so, exactly as with the score above, what
+    // this pins is the sync's own link: the candidate's synopsis and count reach the write rather
+    // than being dropped on the way. The not-clearing half is `COALESCE`, the same clause the date
+    // and the artwork path are asserted against.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let id = stub(&database, "The Matrix").await;
+
+    let described = listed("603", None, Some(8.2))
+        .with_overview(Some("A hacker learns the truth.".to_owned()))
+        .with_votes(Some(24_000));
+    let written = record_list_answer(&database, id, &described, 2_000)
+        .await
+        .expect("the answer is written");
+
+    assert_eq!(
+        written.overview.as_deref(),
+        Some("A hacker learns the truth.")
+    );
+    assert_eq!(written.votes, Some(24_000));
+
+    let bare = record_list_answer(&database, id, &listed("603", None, Some(8.2)), 3_000)
+        .await
+        .expect("the second answer is written");
+    assert_eq!(bare.overview, None, "the second answer carried no synopsis");
+    assert_eq!(bare.votes, None, "the second answer carried no count");
+}
+
+#[tokio::test]
 async fn a_list_answer_never_clears_a_field_a_details_fill_stored() {
     // The rule PG-E5-07 established, across the two writers rather than within one: a date a
     // *details* read recorded survives a later list answer that omits it, because every optional

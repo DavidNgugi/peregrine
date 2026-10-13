@@ -55,6 +55,12 @@ pub const PRIORITY: i32 = 10;
 /// The row id is the stable key a screen navigates with, and the name and year are what the
 /// catalogue holds. Mapping a row into this is the core's business rather than a screen's
 /// (`AGENTS R7`), which is why the DTO the IPC layer answers with is built from it.
+///
+/// **Everything a list answer already gave is here, and nothing is invented.** A provider's rail
+/// answer carries a poster, a score, a synopsis, and a vote count for each item, and the hover
+/// preview (`PG-E7-05`) draws all four — so all four ride the item rather than costing a second
+/// request per tile. What it does *not* carry is a runtime or a genre: TMDB's list endpoints send
+/// neither, and a panel that guessed one would be stating something no provider said.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RailItem {
     /// The catalogue row, which is what opening the title needs.
@@ -70,6 +76,10 @@ pub struct RailItem {
     /// The provider's own score for the title, when the list answer carried one, so the card a
     /// screen draws can show its badge without a second read.
     pub rating: Option<f64>,
+    /// The synopsis the list answer carried, when it carried one, for the preview's prose.
+    pub overview: Option<String>,
+    /// How many people voted on it, when the list answer counted them.
+    pub votes: Option<u64>,
 }
 
 /// What the Discover screen reads: every rail, as the catalogue and the cache last answered.
@@ -338,9 +348,12 @@ impl DiscoverRailsJob {
     /// One candidate, in the catalogue, as a rail item — or `None` when it cannot be one.
     ///
     /// The write is [`peregrine_sync::record_list_answer`] rather than a details read: a list answer
-    /// already carries the poster's path and the score, so the catalogue is given them here and the
-    /// artwork phase below reads the path back out. That is what turns two requests per title into
-    /// one (`PG-E7-08`).
+    /// already carries the poster's path, the score, the synopsis, and the vote count, so the
+    /// catalogue is given all four here and the artwork phase below reads the path back out. That is
+    /// what turns two requests per title into one (`PG-E7-08`), and it is where the hover preview's
+    /// prose comes from without a second request either (`PG-E7-05`). The item the caller draws is
+    /// built from what was written, so the screen and the catalogue cannot disagree about what the
+    /// provider said.
     async fn upsert(
         &self,
         candidate: SearchCandidate,
@@ -369,6 +382,8 @@ impl DiscoverRailsJob {
             year: written.released.map(|date| i32::from(date.year())),
             poster: None,
             rating: written.rating,
+            overview: written.overview,
+            votes: written.votes,
         }))
     }
 
@@ -778,6 +793,8 @@ mod tests {
                 year: Some(1999),
                 poster: None,
                 rating: None,
+                overview: None,
+                votes: None,
             }],
         );
 
@@ -832,6 +849,8 @@ mod tests {
             year: None,
             poster: None,
             rating: None,
+            overview: None,
+            votes: None,
         };
         let mut rails = BTreeMap::new();
         rails.insert(RailKind::TrendingWeek, vec![item(1), item(2), item(3)]);
@@ -1012,6 +1031,53 @@ mod tests {
             row.state.is_terminal(),
             "a finished run must close its journal row"
         );
+    }
+
+    #[tokio::test]
+    async fn a_rail_item_carries_the_synopsis_and_the_vote_count_the_list_answer_gave() {
+        // The hover preview draws both inside the enlarged card (`PG-E7-05`), and the rail item is
+        // where it gets them: a candidate whose list answer carried prose and a count keeps them,
+        // and one whose answer carried neither says `None` rather than inventing a summary or a
+        // zero. The write is asserted separately, against `peregrine-sync`'s own suite.
+        let fixture = Fixture::new().await;
+        let described = listed("603", "The Matrix", "/poster.jpg", Some(8.2))
+            .with_overview(Some("A hacker learns the truth.".to_owned()))
+            .with_votes(Some(24_000));
+        let bare = listed("604", "A Bare Listing", "/bare.jpg", None);
+        let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("unused", None),
+            b"jpeg".to_vec(),
+            vec![described, bare],
+        );
+        fixture.run(Arc::new(fake)).await.expect("the run succeeds");
+
+        let read = fixture.rails.read();
+        let popular = read
+            .iter()
+            .find(|(rail, _)| *rail == RailKind::PopularMovies)
+            .expect("every rail is reported");
+        assert_eq!(popular.1.len(), 2);
+        let matrix = popular
+            .1
+            .iter()
+            .find(|item| item.name == "The Matrix")
+            .expect("the described title is listed");
+        assert_eq!(
+            matrix.overview.as_deref(),
+            Some("A hacker learns the truth.")
+        );
+        assert_eq!(matrix.votes, Some(24_000));
+        let bare = popular
+            .1
+            .iter()
+            .find(|item| item.name == "A Bare Listing")
+            .expect("the bare title is listed");
+        assert_eq!(
+            bare.overview, None,
+            "a provider that wrote no prose said none"
+        );
+        assert_eq!(bare.votes, None, "an absent count is not a count of zero");
     }
 
     #[tokio::test]

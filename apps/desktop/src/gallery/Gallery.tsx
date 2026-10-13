@@ -221,20 +221,123 @@ const POSTER = `data:image/svg+xml,${encodeURIComponent(
  * Twelve of them so the rail overflows the gallery's own column width and both edge affordances have
  * something to answer for: a rail that fits on screen shows neither chevron, and showing only that
  * state would be showing the one case where the component does nothing.
+ *
+ * Each one carries what a list answer carries — a synopsis and a vote count — because the hover
+ * preview draws them (`PG-E7-05`) and a gallery entry with nothing behind the ladder would be a
+ * gallery entry that cannot be reviewed. Two deliberately have neither, so the panel's empty and
+ * partial states are on the page rather than only in a test.
  */
 const RAIL_TITLES = [
-  { id: 1, kind: "movie", meta: "1979 · Film", rating: 8.5, title: "Alien" },
-  { id: 2, kind: "movie", meta: "2010 · Film", rating: 8.8, title: "Inception" },
-  { id: 3, kind: "movie", meta: "1999 · Film", rating: 8.7, title: "The Matrix" },
-  { id: 4, kind: "series", meta: "2008 · Series", rating: 9.5, title: "Breaking Bad" },
-  { id: 5, kind: "movie", meta: "2014 · Film", rating: 8.6, title: "Interstellar" },
-  { id: 6, kind: "series", meta: "2019 · Series", rating: 8.7, title: "The Expanse" },
-  { id: 7, kind: "movie", meta: "1982 · Film", rating: 8.1, title: "Blade Runner" },
-  { id: 8, kind: "movie", meta: "2016 · Film", rating: 7.8, title: "Arrival" },
-  { id: 9, kind: "series", meta: "2002 · Series", rating: 9.2, title: "The Wire" },
-  { id: 10, kind: "movie", meta: "1968 · Film", rating: 8.3, title: "2001: A Space Odyssey" },
-  { id: 11, kind: "movie", meta: "2019 · Film", rating: 7.9, title: "Ad Astra" },
-  { id: 12, kind: "series", meta: "2020 · Series", rating: 8.4, title: "Raised by Wolves" },
+  {
+    id: 1,
+    kind: "movie",
+    meta: "1979 · Film",
+    rating: 8.5,
+    title: "Alien",
+    overview:
+      "The crew of a commercial towing ship answers a distress call and finds something aboard that should not be there.",
+    votes: 14_208,
+  },
+  {
+    id: 2,
+    kind: "movie",
+    meta: "2010 · Film",
+    rating: 8.8,
+    title: "Inception",
+    overview: "A thief who enters dreams to steal secrets is asked to plant one instead.",
+    votes: 37_402,
+  },
+  {
+    id: 3,
+    kind: "movie",
+    meta: "1999 · Film",
+    rating: 8.7,
+    title: "The Matrix",
+    overview: "A hacker learns that the world he lives in is a construction, and what it is for.",
+    votes: 26_113,
+  },
+  {
+    id: 4,
+    kind: "series",
+    meta: "2008 · Series",
+    rating: 9.5,
+    title: "Breaking Bad",
+    overview: null,
+    votes: 15_004,
+  },
+  {
+    id: 5,
+    kind: "movie",
+    meta: "2014 · Film",
+    rating: 8.6,
+    title: "Interstellar",
+    overview: "A farmer and former pilot leaves his children to look for a home for everyone else.",
+    votes: 35_901,
+  },
+  {
+    id: 6,
+    kind: "series",
+    meta: "2019 · Series",
+    rating: 8.7,
+    title: "The Expanse",
+    overview: "Three factions, one missing woman, and a system that is not as empty as it looks.",
+    votes: 4_882,
+  },
+  {
+    id: 7,
+    kind: "movie",
+    meta: "1982 · Film",
+    rating: 8.1,
+    title: "Blade Runner",
+    overview: "A retired officer is brought back to retire four who came back on their own.",
+    votes: 13_540,
+  },
+  {
+    id: 8,
+    kind: "movie",
+    meta: "2016 · Film",
+    rating: 7.8,
+    title: "Arrival",
+    overview: "A linguist is asked to talk to something that does not experience time as she does.",
+    votes: 18_770,
+  },
+  {
+    id: 9,
+    kind: "series",
+    meta: "2002 · Series",
+    rating: 9.2,
+    title: "The Wire",
+    overview: null,
+    votes: null,
+  },
+  {
+    id: 10,
+    kind: "movie",
+    meta: "1968 · Film",
+    rating: 8.3,
+    title: "2001: A Space Odyssey",
+    overview: "A monolith, a mission, and the one member of the crew that never sleeps.",
+    votes: 11_920,
+  },
+  {
+    id: 11,
+    kind: "movie",
+    meta: "2019 · Film",
+    rating: 7.9,
+    title: "Ad Astra",
+    overview:
+      "An astronaut goes looking for the father whose mission everyone else would rather forget.",
+    votes: 8_311,
+  },
+  {
+    id: 12,
+    kind: "series",
+    meta: "2020 · Series",
+    rating: 8.4,
+    title: "Raised by Wolves",
+    overview: null,
+    votes: 2_100,
+  },
 ] as const;
 
 /**
@@ -296,7 +399,9 @@ export function Gallery(): ReactElement {
             label="Five thousand titles"
             renderItem={(item) => (
               <TitleCard
+                detailsLabel="Details"
                 href={`/title/movie/${String(item.id)}`}
+                overview="One tile of five thousand, at the geometry §4 fixes."
                 poster={POSTER}
                 size="sm"
                 title={item.title}
@@ -476,13 +581,17 @@ export function Gallery(): ReactElement {
             items={RAIL_TITLES}
             renderItem={(item, tabIndex) => (
               <TitleCard
+                detailsLabel="Details"
                 href={`/title/${item.kind}/${item.id}`}
                 meta={item.meta}
+                overview={item.overview}
                 poster={POSTER}
                 rating={item.rating}
+                ratingLabel={`rated ${String(item.rating)} out of 10`}
                 size="md"
                 tabIndex={tabIndex}
                 title={item.title}
+                votesLabel={item.votes === null ? null : `${item.votes.toLocaleString("en")} votes`}
               />
             )}
             title="Trending this week"
@@ -492,7 +601,7 @@ export function Gallery(): ReactElement {
 
       <Section_
         component="TitleCard"
-        description="A poster tile. The 2:3 box is reserved before the bytes arrive, so a late, failed, or never-cached image never moves the grid; the chip's word and the rating's spoken form come from the caller, because the kit holds no copy."
+        description="A poster tile, and the hover preview PG-E7-05 is judged on. Rest a pointer on one for 450 ms: it grows to 1.06 over 180 ms with the metadata scrimmed inside the enlarged layer, and the tiles beside it do not move. Leave, scroll, hide the tab, or scroll it below 60% and it cancels; Tab to it and the panel appears without the scale. The 2:3 box is reserved before the bytes arrive, so a late, failed, or never-cached image never moves the grid; every word comes from the caller, because the kit holds no copy."
       >
         <div className="flex w-full flex-col gap-6">
           <div className="flex flex-wrap items-end gap-3">
@@ -501,43 +610,59 @@ export function Gallery(): ReactElement {
                 <TitleCard
                   availability="acquiring"
                   availabilityLabel="Downloading"
+                  detailsLabel="Details"
                   href="/title/movie/1"
                   meta="1979 · Film"
+                  overview="The crew of a commercial towing ship answers a distress call and finds something aboard that should not be there."
                   poster={POSTER}
                   rating={8.5}
                   ratingLabel="rated 8.5 out of 10"
                   size={size}
                   title="Alien"
+                  votesLabel="14,208 votes"
                 />
                 <span className="text-micro text-text-tertiary">{size}</span>
               </div>
             ))}
           </div>
           <div className="flex flex-wrap items-start gap-3">
+            {/* The four states the revealed panel can be in, side by side: everything a list
+                answer carries, prose with no score, a score with no prose, and a title the provider
+                said nothing about at all. */}
             <TitleCard
+              detailsLabel="Details"
               href="/title/movie/2"
               meta="2010 · Film"
+              overview="A thief who enters dreams to steal secrets is asked to plant one instead."
               poster={POSTER}
               rating={7.25}
+              ratingLabel="rated 7.3 out of 10"
               size="lg"
               title="Inception"
+              votesLabel="37,402 votes"
             />
             <TitleCard
               availability="unavailable"
               availabilityLabel="Unavailable"
+              detailsLabel="Details"
               href="/title/movie/3"
               meta="1999 · Film"
+              overview="A hacker learns that the world he lives in is a construction, and what it is for."
               poster={POSTER}
               size="lg"
               title="The Matrix"
+              votesLabel="26,113 votes"
             />
             <TitleCard
               availability="watchlisted"
               availabilityLabel=""
+              detailsLabel="Details"
               href="/title/movie/4"
               meta="2019 · Film"
               placeholder="oklch(0.45 0.06 250)"
               poster={null}
+              rating={8.4}
+              ratingLabel="rated 8.4 out of 10"
               size="lg"
               title="No poster cached"
             />

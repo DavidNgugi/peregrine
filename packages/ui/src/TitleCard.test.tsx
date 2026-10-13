@@ -1,6 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CARD_SIZES, formatRating, posterVisible, TitleCard } from "./TitleCard.js";
+import {
+  CARD_SIZES,
+  formatRating,
+  posterVisible,
+  previewOverview,
+  TitleCard,
+  TitlePreviewPanel,
+} from "./TitleCard.js";
 
 /** Every `class` attribute in the markup, in render order. */
 function classAttributes(markup: string): string[][] {
@@ -190,5 +197,193 @@ describe("TitleCard accessible name", () => {
   it("lets the call site win a conflicting utility", () => {
     expect(frameClasses(card({ className: "w-[999px]" }))).toContain("w-[999px]");
     expect(frameClasses(card({ className: "w-[999px]" }))).not.toContain("w-[144px]");
+  });
+});
+
+/**
+ * The hover preview's markup and its animation contract.
+ *
+ * **The one thing this file cannot do is interact.** The test environment is Node with
+ * `react-dom/server`: there is no pointer, no timer, no `IntersectionObserver`, and no
+ * `transitionend`, so the marks a hover would leave are decided in `hover-preview.ts` and tested
+ * there. What is asserted here is what a *static* render can hold to the rules: the layer that is
+ * not there before anything happened, the classes that keep the animation on the compositor, and the
+ * panel's own markup for each combination of data the caller supplies.
+ */
+describe("TitleCard hover preview", () => {
+  it("draws no metadata layer before the interaction has fired", () => {
+    // The ladder's first state, reached without a pointer: a resting tile carries no layer at all
+    // rather than a hidden one, so nothing is painted and nothing is tabbable.
+    const markup = card({
+      detailsLabel: "Details",
+      meta: "1979 · Film",
+      overview: "A crew answers a distress call.",
+      votesLabel: "24,000 votes",
+    });
+
+    expect(markup).not.toContain("data-preview-panel");
+    expect(markup).not.toContain("Details");
+  });
+
+  it("rests at scale 1 with nothing promoted to the compositor", () => {
+    // §5 rule 3: `will-change` is applied when an interaction starts and removed when it settles —
+    // never left on a grid of five thousand tiles.
+    const markup = card();
+
+    expect(markup).toContain("transform:scale(1)");
+    expect(markup).not.toContain("will-change");
+  });
+
+  it("animates transform and opacity and nothing else", () => {
+    const classes = frameClasses(card());
+
+    expect(classes).toContain("transition-transform");
+    expect(classes).toContain("after:transition-opacity");
+    for (const forbidden of [
+      "transition-all",
+      "transition-shadow",
+      "transition-[width]",
+      "transition-[height]",
+      "transition-[box-shadow]",
+    ]) {
+      expect(classes).not.toContain(forbidden);
+    }
+  });
+
+  it("rides the shadow ramp on a pseudo-element rather than animating a box-shadow", () => {
+    // §5's rule, and the reason it exists: an animated `box-shadow` repaints the whole tile every
+    // frame. The ramp is the `::after`'s opacity, so the shadow itself never animates.
+    const classes = frameClasses(card());
+
+    expect(classes.some((name) => name.startsWith("after:shadow-"))).toBe(true);
+    expect(classes.some((name) => name.startsWith("after:opacity-"))).toBe(true);
+    expect(classes.filter((name) => /(^|:)shadow-/u.test(name))).toHaveLength(1);
+  });
+
+  it("does not clip the ramp's own shadow with the containment hint", () => {
+    // Found while wiring this: `contain: paint` clips a descendant's painting to the tile's box, and
+    // the shadow ramp *is* a descendant — its whole point is the part that falls outside the border
+    // box. The poster is clipped by the inner frame instead, which is where the rounded corner is.
+    const classes = frameClasses(card());
+
+    expect(classes).toContain("[contain:layout_style]");
+    expect(classes).not.toContain("[contain:layout_paint_style]");
+    expect(everyClass(card())).toContain("overflow-hidden");
+  });
+
+  it("names the motion tokens, with §5's numbers as the fallback until they land", () => {
+    // The `--dur-*`/`--ease-*` families are PG-E21-07's and do not exist yet, so the ladder has to be
+    // right today and pick the tokens up unchanged the day they do. The ramp's pair is in the
+    // classes, which is how a resting tile still states it.
+    const markup = card();
+    const classes = frameClasses(card());
+
+    expect(markup).toContain("var(--dur-2, 120ms)");
+    expect(markup).toContain("var(--ease-accelerate");
+    expect(classes.some((name) => name.includes("var(--dur-3,180ms)"))).toBe(true);
+    expect(classes.some((name) => name.includes("var(--ease-standard"))).toBe(true);
+  });
+
+  it("has a reduced-motion branch for both transitions", () => {
+    // §5 rule 5: the durations collapse, and the reveal is instant rather than absent — the panel
+    // still appears, it just stops moving. This is the kit's established branch, in `Button`,
+    // `Progress`, and `Sidebar` too.
+    const classes = frameClasses(card());
+
+    expect(classes).toContain("motion-reduce:transition-none");
+    expect(classes).toContain("motion-reduce:after:transition-none");
+  });
+});
+
+describe("TitlePreviewPanel", () => {
+  function panel(overrides: Partial<Parameters<typeof TitlePreviewPanel>[0]> = {}): string {
+    return renderToStaticMarkup(<TitlePreviewPanel {...overrides} />);
+  }
+
+  it("draws the score with its mark, the count, the meta line, the prose, and the Details verb", () => {
+    const markup = panel({
+      detailsLabel: "Details",
+      meta: "1999 · Film",
+      overview: "A hacker learns the truth.",
+      rating: 8.2,
+      votesLabel: "24,000 votes",
+    });
+
+    expect(markup).toContain('data-preview-panel=""');
+    expect(markup).toContain('<svg aria-hidden="true"');
+    expect(markup).toContain("8.2");
+    expect(markup).toContain("24,000 votes");
+    expect(markup).toContain("1999 · Film");
+    expect(markup).toContain("A hacker learns the truth.");
+    expect(markup).toContain("Details");
+  });
+
+  it("hides itself from assistive technology rather than naming the tile twice", () => {
+    // Everything here is already in the tile's accessible name; the synopsis is what a person chose
+    // to hover for, and announcing it inside the link would make the link's name a paragraph.
+    expect(panel({ overview: "Prose", rating: 8.2 })).toContain('aria-hidden="true"');
+  });
+
+  it("adds no control of its own, so the tile stays one tab stop", () => {
+    // PG-E9-01 owns the watchlist and bookmark actions, and an enabled button that does nothing is
+    // worse than an absent one (PG-E1-07). Details is the tile's own navigation, drawn as part of
+    // the link rather than as a nested control inside it.
+    const markup = panel({ detailsLabel: "Details", rating: 8.2 });
+
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("<a ");
+  });
+
+  it("leaves out every line it has no data for", () => {
+    const empty = panel({});
+
+    expect(empty).not.toContain("<svg");
+    expect(empty).not.toContain("Details");
+    // The layer is still drawn — an empty panel is the *reveal* of a title with nothing to say, and
+    // the surface that covers the artwork is what the reveal is.
+    expect(empty).toContain('data-preview-panel=""');
+  });
+
+  it("takes a count without a score, and a score without a count", () => {
+    const votesOnly = panel({ votesLabel: "12 votes" });
+    expect(votesOnly).toContain("12 votes");
+    expect(votesOnly).not.toContain("<svg");
+
+    const scoreOnly = panel({ rating: 7 });
+    expect(scoreOnly).toContain("7.0");
+    expect(scoreOnly).not.toContain("votes");
+  });
+
+  it("clamps the prose to three lines and never cuts a word out of it", () => {
+    // The clamp is CSS, which drops whole lines at a word boundary. The text itself is handed over
+    // intact — a kit that cut "The Matrix is a…sci" would be building ellipsis soup.
+    const prose = "A hacker learns the truth about the world he lives in.";
+    const markup = panel({ overview: prose });
+
+    expect(everyClass(markup)).toContain("line-clamp-3");
+    expect(markup).toContain(prose);
+    expect(markup).not.toContain("…");
+  });
+});
+
+describe("previewOverview", () => {
+  it("says nothing at all for nothing at all", () => {
+    expect(previewOverview(null)).toBeNull();
+    expect(previewOverview(undefined)).toBeNull();
+    expect(previewOverview("")).toBeNull();
+    expect(previewOverview("   ")).toBeNull();
+    expect(previewOverview("\n\t ")).toBeNull();
+  });
+
+  it("collapses the provider's own whitespace so the clamp counts lines and not newlines", () => {
+    expect(previewOverview("  A hacker\n\nlearns   the truth.  ")).toBe(
+      "A hacker learns the truth.",
+    );
+  });
+
+  it("hands real prose over untouched", () => {
+    expect(previewOverview("A crew answers a distress call.")).toBe(
+      "A crew answers a distress call.",
+    );
   });
 });

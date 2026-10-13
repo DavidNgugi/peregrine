@@ -125,6 +125,15 @@ export const en = {
       close: "Close",
       cancel: "Cancel",
     },
+    // The poster tile's own words, which the kit deliberately does not hold (`AGENTS R7`): a chip's
+    // state, a rating's spoken form, a vote count, and one verb. They live here rather than under
+    // `discover` because every screen that draws a tile reads them.
+    card: {
+      details: "Details",
+      rating: "rated {{score}} out of 10",
+      votes_one: "{{formatted}} vote",
+      votes_other: "{{formatted}} votes",
+    },
     title: {
       section: "In your library",
       column: {

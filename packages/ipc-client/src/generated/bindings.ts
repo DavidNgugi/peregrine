@@ -758,6 +758,26 @@ export type RailItemDto = {
 	 *  and a `0.0` badge would be a claim the provider never made.
 	 */
 	rating: number | null,
+	/**
+	 *  The short synopsis the list answer carried, or `null` when it carried none.
+	 * 
+	 *  It is what the hover preview draws inside the enlarged card (`PG-E7-05`), and it is the
+	 *  *list* answer's prose rather than the details read's: a title whose details have been filled
+	 *  in may have a longer one, and this field is not that one.
+	 */
+	overview: string | null,
+	/**
+	 *  How many people voted on it, or `null` when the answer carried no count.
+	 * 
+	 *  `null` is not `0`: a provider that sends nothing, and one that sends the zero it uses for an
+	 *  item nobody has voted on, both arrive as "no count to draw" — and "0 votes" beside a star is
+	 *  a claim the provider never made.
+	 * 
+	 *  Exported as `Number` rather than Specta's forbidden `u64`, which is the same precision
+	 *  argument `title_id` makes: a webview counts in `f64`, and no vote count will ever reach
+	 *  2^53.
+	 */
+	votes: number | null,
 };
 
 /**

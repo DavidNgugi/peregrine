@@ -49,6 +49,8 @@ export type { TableColumn, TableProps } from "./Table.js";
 export { TextInput } from "./TextInput.js";
 export type { TextInputProps } from "./TextInput.js";
 export { CARD_SIZES, TitleCard } from "./TitleCard.js";
-// `posterVisible` and `formatRating` are the card's own decisions rather than primitives, so they are
-// not exported as ones: the card's tests import them from the module, the way the link's do.
+// `posterVisible`, `formatRating`, `previewOverview`, and the `TitlePreviewPanel` the hover preview
+// draws are the card's own decisions rather than primitives, so they are not exported as ones: the
+// card's tests import them from the module, the way the link's do. The ladder itself is
+// `hover-preview.ts`'s, for the same reason.
 export type { CardAvailability, CardSize, TitleCardProps } from "./TitleCard.js";

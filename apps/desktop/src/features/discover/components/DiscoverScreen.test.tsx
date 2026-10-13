@@ -29,6 +29,10 @@ function item(overrides: Partial<RailItemDto> = {}): RailItemDto {
     // `null` rather than a score: most of what the screen draws has no badge, and a test that wanted
     // one says so.
     rating: null,
+    // `null` rather than prose or a count: the preview panel draws what the core answered and
+    // nothing for a field the provider never sent, and a test that wanted either says so.
+    overview: null,
+    votes: null,
     ...overrides,
   };
 }
@@ -99,6 +103,30 @@ describe("DiscoverView", () => {
 
     const unscored = markup(railsView({ rails: [rail({ items: [item({ rating: null })] })] }));
     expect(unscored).not.toContain("8.2");
+  });
+
+  it("writes a rail item's score and vote count into the tile's own name", () => {
+    // The hover preview's panel waits for a pointer this environment does not have, so the part of
+    // it a static render reaches is the accessible name — which is where "8.2" and the count are
+    // written for a screen reader, and where a caller's mapping from the core's numbers to words
+    // either exists or does not.
+    const html = markup(
+      railsView({
+        rails: [
+          rail({
+            items: [
+              item({
+                overview: "A hacker learns the truth.",
+                rating: 8.2,
+                votes: 24_000,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(html).toContain("The Matrix, 1999 · Film, rated 8.2 out of 10, 24,000 votes");
   });
 
   it("gives every rail a heading and its own empty state, fetched or not", () => {
@@ -172,7 +200,10 @@ describe("DiscoverView", () => {
 
   it("draws the rails once the providers have answered", () => {
     const html = markup(
-      railsView({ rails: [rail({ items: [item({ titleId: 4 })], state: "ready" })], state: "ready" }),
+      railsView({
+        rails: [rail({ items: [item({ titleId: 4 })], state: "ready" })],
+        state: "ready",
+      }),
     );
 
     expect(html).toContain("Popular films");

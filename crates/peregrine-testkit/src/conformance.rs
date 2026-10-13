@@ -207,9 +207,10 @@ pub async fn metadata_provider_satisfies_the_port(
 
 /// The facts about one candidate the suite can check without knowing a provider's fixtures.
 ///
-/// Both halves are identity rules rather than taste: the id must name the provider that answered,
-/// and artwork that is present must address something. `operation` names the call that answered, so
-/// a failure says which endpoint produced it.
+/// These are identity rules rather than taste: the id must name the provider that answered,
+/// artwork that is present must address something, a synopsis that is present must say something,
+/// and a vote count must not be the zero a provider uses for "nobody has voted". `operation` names
+/// the call that answered, so a failure says which endpoint produced it.
 fn check_candidate(candidate: &SearchCandidate, named: Provider, operation: &str) {
     assert_eq!(
         candidate.external_id().provider(),
@@ -223,6 +224,17 @@ fn check_candidate(candidate: &SearchCandidate, named: Provider, operation: &str
             "{named} answered a {operation} candidate whose artwork path is blank, which names no image"
         );
     }
+    if let Some(overview) = candidate.overview() {
+        assert!(
+            !overview.trim().is_empty(),
+            "{named} answered a {operation} candidate whose synopsis is blank, which says nothing"
+        );
+    }
+    assert_ne!(
+        candidate.votes(),
+        Some(0),
+        "{named} answered a {operation} candidate with a vote count of zero, which is a provider's way of saying nobody has voted"
+    );
 }
 
 /// The rail half of the contract, which is the search half's shape with a rail's two differences.

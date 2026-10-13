@@ -1,0 +1,190 @@
+/**
+ * The hover-preview ladder (`DESIGN_SYSTEM §5`), as a state machine rather than as event handlers.
+ *
+ * The ladder is the most scrutinized interaction in the app and the one a test environment cannot
+ * exercise: the test runner here is Node with `react-dom/server`, so there is no pointer, no timer,
+ * and no observer callback to deliver (`PG-E21-03`'s named gap). What a component test *can* do is
+ * render the markup a state produces — which means the state has to be reachable without the DOM.
+ * That is why the whole ladder lives in this file as a pure function: `nextPreview` is the
+ * transition, `previewScale` is the transform, and `panelVisible` is the metadata layer, and the
+ * card's only job is to hand `nextPreview` the events its listeners received.
+ *
+ * The rules §5 states, and where each one is decided:
+ *
+ * - **A dwell, not a hover.** Enter arms a {@link DWELL_MS} delay and nothing else; the reveal
+ *   happens when that delay elapses, and it never happens without it or twice for one enter.
+ * - **Anything that moves the card out from under the pointer cancels.** Leave, scroll, the document
+ *   going hidden, and dropping below {@link MIN_VISIBLE_RATIO} of visibility all cancel — the last
+ *   two because the card is no longer what the pointer is over even though the pointer never moved.
+ * - **The scale is capped.** {@link REVEAL_SCALE_CAP} is the hard ceiling, because a tile that grows
+ *   past it collides with its neighbour in a rail or a grid.
+ * - **Focus is not a preview.** A focused card shows the metadata panel and nothing else, which is
+ *   why {@link panelVisible} takes the focus separately and {@link previewScale} does not.
+ */
+
+/** §5's dwell: how long the pointer must rest on a tile before the preview is worth starting. */
+export const DWELL_MS = 450;
+
+/** §5's reveal: how much the tile grows once the dwell has elapsed. */
+export const REVEAL_SCALE = 1.06;
+
+/** §5's hard cap, past which adjacent tiles collide. */
+export const REVEAL_SCALE_CAP = 1.12;
+
+/** §5's visibility floor: below 60% of the tile on screen, the preview is cancelled. */
+export const MIN_VISIBLE_RATIO = 0.6;
+
+/**
+ * Where the ladder is.
+ *
+ * `dwelling` is the 450 ms of nothing-that-shows that separates a pointer crossing a tile from a
+ * pointer resting on it; `revealed` is the enlarged layer.
+ */
+export type PreviewPhase = "idle" | "dwelling" | "revealed";
+
+/**
+ * The phase, and whether a transform transition is in flight.
+ *
+ * `animating` is separate from `phase` because the two disagree in both directions and the
+ * difference is what `will-change` follows: leaving a *dwelling* card animates nothing (no
+ * transition was ever started), while leaving a *revealed* one runs the 120 ms exit — and §5 rule 3
+ * requires `will-change` on the element that is animating and off every other tile in a grid.
+ */
+export interface PreviewState {
+  readonly phase: PreviewPhase;
+  /** Whether this card has a transform transition running, and so whether to promote it. */
+  readonly animating: boolean;
+}
+
+/** Nothing has happened: no dwell, no reveal, nothing to promote. */
+export const IDLE_PREVIEW: PreviewState = { animating: false, phase: "idle" };
+
+/**
+ * Everything that can move the ladder, named as the source names it.
+ *
+ * The four cancelling sources are events of their own rather than one `cancel`, so a test can hold
+ * each of §5's listed triggers to the rule separately — a single event would let three of them be
+ * unwired without a test noticing.
+ */
+export type PreviewEvent =
+  | { readonly type: "pointerEnter" }
+  | { readonly type: "pointerLeave" }
+  | { readonly type: "dwellElapsed" }
+  | { readonly type: "scroll" }
+  | { readonly type: "visibilityChange"; readonly hidden: boolean }
+  | { readonly type: "intersection"; readonly ratio: number }
+  | { readonly type: "settled" };
+
+/** The state an event leaves behind. */
+export function nextPreview(state: PreviewState, event: PreviewEvent): PreviewState {
+  switch (event.type) {
+    case "pointerEnter":
+      // A pointer that re-enters an already-revealed tile does not restart anything: the preview is
+      // up, and re-arming a dwell would take it away and put it back.
+      return state.phase === "idle" ? { animating: true, phase: "dwelling" } : state;
+    case "dwellElapsed":
+      // Only a dwell can fire the preview, and only once — a second timer arriving for a reveal
+      // already up changes nothing.
+      return state.phase === "dwelling" ? { animating: true, phase: "revealed" } : state;
+    case "settled":
+      // `transitionend`: whatever was animating has stopped, so the layer promotion comes off.
+      return state.animating ? { animating: false, phase: state.phase } : state;
+    case "pointerLeave":
+    case "scroll":
+      return cancelled(state);
+    case "visibilityChange":
+      return event.hidden ? cancelled(state) : state;
+    case "intersection":
+      // At exactly the floor the card is still visible enough (§5: "dropping below 60%"), so the
+      // comparison is strict.
+      return event.ratio < MIN_VISIBLE_RATIO ? cancelled(state) : state;
+  }
+}
+
+/**
+ * The cancel a leave, a scroll, a hidden document, and a tile falling below the floor all share.
+ *
+ * A dwell is not an animation: cancelling it must not leave `will-change` on for a transition that
+ * never ran. A reveal *is* one — the exit transition is exactly what cancelling starts — so the
+ * promotion stays until `settled`.
+ */
+function cancelled(state: PreviewState): PreviewState {
+  return { animating: state.phase === "revealed", phase: "idle" };
+}
+
+/**
+ * How much the card is scaled right now.
+ *
+ * §5's reveal scale, clamped so that a caller which asks for more than
+ * {@link REVEAL_SCALE_CAP} — a future size variant, say — cannot put two tiles through each other,
+ * and never scaled below 1: a card that shrank on hover would be a different interaction.
+ */
+export function previewScale(state: PreviewState): number {
+  return state.phase === "revealed" ? revealScale(REVEAL_SCALE) : 1;
+}
+
+/** The cap, applied. Exported for the test that would fail if the number moved. */
+export function revealScale(requested: number): number {
+  return Math.min(Math.max(requested, 1), REVEAL_SCALE_CAP);
+}
+
+/**
+ * Whether the metadata layer is drawn.
+ *
+ * Two ways in and they are not the same interaction: the dwell reveals it inside a scaled card, and
+ * focus reveals it inside a card that stays where it is (§5's keyboard-parity row — the preview is
+ * pointer-only and must never trigger on focus).
+ */
+export function panelVisible(state: PreviewState, focused: boolean): boolean {
+  return state.phase === "revealed" || focused;
+}
+
+/**
+ * Whether the tile's own rating badge is drawn.
+ *
+ * The revealed layer repeats the score where the eye can read it, so the badge behind it is a
+ * ghost of a second one and comes off while the panel is up — one score per tile, not two at
+ * different contrasts. Found by looking at the gallery rather than by a test.
+ *
+ * The availability chip is deliberately not part of this: the panel does not repeat the state, and
+ * the chip stays legible through the layer, which is exactly the moment a person wants to know what
+ * is happening to the title.
+ */
+export function badgeVisible(state: PreviewState, focused: boolean): boolean {
+  return !panelVisible(state, focused);
+}
+
+/** A transition's two CSS values, as the card writes them onto the element. */
+export interface PreviewMotion {
+  readonly duration: string;
+  readonly easing: string;
+}
+
+/**
+ * §5's enter: 180 ms to scale 1.06, decelerating into the stop.
+ *
+ * The values name the `--dur-*`/`--ease-*` tokens PG-E21-07 has not landed yet, with §5's own numbers
+ * as the fallback — so the ladder is right today and picks the token up, reduced-motion collapse
+ * included, the day it exists.
+ */
+export const ENTER_MOTION: PreviewMotion = {
+  duration: "var(--dur-3, 180ms)",
+  easing: "var(--ease-decelerate, cubic-bezier(0, 0, 0, 1))",
+};
+
+/** §5's exit: 120 ms back to scale 1, accelerating away. */
+export const EXIT_MOTION: PreviewMotion = {
+  duration: "var(--dur-2, 120ms)",
+  easing: "var(--ease-accelerate, cubic-bezier(0.3, 0, 1, 1))",
+};
+
+/**
+ * Which transition the card is on.
+ *
+ * Here rather than inline in the component for the reason the rest of the ladder is: the enter's
+ * values only exist in the revealed state, which a `react-dom/server` test cannot reach, and a rule
+ * about a duration that no test can see is a rule nobody is holding to §5.
+ */
+export function previewMotion(state: PreviewState): PreviewMotion {
+  return state.phase === "revealed" ? ENTER_MOTION : EXIT_MOTION;
+}
