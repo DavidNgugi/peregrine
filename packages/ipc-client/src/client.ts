@@ -20,6 +20,7 @@ import type {
   LibraryTitleDto,
   MatchAsDto,
   MatchRuleDto,
+  TitleMatchDto,
   UnmatchedFileDto,
   RootKind,
   RootRef,
@@ -105,6 +106,16 @@ export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto
 }
 
 /**
+ * A page of titles that match the user's own text.
+ *
+ * An empty query answers nothing rather than everything: it is not a search, and a picker that listed
+ * the whole catalogue when the field was empty would be the library screen again.
+ */
+export async function searchTitles(query: string, limit?: number): Promise<TitleMatchDto[]> {
+  return unwrap(commands.searchTitles(query, limit ?? null));
+}
+
+/**
  * One title with the counts its screen shows, or `null` when it is not here.
  *
  * `null` covers both "this account may not see it" and "no title has that id": the two read the same
@@ -156,8 +167,9 @@ export async function listUnmatchedFiles(limit?: number): Promise<UnmatchedFileD
 export async function matchUnmatchedFile(
   id: number,
   asTitle: MatchAsDto = "parsed",
+  titleId?: number,
 ): Promise<boolean> {
-  return unwrap(commands.matchUnmatched({ id, asTitle }));
+  return unwrap(commands.matchUnmatched({ id, asTitle, titleId: titleId ?? null }));
 }
 
 /**

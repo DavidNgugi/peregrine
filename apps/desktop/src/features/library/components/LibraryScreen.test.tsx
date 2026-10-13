@@ -61,6 +61,10 @@ function queue(
       record.matched.push(file.id);
       return Promise.resolve();
     },
+    matchAs: (file: UnmatchedFileDto, titleId: number) => {
+      record.matched.push(file.id + titleId);
+      return Promise.resolve();
+    },
     refresh: () => Promise.resolve(),
     ...state,
     ...record,

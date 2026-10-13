@@ -244,6 +244,14 @@ pub enum MatchAs {
     /// A row with no suggestion falls back to [`MatchAs::Parsed`] rather than failing, because a
     /// suggestion can be filtered from view (a restricted account, I37) while the row is not.
     Suggested,
+    /// The title a person chose from the catalogue.
+    ///
+    /// What the queue could not do without a way to search: a name that neither parses to the right
+    /// title nor looks like one the library holds is a name only a person can place. The id is
+    /// resolved to the title's *name* before the placement, so a chosen title takes the same path as
+    /// a parsed one — and a film is what gets placed, because one file is one item and the episode a
+    /// file belongs to is a different question than the title it belongs to.
+    Title(i64),
 }
 
 /// What answering a parked file did.
@@ -308,6 +316,10 @@ pub async fn match_unmatched(
             Some(title_id) => database.title_name(title_id).await?,
             None => None,
         },
+        // A chosen title is read rather than trusted from the request for the same reason the
+        // suggestion is: a client cannot name a title it may not see, and a client that named one
+        // that does not exist gets the parse's reading rather than a row pointing at nothing.
+        MatchAs::Title(title_id) => database.title_name(title_id).await?,
     };
     let title_name = suggested.as_deref().unwrap_or(title_name);
     let candidate = CandidateFile {
@@ -947,6 +959,21 @@ mod tests {
             }
         }
 
+        /// The id of the one title the corpus holds under `name`.
+        async fn only_title_named(&self, name: &str) -> i64 {
+            self.database
+                .list_titles(
+                    AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                    PageRequest::first(50),
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.name.as_str() == name)
+                .expect("the corpus holds that title")
+                .id
+        }
+
         /// The one title the corpus holds, for a test that needs its id.
         async fn only_title(&self) -> i64 {
             self.database
@@ -1359,6 +1386,55 @@ mod tests {
 
         assert_eq!(second.unmatched, 2, "both are still questions: {second:?}");
         assert_eq!(second.created_seasons, 0, "{second:?}");
+    }
+
+    #[tokio::test]
+    async fn answering_with_a_chosen_title_files_the_file_under_it() {
+        // The third answer, and the only one a person supplies outright: a name whose parse and
+        // suggestion are both wrong is placed under the title a search found. The chosen id resolves
+        // to the title's *name* first, so a chosen title takes the same path a parsed one does.
+        let corpus = corpus("chosen", &["The Matrix 2049.mkv", "Alien (1979).mkv"]).await;
+        corpus.index().await;
+        let chosen = corpus.only_title_named("Alien").await;
+
+        match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            corpus.unmatched_rows().await[0].id,
+            MatchAs::Title(chosen),
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            corpus.titles().await.len(),
+            1,
+            "the file joined the chosen title"
+        );
+        assert_eq!(corpus.unmatched_rows().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn answering_with_a_title_that_does_not_exist_falls_back_to_the_parse() {
+        // A malformed request that still names a file places it the way its own name says rather than
+        // refusing the row: the alternative is a file nobody can place because a client sent an id
+        // that means nothing.
+        let corpus = corpus("chosen-missing", &["The Matrix 2049.mkv"]).await;
+        corpus.index().await;
+        let id = corpus.unmatched_rows().await[0].id;
+
+        match_unmatched(
+            &corpus.database,
+            AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+            id,
+            MatchAs::Title(9_999),
+            at(NOW + 1_000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(corpus.titles().await, vec!["The Matrix".to_owned()]);
     }
 
     #[tokio::test]

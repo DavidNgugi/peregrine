@@ -109,6 +109,20 @@ export const en = {
         failed: "The last scan did not finish.",
         refused: "That scan could not be started.",
       },
+      picker: {
+        title: "File this under…",
+        description: "Choose the title “{{file}}” belongs to. Nothing is downloaded or moved.",
+        search: "Search your catalogue",
+        placeholder: "A film or series name",
+        empty: {
+          title: "Nothing to choose from yet.",
+          body: "Type a name to search the catalogue.",
+        },
+        failed: {
+          title: "The search did not run.",
+          body: "Peregrine's core did not answer, so this list is unknown rather than empty.",
+        },
+      },
       queue: {
         title: "Needs a decision",
         description:
@@ -119,6 +133,7 @@ export const en = {
         },
         match: "Match",
         matchUnder: "File under {{title}}",
+        choose: "Choose…",
         looksLike: "Looks like {{title}}",
         noReason: "—",
         nothingRead: "Nothing was read from this name",

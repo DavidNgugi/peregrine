@@ -36,6 +36,14 @@ export interface UnmatchedQueue {
    * fallback, and a row with no suggestion is still answerable.
    */
   readonly match: (file: UnmatchedFileDto) => Promise<void>;
+  /**
+   * Files the file under a title the user chose.
+   *
+   * The third answer, and the only one a person supplies outright: the parse's reading and the scan's
+   * suggestion are both inferences, and a name neither of them gets right is one only a search can
+   * settle.
+   */
+  readonly matchAs: (file: UnmatchedFileDto, titleId: number) => Promise<void>;
   /** Re-reads the queue. */
   readonly refresh: () => Promise<void>;
 }
@@ -87,5 +95,22 @@ export function useUnmatchedFiles(): UnmatchedQueue {
     [refresh],
   );
 
-  return { ...state, match, refresh };
+  const matchAs = useCallback(
+    async (file: UnmatchedFileDto, titleId: number): Promise<void> => {
+      setState((previous) => ({ ...previous, busy: true, error: null }));
+      try {
+        await matchUnmatchedFile(file.id, "chosen", titleId);
+        await refresh();
+      } catch (caught: unknown) {
+        const error = normalizeIpcError(caught);
+        logUiError("matchUnmatchedFile", error);
+        setState((previous) => ({ ...previous, error: messageOf(error) }));
+      } finally {
+        setState((previous) => ({ ...previous, busy: false }));
+      }
+    },
+    [refresh],
+  );
+
+  return { ...state, match, matchAs, refresh };
 }

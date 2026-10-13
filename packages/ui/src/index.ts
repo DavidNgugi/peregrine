@@ -31,6 +31,8 @@ export type { ShortcutKeysProps } from "./ShortcutKeys.js";
 export { Sidebar, SidebarItem } from "./Sidebar.js";
 export type { SidebarItemProps, SidebarProps } from "./Sidebar.js";
 export { Switch } from "./Switch.js";
+export { TextInput } from "./TextInput.js";
+export type { TextInputProps } from "./TextInput.js";
 export type { SwitchProps } from "./Switch.js";
 export { Table } from "./Table.js";
 export type { TableColumn, TableProps } from "./Table.js";

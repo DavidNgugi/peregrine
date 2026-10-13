@@ -132,6 +132,32 @@ impl From<peregrine_app::LibraryTitleRow> for LibraryTitleDto {
     }
 }
 
+/// One title a search found, as the picker lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleMatchDto {
+    /// The title's id, which is what choosing one names.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// Its name.
+    pub name: String,
+    /// Whether it is a film or a series.
+    pub kind: RootKind,
+}
+
+impl From<peregrine_app::TitleIdentity> for TitleMatchDto {
+    fn from(identity: peregrine_app::TitleIdentity) -> Self {
+        Self {
+            id: identity.id,
+            name: identity.name,
+            kind: match identity.kind {
+                peregrine_app::TitleKind::Movie => RootKind::Movies,
+                peregrine_app::TitleKind::Show => RootKind::Shows,
+            },
+        }
+    }
+}
+
 /// The title a command acts on.
 ///
 /// A DTO rather than a bare `i64` argument, for the reason `RootRef` gives: specta refuses to export
@@ -228,9 +254,12 @@ pub struct UnmatchedRef {
     /// The row id, as the queue returned it.
     #[specta(type = Number)]
     pub id: i64,
-    /// Which title the answer files the file under: the one its name read, or the one the scan
-    /// offered.
+    /// Which title the answer files the file under: the one its name read, the one the scan offered,
+    /// or the one a person chose.
     pub as_title: MatchAsDto,
+    /// The chosen title's id, when `asTitle` is `chosen` and the answer names one.
+    #[specta(type = Option<Number>)]
+    pub title_id: Option<i64>,
 }
 
 /// The two titles an answer can file a parked file under.
@@ -241,13 +270,21 @@ pub enum MatchAsDto {
     Parsed,
     /// What the scan offered, which joins a title the library already holds when there is one.
     Suggested,
+    /// A title a person chose from a search.
+    Chosen,
 }
 
-impl From<MatchAsDto> for peregrine_app::MatchAs {
-    fn from(value: MatchAsDto) -> Self {
-        match value {
-            MatchAsDto::Parsed => Self::Parsed,
-            MatchAsDto::Suggested => Self::Suggested,
+impl UnmatchedRef {
+    /// The placement this answer asks for.
+    ///
+    /// A `chosen` answer with no id is the parse's reading rather than a failure: the request is
+    /// malformed, and the honest thing to do with a malformed request that still names a file is to
+    /// place it the way its own name says rather than to refuse the row.
+    fn as_title(self) -> peregrine_app::MatchAs {
+        match (self.as_title, self.title_id) {
+            (MatchAsDto::Chosen, Some(title_id)) => peregrine_app::MatchAs::Title(title_id),
+            (MatchAsDto::Chosen, None) | (MatchAsDto::Parsed, _) => peregrine_app::MatchAs::Parsed,
+            (MatchAsDto::Suggested, _) => peregrine_app::MatchAs::Suggested,
         }
     }
 }
@@ -429,6 +466,28 @@ pub async fn list_titles(
     Ok(guard_response("library::list_titles", titles))
 }
 
+/// A page of titles that match the user's own text.
+///
+/// The picker's read. The query is refused rather than run when it is empty: an empty search is not a
+/// search, and answering it with a page of everything would be the screen's own list again.
+#[tauri::command]
+#[specta::specta]
+pub async fn search_titles(
+    state: State<'_, RuntimeState>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<TitleMatchDto>, AppError> {
+    if query.trim().is_empty() {
+        return Ok(guard_response("library::search_titles", Vec::new()));
+    }
+    let found = state
+        .runtime()?
+        .search_titles(&query, limit.unwrap_or(20))
+        .await?;
+    let found = found.into_iter().map(TitleMatchDto::from).collect();
+    Ok(guard_response("library::search_titles", found))
+}
+
 /// One title, with the counts its screen shows, or `null` when it is not here.
 ///
 /// `null` rather than an error for the two cases that read the same to a person: a title this
@@ -513,7 +572,7 @@ pub async fn match_unmatched(
 ) -> Result<bool, AppError> {
     let placed = state
         .runtime()?
-        .match_unmatched_file(file.id, file.as_title.into())
+        .match_unmatched_file(file.id, file.as_title())
         .await?;
     Ok(guard_response("library::match_unmatched", placed))
 }

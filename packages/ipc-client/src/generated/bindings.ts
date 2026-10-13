@@ -167,6 +167,13 @@ export const commands = {
 	/**  How many of them are marked missing. */
 	missingFiles: number,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
+	/**
+	 *  A page of titles that match the user's own text.
+	 * 
+	 *  The picker's read. The query is refused rather than run when it is empty: an empty search is not a
+	 *  search, and answering it with a page of everything would be the screen's own list again.
+	 */
+	searchTitles: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_titles", { query, limit })),
 	/**  A title's episodes, in the order a person watches them. */
 	listEpisodes: (title: TitleRef, limit: number | null) => typedError<EpisodeDto[], AppError_Serialize>(__TAURI_INVOKE("list_episodes", { title, limit })),
 	/**
@@ -512,7 +519,9 @@ export type MatchAsDto =
 /**  What the name read, which is what the row's own values say. */
 "parsed" | 
 /**  What the scan offered, which joins a title the library already holds when there is one. */
-"suggested";
+"suggested" | 
+/**  A title a person chose from a search. */
+"chosen";
 
 /**  One rule a user's correction became, as the screen lists it. */
 export type MatchRuleDto = {
@@ -602,6 +611,16 @@ export type ShortcutBinding = {
 	shift: boolean,
 };
 
+/**  One title a search found, as the picker lists it. */
+export type TitleMatchDto = {
+	/**  The title's id, which is what choosing one names. */
+	id: number,
+	/**  Its name. */
+	name: string,
+	/**  Whether it is a film or a series. */
+	kind: RootKind,
+};
+
 /**
  *  The title a command acts on.
  * 
@@ -658,10 +677,12 @@ export type UnmatchedRef = {
 	/**  The row id, as the queue returned it. */
 	id: number,
 	/**
-	 *  Which title the answer files the file under: the one its name read, or the one the scan
-	 *  offered.
+	 *  Which title the answer files the file under: the one its name read, the one the scan offered,
+	 *  or the one a person chose.
 	 */
 	asTitle: MatchAsDto,
+	/**  The chosen title's id, when `asTitle` is `chosen` and the answer names one. */
+	titleId: number | null,
 };
 
 /* Tauri Specta runtime */

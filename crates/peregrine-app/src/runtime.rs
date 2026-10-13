@@ -474,6 +474,26 @@ impl Runtime {
         Ok(matches!(matched, crate::library::Matched::Placed))
     }
 
+    /// A page of titles `scope` may see that match the user's own text.
+    ///
+    /// The picker's read. The query reaches `FTS5` through the storage layer, which is the only place
+    /// it is turned into a `MATCH` expression and the only place hostile input is answered rather than
+    /// refused: a query the grammar would refuse comes back as an empty page.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn search_titles(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<peregrine_storage::TitleIdentity>, RuntimeError> {
+        Ok(self
+            .database
+            .search(installation_scope(), query, PageRequest::first(limit))
+            .await?)
+    }
+
     /// One title, with the counts a screen shows, when the scope may see it.
     ///
     /// # Errors

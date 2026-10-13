@@ -38,6 +38,7 @@ import {
   SidebarItem,
   Switch,
   Table,
+  TextInput,
   type TableColumn,
 } from "@peregrine/ui";
 import type { ReactElement, ReactNode } from "react";
@@ -68,6 +69,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "SidebarItem",
   "Switch",
   "Table",
+  "TextInput",
 ];
 
 /** The two themes the token pipeline ships. */
@@ -386,6 +388,17 @@ export function Gallery(): ReactElement {
           <Progress label="Empty" value={0} />
           <Progress label="Half" value={42} />
           <Progress label="Over the top, and clamped" value={140} />
+        </div>
+      </Section_>
+
+      <Section_
+        component="TextInput"
+        description="A line of text with the label and the message that belong to it: the id is minted inside so the label cannot be left unconnected, and a message that is a failure carries role=alert rather than only a colour."
+      >
+        <div className="flex w-72 flex-col gap-3">
+          <TextInput label="Search your catalogue" placeholder="A film or series name" />
+          <TextInput label="With help" message="Full titles work better than fragments." />
+          <TextInput invalid label="Refused" message="That query is empty." value="" />
         </div>
       </Section_>
 

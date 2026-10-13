@@ -255,6 +255,7 @@ fn match_unmatched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
             crate::library::UnmatchedRef {
                 id: 1,
                 as_title: crate::library::MatchAsDto::Parsed,
+                title_id: None,
             },
         )
         .await
@@ -302,6 +303,15 @@ fn list_episodes_without_a_runtime(harness: &Harness) -> Invocation<'_> {
         )
         .await
         .map(drop)
+    })
+}
+
+/// `search_titles` reads through the runtime, so it fails the same way.
+fn search_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::search_titles(harness.dead_state(), "alien".to_owned(), None)
+            .await
+            .map(drop)
     })
 }
 
@@ -476,6 +486,14 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: list_unmatched_without_a_runtime,
+        },
+        ContractCase {
+            command: "search_titles",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: search_titles_without_a_runtime,
         },
         ContractCase {
             command: "get_title",

@@ -26,11 +26,17 @@ import {
   Table,
 } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
-import type { LibraryTitleDto, MatchRuleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
+import type {
+  LibraryTitleDto,
+  MatchRuleDto,
+  TitleMatchDto,
+  UnmatchedFileDto,
+} from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
+import { TitlePicker } from "./TitlePicker.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
 import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
@@ -185,6 +191,7 @@ function parsedLabel(row: UnmatchedFileDto, t: Translate): string {
 function queueColumnsOf(
   t: Translate,
   match: (file: UnmatchedFileDto) => void,
+  choose: (file: UnmatchedFileDto) => void,
   busy: boolean,
 ): readonly TableColumn<UnmatchedFileDto>[] {
   return [
@@ -223,18 +230,32 @@ function queueColumnsOf(
       cell: (row) => {
         const named = suggestionOf(row);
         return (
-          <Button
-            disabled={busy || row.parsedTitle === null}
-            onClick={() => {
-              match(row);
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            {named === null
-              ? t("library.queue.match")
-              : t("library.queue.matchUnder", { title: named })}
-          </Button>
+          <span className="flex items-center justify-end gap-1">
+            <Button
+              disabled={busy || row.parsedTitle === null}
+              onClick={() => {
+                match(row);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {named === null
+                ? t("library.queue.match")
+                : t("library.queue.matchUnder", { title: named })}
+            </Button>
+            {/* Offered on every row, including the ones with an offer: the parse and the scan can
+                both be wrong, and a file nobody can place is a file the library never has. */}
+            <Button
+              disabled={busy}
+              onClick={() => {
+                choose(row);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t("library.queue.choose")}
+            </Button>
+          </span>
         );
       },
     },
@@ -303,6 +324,8 @@ export function LibraryScreen({
   // but the answer it remembers stops applying, and a mis-click that changed how the library behaves
   // from then on would be a change nobody asked for (AGENTS R22).
   const [forgetting, setForgetting] = useState<MatchRuleDto | null>(null);
+  // Which parked file the picker is open for, if any.
+  const [choosing, setChoosing] = useState<UnmatchedFileDto | null>(null);
 
   // A scan is the only thing that changes this list, so watching one finish is the whole of the
   // subscription: the counter changes once per finished scan, and a boolean would refresh once and
@@ -369,7 +392,12 @@ export function LibraryScreen({
             />
           ) : (
             <Table
-              columns={queueColumnsOf(t, (file) => void unmatched.match(file), unmatched.busy)}
+              columns={queueColumnsOf(
+                t,
+                (file) => void unmatched.match(file),
+                setChoosing,
+                unmatched.busy,
+              )}
               rowKey={(row) => row.id}
               rows={unmatched.files}
             />
@@ -388,6 +416,19 @@ export function LibraryScreen({
             rows={rules.rules}
           />
         </Section>
+      )}
+
+      {choosing === null ? null : (
+        <TitlePicker
+          fileName={choosing.name}
+          onChoose={(title: TitleMatchDto) => {
+            void unmatched.matchAs(choosing, title.id);
+            setChoosing(null);
+          }}
+          onClose={() => {
+            setChoosing(null);
+          }}
+        />
       )}
 
       {forgetting === null ? null : (
