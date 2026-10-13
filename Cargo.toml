@@ -136,6 +136,7 @@ ulid = { version = "3.0.0", features = ["serde"] }
 # off: `pnpm-lock.yaml` is UTF-8 text we already hold, and enabling it would add
 # `encoding_rs` to the graph for a conversion the gate never performs.
 yaml-rust2 = { version = "0.13.0", default-features = false }
+keyring = { version = "4.2.0", default-features = false, features = ["v1", "apple-native-keyring-store", "windows-native-keyring-store", "zbus-secret-service-keyring-store"] }
 zeroize = { version = "1.9.1" }
 
 [workspace.lints.rust]

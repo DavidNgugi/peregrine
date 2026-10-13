@@ -37,7 +37,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 610 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 628 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -45,12 +45,14 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | --- | --- |
 | `Inflector` | 0.11.4 |
 | `adler2` | 2.0.1 |
+| `aes` | 0.9.3 |
 | `aho-corasick` | 1.1.5 |
 | `alloc-no-stdlib` | 3.0.0 |
 | `alloc-stdlib` | 0.3.0 |
 | `allocator-api2` | 0.2.21 |
 | `android_system_properties` | 0.1.6 |
 | `anyhow` | 1.0.104 |
+| `apple-native-keyring-store` | 1.0.2 |
 | `async-broadcast` | 0.7.2 |
 | `async-channel` | 2.5.0 |
 | `async-compression` | 0.4.50 |
@@ -79,6 +81,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `bitflags` | 2.13.2 |
 | `block-buffer` | 0.10.4 |
 | `block-buffer` | 0.12.1 |
+| `block-padding` | 0.4.2 |
 | `block2` | 0.6.2 |
 | `blocking` | 1.7.0 |
 | `brotli` | 9.0.0 |
@@ -94,6 +97,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `cargo-platform` | 0.1.9 |
 | `cargo_metadata` | 0.19.2 |
 | `cargo_toml` | 1.0.1 |
+| `cbc` | 0.2.1 |
 | `cc` | 1.6.0 |
 | `cesu8` | 1.1.0 |
 | `cfb` | 0.14.0 |
@@ -102,6 +106,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `cfg_aliases` | 0.2.2 |
 | `chacha20` | 0.10.2 |
 | `chrono` | 0.4.45 |
+| `cipher` | 0.5.2 |
 | `cmake` | 0.1.58 |
 | `cmov` | 0.5.4 |
 | `combine` | 4.6.8 |
@@ -117,6 +122,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `core-graphics` | 0.25.0 |
 | `core-graphics-types` | 0.2.0 |
 | `core_detect` | 1.0.0 |
+| `cpubits` | 0.1.1 |
 | `cpufeatures` | 0.2.17 |
 | `cpufeatures` | 0.3.1 |
 | `crc` | 3.4.0 |
@@ -259,6 +265,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `indexmap` | 1.9.3 |
 | `indexmap` | 2.14.2 |
 | `infer` | 0.22.0 |
+| `inout` | 0.2.2 |
 | `ipnet` | 2.12.2 |
 | `itoa` | 1.0.18 |
 | `javascriptcore-rs` | 1.1.2 |
@@ -279,6 +286,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `json-patch` | 4.2.0 |
 | `jsonptr` | 0.7.1 |
 | `keyboard-types` | 0.8.3 |
+| `keyring` | 4.2.0 |
+| `keyring-core` | 1.0.1 |
 | `lazy_static` | 1.5.1 |
 | `libappindicator` | 0.9.0 |
 | `libappindicator-sys` | 0.9.0 |
@@ -311,7 +320,13 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `nix` | 0.31.3 |
 | `notify-rust` | 4.18.2 |
 | `nu-ansi-term` | 0.50.3 |
+| `num` | 0.4.3 |
+| `num-bigint` | 0.4.8 |
+| `num-complex` | 0.4.6 |
 | `num-conv` | 0.2.2 |
+| `num-integer` | 0.1.47 |
+| `num-iter` | 0.1.46 |
+| `num-rational` | 0.4.2 |
 | `num-traits` | 0.2.19 |
 | `num_enum` | 0.7.6 |
 | `num_enum_derive` | 0.7.6 |
@@ -414,6 +429,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `schemars_derive` | 0.8.22 |
 | `scopeguard` | 1.2.0 |
 | `secrecy` | 0.10.3 |
+| `secret-service` | 5.2.0 |
 | `security-framework` | 3.7.0 |
 | `security-framework-sys` | 2.17.0 |
 | `selectors` | 0.38.0 |
@@ -590,6 +606,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `windows-implement` | 0.60.2 |
 | `windows-interface` | 0.59.3 |
 | `windows-link` | 0.2.1 |
+| `windows-native-keyring-store` | 1.1.0 |
 | `windows-numerics` | 0.3.1 |
 | `windows-registry` | 0.6.1 |
 | `windows-result` | 0.4.1 |
@@ -637,6 +654,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `yoke` | 0.8.3 |
 | `yoke-derive` | 0.8.4 |
 | `zbus` | 5.19.0 |
+| `zbus-secret-service-keyring-store` | 1.0.1 |
 | `zbus_macros` | 5.19.0 |
 | `zbus_names` | 4.3.4 |
 | `zcheapstr` | 1.1.0 |

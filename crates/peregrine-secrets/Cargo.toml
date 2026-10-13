@@ -10,6 +10,8 @@ description = "Peregrine component crate."
 publish = false
 
 [dependencies]
+keyring = { workspace = true }
+thiserror = { workspace = true }
 secrecy = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
