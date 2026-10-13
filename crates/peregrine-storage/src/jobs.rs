@@ -72,7 +72,12 @@ impl JobPhase {
 pub struct NewJob {
     /// The job kind, for example `hello`.
     pub kind: String,
-    /// Scheduling priority; lower runs first.
+    /// Scheduling priority; **higher runs first**.
+    ///
+    /// The scheduler's ready heap pops the largest value and breaks ties by submission order
+    /// (`peregrine_sync`'s `heap.rs`, pinned by its own test), so the user-asked work in this tree sits
+    /// at 100 and a screen-driven refresh at 10. The doc here said "lower runs first" until PG-E5-20
+    /// gave a settings field a priority to choose and made the contradiction matter.
     pub priority: i32,
     /// The key that coalesces duplicate work, when the job has one.
     pub dedupe_key: Option<String>,

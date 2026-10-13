@@ -8,6 +8,7 @@
 
 pub mod hello;
 pub mod library_scan;
+pub mod provider_credential;
 pub mod provider_refresh;
 
 use peregrine_storage::JobPhase;

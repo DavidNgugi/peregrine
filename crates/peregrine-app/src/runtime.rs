@@ -22,6 +22,7 @@ use std::num::NonZeroU32;
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{Clock, IdGenerator, LibraryRoot, LibraryRootKind, ScanMode};
 use peregrine_platform::{SystemClock, UlidGenerator};
+use peregrine_secrets::{Secret, SecretStore};
 use peregrine_storage::{
     Cursor, Database, JobChange, JobPhase, JobRecord, LibraryTitleRow, NewJob, PageRequest,
     StorageError,
@@ -32,7 +33,9 @@ use peregrine_sync::{
 use serde_json::json;
 
 use crate::jobs::library_scan::{self, LibraryScanJob};
+use crate::jobs::provider_credential;
 use crate::library::{LibraryRootRow, LibraryService};
+use crate::providers::BuildError;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::time::Instant;
 use tracing::{info, warn};
@@ -100,6 +103,12 @@ pub struct RuntimeConfig {
     sink: Arc<dyn EventSink>,
     directives: String,
     tray_enabled: bool,
+    /// Where provider credentials are kept.
+    ///
+    /// Injected rather than constructed inside [`Runtime::start`] so a test never reaches the
+    /// developer's own keychain, and never raises an OS prompt for it (AGENTS R14). The default is
+    /// the real one; [`RuntimeConfig::with_secrets`] is what a test replaces.
+    secrets: Arc<dyn SecretStore>,
 }
 
 impl RuntimeConfig {
@@ -117,6 +126,7 @@ impl RuntimeConfig {
             sink,
             directives: DEFAULT_DIRECTIVES.to_owned(),
             tray_enabled: true,
+            secrets: Arc::new(peregrine_secrets::KeyringStore::new()),
         }
     }
 
@@ -124,6 +134,17 @@ impl RuntimeConfig {
     #[must_use]
     pub fn with_directives(mut self, directives: impl Into<String>) -> Self {
         self.directives = directives.into();
+        self
+    }
+
+    /// Replaces where provider credentials are kept.
+    ///
+    /// **The reason this is a parameter is a test.** The default is the OS keyring, and a test that
+    /// used it would read and write the developer's own login keychain — and, on macOS, raise an OS
+    /// prompt that measured 11.7 s on its first call from a new binary (AGENTS R14, PG-E5-12).
+    #[must_use]
+    pub fn with_secrets(mut self, secrets: Arc<dyn SecretStore>) -> Self {
+        self.secrets = secrets;
         self
     }
 
@@ -182,6 +203,20 @@ pub struct StartedJob {
     pub job: Ulid,
     /// The journal row this job reports into.
     pub journal_id: i64,
+}
+
+/// What to do with one provider's credential.
+///
+/// The candidate travels as a value rather than as a string a caller could accidentally log: it is
+/// moved into the job, proved, and dropped.
+#[derive(Debug)]
+pub enum CredentialRequest {
+    /// Ask the provider whether the stored credential still works.
+    TestConnection,
+    /// Prove a candidate and store it only when the provider accepts it.
+    Replace(Secret),
+    /// Remove whatever is stored.
+    Forget,
 }
 
 /// One title's own screen: what the library holds, where the cached poster is, and whether the
@@ -250,6 +285,8 @@ pub struct Runtime {
     _logging: Observability,
     /// Which providers hold a credential, refreshed off the command path (see `providers`).
     providers: Arc<crate::providers::ProviderRegistry>,
+    /// Where provider credentials are kept, off the command path for the same reason.
+    secrets: Arc<dyn SecretStore>,
     /// Where fetched artwork lives, content-addressed (see `peregrine_sync::ImageCache`).
     artwork: Arc<peregrine_sync::ImageCache>,
     startup: Duration,
@@ -309,13 +346,15 @@ impl Runtime {
         // it scopes the asset protocol to it, and a cache that makes directories on construction does
         // filesystem work on a path a session may never use.
         let artwork_root = config.artwork_directory().to_path_buf();
+        let secrets = Arc::clone(&config.secrets);
         let providers = Arc::new(crate::providers::ProviderRegistry::new());
         // Off the start-up path and off the command path: a keyring read is blocking and can raise an OS
         // prompt, so it happens once, on a blocking thread, and everything else reads the cache.
         {
             let providers = Arc::clone(&providers);
+            let secrets = Arc::clone(&secrets);
             tokio::task::spawn_blocking(move || {
-                if let Err(error) = providers.refresh(&peregrine_secrets::KeyringStore::new()) {
+                if let Err(error) = providers.refresh(secrets.as_ref()) {
                     tracing::debug!(%error, "no credential store answered, so no provider is configured");
                 }
             });
@@ -330,6 +369,7 @@ impl Runtime {
             live: Mutex::new(HashMap::new()),
             _logging: logging,
             providers,
+            secrets,
             artwork: Arc::new(peregrine_sync::ImageCache::new(artwork_root)),
             startup,
         })
@@ -625,6 +665,134 @@ impl Runtime {
                             at: now,
                             phase: JobPhase::Failed,
                             error_code: Some("INTERNAL".to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
+    }
+
+    /// Proves, stores, or clears one provider's credential, and answers the job doing it.
+    ///
+    /// **The candidate is validated before it is stored** (`PG-E5-20`): a `Replace` probes it
+    /// against the provider and writes it to the keyring only when the provider accepted it, so a
+    /// key that does not work never reaches the keychain. The credential itself travels in
+    /// `action` and lives in the job's memory; the journal row names the provider and nothing else,
+    /// because a row is a file, a file is a backup, and a backup is not where a secret belongs
+    /// (SECURITY.md T13).
+    ///
+    /// The keyring work happens inside the job, off the runtime: a read blocks and on macOS the
+    /// first one from a new binary raises an OS prompt that measured 11.7 s (`PG-E5-12`), which is
+    /// why nothing here touches a store directly.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] when this build knows no provider by that name, or when a
+    /// candidate cannot even be turned into an adapter — neither is work worth a journal row.
+    /// [`RuntimeError::Provider`] when the provider refuses the configuration it was given.
+    /// [`RuntimeError::Storage`] when the row cannot be written, and [`RuntimeError::Scheduler`]
+    /// when the queue refuses the job.
+    pub async fn start_provider_credential(
+        &self,
+        provider: &str,
+        action: CredentialRequest,
+    ) -> Result<StartedJob, RuntimeError> {
+        let Some(entry) = crate::providers::entry(provider) else {
+            return Err(RuntimeError::InvalidRequest {
+                detail: format!("`{provider}` is not a metadata provider this build knows"),
+            });
+        };
+        // A candidate no adapter can be built from is a bad request rather than a job: there is
+        // nothing to probe, and a row would only record what the caller already got wrong. The job
+        // builds its own adapter from the same candidate when it probes.
+        //
+        // `BuildError` has no `RuntimeError` of its own: the two failures `build_with` can answer
+        // with are told apart instead — a provider that refuses its configuration is a provider
+        // failure, and anything else is a request this build cannot serve. `build_with` reads no
+        // keyring, so its store arm cannot arise here; it is matched rather than wildcarded so a
+        // variant added to `BuildError` later fails the build instead of becoming a bad request.
+        if let CredentialRequest::Replace(candidate) = &action {
+            match crate::providers::build_with(entry, candidate) {
+                Ok(_) => {}
+                Err(BuildError::Provider(error)) => return Err(RuntimeError::Provider(error)),
+                Err(error @ (BuildError::Unknown { .. } | BuildError::Store(_))) => {
+                    return Err(RuntimeError::InvalidRequest {
+                        detail: error.to_string(),
+                    });
+                }
+            }
+        }
+        let (action, candidate) = match action {
+            CredentialRequest::TestConnection => (provider_credential::Action::Verify, None),
+            CredentialRequest::Replace(candidate) => {
+                (provider_credential::Action::Replace, Some(candidate))
+            }
+            CredentialRequest::Forget => (provider_credential::Action::Forget, None),
+        };
+
+        let now = self.clock.now().as_millisecond();
+        // Keyed by the provider, so a double-click on "test connection" waits on one probe rather
+        // than spending two requests on one answer.
+        let key = provider_credential::dedupe_key(provider);
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: provider_credential::KIND.to_owned(),
+                priority: provider_credential::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: provider_credential::payload(provider),
+                max_attempts: 1,
+                created_at: now,
+            })
+            .await?;
+
+        let spec = JobSpec {
+            kind: provider_credential::KIND.to_owned(),
+            priority: provider_credential::PRIORITY,
+            dedupe_key: Some(key),
+            max_attempts: 1,
+        };
+        let job = provider_credential::ProviderCredentialJob::new(
+            Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
+            Arc::clone(&self.database),
+            Arc::clone(&self.providers),
+            Arc::clone(&self.secrets),
+            journal_id,
+            entry,
+            action,
+            candidate,
+            crate::providers::build_with,
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                };
+                info!(
+                    job = %started.job,
+                    journal_id,
+                    provider,
+                    "accepted the provider credential job"
+                );
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                // The row exists and will never run, so leaving it `queued` would show a check
+                // waiting forever in the UI. Closed here for the same reason the scan and refresh
+                // close theirs.
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some(INTERNAL_CODE.to_owned()),
                             error: Some(error.to_string()),
                         },
                     )
@@ -943,6 +1111,16 @@ impl Runtime {
         }
     }
 
+    /// Which providers hold a credential as of the last refresh.
+    ///
+    /// The cached answer, so a settings screen or a diagnostics poll never waits on a keyring: a
+    /// read is blocking and can raise an OS prompt, and the refresh that fills this runs off the
+    /// command path. Use [`Runtime::start_provider_credential`] to change it.
+    #[must_use]
+    pub fn provider_status(&self) -> crate::providers::ProviderStatus {
+        self.providers.status()
+    }
+
     /// The state the tray's menu presents (PG-E1-09).
     pub async fn shell_status(&self) -> ShellStatus {
         let scheduler = self.scheduler.metrics().await;
@@ -1190,7 +1368,9 @@ pub enum RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::RecordingSink;
+    use crate::testing::{CountingSecretStore, RecordingSink};
+    use peregrine_secrets::{SecretKey, SecretStore};
+    use peregrine_testkit::MemorySecretStore;
     use std::fmt::Write as _;
     use tempfile::TempDir;
 
@@ -1204,17 +1384,48 @@ mod tests {
     /// **The artwork directory is deliberately not `<data directory>/artwork`**, which is where the
     /// runtime used to derive it from: a test that supplied the old derivation's own answer could not
     /// tell the fix from the defect it fixed.
+    ///
+    /// The credential store is in memory for the same class of reason: `RuntimeConfig::new` defaults
+    /// to the OS keyring, and a test that let it would read the developer's own login keychain and,
+    /// on macOS, raise an OS prompt (AGENTS R14).
     async fn runtime(directory: &TempDir) -> (Runtime, Arc<RecordingSink>) {
+        runtime_with(directory, Arc::new(MemorySecretStore::new())).await
+    }
+
+    /// Starts a runtime whose credential store is the one the caller brought.
+    async fn runtime_with(
+        directory: &TempDir,
+        secrets: Arc<dyn SecretStore>,
+    ) -> (Runtime, Arc<RecordingSink>) {
         let sink = Arc::new(RecordingSink::default());
         let config = RuntimeConfig::new(
             directory.path(),
             directory.path().join("cache/images"),
             Arc::clone(&sink) as Arc<dyn EventSink>,
-        );
+        )
+        .with_secrets(secrets);
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();
         (runtime, sink)
+    }
+
+    /// Waits until the startup refresh has filled the registry's cache.
+    ///
+    /// The refresh runs off the start-up path, so a test that asserted "nothing read the store"
+    /// without this would be racing it rather than measuring the poll.
+    async fn await_cached_status(runtime: &Runtime) -> crate::providers::ProviderStatus {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = runtime.provider_status();
+                if !status.known.is_empty() {
+                    return status;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the startup refresh must fill the registry")
     }
 
     /// Waits for the journal row to reach a terminal phase.
@@ -1797,5 +2008,147 @@ mod tests {
         );
         assert!(status.tray_enabled);
         runtime.shutdown().await;
+    }
+
+    /// A provider this build does not know is refused by name, and nothing is journaled.
+    #[tokio::test]
+    async fn an_unknown_provider_is_refused_by_name() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        for provider in ["nobody", ""] {
+            let error = runtime
+                .start_provider_credential(provider, CredentialRequest::Forget)
+                .await
+                .expect_err("an unknown provider cannot be asked about");
+            match error {
+                RuntimeError::InvalidRequest { detail } => assert!(
+                    detail.contains(provider),
+                    "the refusal must name what was asked for: {detail}"
+                ),
+                other => panic!("expected a refusal naming the provider, got {other:?}"),
+            }
+        }
+        assert!(
+            runtime.jobs(None, 10).await.unwrap().is_empty(),
+            "a refused request must not leave a journal row behind"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// The status a settings screen polls is the cached answer, so a locked or prompting keychain
+    /// cannot stall a command.
+    #[tokio::test]
+    async fn provider_status_answers_from_the_cache_without_reading_the_store() {
+        let directory = TempDir::new().unwrap();
+        let secrets = Arc::new(CountingSecretStore::new());
+        let (runtime, _sink) =
+            runtime_with(&directory, Arc::clone(&secrets) as Arc<dyn SecretStore>).await;
+
+        let cached = await_cached_status(&runtime).await;
+        assert_eq!(cached.known, vec!["tmdb"]);
+        assert!(
+            cached.configured.is_empty(),
+            "nothing is stored in the fixture"
+        );
+        let reads = secrets.reads();
+        assert!(reads > 0, "the startup refresh is what filled the cache");
+
+        assert_eq!(runtime.provider_status(), cached);
+        assert_eq!(
+            secrets.reads(),
+            reads,
+            "a polled status must answer from the cache, not from a keyring"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// Forgetting a credential runs the whole flow and leaves the cache agreeing with the store.
+    ///
+    /// `Forget` is the one action that reaches no provider, which is what makes it an end-to-end
+    /// test of the runtime's half without a request (AGENTS R14).
+    #[tokio::test]
+    async fn forgetting_a_credential_reaches_the_registrys_cache() {
+        let directory = TempDir::new().unwrap();
+        let secrets = Arc::new(MemorySecretStore::with_provider("tmdb", "a-key"));
+        let (runtime, _sink) =
+            runtime_with(&directory, Arc::clone(&secrets) as Arc<dyn SecretStore>).await;
+
+        // Waited for, so the assertion below is about the job's own refresh rather than a race with
+        // the one startup started.
+        let cached = await_cached_status(&runtime).await;
+        assert_eq!(cached.configured, vec!["tmdb"]);
+
+        let started = runtime
+            .start_provider_credential("tmdb", CredentialRequest::Forget)
+            .await
+            .unwrap();
+        let row = await_terminal(&runtime, started.journal_id).await;
+
+        assert_eq!(row.state, JobPhase::Succeeded, "{row:?}");
+        assert_eq!(row.kind, crate::jobs::provider_credential::KIND);
+        assert_eq!(row.dedupe_key.as_deref(), Some("provider.credential:tmdb"));
+        assert_eq!(row.last_error_code, None);
+        assert!(
+            secrets
+                .get(&SecretKey::provider("tmdb"))
+                .expect("the store answers")
+                .is_none()
+        );
+        assert!(
+            runtime.provider_status().configured.is_empty(),
+            "the cache must agree with the store the job wrote"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// What the runtime writes for a `Replace` is the provider's name, even though the request
+    /// carries a credential.
+    ///
+    /// The scheduler is stopped first, so the submitted job cannot run its probe and no request
+    /// leaves the machine (AGENTS R14). That makes this an assertion about the row the runtime
+    /// writes rather than about a provider being reachable — and since `JobRecord` does not carry
+    /// `payload_json`, the row is read back from the bytes the database wrote.
+    #[tokio::test]
+    async fn the_row_the_runtime_writes_for_a_replace_carries_no_credential() {
+        const KEY: &str = "super-secret-key";
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        runtime.shutdown().await;
+
+        let error = runtime
+            .start_provider_credential("tmdb", CredentialRequest::Replace(Secret::new(KEY)))
+            .await
+            .expect_err("a stopped scheduler refuses work");
+        assert!(matches!(error, RuntimeError::Scheduler(_)), "{error:?}");
+
+        // The row is written before the scheduler is asked, so it is there to read.
+        let rows = runtime.jobs(None, 10).await.unwrap();
+        let row = rows
+            .first()
+            .expect("the row was written before the submission was refused");
+        assert_eq!(row.kind, crate::jobs::provider_credential::KIND);
+        assert!(
+            !row.last_error.as_deref().unwrap_or_default().contains(KEY),
+            "the row's message carries the credential"
+        );
+        let carries = |bytes: &[u8]| {
+            bytes
+                .windows(KEY.len())
+                .any(|window| window == KEY.as_bytes())
+        };
+        for entry in std::fs::read_dir(directory.path()).unwrap() {
+            let path = entry.unwrap().path();
+            if !path.is_file() {
+                // The runtime makes the log and artwork directories under the same root.
+                continue;
+            }
+            assert!(
+                !carries(&std::fs::read(&path).unwrap()),
+                "{} carries the credential",
+                path.display()
+            );
+        }
     }
 }
