@@ -959,6 +959,21 @@ mod tests {
             }
         }
 
+        /// Every episode the corpus placed, as `(season, episode)` pairs.
+        async fn episodes(&self) -> Vec<(u32, u32)> {
+            self.database
+                .list_title_episodes(
+                    AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                    self.only_title().await,
+                    50,
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.season_number.get(), row.episode_number.get()))
+                .collect()
+        }
+
         /// The id of the one title the corpus holds under `name`.
         async fn only_title_named(&self, name: &str) -> i64 {
             self.database
@@ -1099,6 +1114,229 @@ mod tests {
         assert_eq!(report.created_titles, 1, "{report:?}");
         assert_eq!(report.created_files, 2);
         assert_eq!(corpus.titles().await, vec!["Alien"]);
+    }
+
+    /// What the indexer does with one parsed name: the outcome a person would see.
+    ///
+    /// The table is `PG-E14-07`'s acceptance in miniature — "a fixture table of ambiguous cases with
+    /// expected results" — and it measures the *placement* rather than the parse, which is the half the
+    /// parser's own 200-name corpus does not cover. Every row is a name a real library contains, and
+    /// every expectation was written from the naming conventions `peregrine-domain`'s `name.rs`
+    /// documents rather than read back out of the indexer.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Placement {
+        /// Placed as this season and episode.
+        Placed(u32, u32),
+        /// Placed as a *film*, which is the indexer treating an episode-shaped name as a feature.
+        ///
+        /// In the table because it happens, and because a row that says so is how a wrong answer gets
+        /// written down rather than quietly asserted away: the version-suffixed row in the table is
+        /// what this variant exists for, and that row is expected to change when the parser learns the
+        /// shape. A table that could not state the wrong outcome would have to either hide it or fail.
+        PlacedAsFilm,
+        /// Placed, or parked with the reason a person would read. The expected side holds a
+        /// substring rather than the whole sentence, because two layers may refuse a name — the
+        /// parser, with the specific thing it could not read, and the indexer, with the task that owns
+        /// the decision — and a table that demanded one of them would be asserting an implementation
+        /// detail rather than a behaviour.
+        Parked(&'static str),
+    }
+
+    /// One row of the table.
+    struct EpisodeCase {
+        name: &'static str,
+        expected: Placement,
+        /// What the row is testing, read by a person when it fails.
+        because: &'static str,
+    }
+
+    const EPISODE_CASES: &[EpisodeCase] = &[
+        EpisodeCase {
+            name: "Breaking Bad S01E01.mkv",
+            expected: Placement::Placed(1, 1),
+            because: "the unambiguous form everything else is measured against",
+        },
+        EpisodeCase {
+            name: "breaking bad s1e2.mkv",
+            expected: Placement::Placed(1, 2),
+            because: "case does not change what a name says",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01.E02.mkv",
+            expected: Placement::Placed(1, 2),
+            because: "a separator between season and episode is not part of either",
+        },
+        EpisodeCase {
+            name: "Breaking Bad 1x02.mkv",
+            expected: Placement::Placed(1, 2),
+            because: "the `1x02` form states the same two numbers",
+        },
+        EpisodeCase {
+            name: "Breaking Bad 01x02 - Cat's in the Bag.mkv",
+            expected: Placement::Placed(1, 2),
+            because: "the episode's own title follows the numbers",
+        },
+        EpisodeCase {
+            name: "Breaking Bad (2008) S01E01.mkv",
+            expected: Placement::Placed(1, 1),
+            because: "the year belongs to the show, not to the episode",
+        },
+        EpisodeCase {
+            name: "[Group] Breaking Bad - S01E01 [1080p].mkv",
+            expected: Placement::Placed(1, 1),
+            because: "a release group and a resolution surround the name rather than changing it",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S00E01.mkv",
+            expected: Placement::Placed(0, 1),
+            because: "season zero is where a show's specials live, and the name says so",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01E01E02.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "one file holding two episodes is a modelling question, not a guess",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01E01-E02.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "the same range written with a hyphen",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01E01-02.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "and with the season stated once",
+        },
+        EpisodeCase {
+            name: "Breaking Bad 1x01-1x02.mkv",
+            expected: Placement::Parked("both episode"),
+            because: "a range in the other form, which the parser names as such rather than leaving \
+                      to the indexer",
+        },
+        EpisodeCase {
+            name: "Breaking Bad 05.mkv",
+            expected: Placement::Parked("could be an absolute episode"),
+            because: "a bare number is an absolute episode, a year, or a volume, and the parser \
+                      refuses it for exactly that reason",
+        },
+        EpisodeCase {
+            name: "Breaking Bad - 05.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "a dash does not turn a bare number into a season and episode",
+        },
+        EpisodeCase {
+            name: "Breaking Bad Season 1.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "a season pack says which season and not which episode",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "the abbreviated form of the same thing",
+        },
+        EpisodeCase {
+            name: "Breaking Bad E01.mkv",
+            expected: Placement::Parked("PG-E14-07"),
+            because: "an episode number with no season is not a placement",
+        },
+        EpisodeCase {
+            name: "Breaking Bad s1e1.mkv",
+            expected: Placement::Placed(1, 1),
+            because: "single digits are the same numbers",
+        },
+        EpisodeCase {
+            name: "Breaking Bad Season 01 Episode 02.mkv",
+            expected: Placement::Placed(1, 2),
+            because: "the written-out form states both numbers",
+        },
+        EpisodeCase {
+            name: "Breaking Bad [S01E01].mkv",
+            expected: Placement::Placed(1, 1),
+            because: "brackets around the numbers are punctuation",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01E01v2.mkv",
+            // **This is the table's first finding, and it is wrong.** The name is episode one of
+            // season one with a version suffix, and the indexer files it as a *film* because the
+            // parser's episode pattern does not accept a suffix glued to the episode number. The row
+            // records what happens today so the fix has somewhere to land — when the parser learns the
+            // shape, this row fails and the expectation becomes `Placed(1, 1)`. The parser is
+            // `peregrine-domain`'s `name.rs`, which is PG-E4-04's.
+            expected: Placement::PlacedAsFilm,
+            because: "a version suffix is being read as part of the episode number, which the finding \
+                      in PG-E14-07's note records against PG-E4-04",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01E01 日本語.mkv",
+            expected: Placement::Placed(1, 1),
+            because: "a non-ASCII suffix is not a number and does not change the placement",
+        },
+        EpisodeCase {
+            name: "Breaking Bad S01E00.mkv",
+            // Recorded rather than asserted: an episode zero inside a season is a prologue, a special,
+            // or a numbering mistake, and the naming conventions do not settle it. What the table
+            // states is the placement a person would see today.
+            expected: Placement::Placed(1, 0),
+            because: "the name states a season and an episode, and the core places what a name states",
+        },
+    ];
+
+    #[tokio::test]
+    async fn the_placement_table_says_what_each_ambiguous_name_becomes() {
+        // Every row is run and every disagreement is reported, so one run tells a reader the whole
+        // state of the table rather than the first thing wrong with it.
+        let mut failures: Vec<String> = Vec::new();
+
+        for case in EPISODE_CASES {
+            let corpus = corpus("placement-table", &[case.name]).await;
+            let report = corpus.index().await;
+            let actual = if report.created_episodes == 0
+                && report.unmatched == 0
+                && report.created_files == 1
+            {
+                Placement::PlacedAsFilm
+            } else if report.created_episodes == 1 {
+                let rows = corpus.unmatched_rows().await;
+                if rows.is_empty() {
+                    let episodes = corpus.episodes().await;
+                    Placement::Placed(episodes[0].0, episodes[0].1)
+                } else {
+                    Placement::Parked("placed and parked at once")
+                }
+            } else if report.unmatched == 1 {
+                let reason = corpus
+                    .unmatched_rows()
+                    .await
+                    .first()
+                    .and_then(|row| row.file.reason.clone())
+                    .unwrap_or_default();
+                Placement::Parked(Box::leak(reason.into_boxed_str()))
+            } else {
+                Placement::Parked("neither placed nor parked")
+            };
+
+            let agrees = match (&actual, &case.expected) {
+                (Placement::Placed(a, b), Placement::Placed(c, d)) => a == c && b == d,
+                (Placement::PlacedAsFilm, Placement::PlacedAsFilm) => true,
+                (Placement::Parked(actual_reason), Placement::Parked(wanted)) => {
+                    wanted.is_empty() || actual_reason.contains(wanted)
+                }
+                _ => false,
+            };
+            if !agrees {
+                failures.push(format!(
+                    "{}: expected {:?} ({}) and got {actual:?}",
+                    case.name, case.expected, case.because
+                ));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "{} of {} names are not placed the way the conventions say:\n{}",
+            failures.len(),
+            EPISODE_CASES.len(),
+            failures.join("\n")
+        );
     }
 
     #[tokio::test]
