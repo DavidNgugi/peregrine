@@ -107,9 +107,11 @@ pub async fn sync_search(
 
 /// Fills a title the catalogue holds from the provider that knows it.
 ///
-/// Answers `false` when this provider cannot serve title details at all, which is a normal state rather
-/// than a failure: a provider that declares only `search` is a provider this step skips. Any other
-/// error is reported, because a refresh that silently did nothing looks exactly like one that worked.
+/// Answers with the details it wrote, or `None` when this provider cannot serve title details at all —
+/// a normal state rather than a failure, since a provider that declares only `search` is a provider this
+/// step skips. The details come back rather than a bare success because the caller needs the artwork
+/// paths they carry: filling a title and then fetching its poster is one step from a user's point of
+/// view, and a second read to learn what was just written would be a second read for nothing.
 ///
 /// # Errors
 ///
@@ -120,7 +122,7 @@ pub async fn refresh_title(
     id: i64,
     kind: peregrine_domain::catalogue::TitleKind,
     at: i64,
-) -> Result<bool, SyncError> {
+) -> Result<Option<peregrine_domain::catalogue::TitleDetails>, SyncError> {
     // The id of *this* provider: a title may carry several, and asking the wrong provider for the wrong
     // one's identifier is how a film gets another film's synopsis.
     let external = database
@@ -130,12 +132,12 @@ pub async fn refresh_title(
         .map(|held| held.id)
         .find(|external| external.provider() == provider.descriptor().provider());
     let Some(external) = external else {
-        return Ok(false);
+        return Ok(None);
     };
 
     let details = match provider.title(&external, kind).await {
         Ok(details) => details,
-        Err(ProviderError::Unsupported { .. }) => return Ok(false),
+        Err(ProviderError::Unsupported { .. }) => return Ok(None),
         Err(error) => return Err(SyncError::Provider(error)),
     };
     let sort = sort_name(details.name.as_str());
@@ -143,14 +145,14 @@ pub async fn refresh_title(
     database
         .update_title_metadata(
             id,
-            details,
+            details.clone(),
             sort,
             peregrine_domain::catalogue::MetadataState::Partial,
             provider_name,
             at,
         )
         .await?;
-    Ok(true)
+    Ok(Some(details))
 }
 
 /// The candidate as the matching rule's input, or `None` when it cannot be one.

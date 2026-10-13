@@ -314,6 +314,17 @@ fn search_providers_without_a_runtime(harness: &Harness) -> Invocation<'_> {
             .map(drop)
     })
 }
+fn refresh_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::refresh_title(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            crate::library::RootKind::Movies,
+        )
+        .await
+        .map(drop)
+    })
+}
 
 fn search_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
@@ -365,20 +376,30 @@ struct ContractCase {
 /// the table cannot keep a dead entry either.
 fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
-    all.extend(discover_cases());
+    all.extend(provider_cases());
     all
 }
 
 /// The discover namespace's cases, kept apart so each namespace stays readable as the list grows.
-fn discover_cases() -> Vec<ContractCase> {
-    vec![ContractCase {
-        command: "search_providers",
-        expected: Expected::Fails {
-            code: ErrorCode::Internal,
-            retryable: false,
+fn provider_cases() -> Vec<ContractCase> {
+    vec![
+        ContractCase {
+            command: "refresh_title",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: refresh_title_without_a_runtime,
         },
-        drive: search_providers_without_a_runtime,
-    }]
+        ContractCase {
+            command: "search_providers",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: search_providers_without_a_runtime,
+        },
+    ]
 }
 
 fn cases_by_namespace() -> Vec<ContractCase> {

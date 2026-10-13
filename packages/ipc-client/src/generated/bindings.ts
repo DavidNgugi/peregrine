@@ -97,7 +97,6 @@ export const commands = {
 	 *  [`ErrorCode::StorageCorrupt`] when the journal cannot be read.
 	 */
 	list: (limit: number | null) => typedError<JobRecord_Serialize[], AppError_Serialize>(__TAURI_INVOKE("list", { limit })),
-	/**  One page of library roots, newest first. */
 	listRoots: (limit: number | null) => typedError<LibraryRootDto[], AppError_Serialize>(__TAURI_INVOKE("list_roots", { limit })),
 	/**
 	 *  Adds a folder as a library root and answers with the row it wrote.
@@ -179,6 +178,20 @@ export const commands = {
 	 *  unreachable is reported rather than hidden, and the screen keeps whatever it already had.
 	 */
 	searchProviders: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit })),
+	/**
+	 *  One page of library roots, newest first.
+	 *  Starts filling one title from its provider, artwork included, and answers with the job.
+	 * 
+	 *  A job and not a command that waits, because it leaves the machine twice — once for the title's
+	 *  details and once for its poster — and a screen that blocked on that would be a screen that froze on
+	 *  a provider having a slow day (`ARCHITECTURE §7` rule 2). Keyed by the title, so opening the same
+	 *  screen twice waits on one refresh.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the journal or the queue refuses the job.
+	 */
+	refreshTitle: (title: TitleRef, kind: RootKind) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("refresh_title", { title, kind })),
 	/**
 	 *  A page of titles that match the user's own text.
 	 * 

@@ -389,6 +389,40 @@ pub struct LibraryRootDto {
     pub created_at: i64,
 }
 
+/// Starts filling one title from its provider, artwork included, and answers with the job.
+///
+/// A job and not a command that waits, because it leaves the machine twice — once for the title's
+/// details and once for its poster — and a screen that blocked on that would be a screen that froze on
+/// a provider having a slow day (`ARCHITECTURE §7` rule 2). Keyed by the title, so opening the same
+/// screen twice waits on one refresh.
+///
+/// # Errors
+///
+/// [`AppError`] when the journal or the queue refuses the job.
+#[tauri::command]
+#[specta::specta]
+pub async fn refresh_title(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+    kind: RootKind,
+) -> Result<JobStarted, AppError> {
+    let kind = match kind {
+        RootKind::Shows => peregrine_app::TitleKind::Show,
+        _ => peregrine_app::TitleKind::Movie,
+    };
+    let started = state
+        .runtime()?
+        .start_provider_refresh(title.id, kind)
+        .await?;
+    Ok(guard_response(
+        "library::refresh_title",
+        JobStarted {
+            job_id: started.job.to_string(),
+            journal_id: started.journal_id,
+        },
+    ))
+}
+
 /// One page of library roots, newest first.
 #[tauri::command]
 #[specta::specta]

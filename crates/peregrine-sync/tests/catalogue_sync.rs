@@ -175,11 +175,12 @@ async fn a_stub_is_filled_from_the_provider_that_knows_it() {
         },
     );
 
-    assert!(
-        refresh_title(&provider, &database, id, TitleKind::Movie, 2_000)
-            .await
-            .expect("the refresh runs")
-    );
+    let written = refresh_title(&provider, &database, id, TitleKind::Movie, 2_000)
+        .await
+        .expect("the refresh runs")
+        .expect("the provider serves details");
+    // The details come back because the caller needs the artwork paths they carry.
+    assert_eq!(written.poster_path.as_deref(), Some("/poster.jpg"));
 
     let scope = peregrine_domain::AccountScope::unrestricted(
         peregrine_domain::AccountId::new(1).expect("an account"),

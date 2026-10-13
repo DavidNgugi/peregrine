@@ -210,6 +210,8 @@ pub struct Runtime {
     _logging: Observability,
     /// Which providers hold a credential, refreshed off the command path (see `providers`).
     providers: Arc<crate::providers::ProviderRegistry>,
+    /// Where fetched artwork lives, content-addressed (see `peregrine_sync::ImageCache`).
+    artwork: Arc<peregrine_sync::ImageCache>,
     startup: Duration,
 }
 
@@ -263,6 +265,8 @@ impl Runtime {
             "the runtime is ready"
         );
 
+        // Read before the struct literal moves `config`.
+        let artwork_root = config.database_path().with_file_name("artwork");
         let providers = Arc::new(crate::providers::ProviderRegistry::new());
         // Off the start-up path and off the command path: a keyring read is blocking and can raise an OS
         // prompt, so it happens once, on a blocking thread, and everything else reads the cache.
@@ -284,6 +288,7 @@ impl Runtime {
             live: Mutex::new(HashMap::new()),
             _logging: logging,
             providers,
+            artwork: Arc::new(peregrine_sync::ImageCache::new(artwork_root)),
             startup,
         })
     }
@@ -513,6 +518,78 @@ impl Runtime {
             .database
             .search(installation_scope(), query, PageRequest::first(limit))
             .await?)
+    }
+
+    /// Starts filling one title from its provider, artwork included.
+    ///
+    /// A job rather than a command, because it leaves the machine twice — once for the title's details
+    /// and once for its poster — and `ARCHITECTURE §7` rule 2 puts anything that slow behind the
+    /// scheduler. Keyed by the title, so opening the same screen twice waits on one refresh rather than
+    /// spending two requests on the same answer.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the journal cannot be written and [`RuntimeError::Scheduler`] when
+    /// the queue refuses the job.
+    pub async fn start_provider_refresh(
+        &self,
+        title_id: i64,
+        kind: peregrine_domain::catalogue::TitleKind,
+    ) -> Result<StartedJob, RuntimeError> {
+        let now = self.clock.now().as_millisecond();
+        let key = crate::jobs::provider_refresh::dedupe_key(title_id);
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: crate::jobs::provider_refresh::KIND.to_owned(),
+                priority: crate::jobs::provider_refresh::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: json!({ "titleId": title_id }).to_string(),
+                max_attempts: 2,
+                created_at: now,
+            })
+            .await?;
+
+        let spec = JobSpec {
+            kind: crate::jobs::provider_refresh::KIND.to_owned(),
+            priority: crate::jobs::provider_refresh::PRIORITY,
+            dedupe_key: Some(key),
+            max_attempts: 2,
+        };
+        let job = crate::jobs::provider_refresh::ProviderRefreshJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
+            Arc::clone(&self.providers),
+            Arc::clone(&self.artwork),
+            journal_id,
+            crate::jobs::provider_refresh::Target { title_id, kind },
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                };
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some("INTERNAL".to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
     }
 
     /// Searches the providers this installation has configured, writes what they know into the
