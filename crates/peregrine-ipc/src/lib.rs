@@ -17,7 +17,8 @@
 
 pub mod autostart;
 pub mod bindings;
-pub mod error;
+pub mod discover;
+mod error;
 pub mod guard;
 pub mod jobs;
 pub mod library;
@@ -67,6 +68,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_unmatched,
             library::list_match_rules,
             library::get_title,
+            discover::search_providers,
             library::search_titles,
             library::list_episodes,
             library::match_unmatched,

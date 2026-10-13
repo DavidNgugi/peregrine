@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use std::num::NonZeroU32;
+
+use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{Clock, IdGenerator, LibraryRoot, LibraryRootKind, ScanMode};
 use peregrine_platform::{SystemClock, UlidGenerator};
 use peregrine_storage::{
@@ -512,6 +515,38 @@ impl Runtime {
             .await?)
     }
 
+    /// Searches the providers this installation has configured, writes what they know into the
+    /// catalogue, and returns what the catalogue now holds.
+    ///
+    /// **Two steps, in that order, and the second is not optional.** A provider's answer is written
+    /// (`PG-E6-04`) and the *local* search is what the screen shows, so a result is a title the
+    /// catalogue owns — with an id, a poster, and a place in the library — rather than a row that exists
+    /// only in this response. It also means a provider that is slow, rate-limited, or gone still leaves
+    /// the screen with everything it already had.
+    ///
+    /// With no provider configured this is a local search, which is the honest answer rather than an
+    /// error: an installation with no API key still has a library.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Provider`] when a provider fails, and [`RuntimeError::Storage`] when the
+    /// catalogue cannot be read or written.
+    pub async fn discover(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<peregrine_storage::TitleIdentity>, RuntimeError> {
+        let adapters = self.providers.adapters();
+        if let Some(provider) = adapters.first() {
+            let text = NonEmptyText::new(query).map_err(|_| RuntimeError::EmptyQuery)?;
+            let limit = NonZeroU32::new(limit).unwrap_or(NonZeroU32::MIN);
+            let search = peregrine_providers::provider::SearchQuery::new(text, limit, None);
+            let at = self.clock.now().as_millisecond();
+            peregrine_sync::sync_search(provider.as_ref(), &self.database, &search, at).await?;
+        }
+        self.search_titles(query, limit).await
+    }
+
     /// One title, with the counts a screen shows, when the scope may see it.
     ///
     /// # Errors
@@ -926,6 +961,18 @@ pub enum RuntimeError {
     /// The database could not be opened, migrated, or written.
     #[error("the database could not be used: {0}")]
     Storage(#[from] StorageError),
+
+    /// The search text was empty, which the command refuses before it reaches here.
+    #[error("a search needs something to look for")]
+    EmptyQuery,
+
+    /// A metadata provider failed.
+    #[error("the provider could not answer: {0}")]
+    Provider(#[from] peregrine_providers::error::ProviderError),
+
+    /// The sync between a provider and the catalogue failed.
+    #[error("the provider's answer could not be written: {0}")]
+    Sync(#[from] peregrine_sync::SyncError),
 
     /// The scheduler is not accepting work.
     #[error("the scheduler could not accept the job: {0}")]

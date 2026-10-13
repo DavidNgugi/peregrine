@@ -32,6 +32,24 @@ export const en = {
         title: "Nothing here yet",
         body: "Peregrine has no catalogue data yet. Titles appear here once discovery is available.",
       },
+      search: {
+        label: "Search for a title",
+        placeholder: "A film or a series",
+        action: "Search",
+        searching: "Searching the providers…",
+      },
+      failed: {
+        title: "The search could not be made",
+        body: "Nothing was lost — the library is unchanged. Check the provider's API key in Settings, then try again.",
+      },
+      none: {
+        title: "Nothing matched",
+        body: "The providers answered, and the catalogue holds nothing by that name. Try a different spelling, or the original title.",
+      },
+      result: {
+        movie: "Film",
+        show: "Series",
+      },
     },
     jobs: {
       title: "Diagnostics",

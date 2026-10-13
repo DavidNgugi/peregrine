@@ -5,8 +5,10 @@
 //! lifecycle on `job://state`, both through the coalescing bus, so a job that runs for a
 //! minute cannot flood the webview and the UI never blocks on a job it started.
 
+use peregrine_app::ProviderError;
 use peregrine_app::runtime::RuntimeError;
 use peregrine_app::{JobPhase, JobRecord as StoredJobRecord, StorageError};
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Number;
@@ -209,6 +211,33 @@ impl From<RuntimeError> for AppError {
                 .with_cause(format!("no live job {job}")),
             RuntimeError::Scheduler(inner) => AppError::new(ErrorCode::Internal)
                 .with_detail("The job queue is not running.")
+                .with_cause(inner.to_string()),
+            // The user is told what to do about each of these rather than what went wrong inside:
+            // a provider's own error carries no URL and no key, and saying "the provider refused"
+            // is the difference between a user checking their API key and a user filing a bug.
+            RuntimeError::EmptyQuery => {
+                AppError::new(ErrorCode::InvalidInput).with_detail("Type something to search for.")
+            }
+            // Each of these says what the user can do about it. A provider error carries no URL and no
+            // key, so nothing here can leak one — which is why the detail is written rather than passed
+            // through.
+            RuntimeError::Provider(ProviderError::RateLimited { .. }) => {
+                AppError::new(ErrorCode::ProviderRateLimited)
+                    .with_detail("The provider is asking us to slow down. Try again in a moment.")
+                    .with_cause("the provider refused with 429")
+            }
+            RuntimeError::Provider(ProviderError::SchemaDrift { .. }) => {
+                AppError::new(ErrorCode::ProviderSchemaDrift)
+                    .with_detail("The provider's answer has changed shape and could not be read.")
+                    .with_cause("the provider's payload did not match the documented shape")
+            }
+            RuntimeError::Provider(_) => AppError::new(ErrorCode::ProviderUnavailable)
+                .with_detail(
+                    "The metadata provider could not answer. Check the API key in Settings.",
+                )
+                .with_cause("a provider request failed"),
+            RuntimeError::Sync(inner) => AppError::new(ErrorCode::Internal)
+                .with_detail("The provider's answer could not be saved.")
                 .with_cause(inner.to_string()),
             // Neither of these messages carries a filesystem path into the payload: the
             // rule is that `detail` and `cause` are safe to show, and the path is in the

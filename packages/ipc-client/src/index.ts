@@ -33,6 +33,7 @@ export {
   isSuccessful,
   listLibraryRoots,
   listLibraryTitles,
+  searchProviders,
   getTitle,
   searchTitles,
   listEpisodes,

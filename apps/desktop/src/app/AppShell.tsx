@@ -125,7 +125,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           ))}
         </Sidebar>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {route.kind === "discover" ? <DiscoverScreen /> : null}
+          {route.kind === "discover" ? <DiscoverScreen onNavigate={setRoute} /> : null}
           {route.kind === "library" ? (
             <LibraryScreen
               onNavigate={setRoute}

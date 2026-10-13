@@ -116,6 +116,18 @@ export async function searchTitles(query: string, limit?: number): Promise<Title
 }
 
 /**
+ * Searches the configured metadata providers, then reads what the catalogue holds.
+ *
+ * The one call here that leaves the machine. It is a single request per search rather than one per
+ * keystroke for that reason, and what it resolves to is a title the *catalogue* owns — the core writes
+ * the provider's answer before answering (`PG-E6-04`) — so a result can be opened and outlives the
+ * provider being reachable.
+ */
+export async function searchProviders(query: string, limit?: number): Promise<TitleMatchDto[]> {
+  return unwrap(commands.searchProviders(query, limit ?? null));
+}
+
+/**
  * One title with the counts its screen shows, or `null` when it is not here.
  *
  * `null` covers both "this account may not see it" and "no title has that id": the two read the same

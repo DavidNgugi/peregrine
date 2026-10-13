@@ -307,6 +307,14 @@ fn list_episodes_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 }
 
 /// `search_titles` reads through the runtime, so it fails the same way.
+fn search_providers_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::search_providers(harness.dead_state(), "alien".to_owned(), None)
+            .await
+            .map(drop)
+    })
+}
+
 fn search_titles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::library::search_titles(harness.dead_state(), "alien".to_owned(), None)
@@ -356,6 +364,24 @@ struct ContractCase {
 /// fails that test by name; a case naming a command that is not registered fails it too, so
 /// the table cannot keep a dead entry either.
 fn cases() -> Vec<ContractCase> {
+    let mut all = cases_by_namespace();
+    all.extend(discover_cases());
+    all
+}
+
+/// The discover namespace's cases, kept apart so each namespace stays readable as the list grows.
+fn discover_cases() -> Vec<ContractCase> {
+    vec![ContractCase {
+        command: "search_providers",
+        expected: Expected::Fails {
+            code: ErrorCode::Internal,
+            retryable: false,
+        },
+        drive: search_providers_without_a_runtime,
+    }]
+}
+
+fn cases_by_namespace() -> Vec<ContractCase> {
     let mut all = shell_cases();
     all.extend(job_cases());
     all.extend(library_cases());

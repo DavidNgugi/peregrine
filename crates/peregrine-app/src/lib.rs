@@ -42,3 +42,5 @@ pub use peregrine_storage::{
 // And the instant a root's fields carry, for the same reason: the command surface has to name
 // the type it converts, and `jiff` is not a dependency it may take (AGENTS R6).
 pub use jiff::Timestamp;
+
+pub use peregrine_providers::error::ProviderError;

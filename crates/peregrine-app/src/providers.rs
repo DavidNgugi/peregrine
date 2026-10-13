@@ -62,9 +62,26 @@ impl ProviderStatus {
 /// So the read happens once, off the command path, and a health check reads this cache: a diagnostics
 /// check that stalled on a keychain prompt would be worse than no diagnostics at all (`ARCHITECTURE §7`
 /// rule 2, and the test that caught it).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ProviderRegistry {
+    /// The built adapters, so a request never waits on a keyring. A credential is held by the adapter
+    /// that uses it, which is the one place it has to live; caching the *adapter* rather than the key
+    /// means there is no second copy of a secret to leak.
+    adapters:
+        std::sync::RwLock<Vec<std::sync::Arc<dyn peregrine_providers::provider::MetadataProvider>>>,
     status: std::sync::RwLock<ProviderStatus>,
+}
+
+impl std::fmt::Debug for ProviderRegistry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The adapters hold credentials; they are counted rather than printed, and no `Debug` of a
+        // secret is ever reached through this type.
+        formatter
+            .debug_struct("ProviderRegistry")
+            .field("adapters", &self.adapters().len())
+            .field("status", &self.status())
+            .finish()
+    }
 }
 
 impl ProviderRegistry {
@@ -94,13 +111,33 @@ impl ProviderRegistry {
     ///
     /// [`peregrine_secrets::SecretStoreError`] when the store cannot be read. A keyring that is
     /// unavailable, or a machine with no keychain at all, leaves the registry at nothing configured.
-    pub fn refresh(
-        &self,
-        store: &dyn SecretStore,
-    ) -> Result<ProviderStatus, peregrine_secrets::SecretStoreError> {
+    pub fn refresh(&self, store: &dyn SecretStore) -> Result<ProviderStatus, BuildError> {
         let status = status(store)?;
+        let mut adapters = Vec::new();
+        for entry in MANIFEST {
+            if let Some(adapter) = build(entry, store)? {
+                adapters.push(adapter);
+            }
+        }
+        *self.adapters.write().expect("the lock is not poisoned") = adapters;
         *self.status.write().expect("the lock is not poisoned") = status.clone();
         Ok(status)
+    }
+
+    /// The adapters that can be asked, in priority order.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the lock is poisoned, which is a bug in this type rather than anything a caller
+    /// can cause.
+    #[must_use]
+    pub fn adapters(
+        &self,
+    ) -> Vec<std::sync::Arc<dyn peregrine_providers::provider::MetadataProvider>> {
+        self.adapters
+            .read()
+            .expect("the lock is not poisoned")
+            .clone()
     }
 }
 

@@ -168,6 +168,18 @@ export const commands = {
 	missingFiles: number,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
 	/**
+	 *  Searches the configured providers, writes what they know, and answers with what the catalogue holds.
+	 * 
+	 *  An empty query is an empty result rather than an error: the search box calls this as the user types,
+	 *  and a refusal to answer nothing would be a failure state on an empty box.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when a provider or the catalogue fails. A provider that is slow, rate-limited, or
+	 *  unreachable is reported rather than hidden, and the screen keeps whatever it already had.
+	 */
+	searchProviders: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit })),
+	/**
 	 *  A page of titles that match the user's own text.
 	 * 
 	 *  The picker's read. The query is refused rather than run when it is empty: an empty search is not a
