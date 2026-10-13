@@ -31,6 +31,7 @@ import {
   Link,
   Panel,
   Progress,
+  Rail,
   Screen,
   Section,
   SettingsRow,
@@ -64,6 +65,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "Link",
   "Panel",
   "Progress",
+  "Rail",
   "Screen",
   "Section",
   "SettingsRow",
@@ -210,6 +212,28 @@ const POSTER = `data:image/svg+xml,${encodeURIComponent(
     <path d="M0 250c46-12 82 12 118 2s58-16 82-8v56H0Z" fill="#15121f"/>
   </svg>`,
 )}`;
+
+/**
+ * A rail's worth of titles for the card and rail sections.
+ *
+ * Twelve of them so the rail overflows the gallery's own column width and both edge affordances have
+ * something to answer for: a rail that fits on screen shows neither chevron, and showing only that
+ * state would be showing the one case where the component does nothing.
+ */
+const RAIL_TITLES = [
+  { id: 1, kind: "movie", meta: "1979 · Film", rating: 8.5, title: "Alien" },
+  { id: 2, kind: "movie", meta: "2010 · Film", rating: 8.8, title: "Inception" },
+  { id: 3, kind: "movie", meta: "1999 · Film", rating: 8.7, title: "The Matrix" },
+  { id: 4, kind: "series", meta: "2008 · Series", rating: 9.5, title: "Breaking Bad" },
+  { id: 5, kind: "movie", meta: "2014 · Film", rating: 8.6, title: "Interstellar" },
+  { id: 6, kind: "series", meta: "2019 · Series", rating: 8.7, title: "The Expanse" },
+  { id: 7, kind: "movie", meta: "1982 · Film", rating: 8.1, title: "Blade Runner" },
+  { id: 8, kind: "movie", meta: "2016 · Film", rating: 7.8, title: "Arrival" },
+  { id: 9, kind: "series", meta: "2002 · Series", rating: 9.2, title: "The Wire" },
+  { id: 10, kind: "movie", meta: "1968 · Film", rating: 8.3, title: "2001: A Space Odyssey" },
+  { id: 11, kind: "movie", meta: "2019 · Film", rating: 7.9, title: "Ad Astra" },
+  { id: 12, kind: "series", meta: "2020 · Series", rating: 8.4, title: "Raised by Wolves" },
+] as const;
 
 export function Gallery(): ReactElement {
   const [theme, toggleTheme] = useGalleryTheme();
@@ -401,6 +425,30 @@ export function Gallery(): ReactElement {
         <div className="flex flex-col items-start gap-2">
           <Link href="/title/movie/7">A title's own screen</Link>
           <Link href="/library">The library</Link>
+        </div>
+      </Section_>
+
+      <Section_
+        component="Rail"
+        description="A row of tiles that pages sideways. One tab stop for the whole rail, the arrows move inside it, and each chevron appears only on an edge there is still somewhere to go from. Tab to it, then press ← → Home End."
+      >
+        <div className="w-full">
+          <Rail
+            itemKey={(item) => item.id}
+            items={RAIL_TITLES}
+            renderItem={(item, tabIndex) => (
+              <TitleCard
+                href={`/title/${item.kind}/${item.id}`}
+                meta={item.meta}
+                poster={POSTER}
+                rating={item.rating}
+                size="md"
+                tabIndex={tabIndex}
+                title={item.title}
+              />
+            )}
+            title="Trending this week"
+          />
         </div>
       </Section_>
 

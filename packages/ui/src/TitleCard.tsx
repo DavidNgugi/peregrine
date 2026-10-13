@@ -146,6 +146,13 @@ export interface TitleCardProps {
    * large grid from asking for artwork nobody has scrolled to.
    */
   readonly priority?: boolean;
+  /**
+   * Where the tile sits in its rail's single tab stop (§2.7).
+   *
+   * A rail moves this between tiles as the arrows do, which is why it is a prop at all: an `<a href>`
+   * is focusable by default, so a tile outside a rail needs to set nothing.
+   */
+  readonly tabIndex?: number;
   readonly onNavigate?: () => void;
   readonly className?: string;
 }
@@ -162,6 +169,7 @@ export function TitleCard({
   availabilityLabel,
   size,
   priority = false,
+  tabIndex,
   onNavigate,
   className,
 }: TitleCardProps): ReactElement {
@@ -185,6 +193,7 @@ export function TitleCard({
         className,
       )}
       href={href}
+      {...(tabIndex === undefined ? {} : { tabIndex })}
       {...(onNavigate === undefined ? {} : { onNavigate })}
     >
       <span className="sr-only">{spoken}</span>

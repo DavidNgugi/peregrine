@@ -22,6 +22,10 @@ export { Panel } from "./Panel.js";
 export type { PanelProps } from "./Panel.js";
 export { Progress } from "./Progress.js";
 export type { ProgressProps } from "./Progress.js";
+export { Rail } from "./Rail.js";
+// `nextRailIndex` and `showsChevrons` are the rail's own decisions rather than primitives, so they
+// are not exported as ones: the rail's tests import them from the module, the way the card's do.
+export type { RailProps } from "./Rail.js";
 export { Screen } from "./Screen.js";
 export type { ScreenProps } from "./Screen.js";
 export { Section } from "./Section.js";
