@@ -342,6 +342,19 @@ mod tests {
                 &self.descriptor
             }
 
+            fn image(
+                &self,
+                _path: &str,
+                _kind: peregrine_domain::catalogue::ImageKind,
+            ) -> peregrine_providers::ProviderFuture<'_, Vec<u8>> {
+                Box::pin(async {
+                    Err(ProviderError::Unsupported {
+                        provider: Provider::Tmdb,
+                        capability: "images",
+                    })
+                })
+            }
+
             fn title(
                 &self,
                 _id: &peregrine_domain::id::ExternalId,

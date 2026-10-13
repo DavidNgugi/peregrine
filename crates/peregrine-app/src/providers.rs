@@ -184,7 +184,11 @@ pub fn build(
         return Ok(None);
     };
     let adapter = match entry.provider {
-        "tmdb" => Tmdb::new(entry.endpoint, credential.expose_secret().to_owned())?,
+        "tmdb" => Tmdb::new(
+            entry.endpoint,
+            peregrine_providers::tmdb::IMAGE_BASE,
+            credential.expose_secret().to_owned(),
+        )?,
         _ => return Ok(None),
     };
     Ok(Some(std::sync::Arc::new(adapter)))

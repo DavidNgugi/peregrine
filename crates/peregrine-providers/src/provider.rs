@@ -191,6 +191,22 @@ pub trait MetadataProvider: Send + Sync {
         id: &ExternalId,
         kind: TitleKind,
     ) -> ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>;
+
+    /// Reads one image's bytes.
+    ///
+    /// `path` is the provider-relative path a title's details carry, not a URL: only the adapter knows
+    /// which host serves its images, and a caller that built the URL itself would be a caller that knows
+    /// a provider's business.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when the descriptor does not declare
+    /// [`crate::capability::Capability::Images`], and otherwise as [`MetadataProvider::search`].
+    fn image(
+        &self,
+        path: &str,
+        kind: peregrine_domain::catalogue::ImageKind,
+    ) -> ProviderFuture<'_, Vec<u8>>;
 }
 
 #[cfg(test)]
@@ -223,6 +239,19 @@ mod tests {
     impl MetadataProvider for Stub {
         fn descriptor(&self) -> &ProviderDescriptor {
             &self.descriptor
+        }
+
+        fn image(
+            &self,
+            _path: &str,
+            _kind: peregrine_domain::catalogue::ImageKind,
+        ) -> ProviderFuture<'_, Vec<u8>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "images",
+                })
+            })
         }
 
         fn title(

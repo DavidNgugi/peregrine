@@ -257,6 +257,19 @@ pub struct EpisodePosition {
     pub episode_number: EpisodeNumber,
 }
 
+/// Which of a title's two pictures is wanted.
+///
+/// The *kind* rather than a pixel size: sizes are a provider's own naming (`TMDB` calls them `w342` and
+/// `w780`), and a domain type that named one provider's sizes would have to change the day another
+/// provider numbers theirs differently. The adapter picks the size that suits the kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageKind {
+    /// The portrait image a grid or a detail page shows.
+    Poster,
+    /// The wide image a hero shows behind the title.
+    Backdrop,
+}
+
 /// The fields a provider supplies for one title.
 ///
 /// Not [`Title`]: that type carries the `i64` row id storage assigns, the timestamps it writes, and the

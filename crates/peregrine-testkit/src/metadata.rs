@@ -51,6 +51,7 @@ pub struct FakeMetadataProvider {
     descriptor: ProviderDescriptor,
     answer: Result<Vec<SearchCandidate>, ProviderError>,
     title_answer: Result<TitleDetails, ProviderError>,
+    image_answer: Result<Vec<u8>, ProviderError>,
 }
 
 impl FakeMetadataProvider {
@@ -71,6 +72,10 @@ impl FakeMetadataProvider {
                 provider,
                 capability: "title",
             }),
+            image_answer: Err(ProviderError::Unsupported {
+                provider,
+                capability: "images",
+            }),
         }
     }
 
@@ -86,6 +91,27 @@ impl FakeMetadataProvider {
             ),
             answer: Ok(Vec::new()),
             title_answer: Ok(details),
+            image_answer: Err(ProviderError::Unsupported {
+                provider,
+                capability: "images",
+            }),
+        }
+    }
+
+    /// A provider that declares `images` and answers `bytes` to every image read.
+    #[must_use]
+    pub fn serving_images(provider: Provider, details: TitleDetails, bytes: Vec<u8>) -> Self {
+        Self {
+            descriptor: fake_descriptor(
+                provider,
+                Capabilities::EMPTY
+                    .with(Capability::Search)
+                    .with(Capability::Title)
+                    .with(Capability::Images),
+            ),
+            answer: Ok(Vec::new()),
+            title_answer: Ok(details),
+            image_answer: Ok(bytes),
         }
     }
 
@@ -111,6 +137,15 @@ impl FakeMetadataProvider {
 impl MetadataProvider for FakeMetadataProvider {
     fn descriptor(&self) -> &ProviderDescriptor {
         &self.descriptor
+    }
+
+    fn image(
+        &self,
+        _path: &str,
+        _kind: peregrine_domain::catalogue::ImageKind,
+    ) -> ProviderFuture<'_, Vec<u8>> {
+        let answer = self.image_answer.clone();
+        Box::pin(async move { answer })
     }
 
     fn title(&self, _id: &ExternalId, _kind: TitleKind) -> ProviderFuture<'_, TitleDetails> {

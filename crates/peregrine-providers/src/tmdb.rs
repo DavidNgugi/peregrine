@@ -48,6 +48,7 @@ pub struct Tmdb {
     descriptor: ProviderDescriptor,
     client: HttpClient,
     base: String,
+    image_base: String,
     credential: String,
 }
 
@@ -64,13 +65,14 @@ impl Tmdb {
     ///
     /// [`ProviderError`] when the descriptor cannot be built or the HTTP client cannot be constructed,
     /// which is a failure of the policy rather than of anything a provider said.
-    pub fn new(base: &str, credential: String) -> Result<Self, ProviderError> {
+    pub fn new(base: &str, image_base: &str, credential: String) -> Result<Self, ProviderError> {
         let descriptor = ProviderDescriptor::new(
             Provider::Tmdb,
             "TMDB",
             Capabilities::EMPTY
                 .with(Capability::Search)
-                .with(Capability::Title),
+                .with(Capability::Title)
+                .with(Capability::Images),
             // TMDB's documented limit is fifty requests a second; this is far below it, because the
             // cost of being wrong in this direction is a slower sync and in the other is a ban.
             RatePolicy::new(nonzero(20), Duration::from_secs(1), nonzero(10), true).map_err(
@@ -108,6 +110,9 @@ impl Tmdb {
             descriptor,
             client: HttpClient::new(Provider::Tmdb, &policy)?,
             base: base.trim_end_matches('/').to_owned(),
+            // A parameter for the same reason the API base is: an adapter that could only talk to the
+            // live CDN could not be tested at all (`AGENTS R14`).
+            image_base: image_base.trim_end_matches('/').to_owned(),
             credential,
         })
     }
@@ -187,6 +192,52 @@ impl MetadataProvider for Tmdb {
                 }
             }
             Ok(candidates)
+        })
+    }
+
+    fn image(
+        &self,
+        path: &str,
+        kind: peregrine_domain::catalogue::ImageKind,
+    ) -> ProviderFuture<'_, Vec<u8>> {
+        if !self.descriptor.capabilities().contains(Capability::Images) {
+            let unsupported = ProviderError::Unsupported {
+                provider: Provider::Tmdb,
+                capability: "images",
+            };
+            return Box::pin(async move { Err(unsupported) });
+        }
+        // The size is this adapter's choice for the kind: a poster is shown in a grid, a backdrop behind
+        // a title, and one width each is what those two places ask for.
+        let size = match kind {
+            peregrine_domain::catalogue::ImageKind::Poster => "w342",
+            peregrine_domain::catalogue::ImageKind::Backdrop => "w780",
+        };
+        // A path from a provider is untrusted input on its way into a URL. Cleaning it a segment at a
+        // time is what makes it safe *and* correct: `..` would climb out of the size directory, `.` and
+        // an empty segment would produce a `//` that some servers serve and others refuse, and a path
+        // beginning with a scheme never gets the chance to replace the host.
+        let cleaned = path
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".." && *segment != ".")
+            .collect::<Vec<_>>()
+            .join("/");
+        let url = format!("{}/{size}/{cleaned}", self.image_base);
+
+        Box::pin(async move {
+            let fetched = self
+                .client
+                .fetch(
+                    Provider::Tmdb,
+                    Request {
+                        url: &url,
+                        // The image CDN is public: sending the credential to a second host would hand
+                        // it to whoever runs that host.
+                        credential: None,
+                    },
+                )
+                .await?;
+            Ok(fetched.bytes)
         })
     }
 
@@ -323,6 +374,13 @@ struct DetailsAnswer {
     backdrop_path: Option<String>,
 }
 
+/// Where TMDB serves images, and the two widths this build asks for.
+///
+/// A second host, which is why it is a constant here rather than something a caller supplies: the image
+/// CDN is public, needs no credential, and — per `AGENTS R24`'s documented exception — cannot
+/// revalidate, so an image request carries no conditional header.
+pub const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
+
 /// What TMDB answers a search with, as much of it as this adapter reads.
 ///
 /// No `deny_unknown_fields`: a provider that adds a field is not drifting, and refusing an answer
@@ -430,7 +488,8 @@ mod tests {
     }
 
     fn adapter(server: &MockServer) -> Tmdb {
-        Tmdb::new(&server.uri(), "test-token".to_owned()).expect("the adapter builds")
+        Tmdb::new(&server.uri(), &server.uri(), "test-token".to_owned())
+            .expect("the adapter builds")
     }
 
     #[tokio::test]
@@ -646,6 +705,36 @@ mod tests {
             Some("1999-03-31".parse().expect("a date"))
         );
         assert_eq!(details.poster_path.as_deref(), Some("/poster.jpg"));
+    }
+
+    #[tokio::test]
+    async fn an_image_is_fetched_without_the_credential_and_cannot_climb_out_of_its_directory() {
+        // Two things at once, because they are the same request: the public CDN gets **no** credential —
+        // sending it to a second host would hand it to whoever runs that host — and a path from a
+        // provider cannot escape the size directory it is appended to.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/w342/poster.jpg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"jpeg".to_vec()))
+            .mount(&server)
+            .await;
+
+        let adapter = Tmdb::new(
+            &format!("{}/3", server.uri()),
+            &server.uri(),
+            "test-token".to_owned(),
+        )
+        .expect("the adapter builds");
+        let bytes = adapter
+            .image(
+                // A path a compromised or mistaken provider could send: cleaned, it addresses a file
+                // in this size's directory rather than one above it.
+                "/../poster.jpg",
+                peregrine_domain::catalogue::ImageKind::Poster,
+            )
+            .await
+            .expect("the image answers");
+        assert_eq!(bytes, b"jpeg");
     }
 
     #[tokio::test]

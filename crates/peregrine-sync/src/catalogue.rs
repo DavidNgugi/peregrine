@@ -11,6 +11,8 @@ use peregrine_providers::error::ProviderError;
 use peregrine_providers::provider::{MetadataProvider, SearchQuery};
 use peregrine_storage::{Database, ProviderTitle, StorageError, TitleExternalId};
 
+use crate::images::{ImageCache, ImageCacheError, ImageKey, ImageVariant};
+
 /// What one sync did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SyncOutcome {
@@ -173,4 +175,44 @@ fn held(id: &peregrine_domain::ExternalId, at: i64) -> TitleExternalId {
         is_primary: true,
         fetched_at: at,
     }
+}
+
+/// Fetches one image into the blob cache and answers with where it is on disk.
+///
+/// The key is content-addressed over the provider, the path, and the variant, so the same poster is
+/// fetched once however many times a grid redraws — `contains` is what avoids the second *request*, and
+/// `store` after it is the write that a first fetch needs.
+///
+/// # Errors
+///
+/// [`CacheError::Provider`] when the provider cannot be asked, and [`CacheError::Write`] when the bytes
+/// cannot be written.
+pub async fn cache_image(
+    provider: &dyn MetadataProvider,
+    cache: &ImageCache,
+    path: &str,
+    kind: peregrine_domain::catalogue::ImageKind,
+) -> Result<std::path::PathBuf, CacheError> {
+    let variant = match kind {
+        peregrine_domain::catalogue::ImageKind::Poster => ImageVariant::PosterW342,
+        peregrine_domain::catalogue::ImageKind::Backdrop => ImageVariant::BackdropW780,
+    };
+    let key = ImageKey::for_image(provider.descriptor().provider(), path, variant);
+    if cache.contains(&key) {
+        return Ok(cache.disk_path(&key));
+    }
+    let bytes = provider.image(path, kind).await?;
+    let stored = cache.store(&key, &bytes).map_err(CacheError::Write)?;
+    Ok(stored.disk_path().to_path_buf())
+}
+
+/// Why an image could not be cached.
+#[derive(Debug, thiserror::Error)]
+pub enum CacheError {
+    /// The provider could not be asked.
+    #[error("the image could not be fetched")]
+    Provider(#[from] ProviderError),
+    /// The bytes could not be written.
+    #[error("the image could not be stored")]
+    Write(#[source] ImageCacheError),
 }

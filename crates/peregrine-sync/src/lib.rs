@@ -21,7 +21,7 @@ mod job;
 mod tests;
 
 pub use backoff::Backoff;
-pub use catalogue::{SyncError, SyncOutcome, refresh_title, sync_search};
+pub use catalogue::{CacheError, SyncError, SyncOutcome, cache_image, refresh_title, sync_search};
 pub use core::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_CONCURRENCY, Scheduler, SchedulerClasses, SchedulerConfig,
     SchedulerMetrics, Submission,
