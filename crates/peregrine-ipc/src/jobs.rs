@@ -553,7 +553,11 @@ mod command_tests {
     /// the way Tauri calls it: with managed state injected.
     async fn served(directory: &TempDir) -> tauri::App<tauri::test::MockRuntime> {
         let app = tauri::test::mock_app();
-        let config = RuntimeConfig::new(directory.path(), Arc::new(SilentSink));
+        let config = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("artwork"),
+            Arc::new(SilentSink),
+        );
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();

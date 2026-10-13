@@ -132,6 +132,35 @@ impl From<peregrine_app::LibraryTitleRow> for LibraryTitleDto {
     }
 }
 
+/// One title as its own screen reads it: the library's answer, plus the artwork.
+///
+/// Nested rather than a wider [`LibraryTitleDto`] because the two answer different questions and are
+/// read by different screens: the list is "what the library holds", and this is "what the library
+/// holds, and what a provider could still add". A hundred-row page must not carry a poster path it
+/// never draws, and one DTO cannot mean two things.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleDetailDto {
+    /// The title itself, exactly as the library screen lists it.
+    pub title: LibraryTitleDto,
+    /// The absolute path of the cached poster, or `null` when the cache holds none.
+    ///
+    /// A filesystem path rather than a URL or bytes: `apps/desktop/src/lib/media.ts` is the only
+    /// module that turns one into something an `<img>` can load, and the bytes themselves travel over
+    /// the asset protocol and never over IPC (AGENTS R11). A path this platform cannot spell as UTF-8
+    /// is reported as `null` rather than lossily — a corrupted path is a request the asset protocol
+    /// refuses, which is the state that looks like a rendering bug.
+    pub poster: Option<String>,
+    /// Whether opening this screen should ask the provider for the title.
+    ///
+    /// **A rule, and computed in the core for that reason** (AGENTS R7): it is "no provider has ever
+    /// filled this title in, or a provider is known to have artwork the cache does not hold". A
+    /// screen that decided this for itself would spend a request on every visit to a title whose
+    /// provider has no poster, which is the shape AGENTS R24 exists to prevent. The *staleness*
+    /// policy — when an already-filled title is due again — is `PG-E6-15`'s and is not this flag.
+    pub refresh_due: bool,
+}
+
 /// One title a search found, as the picker lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -522,7 +551,8 @@ pub async fn search_titles(
     Ok(guard_response("library::search_titles", found))
 }
 
-/// One title, with the counts its screen shows, or `null` when it is not here.
+/// One title, with the counts its screen shows and the artwork the cache holds for it, or `null`
+/// when it is not here.
 ///
 /// `null` rather than an error for the two cases that read the same to a person: a title this
 /// account may not see, and an id that names nothing (I37). A route naming either opens a screen
@@ -532,12 +562,27 @@ pub async fn search_titles(
 pub async fn get_title(
     state: State<'_, RuntimeState>,
     title: TitleRef,
-) -> Result<Option<LibraryTitleDto>, AppError> {
+) -> Result<Option<TitleDetailDto>, AppError> {
     let title = state.runtime()?.library_title(title.id).await?;
     Ok(guard_response(
         "library::get_title",
-        title.map(LibraryTitleDto::from),
+        title.map(title_detail),
     ))
+}
+
+/// The wire shape of one title's own read.
+fn title_detail(detail: peregrine_app::LibraryTitleDetail) -> TitleDetailDto {
+    TitleDetailDto {
+        title: LibraryTitleDto::from(detail.title),
+        // A path this platform cannot spell as UTF-8 is no reference at all: the webview would have
+        // to guess, and a lossy path is a request the asset protocol refuses.
+        poster: detail
+            .poster
+            .as_deref()
+            .and_then(std::path::Path::to_str)
+            .map(str::to_owned),
+        refresh_due: detail.refresh_due,
+    }
 }
 
 /// A title's episodes, in the order a person watches them.
@@ -655,6 +700,77 @@ mod tests {
 
     use super::*;
 
+    /// What the runtime answers for one title, with only the artwork varying.
+    fn detail(poster: Option<std::path::PathBuf>) -> peregrine_app::LibraryTitleDetail {
+        peregrine_app::LibraryTitleDetail {
+            title: peregrine_app::LibraryTitleRow {
+                title: peregrine_app::TitleIdentity {
+                    id: 7,
+                    kind: peregrine_app::TitleKind::Movie,
+                    subtype: peregrine_app::TitleSubtype::Standard,
+                    name: "Alien".to_owned(),
+                    sort_name: "alien".to_owned(),
+                    metadata_state: peregrine_app::MetadataState::Stub,
+                    adult: false,
+                },
+                items: 1,
+                files: 2,
+                bytes: 4_000_000_000,
+                missing_files: 1,
+            },
+            poster,
+            refresh_due: true,
+        }
+    }
+
+    /// The wire shape of the one read a title screen makes.
+    ///
+    /// Everything the screen acts on crosses here, and two of the three fields are decided by the
+    /// core rather than by the screen: the poster is a path on this machine, and `refresh_due` is the
+    /// rule for whether opening the page should leave it (AGENTS R7).
+    #[test]
+    fn a_title_read_carries_its_poster_path_and_the_core_s_rule() {
+        let dto = title_detail(detail(Some(std::path::PathBuf::from(
+            "/cache/images/abc.webp",
+        ))));
+
+        assert_eq!(dto.poster.as_deref(), Some("/cache/images/abc.webp"));
+        assert!(
+            dto.refresh_due,
+            "the core's answer travels with the read rather than being recomputed by a screen"
+        );
+        assert_eq!(dto.title.id, 7);
+        assert_eq!(dto.title.name, "Alien");
+        assert_eq!(dto.title.kind, RootKind::Movies);
+        assert_eq!(dto.title.items, 1);
+        assert_eq!(dto.title.files, 2);
+        assert_eq!(dto.title.bytes, 4_000_000_000);
+        assert_eq!(dto.title.missing_files, 1);
+        assert!(
+            dto.title.stub,
+            "a title no provider has filled in is a stub, and the flag travels with the read"
+        );
+
+        // No poster is no reference, which is the state the screen draws its placeholder for.
+        assert_eq!(title_detail(detail(None)).poster, None);
+    }
+
+    /// A cache path this platform cannot spell as UTF-8 is reported as no poster rather than lossily.
+    ///
+    /// The path is the whole of what the screen gets, so a lossy one is a request the asset protocol
+    /// refuses — the state that looks like a rendering bug rather than like a title with no artwork.
+    #[cfg(unix)]
+    #[test]
+    fn a_poster_path_that_is_not_text_is_reported_as_absent() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let poster = std::path::PathBuf::from(OsStr::from_bytes(b"/cache/images/\xff\xfe.webp"));
+        let dto = title_detail(detail(Some(poster)));
+
+        assert_eq!(dto.poster, None);
+    }
+
     /// A sink that discards every event: these tests are about the command surface, and the bus's
     /// own delivery is tested in the crate that owns it.
     struct SilentSink;
@@ -669,7 +785,11 @@ mod tests {
     /// command can be called the way Tauri calls it: with managed state injected.
     async fn served(directory: &TempDir) -> (tauri::App<tauri::test::MockRuntime>, String) {
         let app = tauri::test::mock_app();
-        let config = RuntimeConfig::new(directory.path(), Arc::new(SilentSink));
+        let config = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("artwork"),
+            Arc::new(SilentSink),
+        );
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();

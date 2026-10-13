@@ -71,7 +71,11 @@ impl Harness {
         ));
 
         let served = tauri::test::mock_app();
-        let config = RuntimeConfig::new(directory.path(), Arc::new(SilentSink));
+        let config = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("artwork"),
+            Arc::new(SilentSink),
+        );
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();

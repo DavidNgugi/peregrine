@@ -5,6 +5,7 @@
 //!
 //! This is the only place where multiple ports are combined.
 
+pub mod artwork;
 pub mod events;
 pub mod jobs;
 pub mod library;
@@ -30,14 +31,19 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // layer, which may depend on this crate and not on storage — can name what it is handed
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
-pub use runtime::{Health, Runtime, RuntimeConfig, RuntimeError, ShellStatus, StartedJob};
+pub use runtime::{
+    Health, LibraryTitleDetail, Runtime, RuntimeConfig, RuntimeError, ShellStatus, StartedJob,
+};
 // The command surface speaks these too, and `peregrine-ipc` may depend on this crate and not
 // on `peregrine-domain` (AGENTS R6): re-exported rather than duplicated so a kind added to the
-// domain cannot reach the wire in a form the domain does not have.
+// domain cannot reach the wire in a form the domain does not have. `TitleSubtype` is here for the
+// same completeness rather than for a command field: it is a public field of `TitleIdentity`, which
+// this block already exports, so a caller that must build or destructure the row a command answers
+// with would otherwise have a type it cannot name.
 pub use peregrine_domain::{EpisodeNumber, LibraryRoot, LibraryRootKind, ScanMode, SeasonNumber};
 pub use peregrine_storage::{
     LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity, TitleKind,
-    UnmatchedFileRow,
+    TitleSubtype, UnmatchedFileRow,
 };
 // And the instant a root's fields carry, for the same reason: the command surface has to name
 // the type it converts, and `jiff` is not a dependency it may take (AGENTS R6).

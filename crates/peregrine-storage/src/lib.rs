@@ -46,8 +46,8 @@ pub use image_cache::ImageCacheEntry;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{
-    LibraryRootRow, LibraryTitleRow, MediaFileRow, MediaItemRow, SubtitleTrackRow, TitleEpisodeRow,
-    UnmatchedFileRow,
+    ArtworkPath, LibraryRootRow, LibraryTitleRow, MediaFileRow, MediaItemRow, SubtitleTrackRow,
+    TitleDetailRow, TitleEpisodeRow, UnmatchedFileRow,
 };
 pub use maintenance::{
     MaintenanceOutcome, MaintenancePlan, MaintenanceRequest, MaintenanceStep, StepOutcome,

@@ -76,6 +76,10 @@ impl RuntimeState {
 /// installed first, because every later failure has to be reportable, and the runtime is
 /// started second, so a failed database migration stops the app before a window is usable.
 ///
+/// `artwork_directory` is the directory the shell scoped the asset protocol to, passed through so
+/// that the image cache writes where the webview can read (PG-E2-08). It is a parameter rather than
+/// a derivation because the shell is the only layer that knows what the protocol serves.
+///
 /// # Errors
 ///
 /// [`StartupError::Logging`] when the subscriber cannot be installed — another one already
@@ -84,8 +88,9 @@ impl RuntimeState {
 pub fn serve<R: tauri::Runtime>(
     app: &AppHandle<R>,
     data_directory: PathBuf,
+    artwork_directory: PathBuf,
 ) -> Result<(), StartupError> {
-    let outcome = start(app, data_directory);
+    let outcome = start(app, data_directory, artwork_directory);
     let state = match &outcome {
         Ok(runtime) => RuntimeState {
             runtime: Some(Arc::clone(runtime)),
@@ -104,8 +109,13 @@ pub fn serve<R: tauri::Runtime>(
 fn start<R: tauri::Runtime>(
     app: &AppHandle<R>,
     data_directory: PathBuf,
+    artwork_directory: PathBuf,
 ) -> Result<Arc<Runtime>, StartupError> {
-    let config = RuntimeConfig::new(data_directory, Arc::new(TauriSink { app: app.clone() }));
+    let config = RuntimeConfig::new(
+        data_directory,
+        artwork_directory,
+        Arc::new(TauriSink { app: app.clone() }),
+    );
     let logging = Observability::install(&config.log_config())?;
     let runtime = tauri::async_runtime::block_on(Runtime::start(config, logging))?;
     Ok(Arc::new(runtime))

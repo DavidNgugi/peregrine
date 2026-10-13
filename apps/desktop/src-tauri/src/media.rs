@@ -56,18 +56,27 @@ pub enum MediaError {
     Scope(#[source] tauri::Error),
 }
 
-/// Creates the image cache directory and allows exactly it on the asset protocol scope.
+/// The directory the asset protocol serves and the image cache writes into, before it exists.
 ///
-/// Called once from the shell's `setup`, before the document loads. A failure is reported
-/// and not fatal: the app is still usable, images simply never arrive, and the in-app
-/// surfaces that depend on them show their placeholder rather than crashing the window.
+/// `<OS cache directory>/images`, the tier-3 cache of `docs/ARCHITECTURE.md` §11: a cache wipe is
+/// always safe, so it belongs where an OS cleaner may take it rather than beside the database.
+///
+/// Visible to the shell because a failure here is not the same failure as a scope that refuses: the
+/// shell picks a fallback directory under its own data folder, and the protocol has to be asked
+/// about *that* one. Two answers to "where do cached images live" is the defect this module exists
+/// to prevent.
 ///
 /// # Errors
 ///
-/// [`MediaError`] names which of the four steps failed.
-pub(crate) fn install<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), MediaError> {
-    let directory = image_cache_root(app)?;
-    allow(app, &directory).map(|_| ())
+/// [`MediaError::CacheDirectory`] when the OS will not name a cache directory.
+pub(crate) fn image_cache_root<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<PathBuf, MediaError> {
+    Ok(app
+        .path()
+        .app_cache_dir()
+        .map_err(MediaError::CacheDirectory)?
+        .join(IMAGE_CACHE_DIRECTORY))
 }
 
 /// Creates `directory`, resolves it, and allows it recursively on the asset scope.
@@ -75,8 +84,20 @@ pub(crate) fn install<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Media
 /// The path is canonicalized before it is allowed because the scope canonicalizes the
 /// path it is *asked* about: on a platform where the cache directory is reached through a
 /// symlink — `/var` on macOS, for instance — allowing the textual path would allow a
-/// pattern no resolved path ever matches. Returns the resolved directory for the tests.
-fn allow<R: Runtime>(app: &tauri::AppHandle<R>, directory: &Path) -> Result<PathBuf, MediaError> {
+/// pattern no resolved path ever matches. Returns the resolved directory, which is what the runtime
+/// is told to write into.
+///
+/// Called once from the shell's `setup`, before the document loads. A failure is reported and not
+/// fatal: the app is still usable, images simply never arrive, and the in-app surfaces that depend
+/// on them show their placeholder rather than crashing the window.
+///
+/// # Errors
+///
+/// [`MediaError`] names which of the three steps failed.
+pub(crate) fn install<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    directory: &Path,
+) -> Result<PathBuf, MediaError> {
     std::fs::create_dir_all(directory).map_err(MediaError::Create)?;
     let resolved = std::fs::canonicalize(directory).map_err(MediaError::Resolve)?;
     app.asset_protocol_scope()
@@ -86,15 +107,6 @@ fn allow<R: Runtime>(app: &tauri::AppHandle<R>, directory: &Path) -> Result<Path
     // (SECURITY.md T13).
     tracing::debug!("the asset protocol was scoped to the image cache");
     Ok(resolved)
-}
-
-/// The one directory the asset protocol serves, before it exists.
-fn image_cache_root<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, MediaError> {
-    Ok(app
-        .path()
-        .app_cache_dir()
-        .map_err(MediaError::CacheDirectory)?
-        .join(IMAGE_CACHE_DIRECTORY))
 }
 
 #[cfg(test)]
@@ -124,7 +136,7 @@ mod tests {
         let media = write(library.path(), "movie.mkv");
 
         let app = mock();
-        let resolved = allow(app.handle(), cache.path()).expect("the cache is allowed");
+        let resolved = install(app.handle(), cache.path()).expect("the cache is allowed");
 
         let scope = app.asset_protocol_scope();
         assert!(
@@ -176,7 +188,7 @@ mod tests {
         let library = tempfile::tempdir().expect("a temporary library root");
 
         let app = mock();
-        allow(app.handle(), cache.path()).expect("the cache is allowed");
+        install(app.handle(), cache.path()).expect("the cache is allowed");
 
         let missing = library.path().join("never-created.webp");
         assert!(!app.asset_protocol_scope().is_allowed(&missing));
@@ -193,7 +205,7 @@ mod tests {
         std::os::unix::fs::symlink(&secret, &link).expect("the symlink is created");
 
         let app = mock();
-        allow(app.handle(), cache.path()).expect("the cache is allowed");
+        install(app.handle(), cache.path()).expect("the cache is allowed");
 
         assert!(
             !app.asset_protocol_scope().is_allowed(&link),

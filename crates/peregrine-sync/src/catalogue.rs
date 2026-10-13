@@ -195,11 +195,11 @@ pub async fn cache_image(
     path: &str,
     kind: peregrine_domain::catalogue::ImageKind,
 ) -> Result<std::path::PathBuf, CacheError> {
-    let variant = match kind {
-        peregrine_domain::catalogue::ImageKind::Poster => ImageVariant::PosterW342,
-        peregrine_domain::catalogue::ImageKind::Backdrop => ImageVariant::BackdropW780,
-    };
-    let key = ImageKey::for_image(provider.descriptor().provider(), path, variant);
+    let key = ImageKey::for_image(
+        provider.descriptor().provider(),
+        path,
+        ImageVariant::for_kind(kind),
+    );
     if cache.contains(&key) {
         return Ok(cache.disk_path(&key));
     }

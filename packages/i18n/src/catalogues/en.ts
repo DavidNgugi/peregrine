@@ -99,6 +99,10 @@ export const en = {
         name: "Name",
       },
       unnamedEpisode: "Not named yet",
+      poster: {
+        alt: "Poster for {{name}}",
+        none: "No poster yet",
+      },
       episodes: {
         title: "Episodes",
         description: "Every episode the library holds, in the order they are watched.",

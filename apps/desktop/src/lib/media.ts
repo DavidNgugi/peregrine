@@ -32,8 +32,37 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
  */
 export type ImagePath = string & { readonly __imagePath: unique symbol };
 
-/** A Windows drive-absolute path, which is the one absolute form that has no leading slash. */
-const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
+/**
+ * The Windows absolute forms that have no leading slash: a drive path, and a UNC share.
+ *
+ * Both are reachable because the cache directory is the OS one: a profile whose `LOCALAPPDATA` is
+ * redirected to a file server resolves to a `\\server\share` path, and canonicalizing that gives the
+ * verbatim form. A poster missing on such a machine, with nothing to report it, is the failure this
+ * pair of patterns exists to prevent.
+ */
+const WINDOWS_ABSOLUTE = /^(?:[A-Za-z]:[\\/]|\\\\[^\\/])/;
+
+/** The verbatim prefix Windows canonicalization puts in front of a local path, and of a UNC one. */
+const VERBATIM_PREFIX = "\\\\?\\";
+const VERBATIM_UNC_PREFIX = "\\\\?\\UNC\\";
+
+/**
+ * A Windows path with the verbatim prefix removed, for the shape check only.
+ *
+ * **`std::fs::canonicalize` answers `\\?\C:\…` on Windows**, and that is the path the shell hands
+ * the runtime and the runtime answers a screen with, so a check that knew only the plain form would
+ * refuse every cached poster on the one platform whose resolved paths carry a prefix — silently,
+ * because a refused reference renders the same placeholder a missing poster does. Stripping it here is
+ * what Tauri's own `convertFileSrc` does to the same path before it builds a URL, so the check and the
+ * protocol agree about what the value is. The value itself is passed through untouched: the scope
+ * canonicalizes what it is asked about, and both forms resolve to the same file.
+ */
+function withoutVerbatimPrefix(value: string): string {
+  if (value.startsWith(VERBATIM_UNC_PREFIX)) {
+    return `\\\\${value.slice(VERBATIM_UNC_PREFIX.length)}`;
+  }
+  return value.startsWith(VERBATIM_PREFIX) ? value.slice(VERBATIM_PREFIX.length) : value;
+}
 
 /**
  * Whether `value` is a plausible cache reference rather than a URL or a relative path.
@@ -52,10 +81,11 @@ export function isImagePath(value: unknown): value is ImagePath {
   if (/[\u0000-\u001f]/.test(value)) {
     return false;
   }
-  if (!value.startsWith("/") && !WINDOWS_ABSOLUTE.test(value)) {
+  const path = withoutVerbatimPrefix(value);
+  if (!path.startsWith("/") && !WINDOWS_ABSOLUTE.test(path)) {
     return false;
   }
-  return !value.split(/[\\/]/).includes("..");
+  return !path.split(/[\\/]/).includes("..");
 }
 
 /**

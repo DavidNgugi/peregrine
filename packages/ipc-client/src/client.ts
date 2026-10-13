@@ -20,6 +20,7 @@ import type {
   LibraryTitleDto,
   MatchAsDto,
   MatchRuleDto,
+  TitleDetailDto,
   TitleMatchDto,
   UnmatchedFileDto,
   RootKind,
@@ -128,13 +129,28 @@ export async function searchProviders(query: string, limit?: number): Promise<Ti
 }
 
 /**
- * One title with the counts its screen shows, or `null` when it is not here.
+ * One title as its own screen reads it: the library's answer, plus where its poster is.
  *
  * `null` covers both "this account may not see it" and "no title has that id": the two read the same
- * to a person, and the screen says the title is not here either way (I37).
+ * to a person, and the screen says the title is not here either way (I37). `poster` is an absolute
+ * path or nothing — turning it into something an `<img>` can load is `lib/media.ts`'s job, and the
+ * bytes never travel over IPC (AGENTS R11). `refreshDue` is the core's rule for whether opening the
+ * screen should ask a provider for the title, and a screen must not second-guess it (AGENTS R7).
  */
-export async function getTitle(id: number): Promise<LibraryTitleDto | null> {
+export async function getTitle(id: number): Promise<TitleDetailDto | null> {
   return unwrap(commands.getTitle({ id }));
+}
+
+/**
+ * Starts filling one title from its provider, artwork included, and answers with the job to watch.
+ *
+ * A job rather than a wait, because it leaves the machine twice — once for the title's details and
+ * once for its poster — and a screen that blocked on a provider having a slow day would be a screen
+ * that froze (ARCHITECTURE §7 rule 2). Keyed by the title in the core, so opening the same screen
+ * twice waits on one refresh rather than spending two requests on one answer.
+ */
+export async function refreshTitle(id: number, kind: RootKind): Promise<JobStarted> {
+  return unwrap(commands.refreshTitle({ id }, kind));
 }
 
 /** A title's episodes, in the order a person watches them. */

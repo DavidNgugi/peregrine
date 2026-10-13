@@ -113,17 +113,6 @@ pub fn run() -> Result<(), ShellError> {
             route_own_arguments(app);
             listen_for_opened_urls(app);
             start_tray(app);
-            // Before the document loads: an `<img>` pointing at a cached image is answered
-            // by the asset protocol, and the scope has to be filled before the first one is
-            // requested. A failure is reported and not fatal — images stay at their
-            // placeholder, and no other surface depends on this (PG-E2-08).
-            if let Err(error) = media::install(app.handle()) {
-                eprintln!("peregrine: {error}");
-                tracing::warn!(
-                    %error,
-                    "the asset protocol was not scoped, so cached images will not load"
-                );
-            }
             // After the window-state plugin has restored the geometry, which is what can
             // leave the window hidden; see the function.
             ensure_main_window_visible(app.handle());
@@ -284,7 +273,32 @@ fn start_runtime(app: &mut tauri::App) {
         }
     };
 
-    if let Err(error) = peregrine_ipc::runtime::serve(app.handle(), directory) {
+    // The image cache and the asset protocol are the same directory, and this is the only place
+    // that decides which one (PG-E2-08). The OS cache directory is the documented location — a
+    // cache wipe is always safe, so it belongs where an OS cleaner may take it — and a machine
+    // where it cannot be resolved falls back to one under the data folder, which is scoped the same
+    // way. What must never happen is the two answers disagreeing: a blob written where the protocol
+    // refuses to read is a poster that renders as nothing and reports an error nobody can act on.
+    let preferred = media::image_cache_root(app.handle()).unwrap_or_else(|error| {
+        tracing::warn!(
+            %error,
+            "the OS cache directory could not be resolved; cached images fall back to the data folder"
+        );
+        directory.join("artwork")
+    });
+    let artwork = match media::install(app.handle(), &preferred) {
+        Ok(scoped) => scoped,
+        Err(error) => {
+            eprintln!("peregrine: {error}");
+            tracing::warn!(
+                %error,
+                "the asset protocol was not scoped, so cached images will not load"
+            );
+            preferred
+        }
+    };
+
+    if let Err(error) = peregrine_ipc::runtime::serve(app.handle(), directory, artwork) {
         eprintln!("peregrine: {error}");
         tracing::error!(%error, "the application runtime did not start");
     }

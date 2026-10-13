@@ -775,7 +775,8 @@ impl Database {
         crate::library::list_library_titles(&self.readers, scope, request).await
     }
 
-    /// One title, with the counts a screen shows, or `None` when `scope` may not see it.
+    /// One title, with the counts a screen shows and the artwork a provider fill recorded, or `None`
+    /// when `scope` may not see it.
     ///
     /// Scoped for the reason the page above is, and the `None` is the whole of what a hidden title
     /// and an absent one have in common (I37).
@@ -783,7 +784,7 @@ impl Database {
         &self,
         scope: AccountScope,
         id: i64,
-    ) -> Result<Option<crate::library::LibraryTitleRow>, StorageError> {
+    ) -> Result<Option<crate::library::TitleDetailRow>, StorageError> {
         crate::library::library_title(&self.readers, scope, id).await
     }
 

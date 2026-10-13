@@ -13,7 +13,12 @@
 
 import type { EventTopicName, JobRecord, JobState } from "@peregrine/ipc-client";
 
-import { eventPayload } from "../../lib/job-events.js";
+import { eventPayload, jobPhase } from "../../lib/job-events.js";
+
+// The phase rule is the core's, and this module reads it rather than keeping a copy: three
+// features now parse a `job://state` payload, and a list of phases that disagrees with the other
+// two is a screen waiting for a stop it cannot recognise.
+export { isTerminal } from "../../lib/job-events.js";
 
 /** One live job, as the two streams describe it. */
 export interface LiveJob {
@@ -30,36 +35,12 @@ export type JobEvent =
   | { readonly kind: "progress"; readonly job: LiveJob }
   | { readonly kind: "state"; readonly job: LiveJob; readonly phase: JobState };
 
-/** The terminal phases, which are what stops the screen waiting for more. */
-const TERMINAL: readonly JobState[] = ["succeeded", "failed", "canceled"];
-
-/** Whether a phase means the job will not report again. */
-export function isTerminal(phase: JobState | null): boolean {
-  return phase !== null && TERMINAL.includes(phase);
-}
-
 /** The progress a screen shows, clamped to the range the backend documents. */
 export function percentOf(job: LiveJob | null): number {
   if (job === null) {
     return 0;
   }
   return Math.min(100, Math.max(0, job.progressPermille / 10));
-}
-
-/** The phases the core declares, so an unknown string cannot reach the screen. */
-const PHASES: readonly JobState[] = [
-  "queued",
-  "running",
-  "deferred",
-  "succeeded",
-  "failed",
-  "canceled",
-];
-
-function asPhase(value: unknown): JobState | null {
-  return typeof value === "string" && (PHASES as readonly string[]).includes(value)
-    ? (value as JobState)
-    : null;
 }
 
 function asFiniteNumber(value: unknown): number | null {
@@ -98,7 +79,7 @@ export function parseJobEvent(topic: EventTopicName | string, envelope: unknown)
   }
 
   if (topic === "job://state") {
-    const phase = asPhase(inner["phase"]);
+    const phase = jobPhase(inner["phase"]);
     if (phase === null) {
       return null;
     }

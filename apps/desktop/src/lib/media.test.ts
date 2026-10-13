@@ -38,6 +38,30 @@ describe("imageUrl", () => {
     );
   });
 
+  it("accepts the verbatim form Windows canonicalization produces", () => {
+    // `std::fs::canonicalize` answers `\\?\C:\…` on Windows, and that is the path the shell hands
+    // the runtime, so this is the *ordinary* case on that platform rather than an exotic one. A check
+    // that refused it would render a placeholder for every poster ever cached, and nothing would
+    // report it: the placeholder is what a missing poster looks like too.
+    const verbatim = "\\\\?\\C:\\Users\\someone\\AppData\\Local\\peregrine\\images\\poster.webp";
+
+    expect(imageUrl(verbatim)).toBe(`asset://localhost/${encodeURIComponent(verbatim)}`);
+    // Passed through as it arrived: the asset scope canonicalizes what it is asked about, so both
+    // forms name the same file.
+    expect(bridge.convertFileSrc).toHaveBeenCalledWith(verbatim);
+  });
+
+  it("accepts the verbatim form of a UNC path", () => {
+    const unc = "\\\\?\\UNC\\server\\share\\peregrine\\images\\poster.webp";
+
+    expect(imageUrl(unc)).not.toBeNull();
+  });
+
+  it("still refuses a traversal written behind a verbatim prefix", () => {
+    // The prefix is stripped for the shape check only, so it cannot be used to smuggle a `..` past it.
+    expect(imageUrl("\\\\?\\C:\\cache\\..\\..\\etc\\passwd")).toBeNull();
+  });
+
   it("renders nothing outside the Tauri shell rather than inventing a URL", () => {
     bridge.inTauri = false;
 

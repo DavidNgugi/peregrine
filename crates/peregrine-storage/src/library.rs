@@ -45,10 +45,11 @@ use crate::page::PageRequest;
 use jiff::Timestamp;
 use peregrine_domain::{
     AccountScope, EpisodeNumber, HdrFormat, LibraryRoot, LibraryRootKind, MediaFile, MediaItem,
-    MediaItemState, MediaOrigin, NonEmptyText, ScanMode, SeasonNumber, SubtitleFormat,
+    MediaItemState, MediaOrigin, NonEmptyText, Provider, ScanMode, SeasonNumber, SubtitleFormat,
     SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile,
 };
 use sqlx::Connection as _;
+use tracing::warn;
 
 // The title vocabulary the library's own read maps, re-exported by the catalogue module rather than
 // declared twice: a kind the schema holds and this file spells differently would be a title the
@@ -592,6 +593,38 @@ pub struct LibraryTitleRow {
     pub missing_files: i64,
 }
 
+/// A provider's own path to one of a title's pictures.
+///
+/// The pair the cache key is built from: `sha256(provider|path|variant)` is what turns this into a
+/// file name, and it is the whole reason a screen cannot resolve artwork for itself (AGENTS R7) —
+/// the hash is the core's, and only the core knows whether the blob it names is on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtworkPath {
+    /// The provider that serves the bytes.
+    pub provider: Provider,
+    /// The provider-relative path, exactly as the provider spelled it.
+    pub path: String,
+}
+
+/// One title's own screen: what the library holds of it, and what a provider could still add.
+///
+/// Separate from [`LibraryTitleRow`] rather than a wider version of it because the two answer
+/// different questions: the list asks what the library has, and this asks whether opening the page
+/// should leave the machine. Keeping the list row narrow is what stops a hundred-row page from
+/// carrying artwork it never shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleDetailRow {
+    /// The counts the list shows, which is the whole of what the library knows.
+    pub library: LibraryTitleRow,
+    /// The primary poster the last provider fill recorded, when one ever did.
+    pub poster: Option<ArtworkPath>,
+    /// Whether any provider has ever filled this title in (`title.last_synced_at` is set).
+    ///
+    /// The one fact that distinguishes "the provider had nothing" from "nobody has asked", which
+    /// is what decides whether asking again is worth a request.
+    pub synced: bool,
+}
+
 /// A page of the titles the library holds, newest first.
 ///
 /// The join starts from `title` and reaches `media_file` only through `media_item`, so an item with
@@ -657,17 +690,23 @@ pub struct TitleEpisodeRow {
 /// The same aggregate as [`list_library_titles`] for one row, and the same reason it aggregates: a
 /// screen showing a title's size has to add up its files, and doing it in the statement keeps the
 /// documents off the wire.
+///
+/// Three columns more than the list reads: the provider and path of the primary poster the last fill
+/// recorded, and the instant it was recorded. They are here rather than in a second statement because the scope
+/// predicate is in this one — two reads of the same row could disagree about whether the account may
+/// see it, and the answer the screen gets must be one answer (AGENTS R34).
 pub(crate) async fn library_title(
     pool: &sqlx::SqlitePool,
     scope: AccountScope,
     id: i64,
-) -> Result<Option<LibraryTitleRow>, StorageError> {
-    let row = sqlx::query_as::<_, LibraryTitleQueryRow>(
+) -> Result<Option<TitleDetailRow>, StorageError> {
+    let row = sqlx::query_as::<_, TitleDetailQueryRow>(
         // `LEFT JOIN media_item` rather than an inner one: a route can name a title the library
         // holds nothing of, and the screen it opens has to say so rather than refuse to open. The
         // page read above stays an inner join for the same reason in reverse — its question is what
         // the library *has*.
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
+                t.poster_provider, t.poster_path, t.last_synced_at, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
@@ -776,6 +815,87 @@ struct LibraryTitleQueryRow {
     files: i64,
     bytes: i64,
     missing_files: i64,
+}
+
+/// The columns [`TitleDetailRow`] is built from: the same ones, and the artwork the page shows.
+#[derive(sqlx::FromRow)]
+struct TitleDetailQueryRow {
+    id: i64,
+    kind: String,
+    subtype: String,
+    name: String,
+    sort_name: String,
+    metadata_state: String,
+    adult: i64,
+    poster_provider: Option<String>,
+    poster_path: Option<String>,
+    last_synced_at: Option<i64>,
+    items: i64,
+    files: i64,
+    bytes: i64,
+    missing_files: i64,
+}
+
+impl From<TitleDetailQueryRow> for LibraryTitleQueryRow {
+    fn from(row: TitleDetailQueryRow) -> Self {
+        Self {
+            id: row.id,
+            kind: row.kind,
+            subtype: row.subtype,
+            name: row.name,
+            sort_name: row.sort_name,
+            metadata_state: row.metadata_state,
+            adult: row.adult,
+            items: row.items,
+            files: row.files,
+            bytes: row.bytes,
+            missing_files: row.missing_files,
+        }
+    }
+}
+
+/// The primary poster one title row records, when it records a usable one.
+///
+/// Two things are no artwork rather than errors. A provider without a path, or a path without a
+/// provider, is half of the pair the cache key is built from, so it names nothing on disk. And a
+/// provider string this build does not know — a row written by a build that knew a provider this one
+/// does not, or a restored database — is *reported and skipped*: the poster is decoration, and a
+/// title whose page refused to open because of it would trade a working screen for nothing. The
+/// anomaly is a maintainer's problem, so it goes to the log while the title renders.
+fn artwork_path(provider: Option<String>, path: Option<String>) -> Option<ArtworkPath> {
+    let (Some(provider), Some(path)) = (provider, path) else {
+        return None;
+    };
+    match provider.parse::<Provider>() {
+        Ok(provider) => Some(ArtworkPath { provider, path }),
+        Err(error) => {
+            // The value is a provider name and the column is a column: neither is a path or a
+            // secret, so both are safe to record (SECURITY.md T13).
+            warn!(
+                column = "title.poster_provider",
+                value = %provider,
+                %error,
+                "a title records a poster from a provider this build does not know"
+            );
+            None
+        }
+    }
+}
+
+impl TryFrom<TitleDetailQueryRow> for TitleDetailRow {
+    type Error = StorageError;
+
+    fn try_from(mut row: TitleDetailQueryRow) -> Result<Self, Self::Error> {
+        // Taken before the row is consumed by the conversion below, which is the one place the
+        // identity columns are parsed: a column added to both reads is converted once.
+        let synced = row.last_synced_at.is_some();
+        let poster = artwork_path(row.poster_provider.take(), row.poster_path.take());
+        Ok(Self {
+            library: LibraryTitleRow::try_from(LibraryTitleQueryRow::from(row))?,
+            poster,
+            synced,
+        })
+    }
 }
 
 impl TryFrom<LibraryTitleQueryRow> for LibraryTitleRow {
@@ -1608,7 +1728,7 @@ mod tests {
     use crate::Database;
     use crate::database::open_writer_connection;
     use crate::page::Cursor;
-    use crate::test_support::{NOW, account, database, episode, path_of, season, title};
+    use crate::test_support::{NOW, account, database, episode, execute, path_of, season, title};
     use peregrine_domain::{AccountId, HdrFormat, SeasonNumber};
     use proptest::prelude::*;
     use tempfile::TempDir;
@@ -2566,8 +2686,8 @@ mod tests {
             .await
             .unwrap()
             .expect("a title with no items is still a title");
-        assert_eq!(empty.items, 0);
-        assert_eq!(empty.files, 0);
+        assert_eq!(empty.library.items, 0);
+        assert_eq!(empty.library.files, 0);
 
         // One film's worth of rows, then an episode with its own.
         let (film_item, _) = item_with_file(&database, certified, "/media/alien.mkv").await;
@@ -2603,9 +2723,12 @@ mod tests {
 
         let title = database.library_title(scope, certified).await.unwrap();
         let title = title.expect("the fixture's title");
-        assert_eq!(title.title.id, certified);
-        assert_eq!(title.items, 3, "one film and two episodes: {title:?}");
-        assert_eq!(title.files, 3, "and a file each: {title:?}");
+        assert_eq!(title.library.title.id, certified);
+        assert_eq!(
+            title.library.items, 3,
+            "one film and two episodes: {title:?}"
+        );
+        assert_eq!(title.library.files, 3, "and a file each: {title:?}");
 
         let episodes = database
             .list_title_episodes(scope, certified, 50)
@@ -2620,6 +2743,161 @@ mod tests {
         let mut sorted = order.clone();
         sorted.sort_unstable();
         assert_eq!(order, sorted, "season and number, ascending");
+    }
+
+    /// What a provider answered for a title, with only the fields a test is about set.
+    ///
+    /// Everything else is absent, which is the state `COALESCE` exists for: a fill that omitted a
+    /// field must not erase what is stored.
+    fn details(name: &str, poster: Option<&str>) -> peregrine_domain::catalogue::TitleDetails {
+        peregrine_domain::catalogue::TitleDetails {
+            kind: crate::catalogue::TitleKind::Movie,
+            name: text(name),
+            original_name: None,
+            overview: None,
+            tagline: None,
+            released: None,
+            runtime_minutes: None,
+            original_language: None,
+            origin_country: None,
+            rating: None,
+            votes: None,
+            popularity: None,
+            adult: None,
+            in_production: None,
+            season_count: None,
+            episode_count: None,
+            homepage: None,
+            poster_path: poster.map(str::to_owned),
+            backdrop_path: None,
+        }
+    }
+
+    /// The one title read carries the artwork a screen shows, and the fact that distinguishes
+    /// "the provider had nothing" from "nobody has asked".
+    ///
+    /// Those two are the whole input to whether opening the screen should spend a request, and only
+    /// the storage layer can tell them apart: the poster path is a column and the last fill is a
+    /// column, and neither is derivable from the other.
+    #[tokio::test]
+    async fn a_title_read_reports_its_primary_poster_and_whether_a_provider_ever_filled_it() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _adult) = populated(&directory).await;
+        let scope = any_account();
+
+        // A title the fixtures inserted directly has never been filled: a poster nobody recorded and
+        // a fill that never happened are both `None`/false, and the screen asks.
+        let fresh = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert_eq!(fresh.poster, None);
+        assert!(!fresh.synced, "nothing has filled this title in");
+
+        // A provider that answered with no artwork at all is the other half: the title *has* been
+        // filled, so asking again would spend a request to be told the same thing.
+        database
+            .update_title_metadata(
+                certified,
+                details("Alien", None),
+                "alien".to_owned(),
+                MetadataState::Partial,
+                "tmdb".to_owned(),
+                NOW,
+            )
+            .await
+            .unwrap();
+        let no_artwork = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert_eq!(no_artwork.poster, None);
+        assert!(
+            no_artwork.synced,
+            "a fill that recorded no poster is a fill"
+        );
+
+        // And a fill that *did* record one: the pair is what the cache key is built from, so the
+        // provider is parsed rather than passed through as whatever text the column held.
+        database
+            .update_title_metadata(
+                certified,
+                details("Alien", Some("/poster.jpg")),
+                "alien".to_owned(),
+                MetadataState::Partial,
+                "tmdb".to_owned(),
+                NOW,
+            )
+            .await
+            .unwrap();
+        let with_artwork = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert_eq!(
+            with_artwork.poster,
+            Some(ArtworkPath {
+                provider: Provider::Tmdb,
+                path: "/poster.jpg".to_owned(),
+            })
+        );
+        assert_eq!(
+            with_artwork.library, no_artwork.library,
+            "an artwork fill changes no count"
+        );
+    }
+
+    /// A poster path with no provider is not artwork, and a provider this build does not know is
+    /// skipped rather than treated as a failure: a decorative column must not make a title's page
+    /// refuse to open.
+    #[tokio::test]
+    async fn a_poster_pair_that_names_nothing_on_disk_is_not_artwork() {
+        let directory = TempDir::new().unwrap();
+        let (database, _certified, adult) = populated(&directory).await;
+        let path = path_of(&directory);
+        let scope = any_account();
+
+        // The pair with one half missing: the column combination a partial write could leave.
+        let _ = execute(
+            &path,
+            &format!(
+                "UPDATE title SET poster_provider = 'tmdb', poster_path = NULL, \
+                 last_synced_at = {NOW} WHERE id = {adult}"
+            ),
+        )
+        .await;
+        let half = database
+            .library_title(scope, adult)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert_eq!(half.poster, None, "a path without a provider is no artwork");
+        assert!(half.synced);
+
+        let _ = execute(
+            &path,
+            &format!(
+                "UPDATE title SET poster_provider = 'not-a-provider', \
+                 poster_path = '/poster.jpg' WHERE id = {adult}"
+            ),
+        )
+        .await;
+        let unknown = database
+            .library_title(scope, adult)
+            .await
+            .expect("a provider this build does not know must not make the title unreadable")
+            .expect("the fixture's title");
+        assert_eq!(
+            unknown.poster, None,
+            "a poster from a provider this build cannot hash is no poster"
+        );
+        assert!(
+            unknown.synced,
+            "and the title is otherwise exactly what the row says"
+        );
     }
 
     #[tokio::test]

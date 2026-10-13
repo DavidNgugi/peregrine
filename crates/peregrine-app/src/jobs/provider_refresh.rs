@@ -116,25 +116,43 @@ impl ProviderRefreshJob {
         attempt: u32,
         cancellation: CancellationToken,
     ) -> peregrine_sync::JobResult {
-        // One provider is enough: a title carries its own external ids, and `refresh_title` asks the one
-        // that owns one of them.
-        let Some(provider) = self.providers.adapters().into_iter().next() else {
+        let adapters = self.providers.adapters();
+        if adapters.is_empty() {
             return Err(JobError::failed("no provider is configured"));
-        };
+        }
 
         self.phase(job, attempt, 100).await;
         let at = self.clock.now().as_millisecond();
-        let details = peregrine_sync::refresh_title(
-            provider.as_ref(),
-            &self.database,
-            self.target.title_id,
-            self.target.kind,
-            at,
-        )
-        .await
-        .map_err(|error| JobError::failed(error.to_string()))?;
-        let Some(details) = details else {
-            return Ok(Box::new(None::<std::path::PathBuf>) as JobOutput);
+        // **The provider that owns one of this title's identifiers, not simply the first one
+        // configured.** A title carries ids for several providers, and asking one for another's
+        // identifier is what `refresh_title` refuses. A provider with no id for the title answers
+        // `None` without a request, so walking the list costs one read each and no network.
+        let mut answered = None;
+        for adapter in &adapters {
+            match peregrine_sync::refresh_title(
+                adapter.as_ref(),
+                &self.database,
+                self.target.title_id,
+                self.target.kind,
+                at,
+            )
+            .await
+            {
+                Ok(Some(details)) => {
+                    answered = Some((Arc::clone(adapter), details));
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => return Err(JobError::failed(error.to_string())),
+            }
+        }
+
+        // **A title nobody can be asked about is a success, not a failure.** No configured provider
+        // holds an id for it — a title the library scanned and no search has matched — so there is
+        // nothing to fill in and nothing to fetch. A failure here would put a red row in the journal
+        // for a library that is simply not matched yet, which is a fact rather than a fault.
+        let Some((provider, details)) = answered else {
+            return self.succeeded(job, attempt, None).await;
         };
 
         if cancellation.is_cancelled() {
@@ -156,12 +174,40 @@ impl ProviderRefreshJob {
             ),
         };
 
-        if let Err(error) = self
-            .database
-            .update_job(self.journal_id, JobChange::Progress { permille: 1_000 })
-            .await
-        {
-            debug!(%error, "job progress could not be journalled");
+        self.succeeded(job, attempt, poster).await
+    }
+
+    /// Records that the job succeeded and publishes the phase, which is the last thing every
+    /// successful path does.
+    ///
+    /// **The journal write is what stops the row saying `running`.** `JobChange::Finished` does not
+    /// touch `progress_permille`, so the progress write comes first: a row left at the last reported
+    /// fraction would show a finished job as three-fifths done. A journal failure is logged and does
+    /// not fail the job — refusing to do the work because the record of it could not be written would
+    /// turn a full disk into a stuck queue — which is the rule `hello` and `library_scan` follow.
+    ///
+    /// The state event is what a screen following this job waits for, and *every* success publishes
+    /// it: a title with nothing to fill in is the common case for a fresh library, and a job that
+    /// completed without saying so is a screen waiting for a stop that cannot arrive.
+    async fn succeeded(
+        &self,
+        job: ulid::Ulid,
+        attempt: u32,
+        poster: Option<std::path::PathBuf>,
+    ) -> peregrine_sync::JobResult {
+        let at = self.clock.now().as_millisecond();
+        for change in [
+            JobChange::Progress { permille: 1_000 },
+            JobChange::Finished {
+                at,
+                phase: JobPhase::Succeeded,
+                error_code: None,
+                error: None,
+            },
+        ] {
+            if let Err(error) = self.database.update_job(self.journal_id, change).await {
+                debug!(%error, "job completion could not be journalled");
+            }
         }
         self.bus.publish(Event::new(
             JOB_STATE,

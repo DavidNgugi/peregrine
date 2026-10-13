@@ -1,13 +1,17 @@
 /**
- * One title's own screen: what it is, what the library holds of it, and its episodes.
+ * One title's own screen: what it is, what the library holds of it, its poster, and its episodes.
  *
  * The screen is named by the *route* as well as by the read, which is why the kind travels in the
  * path: a film's page can say "Film" before the core has answered, and a page that waited for its
  * read to say anything at all would be the full-page spinner `PG-E7-02` forbids.
  *
- * **What is owed here is most of what a title page is for.** Artwork, cast, provider availability,
- * and the actions that acquire or play are `PG-E6`, `PG-E14-11`, `PG-E5`, and `PG-E15` — the read
- * below is the library's own answer, which is the one part of this page that has data behind it.
+ * The poster is what the cache already holds. Filling that cache is the refresh job the hook asks
+ * for when the core says one is due, and this screen neither waits for it nor draws anything from it:
+ * a picture that arrives late is a picture that arrives late (`ARCHITECTURE §7` rule 2).
+ *
+ * **What is still owed here** is the rest of a title page: the hero expansion and the backdrop
+ * cross-fade, cast, provider availability, and the actions that acquire or play — `PG-E7-11`, `PG-E5`,
+ * `PG-E14-11`, and `PG-E15`.
  */
 
 import { EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
@@ -16,6 +20,7 @@ import type { EpisodeDto, LibraryTitleDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useMemo } from "react";
+import { TitleArtwork } from "./TitleArtwork.js";
 import type { TitleDetail } from "../hooks/useTitle.js";
 import type { TitleKind } from "../../../app/routes.js";
 
@@ -105,36 +110,44 @@ export function TitleScreen({ kind, detail }: TitleScreenProps): ReactElement {
         ) : detail.missing || title === null ? (
           <EmptyState body={t("title.missing.body")} size="page" title={t("title.missing.title")} />
         ) : (
-          <Table
-            columns={[
-              {
-                id: "items",
-                header: t("title.column.items"),
-                numeric: true,
-                cell: () => String(title.items),
-              },
-              {
-                id: "files",
-                header: t("library.column.files"),
-                numeric: true,
-                cell: () => String(title.files),
-              },
-              {
-                id: "size",
-                header: t("library.column.size"),
-                numeric: true,
-                cell: () => sizeLabel(title.bytes, t),
-              },
-              {
-                id: "missing",
-                header: t("library.column.missing"),
-                numeric: true,
-                cell: () => (title.missingFiles === 0 ? "—" : String(title.missingFiles)),
-              },
-            ]}
-            rowKey={() => "totals"}
-            rows={[title]}
-          />
+          // The poster beside the counts rather than above them: the two are one answer about one
+          // title, and a reader who has the picture should not have to scroll past it to learn what
+          // the library holds.
+          <div className="flex flex-wrap items-start gap-6">
+            <TitleArtwork name={title.name} poster={detail.poster} />
+            <div className="min-w-[16rem] flex-1">
+              <Table
+                columns={[
+                  {
+                    id: "items",
+                    header: t("title.column.items"),
+                    numeric: true,
+                    cell: () => String(title.items),
+                  },
+                  {
+                    id: "files",
+                    header: t("library.column.files"),
+                    numeric: true,
+                    cell: () => String(title.files),
+                  },
+                  {
+                    id: "size",
+                    header: t("library.column.size"),
+                    numeric: true,
+                    cell: () => sizeLabel(title.bytes, t),
+                  },
+                  {
+                    id: "missing",
+                    header: t("library.column.missing"),
+                    numeric: true,
+                    cell: () => (title.missingFiles === 0 ? "—" : String(title.missingFiles)),
+                  },
+                ]}
+                rowKey={() => "totals"}
+                rows={[title]}
+              />
+            </div>
+          </div>
         )}
       </Section>
 

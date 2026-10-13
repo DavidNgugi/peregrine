@@ -1,6 +1,6 @@
 //! The image cache: content-addressed blobs for poster and backdrop bytes (PG-E6-09).
 //!
-//! `docs/ARCHITECTURE.md` §8 calls this the tier-3 cache — the bytes themselves, as opposed to
+//! `docs/ARCHITECTURE.md` §11 calls this the tier-3 cache — the bytes themselves, as opposed to
 //! the `image_ref` rows that describe them — and §5 gives it to this crate with `peregrine-sync`'s
 //! other scheduled work. The directory it lives in is the one the shell's asset protocol is
 //! scoped to (PG-E2-08), and nothing else may write there.
@@ -40,6 +40,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use peregrine_domain::catalogue::ImageKind;
 use peregrine_domain::id::Provider;
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
@@ -75,6 +76,19 @@ impl ImageVariant {
         match self {
             Self::PosterW342 => "w342",
             Self::BackdropW780 => "w780",
+        }
+    }
+
+    /// The variant the cache keeps for one kind of picture.
+    ///
+    /// The fetch path (`cache_image`) and the read path that answers a screen with a path already
+    /// on disk both need this, and a second copy would be a cache that writes one blob and looks
+    /// for another.
+    #[must_use]
+    pub const fn for_kind(kind: ImageKind) -> Self {
+        match kind {
+            ImageKind::Poster => Self::PosterW342,
+            ImageKind::Backdrop => Self::BackdropW780,
         }
     }
 }
@@ -415,6 +429,29 @@ mod tests {
         let named: Vec<&str> = ImageVariant::ALL.iter().map(|one| one.as_str()).collect();
 
         assert_eq!(named, ["w342", "w780"]);
+    }
+
+    #[test]
+    fn each_kind_of_picture_has_exactly_one_variant() {
+        // The mapping both paths share: the fetch writes the blob this names, and the read that
+        // answers a screen with a path looks for the same one. Every kind is asserted, so a kind
+        // added to the domain without a variant here fails rather than silently fetching a poster
+        // size for a backdrop.
+        assert_eq!(
+            ImageVariant::for_kind(ImageKind::Poster),
+            ImageVariant::PosterW342
+        );
+        assert_eq!(
+            ImageVariant::for_kind(ImageKind::Backdrop),
+            ImageVariant::BackdropW780
+        );
+        // And every variant is some kind's: a variant nothing maps to is a size fetched by nothing.
+        for variant in ImageVariant::ALL {
+            let named = [ImageKind::Poster, ImageKind::Backdrop]
+                .into_iter()
+                .any(|kind| ImageVariant::for_kind(kind) == variant);
+            assert!(named, "{variant:?} is no kind's variant");
+        }
     }
 
     #[test]

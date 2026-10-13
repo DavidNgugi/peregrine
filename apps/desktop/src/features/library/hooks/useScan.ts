@@ -20,10 +20,7 @@ import type { IpcError, JobState } from "@peregrine/ipc-client";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
-import { eventPayload } from "../../../lib/job-events.js";
-
-/** The phases that mean a scan has stopped, whichever way it stopped. */
-const TERMINAL: readonly JobState[] = ["succeeded", "failed", "canceled"];
+import { eventPayload, isTerminal, jobPhase } from "../../../lib/job-events.js";
 
 /** What the library screen needs to show and drive a scan. */
 export interface ScanControl {
@@ -96,11 +93,11 @@ export function useScan(): ScanControl {
             typeof payload["progressPermille"] === "number"
               ? Math.min(1000, Math.max(0, payload["progressPermille"]))
               : previous.permille;
-          const phase = topic === eventTopics.jobState.name ? asPhase(payload["phase"]) : null;
+          const phase = topic === eventTopics.jobState.name ? jobPhase(payload["phase"]) : null;
           if (phase === null) {
             return { ...previous, permille };
           }
-          const terminal = TERMINAL.includes(phase);
+          const terminal = isTerminal(phase);
           return {
             ...previous,
             permille,
@@ -134,22 +131,7 @@ export function useScan(): ScanControl {
   const phase = state.phase;
   return {
     ...state,
-    running: state.jobId !== null && (phase === null || !TERMINAL.includes(phase)),
+    running: state.jobId !== null && !isTerminal(phase),
     start,
   };
-}
-
-/** The phase the core declares, or `null` for a string this build does not know. */
-function asPhase(value: unknown): JobState | null {
-  const phases: readonly JobState[] = [
-    "queued",
-    "running",
-    "deferred",
-    "succeeded",
-    "failed",
-    "canceled",
-  ];
-  return typeof value === "string" && (phases as readonly string[]).includes(value)
-    ? (value as JobState)
-    : null;
 }

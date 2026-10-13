@@ -88,17 +88,32 @@ const LOG_FILE_SUFFIX: &str = ".jsonl";
 /// `peregrine-ipc`, which is above this crate, and a test wants a sink it can read.
 pub struct RuntimeConfig {
     data_directory: PathBuf,
+    /// Where cached artwork is written, which is the one directory the shell's asset protocol
+    /// serves (PG-E2-08).
+    ///
+    /// Handed in rather than derived, and deliberately: the directory used to be derived from the
+    /// data directory while the protocol was scoped to the OS cache directory, so every blob the
+    /// cache wrote was written where nothing could serve it. `PG-E6-09` states the contract from the
+    /// other side — "the directory it lives in is the one the shell's asset protocol is scoped to,
+    /// and nothing else may write there" — and a second derivation here would be a second answer.
+    artwork_directory: PathBuf,
     sink: Arc<dyn EventSink>,
     directives: String,
     tray_enabled: bool,
 }
 
 impl RuntimeConfig {
-    /// Builds a configuration for `data_directory`, delivering events to `sink`.
+    /// Builds a configuration for `data_directory`, writing cached artwork under
+    /// `artwork_directory` and delivering events to `sink`.
     #[must_use]
-    pub fn new(data_directory: impl Into<PathBuf>, sink: Arc<dyn EventSink>) -> Self {
+    pub fn new(
+        data_directory: impl Into<PathBuf>,
+        artwork_directory: impl Into<PathBuf>,
+        sink: Arc<dyn EventSink>,
+    ) -> Self {
         Self {
             data_directory: data_directory.into(),
+            artwork_directory: artwork_directory.into(),
             sink,
             directives: DEFAULT_DIRECTIVES.to_owned(),
             tray_enabled: true,
@@ -135,6 +150,15 @@ impl RuntimeConfig {
         self.data_directory.join(DATABASE_FILE)
     }
 
+    /// The directory cached artwork is written into.
+    ///
+    /// The same directory the shell's asset protocol serves, so a path the cache reports is a path
+    /// the webview can load (PG-E2-08). Nothing else may write here.
+    #[must_use]
+    pub fn artwork_directory(&self) -> &Path {
+        &self.artwork_directory
+    }
+
     /// The directory the rotated JSON lines are written to.
     #[must_use]
     pub fn logs_directory(&self) -> PathBuf {
@@ -158,6 +182,22 @@ pub struct StartedJob {
     pub job: Ulid,
     /// The journal row this job reports into.
     pub journal_id: i64,
+}
+
+/// One title's own screen: what the library holds, where the cached poster is, and whether the
+/// screen should ask the provider for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryTitleDetail {
+    /// The identity and the counts, which is everything the library screen lists too.
+    pub title: peregrine_storage::LibraryTitleRow,
+    /// Where the cached poster is, or `None` when the cache holds none.
+    ///
+    /// An absolute path on this machine rather than a URL or bytes: the webview turns it into an
+    /// `asset:` URL and the bytes never cross IPC (AGENTS R11).
+    pub poster: Option<PathBuf>,
+    /// Whether opening the screen should ask a provider for this title, which is
+    /// [`crate::artwork::refresh_due`]'s rule and not a screen's.
+    pub refresh_due: bool,
 }
 
 /// What the diagnostics surface reports about the running process.
@@ -265,8 +305,10 @@ impl Runtime {
             "the runtime is ready"
         );
 
-        // Read before the struct literal moves `config`.
-        let artwork_root = config.database_path().with_file_name("artwork");
+        // Read before the struct literal moves `config`. Not created here: the shell creates it when
+        // it scopes the asset protocol to it, and a cache that makes directories on construction does
+        // filesystem work on a path a session may never use.
+        let artwork_root = config.artwork_directory().to_path_buf();
         let providers = Arc::new(crate::providers::ProviderRegistry::new());
         // Off the start-up path and off the command path: a keyring read is blocking and can raise an OS
         // prompt, so it happens once, on a blocking thread, and everything else reads the cache.
@@ -624,19 +666,70 @@ impl Runtime {
         self.search_titles(query, limit).await
     }
 
-    /// One title, with the counts a screen shows, when the scope may see it.
+    /// One title, with the counts a screen shows, the cached poster, and whether opening the screen
+    /// should ask its provider for more, when the scope may see it.
+    ///
+    /// Three answers from one statement and one `stat`: the counts are the aggregate's, the poster
+    /// path is decided by the cache (`crate::artwork::cached_image`), and whether to ask is the rule
+    /// in `crate::artwork::refresh_due`. Resolving the artwork here rather than in the screen is
+    /// `AGENTS R7`: the cache key is a hash, and whether a fill has happened is a column.
     ///
     /// # Errors
     ///
     /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
-    pub async fn library_title(
-        &self,
-        id: i64,
-    ) -> Result<Option<peregrine_storage::LibraryTitleRow>, RuntimeError> {
-        Ok(self
+    pub async fn library_title(&self, id: i64) -> Result<Option<LibraryTitleDetail>, RuntimeError> {
+        let Some(row) = self
             .database
             .library_title(installation_scope(), id)
-            .await?)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let poster = row.poster.as_ref().and_then(|artwork| {
+            crate::artwork::cached_image(
+                &self.artwork,
+                artwork.provider,
+                &artwork.path,
+                peregrine_domain::catalogue::ImageKind::Poster,
+            )
+        });
+        let state = crate::artwork::ArtworkState::of(
+            &row,
+            poster.as_deref(),
+            self.provider_can_serve(id).await?,
+        );
+        Ok(Some(LibraryTitleDetail {
+            refresh_due: crate::artwork::refresh_due(&state),
+            title: row.library,
+            poster,
+        }))
+    }
+
+    /// Whether a configured provider owns an identifier `title_id` carries.
+    ///
+    /// The question a refresh's usefulness turns on, and the reason it is asked here rather than by a
+    /// screen: it needs the credential store's answer (`PG-E5-12`'s registry, read once at startup and
+    /// never on a command path) together with the ids the catalogue holds. Nothing leaves the machine —
+    /// this compares what was already known.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the ids cannot be read.
+    async fn provider_can_serve(&self, title_id: i64) -> Result<bool, RuntimeError> {
+        let configured: Vec<peregrine_domain::Provider> = self
+            .providers
+            .adapters()
+            .iter()
+            .map(|adapter| adapter.descriptor().provider())
+            .collect();
+        let held: Vec<peregrine_domain::ExternalId> = self
+            .database
+            .external_ids_of(title_id)
+            .await?
+            .into_iter()
+            .map(|one| one.id)
+            .collect();
+        Ok(crate::artwork::can_answer(&configured, &held))
     }
 
     /// A title's episodes, in the order a person watches them.
@@ -1107,9 +1200,17 @@ mod tests {
     /// only be called once per process, so a test that installed it would make every other
     /// test in this binary order-dependent. Dropping it here is deliberate — the runtime
     /// holds the handle it needs, and nothing in these tests changes the log level.
+    ///
+    /// **The artwork directory is deliberately not `<data directory>/artwork`**, which is where the
+    /// runtime used to derive it from: a test that supplied the old derivation's own answer could not
+    /// tell the fix from the defect it fixed.
     async fn runtime(directory: &TempDir) -> (Runtime, Arc<RecordingSink>) {
         let sink = Arc::new(RecordingSink::default());
-        let config = RuntimeConfig::new(directory.path(), Arc::clone(&sink) as Arc<dyn EventSink>);
+        let config = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("cache/images"),
+            Arc::clone(&sink) as Arc<dyn EventSink>,
+        );
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();
@@ -1133,6 +1234,127 @@ mod tests {
         })
         .await
         .expect("the job must reach a terminal state")
+    }
+
+    /// What a provider answered for one title, with only the two fields a test reads set.
+    fn details(name: &str, poster: Option<&str>) -> peregrine_domain::catalogue::TitleDetails {
+        peregrine_domain::catalogue::TitleDetails {
+            kind: peregrine_domain::catalogue::TitleKind::Movie,
+            name: peregrine_domain::NonEmptyText::new(name).expect("the fixture is not empty"),
+            original_name: None,
+            overview: None,
+            tagline: None,
+            released: None,
+            runtime_minutes: None,
+            original_language: None,
+            origin_country: None,
+            rating: None,
+            votes: None,
+            popularity: None,
+            adult: None,
+            in_production: None,
+            season_count: None,
+            episode_count: None,
+            homepage: None,
+            poster_path: poster.map(str::to_owned),
+            backdrop_path: None,
+        }
+    }
+
+    /// The read a title screen makes answers where the poster is, and whether to ask a provider.
+    ///
+    /// **The wiring, not the rule.** `crate::artwork` tests the rule and the cache lookup on their
+    /// own; what this asserts is that the read feeds them the columns the row actually holds. Three
+    /// arguments taken from the wrong column is a bug no unit test of the rule can see, and it is
+    /// the mistake a screen would show as a poster that never arrives.
+    #[tokio::test]
+    async fn a_title_read_reports_the_cached_poster_from_the_configured_cache_directory() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let id = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "Alien".to_owned(),
+                original_name: None,
+                sort_name: "alien".to_owned(),
+                at: 0,
+            })
+            .await
+            .unwrap();
+
+        // Nothing has filled it in. What `refresh_due` answers is asserted where it can be asserted
+        // deterministically — `crate::artwork`'s tests for the rule, and `ArtworkState::of` for the
+        // wiring — because its first input is whether the OS credential store holds a provider key,
+        // which is a fact about the machine running the tests (AGENTS R14). The poster path is what
+        // this test owns.
+        let fresh = runtime.library_title(id).await.unwrap().expect("the stub");
+        assert_eq!(fresh.poster, None);
+
+        // A provider that answered with no artwork at all: the title *has* been filled, so asking
+        // again could only be told the same thing.
+        runtime
+            .database
+            .update_title_metadata(
+                id,
+                details("Alien", None),
+                "alien".to_owned(),
+                peregrine_storage::MetadataState::Partial,
+                "tmdb".to_owned(),
+                1,
+            )
+            .await
+            .unwrap();
+        let no_artwork = runtime.library_title(id).await.unwrap().expect("the title");
+        assert_eq!(no_artwork.poster, None);
+
+        // And a fill that recorded a poster the cache does not hold: one request puts it there.
+        runtime
+            .database
+            .update_title_metadata(
+                id,
+                details("Alien", Some("/poster.jpg")),
+                "alien".to_owned(),
+                peregrine_storage::MetadataState::Partial,
+                "tmdb".to_owned(),
+                1,
+            )
+            .await
+            .unwrap();
+        let known = runtime.library_title(id).await.unwrap().expect("the title");
+        assert_eq!(known.poster, None, "the bytes have not been fetched");
+
+        // Once the blob is in the cache the screen has nothing to ask for — and the path it answers
+        // with is inside the directory the runtime was told to write into, which is the one the
+        // asset protocol was scoped to. That is the whole point of the directory being a parameter.
+        let key = peregrine_sync::ImageKey::for_image(
+            peregrine_domain::Provider::Tmdb,
+            "/poster.jpg",
+            peregrine_sync::ImageVariant::PosterW342,
+        );
+        let stored = peregrine_sync::ImageCache::new(runtime.config().artwork_directory())
+            .store(&key, b"pretend this is a jpeg")
+            .expect("the artwork directory is writable");
+        let cached = runtime.library_title(id).await.unwrap().expect("the title");
+        assert_eq!(cached.poster.as_deref(), Some(stored.disk_path()));
+        assert!(
+            cached
+                .poster
+                .as_deref()
+                .expect("a path")
+                .starts_with(runtime.config().artwork_directory()),
+            "the path must be one the asset protocol can serve"
+        );
+        assert_ne!(
+            runtime.config().artwork_directory(),
+            runtime.config().database_path().with_file_name("artwork"),
+            "the fixture must not supply the answer the old derivation would have produced, or this \
+             test cannot tell the fix from the defect"
+        );
+
+        // A title that is not there is still `None` rather than an error (I37).
+        assert_eq!(runtime.library_title(9_999).await.unwrap(), None);
     }
 
     /// The acceptance for PG-E0-19 in one test: the runtime opens the database, accepts a
@@ -1468,11 +1690,16 @@ mod tests {
         std::fs::write(&blocked, b"not a directory").unwrap();
 
         let sink = Arc::new(RecordingSink::default());
-        let config = RuntimeConfig::new(&blocked, sink as Arc<dyn EventSink>);
+        let config = RuntimeConfig::new(
+            &blocked,
+            directory.path().join("artwork"),
+            sink as Arc<dyn EventSink>,
+        );
         // The log directory has to be somewhere writable, so it is built from a second
         // configuration; startup must fail on the data directory regardless.
         let logs = RuntimeConfig::new(
             directory.path().join("logs-home"),
+            directory.path().join("artwork"),
             Arc::new(RecordingSink::default()) as Arc<dyn EventSink>,
         );
         let (_subscriber, logging) = Observability::build(&logs.log_config()).unwrap();
@@ -1546,7 +1773,11 @@ mod tests {
     fn the_tray_is_enabled_unless_the_configuration_says_otherwise() {
         let directory = TempDir::new().unwrap();
         let sink = Arc::new(RecordingSink::default());
-        let enabled = RuntimeConfig::new(directory.path(), Arc::clone(&sink) as Arc<dyn EventSink>);
+        let enabled = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("artwork"),
+            Arc::clone(&sink) as Arc<dyn EventSink>,
+        );
         assert!(enabled.tray_enabled, "a tray nobody asked to hide is shown");
         assert!(!enabled.with_tray_enabled(false).tray_enabled);
     }

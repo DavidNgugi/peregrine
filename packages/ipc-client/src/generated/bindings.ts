@@ -97,6 +97,7 @@ export const commands = {
 	 *  [`ErrorCode::StorageCorrupt`] when the journal cannot be read.
 	 */
 	list: (limit: number | null) => typedError<JobRecord_Serialize[], AppError_Serialize>(__TAURI_INVOKE("list", { limit })),
+	/**  One page of library roots, newest first. */
 	listRoots: (limit: number | null) => typedError<LibraryRootDto[], AppError_Serialize>(__TAURI_INVOKE("list_roots", { limit })),
 	/**
 	 *  Adds a folder as a library root and answers with the row it wrote.
@@ -138,33 +139,36 @@ export const commands = {
 	/**  A page of the rules a user's corrections became, newest first. */
 	listMatchRules: (limit: number | null) => typedError<MatchRuleDto[], AppError_Serialize>(__TAURI_INVOKE("list_match_rules", { limit })),
 	/**
-	 *  One title, with the counts its screen shows, or `null` when it is not here.
+	 *  One title, with the counts its screen shows and the artwork the cache holds for it, or `null`
+	 *  when it is not here.
 	 * 
 	 *  `null` rather than an error for the two cases that read the same to a person: a title this
 	 *  account may not see, and an id that names nothing (I37). A route naming either opens a screen
 	 *  that says the title is not here.
 	 */
 	getTitle: (title: TitleRef) => typedError<{
-	/**  The row id, which is the paging cursor. */
-	id: number,
-	/**  The display name. */
-	name: string,
-	/**  Film or series, as the webview spells it. */
-	kind: RootKind,
+	/**  The title itself, exactly as the library screen lists it. */
+	title: LibraryTitleDto,
 	/**
-	 *  How complete the metadata is: a title the library holds is a stub until a sync fills it in,
-	 *  and a screen that showed a stub as complete would promise artwork and a synopsis it does not
-	 *  have (`PG-E5-06`).
+	 *  The absolute path of the cached poster, or `null` when the cache holds none.
+	 * 
+	 *  A filesystem path rather than a URL or bytes: `apps/desktop/src/lib/media.ts` is the only
+	 *  module that turns one into something an `<img>` can load, and the bytes themselves travel over
+	 *  the asset protocol and never over IPC (AGENTS R11). A path this platform cannot spell as UTF-8
+	 *  is reported as `null` rather than lossily — a corrupted path is a request the asset protocol
+	 *  refuses, which is the state that looks like a rendering bug.
 	 */
-	stub: boolean,
-	/**  How many items of it the library holds. */
-	items: number,
-	/**  How many files those items have. */
-	files: number,
-	/**  What those files add up to, in bytes. */
-	bytes: number,
-	/**  How many of them are marked missing. */
-	missingFiles: number,
+	poster: string | null,
+	/**
+	 *  Whether opening this screen should ask the provider for the title.
+	 * 
+	 *  **A rule, and computed in the core for that reason** (AGENTS R7): it is "no provider has ever
+	 *  filled this title in, or a provider is known to have artwork the cache does not hold". A
+	 *  screen that decided this for itself would spend a request on every visit to a title whose
+	 *  provider has no poster, which is the shape AGENTS R24 exists to prevent. The *staleness*
+	 *  policy — when an already-filled title is due again — is `PG-E6-15`'s and is not this flag.
+	 */
+	refreshDue: boolean,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
 	/**
 	 *  Searches the configured providers, writes what they know, and answers with what the catalogue holds.
@@ -179,7 +183,6 @@ export const commands = {
 	 */
 	searchProviders: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit })),
 	/**
-	 *  One page of library roots, newest first.
 	 *  Starts filling one title from its provider, artwork included, and answers with the job.
 	 * 
 	 *  A job and not a command that waits, because it leaves the machine twice — once for the title's
@@ -634,6 +637,39 @@ export type ShortcutBinding = {
 	alt: boolean,
 	/**  Whether Shift is held. */
 	shift: boolean,
+};
+
+/**
+ *  One title as its own screen reads it: the library's answer, plus the artwork.
+ * 
+ *  Nested rather than a wider [`LibraryTitleDto`] because the two answer different questions and are
+ *  read by different screens: the list is "what the library holds", and this is "what the library
+ *  holds, and what a provider could still add". A hundred-row page must not carry a poster path it
+ *  never draws, and one DTO cannot mean two things.
+ */
+export type TitleDetailDto = {
+	/**  The title itself, exactly as the library screen lists it. */
+	title: LibraryTitleDto,
+	/**
+	 *  The absolute path of the cached poster, or `null` when the cache holds none.
+	 * 
+	 *  A filesystem path rather than a URL or bytes: `apps/desktop/src/lib/media.ts` is the only
+	 *  module that turns one into something an `<img>` can load, and the bytes themselves travel over
+	 *  the asset protocol and never over IPC (AGENTS R11). A path this platform cannot spell as UTF-8
+	 *  is reported as `null` rather than lossily — a corrupted path is a request the asset protocol
+	 *  refuses, which is the state that looks like a rendering bug.
+	 */
+	poster: string | null,
+	/**
+	 *  Whether opening this screen should ask the provider for the title.
+	 * 
+	 *  **A rule, and computed in the core for that reason** (AGENTS R7): it is "no provider has ever
+	 *  filled this title in, or a provider is known to have artwork the cache does not hold". A
+	 *  screen that decided this for itself would spend a request on every visit to a title whose
+	 *  provider has no poster, which is the shape AGENTS R24 exists to prevent. The *staleness*
+	 *  policy — when an already-filled title is due again — is `PG-E6-15`'s and is not this flag.
+	 */
+	refreshDue: boolean,
 };
 
 /**  One title a search found, as the picker lists it. */
