@@ -30,8 +30,10 @@ serde_json = { workspace = true }
 # PG-E1-09. `protocol-asset` is what makes the `asset:` protocol exist and what gives
 # `Manager::asset_protocol_scope` a scope to fill; the scope itself is PG-E2-08, and it is
 # deny-by-default, so the feature grants no directory on its own. The window, the event
-# loop, and the OS plugins are the only things these features reach.
-tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
+# loop, and the OS plugins are the only things these features reach. Both are enabled in
+# the workspace manifest instead of here, so that this crate and `peregrine-ipc` resolve
+# to one `tauri` build; the reason is written out beside that declaration.
+tauri = { workspace = true }
 # A second launch has to find the first: the plugin owns the lock (a named mutex on
 # Windows, a D-Bus name on Linux, a Unix socket on macOS) and hands the second launch's
 # arguments to the running instance, which is the PG-E1-04 delivery and the seam PG-E1-11's

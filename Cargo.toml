@@ -84,7 +84,16 @@ reqwest = { version = "0.13.5", default-features = false, features = ["rustls", 
 # synthesised HTTP rather than a live provider, which AGENTS R14 requires and R24 respects.
 wiremock = { version = "0.6.5" }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "json", "macros"] }
-tauri = { version = "2.12.1" }
+# The desktop shell's feature set is declared here rather than on the member that uses it.
+# Cargo unifies features per invocation, over the members that invocation *selects*, so a
+# `tauri` configured only in `peregrine-desktop` resolves to a different build than the one
+# `cargo run -p peregrine-ipc --bin gen-ipc`, `cargo test -p peregrine-ipc`, or any other
+# narrower selection gets — and a different resolution recompiles `tauri`, `wry`, and the
+# whole plugin stack, which is minutes, not seconds. Declaring the set once gives every
+# member the same one. `protocol-asset` implies `http-range` (tauri 2.12.1's own feature),
+# so it needs no separate entry. This is the `muda` rule below applied to the biggest
+# dependency in the graph.
+tauri = { version = "2.12.1", features = ["tray-icon", "protocol-asset"] }
 tauri-build = { version = "2.7.1" }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 # The native file and folder pickers (PG-E1-12). The platform's own dialog is the only
