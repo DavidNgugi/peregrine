@@ -56,6 +56,22 @@ pub struct RailItemDto {
     /// A path rather than a URL: the webview turns it into an `asset:` URL, and the scheme the shell
     /// scopes is the shell's business rather than this layer's.
     pub poster: Option<String>,
+    /// Where the cached backdrop is on this machine, as an absolute path, or `null` while it has not
+    /// been fetched.
+    ///
+    /// The wide image Discover's hero draws, and the second variant the same cache holds (`w780`
+    /// against the poster's `w342`). `null` is a state the hero draws — the poster cropped to the
+    /// band, and the reserved surface when there is no poster either — rather than a reason to
+    /// stretch a portrait image across it.
+    pub backdrop: Option<String>,
+    /// Whether the library holds a file for this title that is not known to be missing.
+    ///
+    /// **A fact about the library, not a promise about playback**: it says a blob is on disk, not
+    /// that it decodes or that this build has a player (`PG-E15`). It rides here because the hero's
+    /// Play must be disabled for a reason the core stated rather than for one a screen assumed
+    /// (`AGENTS R7`), and a control that could not be honoured had to be absent instead
+    /// (`PG-E1-07`).
+    pub playable: bool,
     /// The provider's own score for the title, or `null` when the list answer carried none.
     ///
     /// `null` is not `0.0`: a provider that sends no score, and one whose value for an unrated item
@@ -92,6 +108,10 @@ impl From<peregrine_app::RailItem> for RailItemDto {
             name: item.name,
             year: item.year,
             poster: item.poster.map(|path| path.to_string_lossy().into_owned()),
+            backdrop: item
+                .backdrop
+                .map(|path| path.to_string_lossy().into_owned()),
+            playable: item.playable,
             rating: item.rating,
             overview: item.overview,
             votes: item.votes,
@@ -267,6 +287,9 @@ mod tests {
                 name: "Severance".to_owned(),
                 year: Some(2022),
                 poster: Some(std::path::PathBuf::from("/cache/images/abc")),
+                backdrop_source: None,
+                backdrop: Some(std::path::PathBuf::from("/cache/images/def")),
+                playable: true,
                 rating: Some(8.7),
                 overview: Some("A severed employee questions the work.".to_owned()),
                 votes: Some(3_100),
@@ -283,6 +306,15 @@ mod tests {
         assert_eq!(dto.items[0].name, "Severance");
         assert_eq!(dto.items[0].year, Some(2022));
         assert_eq!(dto.items[0].poster.as_deref(), Some("/cache/images/abc"));
+        assert_eq!(
+            dto.items[0].backdrop.as_deref(),
+            Some("/cache/images/def"),
+            "the hero's wide image is a second path rather than the poster's"
+        );
+        assert!(
+            dto.items[0].playable,
+            "the hero's Play is enabled from the core's fact and not from a screen's guess"
+        );
         assert_eq!(dto.items[0].rating, Some(8.7));
         assert_eq!(
             dto.items[0].overview.as_deref(),
@@ -305,6 +337,9 @@ mod tests {
                 name: "Dune".to_owned(),
                 year: None,
                 poster: None,
+                backdrop_source: None,
+                backdrop: None,
+                playable: false,
                 rating: None,
                 overview: None,
                 votes: None,
@@ -315,6 +350,14 @@ mod tests {
         let dto = HomeRailDto::from(rail);
 
         assert_eq!(dto.items[0].poster, None);
+        assert_eq!(
+            dto.items[0].backdrop, None,
+            "a title with no wide image draws a reserved box, not the poster stretched"
+        );
+        assert!(
+            !dto.items[0].playable,
+            "nothing on disk means Play has a reason to be disabled"
+        );
         assert_eq!(dto.items[0].year, None);
         assert_eq!(
             dto.items[0].rating, None,

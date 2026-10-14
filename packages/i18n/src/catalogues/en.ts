@@ -42,7 +42,14 @@ export const en = {
       },
       hero: {
         label: "Featured title",
-        open: "Open this title",
+        play: "Play",
+        // Why the primary action cannot be taken, said where the control is. `noFile` is the
+        // title's own fact and comes first; `noPlayer` is this build's, because no playback
+        // surface exists yet — a live button that fired nothing would be worse than a word.
+        noFile: "Not in your library yet",
+        noPlayer: "Playback is not available yet",
+        strip: "Featured titles",
+        show: "Show {{name}}",
       },
       kind: {
         movie: "Film",

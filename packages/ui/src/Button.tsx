@@ -3,7 +3,14 @@ import { clsx } from "clsx";
 import type { ButtonHTMLAttributes, ReactElement, ReactNode } from "react";
 import { twMerge } from "./merge.js";
 
-const buttonVariants = cva(
+/**
+ * A button's appearance, as a function of its variant and size.
+ *
+ * Exported to the kit rather than to the app, and for one caller: `Link` draws an anchor that has to
+ * look like the button beside it when a caller asks for that, and a second copy of these classes in
+ * `Link` would be a second answer to what a button looks like.
+ */
+export const buttonVariants = cva(
   [
     // `whitespace-nowrap` is not decoration: without it a two-word label wraps inside the button
     // when the row it sits in is wide enough for its description and not for the control, which

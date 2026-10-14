@@ -563,11 +563,22 @@ export function Gallery(): ReactElement {
 
       <Section_
         component="Link"
-        description="An anchor that says where it goes, with the platform's focus ring. Given onNavigate it takes the click rather than letting the webview reload, and it leaves a modified click to the platform: cmd-click is a request for a new window, not for the app to decide."
+        description="An anchor that says where it goes, with the platform's focus ring. Given onNavigate it takes the click rather than letting the webview reload, and it leaves a modified click to the platform: cmd-click is a request for a new window, not for the app to decide. With a variant it is drawn as a button — Discover's hero puts a Play button and a Details link side by side — and it stays an anchor, so the destination is still in the markup and a context menu can still offer it."
       >
         <div className="flex flex-col items-start gap-2">
           <Link href="/title/movie/7">A title's own screen</Link>
           <Link href="/library">The library</Link>
+          <div className="flex items-center gap-2">
+            <Link href="/title/movie/7" variant="primary">
+              Details
+            </Link>
+            <Link href="/library" variant="secondary">
+              Secondary
+            </Link>
+            <Link href="/library" size="sm" variant="ghost">
+              Small
+            </Link>
+          </div>
         </div>
       </Section_>
 

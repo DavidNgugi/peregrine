@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import type { AnchorHTMLAttributes, MouseEvent, ReactElement, ReactNode } from "react";
+import { buttonVariants } from "./Button.js";
 import { twMerge } from "./merge.js";
 
 /**
@@ -33,6 +34,17 @@ export interface LinkProps extends Omit<
    * is what an external link wants, and what a test wants when it renders the markup alone.
    */
   readonly onNavigate?: () => void;
+  /**
+   * Draws the anchor as a button of this variant, for a link that stands beside one.
+   *
+   * The element does not change and must not: Discover's hero has a Play *button* and a Details
+   * *link* side by side, and the link has to look like the button without becoming one — the point of
+   * an anchor is that the destination is in the markup, that a context menu can offer it, and that
+   * `Enter` opens it, which a `<button>` with an `onClick` has none of. The classes come from
+   * `buttonVariants`, so the two cannot drift.
+   */
+  readonly variant?: "primary" | "secondary" | "ghost" | "danger";
+  readonly size?: "sm" | "md";
   readonly className?: string;
 }
 
@@ -69,6 +81,8 @@ export function Link({
   href,
   children,
   onNavigate,
+  variant,
+  size,
   className,
   onClick,
   ...rest
@@ -85,8 +99,10 @@ export function Link({
     <a
       className={twMerge(
         clsx(
-          "rounded-sm text-text-primary underline-offset-2 hover:underline",
-          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring",
+          variant === undefined
+            ? "rounded-sm text-text-primary underline-offset-2 hover:underline focus-visible:outline-offset-1"
+            : buttonVariants({ variant, size }),
+          "focus-visible:outline-2 focus-visible:outline-focus-ring",
         ),
         className,
       )}

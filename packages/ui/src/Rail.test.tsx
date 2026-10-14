@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { nextRailIndex, Rail, showsChevrons } from "./Rail.js";
-import { TitleCard } from "./TitleCard.js";
+import { revealRoom } from "./hover-preview.js";
+import { nextRailIndex, Rail, RAIL_INSET, showsChevrons } from "./Rail.js";
+import { CARD_ASPECT, CARD_WIDTHS, TitleCard } from "./TitleCard.js";
 
 const ITEMS = ["a", "b", "c"] as const;
 
@@ -123,5 +124,31 @@ describe("Rail", () => {
     expect(rail().indexOf('href="/title/movie/b"')).toBeLessThan(
       rail().indexOf('href="/title/movie/c"'),
     );
+  });
+
+  it("leaves the enlarged tile room on every side, and moves nothing by doing it", () => {
+    // `PG-E7-05`'s reported defect: `overflow-x: auto` computes `overflow-y` to `auto`, so the
+    // scroller is a clip box on both axes and cut the scaled tile, its focus ring, and the ramp. The
+    // room is padding on the padding box — the box a scroller clips at — and the margins of the same
+    // size give it all back except the row's own inset, so the tiles, the chevrons' resting offset,
+    // and every heading on the screen stay where they were. A static render cannot measure a clip
+    // box; this holds the scroller to the arithmetic `revealRoom` answers for the largest tile.
+    const room = revealRoom(CARD_WIDTHS.xl, CARD_WIDTHS.xl / CARD_ASPECT);
+    const scroller = /<ul[^>]*>/u.exec(rail())?.[0] ?? "";
+
+    expect(scroller).toContain(
+      `padding:${String(room.top)}px ${String(room.sides)}px ${String(room.bottom)}px`,
+    );
+    expect(scroller).toContain(
+      `margin:${String(RAIL_INSET.y - room.top)}px ${String(RAIL_INSET.x - room.sides)}px ${String(RAIL_INSET.y - room.bottom)}px`,
+    );
+    expect(room.sides).toBeGreaterThan(RAIL_INSET.x);
+    expect(room.top).toBeGreaterThan(RAIL_INSET.y);
+  });
+
+  it("still clips on the scroll axis, which is what makes the room necessary", () => {
+    // Named rather than assumed: a scroller that stopped scrolling would make the test above pass
+    // for the wrong reason and break the rail.
+    expect(rail()).toContain("overflow-x-auto");
   });
 });

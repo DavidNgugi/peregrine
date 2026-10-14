@@ -550,6 +550,11 @@ struct SearchResult {
     /// nullable, and an empty string is the same answer as `null`.
     #[serde(default)]
     poster_path: Option<String>,
+    /// The backdrop's path on the image CDN, which the film and series list endpoints send beside
+    /// the poster. Nullable, and read the same way: an empty or whitespace-only path is an absent
+    /// one, which is what keeps a caller from asking the image host for its root.
+    #[serde(default)]
+    backdrop_path: Option<String>,
     /// The audience score, out of ten. **`0.0` is what TMDB sends an item nobody has voted on**, so
     /// it is read together with `vote_count` rather than on its own.
     #[serde(default)]
@@ -598,10 +603,10 @@ impl SearchResult {
     /// rail mapping because this is where a result becomes a candidate: a rail that asked
     /// `/movie/upcoming` and labelled the answer `Show` would be a mistake nothing else would catch.
     ///
-    /// The artwork, the score, the synopsis, and the vote count come along because a list answer is
-    /// where they are free (`PG-E7-08`, `PG-E7-05`): reading them here is what makes filling a rail
-    /// of posters cost one request per title rather than two. A path or a synopsis that is empty or
-    /// whitespace is an absent one rather than an empty one, for the reason
+    /// The artwork, the backdrop, the score, the synopsis, and the vote count come along because a
+    /// list answer is where they are free (`PG-E7-08`, `PG-E7-05`): reading them here is what makes
+    /// filling a rail of posters cost one request per title rather than two. A path or a synopsis
+    /// that is empty or whitespace is an absent one rather than an empty one, for the reason
     /// [`SearchCandidate::with_artwork_path`] states, and a vote count of zero is TMDB saying nobody
     /// has voted — the same absence [`scored_rating`] reads.
     fn into_candidate_for(self, fixed: Option<TitleKind>) -> Option<SearchCandidate> {
@@ -627,12 +632,14 @@ impl SearchResult {
             .filter(|date| !date.is_empty())
             .and_then(|date| date.parse().ok());
         let artwork = self.poster_path.filter(|path| !path.trim().is_empty());
+        let backdrop = self.backdrop_path.filter(|path| !path.trim().is_empty());
         let rating = scored_rating(self.vote_average, self.vote_count);
         let overview = self.overview.filter(|text| !text.trim().is_empty());
         let votes = self.vote_count.filter(|count| *count > 0);
         Some(
             SearchCandidate::new(external_id, name, kind, released)
                 .with_artwork_path(artwork)
+                .with_backdrop_path(backdrop)
                 .with_rating(rating)
                 .with_overview(overview)
                 .with_votes(votes),
@@ -1171,14 +1178,18 @@ mod tests {
     ];
 
     /// One page of a rail, in the shape `/movie/popular` documents: no `media_type`, because the
-    /// endpoint has already said what kind it answers. One item carries artwork and a score and the
-    /// other carries neither, which is what a real page looks like.
+    /// endpoint has already said what kind it answers. One item carries artwork, a backdrop and a
+    /// score and the other carries none of them, which is what a real page looks like — and one
+    /// carries a whitespace backdrop, which is TMDB's other spelling of "no wide image".
     const MOVIE_RAIL: &str = r#"{
       "page": 1,
       "results": [
         {"id": 603, "title": "The Matrix", "release_date": "1999-03-31",
-         "poster_path": "/matrix.jpg", "vote_average": 7.0, "vote_count": 100},
-        {"id": 27205, "title": "Inception", "release_date": "2010-07-16"}
+         "poster_path": "/matrix.jpg", "backdrop_path": "/matrix-wide.jpg",
+         "vote_average": 7.0, "vote_count": 100},
+        {"id": 27205, "title": "Inception", "release_date": "2010-07-16"},
+        {"id": 157336, "title": "Interstellar", "release_date": "2014-11-05",
+         "backdrop_path": "   "}
       ],
       "total_pages": 500
     }"#;
@@ -1292,14 +1303,30 @@ mod tests {
             .await
             .expect("the rail answers");
 
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.len(), 3);
         assert_eq!(found[0].name().as_str(), "The Matrix");
         assert_eq!(found[0].artwork_path(), Some("/matrix.jpg"));
         assert_eq!(found[0].rating(), Some(7.0));
         assert_eq!(
+            found[0].backdrop_path(),
+            Some("/matrix-wide.jpg"),
+            "the wide image the list answer already sends is what the hero draws, and it is free"
+        );
+        assert_eq!(
             found[1].artwork_path(),
             None,
             "an item the list gave no poster still comes back"
+        );
+        assert_eq!(
+            found[1].backdrop_path(),
+            None,
+            "an item with no wide image says none rather than borrowing the poster"
+        );
+        assert_eq!(
+            found[2].backdrop_path(),
+            None,
+            "a whitespace backdrop is TMDB's other spelling of no backdrop, and a caller that kept \
+             it would ask the image host for its root"
         );
     }
 

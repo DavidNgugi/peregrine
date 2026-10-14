@@ -34,7 +34,7 @@ use peregrine_domain::text::NonEmptyText;
 use peregrine_providers::error::ProviderError;
 use peregrine_providers::provider::{MetadataProvider, RailKind, SearchCandidate};
 use peregrine_storage::{
-    Database, JobChange, JobPhase, ProviderTitle, StorageError, TitleExternalId,
+    ArtworkPath, Database, JobChange, JobPhase, ProviderTitle, StorageError, TitleExternalId,
 };
 use peregrine_sync::{Job, JobContext, JobError, JobFuture, JobOutput};
 use tokio_util::sync::CancellationToken;
@@ -57,10 +57,16 @@ pub const PRIORITY: i32 = 10;
 /// (`AGENTS R7`), which is why the DTO the IPC layer answers with is built from it.
 ///
 /// **Everything a list answer already gave is here, and nothing is invented.** A provider's rail
-/// answer carries a poster, a score, a synopsis, and a vote count for each item, and the hover
-/// preview (`PG-E7-05`) draws all four — so all four ride the item rather than costing a second
-/// request per tile. What it does *not* carry is a runtime or a genre: TMDB's list endpoints send
-/// neither, and a panel that guessed one would be stating something no provider said.
+/// answer carries a poster, a backdrop, a score, a synopsis, and a vote count for each item, and the
+/// hover preview (`PG-E7-05`) draws four of them while Discover's hero draws the wide one — so all
+/// five ride the item rather than costing a second request per tile. What it does *not* carry is a
+/// runtime or a genre: TMDB's list endpoints send neither, and a panel that guessed one would be
+/// stating something no provider said.
+///
+/// **Which of the three artwork fields is for whom** is worth stating, because two of them are
+/// plumbing: [`RailItem::backdrop_source`] is what the artwork phase fetches *from*,
+/// [`RailItem::poster`] and [`RailItem::backdrop`] are where the cache put them, and only the last
+/// two plus [`RailItem::playable`] cross IPC.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RailItem {
     /// The catalogue row, which is what opening the title needs.
@@ -73,6 +79,27 @@ pub struct RailItem {
     pub year: Option<i32>,
     /// Where the cached poster is on this machine, or `None` while it has not been fetched.
     pub poster: Option<std::path::PathBuf>,
+    /// The backdrop a list answer named — the provider that serves it and the path it spells.
+    ///
+    /// An input to the artwork phase rather than something a screen reads: the screen is given
+    /// [`RailItem::backdrop`], the cached blob, for the reason `AGENTS R11` gives about bytes and
+    /// paths. It is kept on the item because the same run that learns the path is the run that
+    /// fetches it, and a second lookup of a stored column the title row does not expose would be a
+    /// read for something already in hand.
+    pub backdrop_source: Option<peregrine_storage::ArtworkPath>,
+    /// Where the cached backdrop is on this machine, or `None` while it has not been fetched.
+    ///
+    /// The wide image Discover's hero draws behind a title's copy. `None` is a state the hero draws
+    /// — the poster cropped to the band, or the reserved surface when there is no poster either —
+    /// rather than a reason to stretch a portrait image across it.
+    pub backdrop: Option<std::path::PathBuf>,
+    /// Whether the library holds a file for this title that is not known to be missing.
+    ///
+    /// **A fact about the library and not a promise about playback**: it says a blob is on disk, not
+    /// that it decodes or that a player exists (`PG-E15` owns playing). It is here because the one
+    /// control that must not lie is Play, and a screen that decided this for itself would be reading
+    /// the library from the wrong layer (`AGENTS R7`).
+    pub playable: bool,
     /// The provider's own score for the title, when the list answer carried one, so the card a
     /// screen draws can show its badge without a second read.
     pub rating: Option<f64>,
@@ -81,6 +108,16 @@ pub struct RailItem {
     /// How many people voted on it, when the list answer counted them.
     pub votes: Option<u64>,
 }
+
+/// How many of the first rail's titles a run fetches a backdrop for.
+///
+/// **A backdrop is a whole-screen image and four times a poster's bytes** (`PG-E6-09`'s variants,
+/// `w780` against `w342`), and only the hero's rotation draws one — so fetching one for every item of
+/// every rail would spend tens of megabytes on a strip that shows one at a time. Eight is the hero's
+/// rotation with room for the one that failed: the screen rotates through at most five
+/// (`hero-rotation.ts`'s cap), and a title missing its backdrop is a reserved box the hero draws
+/// anyway.
+const HERO_BACKDROP_LIMIT: usize = 8;
 
 /// What the Discover screen reads: every rail, as the catalogue and the cache last answered.
 ///
@@ -272,19 +309,25 @@ impl DiscoverRailsJob {
         }
 
         // Published before any artwork is fetched, so the names and years a rail already knows are
-        // on screen while the posters are still arriving.
+        // on screen while the posters are still arriving. What this publish cannot know is the
+        // library's answer about each title — whether a file is there, and where the cached artwork
+        // went — so it says `None` and "nothing to play", and the publish below corrects both. A read
+        // that lands in the window between them sees the conservative answer rather than an invented
+        // one; a screen that reads after the run, which is when the follow re-reads, sees the truth.
         self.rails.publish(&rails);
         self.phase(job, attempt, 500).await;
 
-        let posters = self
+        let artwork = self
             .prefetch_artwork(job, attempt, &rails, adapters, &cancellation)
             .await?;
-        if !posters.is_empty() {
+        if !artwork.is_empty() {
             let mut with_artwork = rails.clone();
             for items in with_artwork.values_mut() {
                 for item in items.iter_mut() {
-                    if let Some(poster) = posters.get(&item.title_id) {
-                        item.poster = Some(poster.clone());
+                    if let Some(found) = artwork.get(&item.title_id) {
+                        item.poster = found.poster.clone();
+                        item.backdrop = found.backdrop.clone();
+                        item.playable = found.playable;
                     }
                 }
             }
@@ -381,6 +424,18 @@ impl DiscoverRailsJob {
             // because the rail's own answer is the more recent statement of the two.
             year: written.released.map(|date| i32::from(date.year())),
             poster: None,
+            // **The provider that serves the backdrop is the one that listed it**, which is a fact
+            // about the candidate rather than about the stored row: the path came from this
+            // adapter's answer, so asking any other configured provider for it would be asking for a
+            // path it never sent.
+            backdrop_source: written.backdrop_path.as_ref().map(|path| ArtworkPath {
+                provider: candidate.external_id().provider(),
+                path: path.clone(),
+            }),
+            backdrop: None,
+            // Filled by the artwork phase, whose library read knows the two counts; a title this run
+            // has just written has no file until a scan finds one.
+            playable: false,
             rating: written.rating,
             overview: written.overview,
             votes: written.votes,
@@ -447,18 +502,27 @@ impl DiscoverRailsJob {
         }
     }
 
-    /// Fetches every rail title's poster that the cache does not already hold.
+    /// Fetches every rail title's poster, and the hero's backdrops, into the blob cache.
     ///
-    /// **Every title, in one run, and no budget.** The path came from the list answer the candidate
-    /// already was, so filling a tile costs one request rather than two, and what paces those
-    /// requests is the provider client's per-host token bucket (`AGENTS R24`) rather than a constant
-    /// here. [`artwork_order`] still decides *which* poster is worth having first when the network
-    /// is slow; it no longer decides how many are asked for.
+    /// **Every title's poster, in one run, and no budget.** The path came from the list answer the
+    /// candidate already was, so filling a tile costs one request rather than two, and what paces
+    /// those requests is the provider client's per-host token bucket (`AGENTS R24`) rather than a
+    /// constant here. [`artwork_order`] still decides *which* poster is worth having first when the
+    /// network is slow; it no longer decides how many are asked for.
     ///
-    /// Returns the poster paths it put in the cache, keyed by title. A failure for one title is
-    /// logged and does not end the run: a rail whose artwork did not arrive is a rail of reserved
-    /// boxes, which is a state the screen draws, and failing here would throw away the rails that
-    /// did arrive.
+    /// **The backdrops are the hero's, and they are bounded** ([`hero_backdrops`]): the wide image is
+    /// four times a poster's bytes and only the rotation draws one, so a backdrop per rail item would
+    /// be tens of megabytes for a strip that shows one at a time.
+    ///
+    /// **This is also where the library's answer about each title is read**, because the title row a
+    /// poster's provider and path come from is the same read: [`RailItem::playable`] is that row's
+    /// file counts, and the alternative — a second query per title — would be a second read of the
+    /// same row.
+    ///
+    /// Returns what the cache now holds for each title, and the one library fact, keyed by title. A
+    /// failure for one title is logged and does not end the run: a rail whose artwork did not arrive
+    /// is a rail of reserved boxes, which is a state the screen draws, and failing here would throw
+    /// away the rails that did arrive.
     async fn prefetch_artwork(
         &self,
         job: ulid::Ulid,
@@ -466,11 +530,12 @@ impl DiscoverRailsJob {
         rails: &BTreeMap<RailKind, Vec<RailItem>>,
         adapters: &[Arc<dyn MetadataProvider>],
         cancellation: &CancellationToken,
-    ) -> Result<BTreeMap<i64, std::path::PathBuf>, JobError> {
+    ) -> Result<BTreeMap<i64, RailArtwork>, JobError> {
         let scope = crate::runtime::installation_scope();
         let ordered = artwork_order(rails);
+        let heroes = hero_backdrops(rails);
         let total = ordered.len();
-        let mut posters = BTreeMap::new();
+        let mut artwork = BTreeMap::new();
         for (done, item) in ordered.into_iter().enumerate() {
             // Checked between fetches, so a cancelled run stops within one title rather than after
             // the whole wall. What phase one wrote is committed and published, so the catalogue the
@@ -487,60 +552,76 @@ impl DiscoverRailsJob {
                 self.phase(job, attempt, permille).await;
             }
             let stored = match self.database.library_title(scope, item.title_id).await {
-                Ok(Some(row)) => row.poster,
-                Ok(None) => None,
+                Ok(row) => row,
                 Err(error) => {
-                    debug!(title = item.title_id, %error, "a rail poster could not be looked up");
-                    continue;
+                    debug!(title = item.title_id, %error, "a rail title could not be looked up");
+                    None
                 }
             };
+            let mut found = RailArtwork::default();
+            if let Some(row) = &stored {
+                // A blob that is known to be gone is not something to play, so what counts is a file
+                // that is not missing — not the number of rows.
+                found.playable = row.library.files > row.library.missing_files;
+            }
             // No list answer ever gave this title a poster path, so there is nothing to fetch and a
             // details request would be asking the provider to repeat itself.
-            let Some(artwork) = stored else {
-                continue;
-            };
-            // A blob the cache already holds costs a `stat` and no request, which is what makes a
-            // second visit cheap.
-            if let Some(path) = crate::artwork::cached_image(
-                &self.artwork,
-                artwork.provider,
-                &artwork.path,
-                ImageKind::Poster,
-            ) {
-                posters.insert(item.title_id, path);
-                continue;
+            if let Some(poster) = stored.and_then(|row| row.poster) {
+                found.poster = self
+                    .cache_artwork(item.title_id, &poster, adapters, ImageKind::Poster)
+                    .await;
             }
-            // **The provider that serves the artwork is the one that listed it**, which the path's
-            // own row records: a second configured provider must not be asked for a path it never
-            // sent.
-            let Some(provider) = adapters
-                .iter()
-                .find(|adapter| adapter.descriptor().provider() == artwork.provider)
-            else {
-                debug!(
-                    title = item.title_id,
-                    provider = artwork.provider.as_str(),
-                    "no configured provider serves this title's artwork"
-                );
-                continue;
-            };
-            match peregrine_sync::cache_image(
-                provider.as_ref(),
-                &self.artwork,
-                &artwork.path,
-                ImageKind::Poster,
-            )
-            .await
+            if heroes.contains(&item.title_id)
+                && let Some(source) = &item.backdrop_source
             {
-                Ok(path) => {
-                    posters.insert(item.title_id, path);
-                }
-                Err(error) => {
-                    debug!(title = item.title_id, %error, "a rail poster did not arrive");
-                }
+                found.backdrop = self
+                    .cache_artwork(item.title_id, source, adapters, ImageKind::Backdrop)
+                    .await;
+            }
+            artwork.insert(item.title_id, found);
+        }
+        Ok(artwork)
+    }
+
+    /// One image, in the cache or fetched into it, or `None` when it cannot be had.
+    ///
+    /// **The provider that serves the artwork is the one that listed it**, which the path's own row
+    /// records: a second configured provider must not be asked for a path it never sent. A blob the
+    /// cache already holds costs a `stat` and no request, which is what makes a second visit cheap,
+    /// and a fetch that fails is a debug line rather than a failed run — a reserved box is a state
+    /// the screen draws.
+    async fn cache_artwork(
+        &self,
+        title: i64,
+        source: &peregrine_storage::ArtworkPath,
+        adapters: &[Arc<dyn MetadataProvider>],
+        kind: ImageKind,
+    ) -> Option<std::path::PathBuf> {
+        if let Some(path) =
+            crate::artwork::cached_image(&self.artwork, source.provider, &source.path, kind)
+        {
+            return Some(path);
+        }
+        let Some(provider) = adapters
+            .iter()
+            .find(|adapter| adapter.descriptor().provider() == source.provider)
+        else {
+            debug!(
+                title,
+                provider = source.provider.as_str(),
+                "no configured provider serves this title's artwork"
+            );
+            return None;
+        };
+        match peregrine_sync::cache_image(provider.as_ref(), &self.artwork, &source.path, kind)
+            .await
+        {
+            Ok(path) => Some(path),
+            Err(error) => {
+                debug!(title, ?kind, %error, "a rail image did not arrive");
+                None
             }
         }
-        Ok(posters)
     }
 
     /// Records that the run succeeded and publishes the phase, which is the last thing every
@@ -572,6 +653,42 @@ impl DiscoverRailsJob {
         ));
         info!(items, "the discover rails were refreshed");
         Ok(Box::new(items) as JobOutput)
+    }
+}
+
+/// What one artwork pass found for one title: where the cache put each image, and the one library
+/// fact the same read answered.
+///
+/// A value rather than a tuple of three, because the three are read together at the publish and a
+/// bare `(Option<PathBuf>, Option<PathBuf>, bool)` at a call site says nothing about which is which.
+#[derive(Debug, Default)]
+struct RailArtwork {
+    /// The cached poster, when the catalogue records a path for one and the fetch succeeded.
+    poster: Option<std::path::PathBuf>,
+    /// The cached backdrop, for a title the hero can show and whose answer carried a path.
+    backdrop: Option<std::path::PathBuf>,
+    /// Whether the library holds a file for this title that is not known to be missing.
+    playable: bool,
+}
+
+/// The titles a run fetches a backdrop for: the first rail that has items, capped at
+/// [`HERO_BACKDROP_LIMIT`].
+///
+/// **The first rail, because that is the one a screen's hero rotates through.** `DiscoverView` picks
+/// its hero from the first rail with an item and rotates through that rail's first few, so a
+/// backdrop for any other rail would be a wide image nothing draws. The order is `RailKind::ALL`'s,
+/// which is the order the runtime reads the rails in and the order the screen draws them.
+fn hero_backdrops(rails: &BTreeMap<RailKind, Vec<RailItem>>) -> BTreeSet<i64> {
+    let first = RailKind::ALL
+        .into_iter()
+        .find_map(|rail| rails.get(&rail).filter(|items| !items.is_empty()));
+    match first {
+        Some(items) => items
+            .iter()
+            .take(HERO_BACKDROP_LIMIT)
+            .map(|item| item.title_id)
+            .collect(),
+        None => BTreeSet::new(),
     }
 }
 
@@ -663,6 +780,71 @@ mod tests {
         candidate(id, name, "1999-03-31")
             .with_artwork_path(Some(artwork.to_owned()))
             .with_rating(rating)
+    }
+
+    /// A candidate as a list endpoint that also sends a backdrop answers one.
+    fn listed_wide(
+        id: &str,
+        name: &str,
+        artwork: &str,
+        backdrop: &str,
+        rating: Option<f64>,
+    ) -> SearchCandidate {
+        listed(id, name, artwork, rating).with_backdrop_path(Some(backdrop.to_owned()))
+    }
+
+    /// One file the library holds for a title, so the row's count is a number this test set.
+    ///
+    /// Every optional probe field is `None`, because the only thing the field under test reads is
+    /// whether a file row exists and whether it is known to be gone.
+    async fn shelve(database: &Database, title_id: i64, missing: bool) {
+        let at = jiff::Timestamp::from_millisecond(1_700_000_000_000).expect("a real instant");
+        let item_id = database
+            .insert_media_item(peregrine_domain::MediaItem {
+                id: 0,
+                title_id,
+                episode_id: None,
+                state: peregrine_domain::MediaItemState::Available,
+                origin: peregrine_domain::MediaOrigin::Scan,
+                preferred_file_id: None,
+                quality_label: None,
+                created_at: at,
+                updated_at: at,
+            })
+            .await
+            .expect("the item is written");
+        database
+            .insert_media_file(peregrine_domain::MediaFile {
+                id: 0,
+                media_item_id: item_id,
+                path: NonEmptyText::new(&format!("/library/{title_id}.mkv")).expect("a path"),
+                root_id: None,
+                size_bytes: 1,
+                mtime_ms: at,
+                added_at: at,
+                missing_since: missing.then_some(at),
+                container: None,
+                duration_ms: None,
+                video_codec: None,
+                video_profile: None,
+                width: None,
+                height: None,
+                bit_depth: None,
+                hdr_format: None,
+                frame_rate: None,
+                bitrate_kbps: None,
+                audio_codec: None,
+                audio_channels: None,
+                audio_layout: None,
+                audio_languages: None,
+                subtitle_format: None,
+                probe_version: None,
+                probe_json: None,
+                quality_label: None,
+                updated_at: at,
+            })
+            .await
+            .expect("the file is written");
     }
 
     /// A provider that counts the image requests it is asked for, and can cancel the run on one.
@@ -792,6 +974,9 @@ mod tests {
                 name: "The Matrix".to_owned(),
                 year: Some(1999),
                 poster: None,
+                backdrop_source: None,
+                backdrop: None,
+                playable: false,
                 rating: None,
                 overview: None,
                 votes: None,
@@ -848,6 +1033,9 @@ mod tests {
             name: format!("Title {title_id}"),
             year: None,
             poster: None,
+            backdrop_source: None,
+            backdrop: None,
+            playable: false,
             rating: None,
             overview: None,
             votes: None,
@@ -865,6 +1053,46 @@ mod tests {
         // before popular — so both rails' first entries come before either rail's second. Title 2,
         // which is trending's second entry and popular's first, appears once.
         assert_eq!(ordered, vec![1, 2, 4, 3]);
+    }
+
+    #[test]
+    fn the_backdrops_a_run_fetches_are_the_first_rails_and_no_more_than_it_can_show() {
+        // The bound, as arithmetic: a backdrop is four times a poster's bytes and only the hero's
+        // rotation draws one, so the set is the first rail that has items — the rail the screen's
+        // hero reads (`heroItem`) — capped. A rail the enum lists earlier but which the provider left
+        // empty does not own the hero, which is the case a "always the first rail" rule would get
+        // wrong.
+        let item = |title_id: i64| RailItem {
+            title_id,
+            kind: TitleKind::Movie,
+            name: format!("Title {title_id}"),
+            year: None,
+            poster: None,
+            backdrop_source: None,
+            backdrop: None,
+            playable: false,
+            rating: None,
+            overview: None,
+            votes: None,
+        };
+        let mut rails = BTreeMap::new();
+        rails.insert(RailKind::PopularMovies, (1..=20).map(item).collect());
+
+        let heroes = hero_backdrops(&rails);
+        assert_eq!(heroes.len(), HERO_BACKDROP_LIMIT);
+        assert!(heroes.contains(&1), "the first item is the hero's lead");
+        assert!(
+            !heroes.contains(&20),
+            "the cap is a cap, not a hope that the wall is short"
+        );
+
+        // An empty first rail does not hold the hero back: the screen's own rule takes the first
+        // *non-empty* rail, and so does this.
+        let mut with_empty_first = rails.clone();
+        with_empty_first.insert(RailKind::TrendingWeek, Vec::new());
+        assert_eq!(hero_backdrops(&with_empty_first), heroes);
+
+        assert!(hero_backdrops(&BTreeMap::new()).is_empty());
     }
 
     /// One run of the job over a scripted provider, against a real database and a real cache.
@@ -1160,6 +1388,155 @@ mod tests {
             requests.load(Ordering::SeqCst),
             1,
             "a poster the cache holds must not be fetched twice"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_run_fetches_the_heros_backdrop_alongside_its_poster() {
+        // The wide image the hero draws (`PG-E7-08`): the list answer already carried the path, so
+        // filling it costs one more request rather than a details read — and the path that reaches
+        // the cache is the *backdrop* variant, which the cache keys separately from the poster's, so
+        // the two cannot be served for each other.
+        let fixture = Fixture::new().await;
+        let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("unused", None),
+            b"jpeg".to_vec(),
+            vec![listed_wide(
+                "603",
+                "The Matrix",
+                "/poster.jpg",
+                "/wide.jpg",
+                Some(8.2),
+            )],
+        );
+        let requests = Arc::new(AtomicUsize::new(0));
+
+        fixture
+            .run(Arc::new(CountingProvider::new(
+                Arc::new(fake),
+                Arc::clone(&requests),
+            )))
+            .await
+            .expect("the run succeeds");
+
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            2,
+            "one request for the poster and one for the wide image, and no third for the wall"
+        );
+        let read = fixture.rails.read();
+        let trending = read
+            .iter()
+            .find(|(rail, _)| *rail == RailKind::TrendingWeek)
+            .expect("every rail is reported");
+        let item = &trending.1[0];
+        let backdrop = item
+            .backdrop
+            .as_ref()
+            .expect("the hero's rail carries the wide image it named");
+        assert!(
+            backdrop.is_file(),
+            "the published path must be a blob the webview can be served"
+        );
+        assert_eq!(
+            std::fs::read(backdrop).expect("the blob is readable"),
+            b"jpeg"
+        );
+        assert!(
+            item.poster.as_ref().is_some_and(|path| path.is_file()),
+            "the poster is still fetched for the tile"
+        );
+        assert_ne!(
+            item.poster.as_ref(),
+            item.backdrop.as_ref(),
+            "the two variants are different blobs and cannot stand in for each other"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rail_item_carries_the_library_s_answer_about_whether_there_is_a_file() {
+        // The fact the hero's Play is enabled from, and the reason it is a core answer rather than a
+        // screen's guess (`AGENTS R7`): a title the catalogue merely lists is not something to play.
+        // A file that is *known to be gone* is not either, which is the arm a `files > 0` rule would
+        // get wrong.
+        let fixture = Fixture::new().await;
+        let candidates = vec![
+            listed("603", "The Matrix", "/matrix.jpg", None),
+            listed("604", "Inception", "/inception.jpg", None),
+            listed("605", "Interstellar", "/interstellar.jpg", None),
+        ];
+        let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("unused", None),
+            b"jpeg".to_vec(),
+            candidates,
+        );
+
+        // One title the run will find before it writes anything, which is the order a second visit
+        // has: the rails are written, and the file was shelved by an earlier scan.
+        fixture
+            .run(Arc::new(fake))
+            .await
+            .expect("the first run writes the titles");
+        let read = fixture.rails.read();
+        let popular = read
+            .iter()
+            .find(|(rail, _)| *rail == RailKind::PopularMovies)
+            .expect("every rail is reported")
+            .1
+            .clone();
+        let matrix = popular
+            .iter()
+            .find(|item| item.name == "The Matrix")
+            .expect("the title is listed")
+            .title_id;
+        shelve(&fixture.database, matrix, false).await;
+        let inception = popular
+            .iter()
+            .find(|item| item.name == "Inception")
+            .expect("the title is listed")
+            .title_id;
+        shelve(&fixture.database, inception, true).await;
+
+        // The second run, over a provider answering the same list — the shape a Refresh has.
+        let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("unused", None),
+            b"jpeg".to_vec(),
+            vec![
+                listed("603", "The Matrix", "/matrix.jpg", None),
+                listed("604", "Inception", "/inception.jpg", None),
+                listed("605", "Interstellar", "/interstellar.jpg", None),
+            ],
+        );
+        fixture.run(Arc::new(fake)).await.expect("the run succeeds");
+
+        let read = fixture.rails.read();
+        let popular = read
+            .iter()
+            .find(|(rail, _)| *rail == RailKind::PopularMovies)
+            .expect("every rail is reported");
+        let playable = |name: &str| {
+            popular
+                .1
+                .iter()
+                .find(|item| item.name == name)
+                .unwrap_or_else(|| panic!("{name} is listed"))
+                .playable
+        };
+
+        assert!(
+            playable("The Matrix"),
+            "a file on disk is something to play"
+        );
+        assert!(
+            !playable("Inception"),
+            "a file the library knows is gone is not"
+        );
+        assert!(
+            !playable("Interstellar"),
+            "a title nobody has shelved is not, and that is not the same as an error"
         );
     }
 

@@ -208,9 +208,10 @@ pub async fn metadata_provider_satisfies_the_port(
 /// The facts about one candidate the suite can check without knowing a provider's fixtures.
 ///
 /// These are identity rules rather than taste: the id must name the provider that answered,
-/// artwork that is present must address something, a synopsis that is present must say something,
-/// and a vote count must not be the zero a provider uses for "nobody has voted". `operation` names
-/// the call that answered, so a failure says which endpoint produced it.
+/// artwork that is present must address something — the poster and the backdrop both, because both
+/// are paths a caller hands back to [`MetadataProvider::image`] — a synopsis that is present must say
+/// something, and a vote count must not be the zero a provider uses for "nobody has voted".
+/// `operation` names the call that answered, so a failure says which endpoint produced it.
 fn check_candidate(candidate: &SearchCandidate, named: Provider, operation: &str) {
     assert_eq!(
         candidate.external_id().provider(),
@@ -222,6 +223,12 @@ fn check_candidate(candidate: &SearchCandidate, named: Provider, operation: &str
         assert!(
             !path.trim().is_empty(),
             "{named} answered a {operation} candidate whose artwork path is blank, which names no image"
+        );
+    }
+    if let Some(path) = candidate.backdrop_path() {
+        assert!(
+            !path.trim().is_empty(),
+            "{named} answered a {operation} candidate whose backdrop path is blank, which names no image"
         );
     }
     if let Some(overview) = candidate.overview() {
@@ -385,11 +392,12 @@ mod tests {
     fn the_fake_provider_satisfies_the_port() {
         // The fake must pass the same suite every adapter passes. If this fails, the fake is
         // not a stand-in for the port and every test built on it is measuring something else.
-        // The fixture carries the two fields a list answer adds, because a rule the suite states
+        // The fixture carries the fields a list answer adds, because a rule the suite states
         // about them has to be satisfied by the fake the suite is demonstrated with.
         let fake = searching_fake(vec![
             candidate(Provider::Tmdb, "1396", "Breaking Bad")
                 .with_artwork_path(Some("/poster.jpg".to_owned()))
+                .with_backdrop_path(Some("/backdrop.jpg".to_owned()))
                 .with_rating(Some(9.2)),
         ]);
         let answered = block_on(metadata_provider_satisfies_the_port(
@@ -491,6 +499,21 @@ mod tests {
             ))
             .is_err(),
             "artwork that is only whitespace names no image and must not conform"
+        );
+
+        let blank_backdrop = searching_fake(vec![
+            candidate(Provider::Tmdb, "603", "The Matrix")
+                .with_backdrop_path(Some("  ".to_owned())),
+        ]);
+        assert!(
+            catch_async(metadata_provider_satisfies_the_port(
+                &blank_backdrop,
+                &probe(),
+                RailKind::PopularMovies,
+                page(1)
+            ))
+            .is_err(),
+            "a backdrop that is only whitespace names no image and must not conform"
         );
     }
 

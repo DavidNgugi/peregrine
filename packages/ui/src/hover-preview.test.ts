@@ -4,14 +4,20 @@ import {
   DWELL_MS,
   ENTER_MOTION,
   EXIT_MOTION,
+  FOCUS_RING_OUTSET_PX,
   IDLE_PREVIEW,
   MIN_VISIBLE_RATIO,
+  RAMP_BLUR_PX,
+  RAMP_OFFSET_Y_PX,
+  REVEAL_LIFT_Z,
   REVEAL_SCALE,
   REVEAL_SCALE_CAP,
   nextPreview,
   panelVisible,
+  previewLift,
   previewMotion,
   previewScale,
+  revealRoom,
   revealScale,
   type PreviewEvent,
   type PreviewState,
@@ -208,5 +214,76 @@ describe("the reveal scale", () => {
     expect(revealScale(1)).toBe(1);
     expect(revealScale(0.5)).toBe(1);
     expect(revealScale(0)).toBe(1);
+  });
+});
+
+describe("the lift that puts the revealed tile over its neighbours", () => {
+  it("is taken by a revealed tile, and kept by one still shrinking back", () => {
+    // The defect this answers, measured in the gallery: every tile's `z-index` was `auto`, so a tile
+    // with a later sibling had half its ramp painted *under* that sibling's poster. The exit keeps
+    // the lift because the tile is still enlarged while it shrinks — releasing it at `pointerLeave`
+    // would cut the ramp in two for the length of the exit.
+    expect(previewLift(IDLE_PREVIEW)).toBeNull();
+    expect(previewLift(after(enter))).toBeNull();
+    expect(previewLift(after(enter, dwell))).toBe(REVEAL_LIFT_Z);
+
+    const leaving = after(enter, dwell, { type: "pointerLeave" });
+    expect(leaving.animating).toBe(true);
+    expect(previewLift(leaving)).toBe(REVEAL_LIFT_Z);
+    expect(previewLift(after(enter, dwell, { type: "pointerLeave" }, { type: "settled" }))).toBeNull();
+  });
+
+  it("is positive, so it paints after every tile that keeps document order", () => {
+    // A zero or negative index would leave the revealed tile in the same painting step as its
+    // neighbours, which is the order the lift exists to escape.
+    expect(REVEAL_LIFT_Z).toBeGreaterThan(0);
+  });
+});
+
+describe("the room a rail has to leave", () => {
+  it("covers the scale's own growth, the focus ring, and the ramp on every side", () => {
+    // A static render cannot measure a clip box, so the arithmetic is pinned here and the rail's own
+    // test holds its scroller to what this answers. `PG-E7-05`'s defect was the scroller clipping the
+    // enlarged tile, the ring, and the ramp that is the lift.
+    const width = 216;
+    const height = 324;
+    const room = revealRoom(width, height);
+
+    expect(room.sides).toBeGreaterThanOrEqual(
+      (width * (REVEAL_SCALE - 1)) / 2 + FOCUS_RING_OUTSET_PX,
+    );
+    expect(room.top).toBeGreaterThanOrEqual(
+      (height * (REVEAL_SCALE - 1)) / 2 + FOCUS_RING_OUTSET_PX,
+    );
+    expect(room.bottom).toBeGreaterThanOrEqual(
+      (height * (REVEAL_SCALE - 1)) / 2 + RAMP_OFFSET_Y_PX + RAMP_BLUR_PX,
+    );
+  });
+
+  it("reaches further below than above, because the ramp falls", () => {
+    const room = revealRoom(144, 216);
+
+    expect(room.bottom).toBeGreaterThan(room.top);
+    expect(room.top).toBeGreaterThan(0);
+    expect(room.sides).toBeGreaterThan(0);
+  });
+
+  it("grows with the tile, and with a scale past the one §5 draws today", () => {
+    // The rail sizes the room from the largest tile it can be asked to draw, and a variant that
+    // revealed at the cap needs more room than this one — which is why the scale is a parameter
+    // rather than a constant read inside.
+    expect(revealRoom(216, 324).sides).toBeGreaterThan(revealRoom(112, 168).sides);
+    expect(revealRoom(144, 216, REVEAL_SCALE_CAP).sides).toBeGreaterThan(
+      revealRoom(144, 216).sides,
+    );
+  });
+
+  it("is whole pixels on every side, because a fraction of a pixel is not room", () => {
+    for (const width of [88, 112, 144, 176, 216]) {
+      const room = revealRoom(width, (width * 3) / 2);
+      for (const side of [room.sides, room.top, room.bottom]) {
+        expect(Number.isInteger(side), String(width)).toBe(true);
+      }
+    }
   });
 });

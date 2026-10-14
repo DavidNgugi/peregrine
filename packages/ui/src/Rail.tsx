@@ -9,8 +9,10 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { revealRoom } from "./hover-preview.js";
 import { IconButton } from "./IconButton.js";
 import { twMerge } from "./merge.js";
+import { CARD_ASPECT, CARD_WIDTHS } from "./TitleCard.js";
 
 /**
  * A horizontal rail: one row of tiles that pages sideways, with its heading and its edges.
@@ -33,7 +35,36 @@ import { twMerge } from "./merge.js";
  * ("keyboard navigation model"), and the snapping and choreography of a scroll in flight are PG-E21-10's.
  * Both are named here rather than half-implemented: a rail that guessed at them would be a second
  * keyboard model to reconcile.
+ *
+ * **The scroller clips, so the rail leaves the hover ladder room.** `overflow-x: auto` is not one
+ * axis: CSS computes `overflow-y` to `auto` as well when the other axis is not `visible`, so the
+ * scroller is a clip box on both axes and a revealed tile is cut by its own rail — measured in the
+ * running gallery, where the tile's ramp reached 1.5 px past the tile and 42 px of it fell outside
+ * the padding box. The room is padding, sized by `revealRoom` from the largest tile the kit draws;
+ * the negative margins of the same size put the row back where it was, so nothing below a rail moves
+ * and the room is only ever the clip box. The tile's own lift over its neighbours is
+ * `TitleCard`'s (`REVEAL_LIFT_Z`), because painting order is the card's business and not the rail's.
  */
+
+/**
+ * The inset the row's tiles rest at, which is what a screen's rhythm is built on: the tiles sit this
+ * far from the box the rail occupies.
+ *
+ * It is a named constant rather than the `px-0.5 py-2` it replaced because the room below is written
+ * around it: the scroller's padding is the room, and its negative margin gives back everything except
+ * this, so enlarging the clip box moves nothing — not the row, not the heading above it, not the
+ * rail below.
+ */
+export const RAIL_INSET = { x: 2, y: 8 } as const;
+
+/**
+ * The room the scroller leaves an enlarged tile, from the largest tile the kit draws.
+ *
+ * `xl` rather than the tile this rail actually holds, because a rail renders its items through the
+ * caller's function and cannot ask what size they are — so the room is the worst case, and a rail of
+ * `sm` tiles pays a few pixels it does not need. The height is §4's ratio applied to that width.
+ */
+const ROOM = revealRoom(CARD_WIDTHS.xl, CARD_WIDTHS.xl / CARD_ASPECT);
 
 export interface RailProps<T> {
   /** The rail's heading, which is also what names its region. */
@@ -200,13 +231,17 @@ export function Rail<T>({
               off-screen at the far right of the overflowing content and the screen clipped where the
               rail should have scrolled. Found by looking at the running app against a real provider's
               rails: ten tiles wide and not one edge affordance visible. */}
-          {/* `py-2` is not spacing: the tiles' focus ring is offset 2 px outside their frame, and a
-              scroller that clips on both axes would cut it off on the first and last tile. There is
-              deliberately no `snap-*` here: snapping moves the resting offset off zero, which is what
-              decides whether the back chevron is lit, and the choreography of a scroll in flight is
-              PG-E21-10's rather than a class guessed at now. */}
+          {/* The padding is not spacing and the margins are not a trick to hide it: together they
+              enlarge the scroller's *clip box* — which is the padding box, and which `overflow-x:
+              auto` also makes the vertical clip — while leaving the tiles exactly where they were,
+              so the chevrons' arithmetic, the row's own inset, and every heading on the screen are
+              unchanged. The values come from `revealRoom` at the largest tile: a scaled tile, its
+              focus ring, and the shadow ramp that is the lift, which the scroller cut to a sliver of
+              its 32 px blur. There is deliberately no `snap-*` here: snapping moves the resting
+              offset off zero, which is what decides whether the back chevron is lit, and the
+              choreography of a scroll in flight is PG-E21-10's rather than a class guessed at now. */}
           <ul
-            className="flex gap-3 overflow-x-auto px-0.5 py-2"
+            className="flex gap-3 overflow-x-auto"
             onKeyDown={(event) => {
               const next = nextRailIndex(active, event.key, items.length);
               if (next === null) {
@@ -216,6 +251,10 @@ export function Rail<T>({
               moveFocus(next);
             }}
             ref={scroller}
+            style={{
+              margin: `${String(RAIL_INSET.y - ROOM.top)}px ${String(RAIL_INSET.x - ROOM.sides)}px ${String(RAIL_INSET.y - ROOM.bottom)}px`,
+              padding: `${String(ROOM.top)}px ${String(ROOM.sides)}px ${String(ROOM.bottom)}px`,
+            }}
           >
             {items.map((item, index) => (
               <li className="shrink-0" key={itemKey(item)}>

@@ -325,6 +325,40 @@ async fn a_list_answer_carries_the_candidates_score_to_the_writer() {
 }
 
 #[tokio::test]
+async fn a_list_answer_carries_the_candidates_backdrop_to_the_writer() {
+    // Discover's hero draws a wide image (`PG-E7-08`), and a list endpoint already sends one — so
+    // this is the same link the score above is asserted through: the candidate's backdrop reaching
+    // the write rather than being dropped on the way. **What it cannot pin** is the *stored* column:
+    // `title.backdrop_path` is written by `update_title_metadata` and no read in `peregrine-storage`
+    // selects it (`library_title` selects the poster's two columns), so the not-clearing half is the
+    // `COALESCE` clause the artwork test above pins on the poster, which the two share.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let id = stub(&database, "The Matrix").await;
+
+    let wide =
+        listed("603", Some("/poster.jpg"), None).with_backdrop_path(Some("/wide.jpg".into()));
+    let written = record_list_answer(&database, id, &wide, 2_000)
+        .await
+        .expect("the answer is written");
+
+    assert_eq!(
+        written.backdrop_path.as_deref(),
+        Some("/wide.jpg"),
+        "the wide path the hero needs is what the list answer was asked to write"
+    );
+    assert_eq!(written.poster_path.as_deref(), Some("/poster.jpg"));
+
+    let bare = record_list_answer(&database, id, &listed("603", None, None), 3_000)
+        .await
+        .expect("the second answer is written");
+    assert_eq!(
+        bare.backdrop_path, None,
+        "an answer with no wide image carries none — it does not reuse the poster"
+    );
+}
+
+#[tokio::test]
 async fn a_list_answer_carries_the_synopsis_and_the_vote_count_it_was_given() {
     // The hover preview draws both from the rail item the list answer produced (`PG-E7-05`), and
     // neither is a column any repository query selects — so, exactly as with the score above, what

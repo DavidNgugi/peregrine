@@ -159,16 +159,19 @@ pub async fn refresh_title(
 /// Writes what a *list* answer knows onto a title the catalogue holds, and answers with it.
 ///
 /// A list answer — a rail, a search page — is not a title read: it carries an identity, a name, a
-/// date, and at most a poster, a score, a short synopsis, and a vote count. Those four are the whole
-/// reason this exists, because a list endpoint already sends them and a screen that had to ask for a
-/// title's details to learn them would spend two requests where the provider's answer needed one
-/// (`PG-E7-08`, `PG-E7-05`).
+/// date, and at most a poster, a backdrop, a score, a short synopsis, and a vote count. Those five
+/// are the whole reason this exists, because a list endpoint already sends them and a screen that had
+/// to ask for a title's details to learn them would spend two requests where the provider's answer
+/// needed one (`PG-E7-08`, `PG-E7-05`). The backdrop is among them because Discover's hero draws a
+/// wide image rather than a portrait one, and it is the same free field the poster is — the row the
+/// statement writes has held a `backdrop_path` since the details read was built, and nothing had
+/// filled it from a list answer.
 ///
 /// **It goes through the same statement a details fill does, and inherits the same rule:** every
 /// optional column is written with `COALESCE`, so a later list answer carrying `None` leaves the
-/// stored poster, score, synopsis, and count alone (`PG-E5-07`). It also inherits the statement's two
-/// stamps, and they are worth naming rather than discovering: `metadata_state` follows
-/// `refresh_title`'s `Partial` — a list answer has filled some fields, not all — and
+/// stored poster, backdrop, score, synopsis, and count alone (`PG-E5-07`). It also inherits the
+/// statement's two stamps, and they are worth naming rather than discovering: `metadata_state`
+/// follows `refresh_title`'s `Partial` — a list answer has filled some fields, not all — and
 /// `last_synced_at` is set, which is what `PG-E6-15`'s staleness policy and `crate::artwork`'s
 /// `refresh_due` read. A list answer *is* a provider answering about the title, so those two travel
 /// with it.
@@ -204,7 +207,7 @@ pub async fn record_list_answer(
         episode_count: None,
         homepage: None,
         poster_path: candidate.artwork_path().map(str::to_owned),
-        backdrop_path: None,
+        backdrop_path: candidate.backdrop_path().map(str::to_owned),
     };
     database
         .update_title_metadata(

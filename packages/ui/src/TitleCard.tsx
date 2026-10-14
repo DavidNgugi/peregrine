@@ -10,6 +10,7 @@ import {
   MIN_VISIBLE_RATIO,
   nextPreview,
   panelVisible,
+  previewLift,
   previewMotion,
   previewScale,
   type PreviewEvent,
@@ -56,6 +57,26 @@ import { twMerge } from "./merge.js";
 export const CARD_SIZES = ["xs", "sm", "md", "lg", "xl"] as const;
 
 export type CardSize = (typeof CARD_SIZES)[number];
+
+/**
+ * The width each size variant draws, in px.
+ *
+ * The numbers are stated twice — here and in the `w-[…]` classes below — because Tailwind's scanner
+ * reads class names and a template string is not one, and the duplication is held together by a test
+ * that renders every size and compares what it drew with this map. It has to be a map at all because
+ * the rail cannot ask a tile its size: it renders its items through the caller's function, so the
+ * room it leaves for the hover ladder is the room the *largest* tile needs (`revealRoom`).
+ */
+export const CARD_WIDTHS: Readonly<Record<CardSize, number>> = {
+  xs: 88,
+  sm: 112,
+  md: 144,
+  lg: 176,
+  xl: 216,
+};
+
+/** §4's tile ratio, width ÷ height, which the frame's `aspect-[2/3]` draws. */
+export const CARD_ASPECT = 2 / 3;
 
 /**
  * Availability, spelled exactly as `peregrine_domain::availability::Availability::as_str` spells it.
@@ -430,6 +451,7 @@ export function TitleCard({
   const revealed = preview.phase === "revealed";
   const motion = previewMotion(preview);
   const showsPanel = panelVisible(preview, focused);
+  const lift = previewLift(preview);
 
   /** `transitionend` on the card's own transform is the moment §5 rule 3 turns the promotion off. */
   const onTransitionEnd = (event: TransitionEvent<HTMLAnchorElement>): void => {
@@ -474,6 +496,10 @@ export function TitleCard({
         transitionDuration: motion.duration,
         transitionTimingFunction: motion.easing,
         ...(preview.animating ? { willChange: "transform" } : {}),
+        // The lift, for the reason `REVEAL_LIFT_Z` gives: without it the ramp of a tile that has a
+        // later sibling is painted under that sibling, which is half the lift `PG-E7-05` is judged
+        // on. `null` is document order, which is what every tile that is not enlarged uses.
+        ...(lift === null ? {} : { zIndex: lift }),
       }}
       {...(tabIndex === undefined ? {} : { tabIndex })}
       {...(onNavigate === undefined ? {} : { onNavigate })}

@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { HomeRailsView } from "../hooks/useHomeRails.js";
-import { DiscoverView, heroItem, itemMeta } from "./DiscoverScreen.js";
+import { DiscoverView, itemMeta } from "./DiscoverScreen.js";
+import { heroSlides } from "./hero-rotation.js";
 
 const i18n = createI18n();
 
@@ -13,9 +14,10 @@ const i18n = createI18n();
  *
  * No network, no Tauri bridge, and no store: `DiscoverView` takes what the hooks answered as props,
  * which is the seam that makes the rails, the hero, and every empty state testable in a Node
- * environment. What this file *cannot* do is drive the refresh click — `renderToStaticMarkup` is one
- * pass with no DOM and no event loop, so the click and the `job://state` follow are unobserved here;
- * `rails-follow.test.ts` covers the matching rule, and the shell exercises the hook itself.
+ * environment. What this file *cannot* do is drive the refresh click or the hero's interval —
+ * `renderToStaticMarkup` is one pass with no DOM and no event loop, so the click and the
+ * `job://state` follow are unobserved here; `rails-follow.test.ts` covers the matching rule, the
+ * rotation's timing is `hero-rotation.test.ts`'s, and the shell exercises the hook itself.
  */
 function item(overrides: Partial<RailItemDto> = {}): RailItemDto {
   return {
@@ -23,9 +25,13 @@ function item(overrides: Partial<RailItemDto> = {}): RailItemDto {
     kind: "movie",
     name: "The Matrix",
     year: 1999,
-    // `null` rather than a path: a Node test has no asset protocol, so a poster reference could not
-    // become a URL and the markup below is the reserved placeholder the tile draws either way.
+    // `null` rather than a path: a Node test has no asset protocol, so a poster or backdrop
+    // reference could not become a URL and the markup below is the reserved box either way.
     poster: null,
+    backdrop: null,
+    // `false` rather than true: most of what the rails hold is not something the library has, and a
+    // test that wanted a playable title says so.
+    playable: false,
     // `null` rather than a score: most of what the screen draws has no badge, and a test that wanted
     // one says so.
     rating: null,
@@ -142,20 +148,41 @@ describe("DiscoverView", () => {
     expect(html).toContain("Refresh to ask the providers, or add a provider key in Settings.");
   });
 
-  it("features the first item of the first non-empty rail as the hero", () => {
+  it("features the first rail that has items as the hero, and rotates through it", () => {
     const html = markup(
       railsView({
         rails: [
           rail({ rail: "trending_week", items: [] }),
-          rail({ rail: "popular_movies", items: [item({ titleId: 9, name: "Dune" })] }),
+          rail({
+            rail: "popular_movies",
+            items: [
+              item({ titleId: 9, name: "Dune" }),
+              item({ titleId: 10, name: "Arrival" }),
+            ],
+          }),
         ],
       }),
     );
 
     expect(html).toContain("Featured title");
-    expect(html).toContain("Open this title");
+    expect(html).toContain("Details");
     expect(html).toContain("/title/movie/9");
-    expect(html).toContain("Dune, 1999 · Film");
+    expect(html).toContain("Dune");
+    expect(html).toContain("1999 · Film");
+    // Both slides are in the DOM at once, which is what the cross-fade needs: the incoming image
+    // cannot fade in if it arrives with the class that shows it.
+    expect(html).toContain("opacity-100");
+    expect(html).toContain("opacity-0");
+    expect(html).toContain('aria-label="Show Arrival"');
+  });
+
+  it("puts the search box above the hero, with its answers beside it", () => {
+    // The reference's order, and the reason it matters: a box at the top whose results appeared
+    // below the rails would be a box whose results nobody finds.
+    const html = markup(railsView());
+
+    expect(html.indexOf("<form")).toBeLessThan(html.indexOf("Featured title"));
+    expect(html.indexOf("<form")).toBeLessThan(html.indexOf("Popular films"));
   });
 
   it("says what to do when nothing has been fetched, and still draws no spinner", () => {
@@ -245,15 +272,16 @@ describe("DiscoverView", () => {
   });
 });
 
-describe("the hero and the tile caption", () => {
-  it("answers the first item of the first non-empty rail, or nothing", () => {
-    expect(heroItem([])).toBeNull();
-    expect(heroItem([rail({ items: [] })])).toBeNull();
-    expect(heroItem([rail({ items: [item({ titleId: 3 })] })])?.titleId).toBe(3);
+describe("the hero's slides and the tile caption", () => {
+  it("takes the first rail that has items, in order, capped", () => {
+    // The rule the screen and the core share (`hero_backdrops`), asserted here as the screen uses it.
+    expect(heroSlides([])).toEqual([]);
+    expect(heroSlides([rail({ items: [] })])).toEqual([]);
+    expect(heroSlides([rail({ items: [item({ titleId: 3 })] })])[0]?.titleId).toBe(3);
     expect(
-      heroItem([rail({ items: [] }), rail({ items: [item({ titleId: 4 }), item({ titleId: 5 })] })])
-        ?.titleId,
-    ).toBe(4);
+      heroSlides([rail({ items: [] }), rail({ items: [item({ titleId: 4 }), item({ titleId: 5 })] })])
+        .map((slide) => slide.titleId),
+    ).toEqual([4, 5]);
   });
 
   it("writes a year it has and stays honest when it does not", () => {

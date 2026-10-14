@@ -751,6 +751,26 @@ export type RailItemDto = {
 	 */
 	poster: string | null,
 	/**
+	 *  Where the cached backdrop is on this machine, as an absolute path, or `null` while it has not
+	 *  been fetched.
+	 * 
+	 *  The wide image Discover's hero draws, and the second variant the same cache holds (`w780`
+	 *  against the poster's `w342`). `null` is a state the hero draws — the poster cropped to the
+	 *  band, and the reserved surface when there is no poster either — rather than a reason to
+	 *  stretch a portrait image across it.
+	 */
+	backdrop: string | null,
+	/**
+	 *  Whether the library holds a file for this title that is not known to be missing.
+	 * 
+	 *  **A fact about the library, not a promise about playback**: it says a blob is on disk, not
+	 *  that it decodes or that this build has a player (`PG-E15`). It rides here because the hero's
+	 *  Play must be disabled for a reason the core stated rather than for one a screen assumed
+	 *  (`AGENTS R7`), and a control that could not be honoured had to be absent instead
+	 *  (`PG-E1-07`).
+	 */
+	playable: boolean,
+	/**
 	 *  The provider's own score for the title, or `null` when the list answer carried none.
 	 * 
 	 *  `null` is not `0.0`: a provider that sends no score, and one whose value for an unrated item

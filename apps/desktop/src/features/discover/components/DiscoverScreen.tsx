@@ -8,7 +8,7 @@ import {
   TextInput,
   TitleCard,
 } from "@peregrine/ui";
-import type { HomeRailDto, RailItemDto, TitleMatchDto } from "@peregrine/ipc-client";
+import type { RailItemDto, TitleMatchDto } from "@peregrine/ipc-client";
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,10 +16,11 @@ import { routePath, type Route } from "../../../app/routes.js";
 import { imageUrl } from "../../../lib/media.js";
 import { useDiscoverSearch } from "../hooks/useDiscoverSearch.js";
 import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
+import { DiscoverHero, type HeroSlide } from "./DiscoverHero.js";
+import { heroSlides } from "./hero-rotation.js";
 
 /**
- * Discover: a hero and the rails the providers publish, then the search box for a name that is not
- * on any of them.
+ * Discover: the search box, a hero, and the rails the providers publish.
  *
  * **There is no spinner and there is no loading body** (`DESIGN_SYSTEM §11` rule 2). The core
  * answers the rails cache-first (`FLOWS F2`), so every rail has its heading and its own empty state
@@ -31,15 +32,19 @@ import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
  * they already set up.
  *
  * **No business rule lives here** (`AGENTS R7`): which titles are in which rail, whether artwork was
- * fetched, whether a title is a film or a series, and whether the rails are empty because nothing
- * can fill them or because the fetch is still running all arrive as answers. The screen picks the
- * hero — the first item of the first non-empty rail — because "which rectangle is biggest" is
- * layout rather than policy, and it maps a cached path to a URL through `lib/media.ts`, the one
- * place that names the asset protocol.
+ * fetched, whether a title is a film or a series, whether the rails are empty because nothing can
+ * fill them or because the fetch is still running, and whether there is a file to play all arrive as
+ * answers. The screen picks the hero — the first rail that has items, which is `heroSlides`'s rule
+ * and the core's own rule for whose backdrops are worth fetching — because "which rectangle is
+ * biggest" is layout rather than policy, and it maps a cached path to a URL through `lib/media.ts`,
+ * the one place that names the asset protocol.
  *
- * The search box is submitted rather than typed: it leaves the machine, and a request per keystroke
- * is a request per keystroke against somebody else's API (`AGENTS R24`). It stays because a rail is
- * what a provider chose to publish and a search is what the person came for.
+ * **The search box is at the top, above the hero**, which is where a person looks for it first: the
+ * form is the same form, moved rather than rebuilt, and the answers it produces stay beside it — a
+ * box at the top whose results appeared below the rails would be a box whose results nobody finds.
+ * It is submitted rather than typed: it leaves the machine, and a request per keystroke is a request
+ * per keystroke against somebody else's API (`AGENTS R24`). It stays because a rail is what a
+ * provider chose to publish and a search is what the person came for.
  *
  * **The two halves are split so the drawing can be tested.** [`DiscoverScreen`] is the data layer —
  * two hooks and one piece of local state — and [`DiscoverView`] takes what they answered as props,
@@ -59,17 +64,6 @@ const RAIL_HEADINGS: Readonly<Record<string, string>> = {
   top_rated_shows: "discover.rail.topRatedShows",
 };
 
-/** The first item of the first rail that has one, or `null` when nothing has been fetched. */
-export function heroItem(rails: readonly HomeRailDto[]): RailItemDto | null {
-  for (const rail of rails) {
-    const first = rail.items[0];
-    if (first !== undefined) {
-      return first;
-    }
-  }
-  return null;
-}
-
 /** One line a tile and the hero both use: "1999 · Film", or the kind alone when the year is unknown. */
 export function itemMeta(item: RailItemDto, kind: string): string {
   return item.year === null ? kind : `${String(item.year)} · ${kind}`;
@@ -87,11 +81,24 @@ export interface DiscoverViewProps {
     readonly query: string;
     readonly setQuery: (query: string) => void;
   };
+  /**
+   * What the hero's Play does, when this build can play anything at all.
+   *
+   * Omitted by the only caller there is, deliberately: `PG-E15` owns playback and no surface for it
+   * exists yet, so the hero draws Play disabled with the reason the core gave rather than an enabled
+   * control that fires nothing (`PG-E1-07`).
+   */
+  readonly onPlay?: (slide: HeroSlide) => void;
   readonly onNavigate: (route: Route) => void;
 }
 
 /** The screen as it is drawn, from answers. */
-export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): ReactElement {
+export function DiscoverView({
+  rails,
+  search,
+  onPlay,
+  onNavigate,
+}: DiscoverViewProps): ReactElement {
   const { i18n, t } = useTranslation();
 
   const routeFor = (item: RailItemDto): Route => ({
@@ -123,7 +130,23 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
           formatted: new Intl.NumberFormat(i18n.language).format(item.votes),
         });
 
-  const hero = heroItem(rails.rails);
+  // The hero's rotation, resolved here because a URL, a year and a count are the caller's words and
+  // not the kit's: the component draws what it is handed and decides only what the timing is.
+  const slides: readonly HeroSlide[] = heroSlides(rails.rails).map((item) => ({
+    id: item.titleId,
+    name: item.name,
+    kind: item.kind,
+    meta: itemMeta(item, kindFor(item)),
+    href: routePath(routeFor(item)),
+    backdrop: imageUrl(item.backdrop),
+    poster: imageUrl(item.poster),
+    overview: item.overview,
+    score: item.rating === null ? null : item.rating.toFixed(1),
+    scoreLabel: ratingLabel(item),
+    votesLabel: votesLabel(item),
+    playable: item.playable,
+  }));
+
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
@@ -131,6 +154,68 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
 
   return (
     <Screen title={t("discover.title")}>
+      {/* The search box, and everything it answers, at the top of the screen: this is where the
+          reference puts it and where a person looks for it. */}
+      <form
+        className="flex items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          search.submit(search.query);
+        }}
+      >
+        <TextInput
+          className="max-w-md flex-1"
+          label={t("discover.search.label")}
+          onChange={(event) => {
+            search.setQuery(event.target.value);
+          }}
+          placeholder={t("discover.search.placeholder")}
+          value={search.query}
+        />
+        <Button disabled={search.searching || search.query.trim() === ""} type="submit">
+          {t("discover.search.action")}
+        </Button>
+      </form>
+
+      {/* Announced rather than drawn as a bar: there is no completion to show for a request whose
+          length nobody knows, and a determinate bar would be a number invented to fill a shape. */}
+      {search.searching ? (
+        <p className="text-body text-text-secondary" role="status">
+          {t("discover.search.searching")}
+        </p>
+      ) : null}
+
+      {!search.searching && search.failed ? (
+        <ErrorState
+          body={t("discover.searchFailed.body")}
+          title={t("discover.searchFailed.title")}
+        />
+      ) : null}
+
+      {!search.searching && !search.failed && search.results.length > 0 ? (
+        <ul aria-busy={search.searching} className="flex flex-col gap-1">
+          {search.results.map((row) => (
+            <li key={row.id}>
+              {/* A link, because it is one: it says where it goes, and a keyboard user opens it with
+                  `Enter` rather than activating a button. */}
+              <Link
+                href={routePath(routeForResult(row))}
+                onNavigate={() => {
+                  onNavigate(routeForResult(row));
+                }}
+              >
+                {row.name}
+              </Link>
+              <span className="ml-2 text-caption text-text-tertiary">{kindForResult(row)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {!search.searching && !search.failed && search.searched && search.results.length === 0 ? (
+        <EmptyState body={t("discover.none.body")} title={t("discover.none.title")} />
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         <Button
           disabled={rails.refreshing}
@@ -163,39 +248,16 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
         </p>
       ) : null}
 
-      {hero === null ? null : (
-        <section aria-label={t("discover.hero.label")} className="flex flex-wrap items-end gap-4">
-          <div className="w-[144px] shrink-0">
-            <TitleCard
-              detailsLabel={t("card.details")}
-              href={routePath(routeFor(hero))}
-              meta={itemMeta(hero, kindFor(hero))}
-              onNavigate={() => {
-                onNavigate(routeFor(hero));
-              }}
-              overview={hero.overview}
-              poster={imageUrl(hero.poster)}
-              priority
-              rating={hero.rating}
-              ratingLabel={ratingLabel(hero)}
-              size="md"
-              title={hero.name}
-              votesLabel={votesLabel(hero)}
-            />
-          </div>
-          <div className="flex min-w-0 flex-col gap-2">
-            <h2 className="text-title-1 text-text-primary">{hero.name}</h2>
-            <p className="text-body text-text-secondary">{itemMeta(hero, kindFor(hero))}</p>
-            <Link
-              href={routePath(routeFor(hero))}
-              onNavigate={() => {
-                onNavigate(routeFor(hero));
-              }}
-            >
-              {t("discover.hero.open")}
-            </Link>
-          </div>
-        </section>
+      {/* No slides is no hero: an empty catalogue draws its empty state below rather than a band of
+          nothing above it, and one slide draws itself without a rotation (`hero-rotation.ts`). */}
+      {slides.length === 0 ? null : (
+        <DiscoverHero
+          onOpen={(slide) => {
+            onNavigate({ id: slide.id, kind: "title", titleKind: slide.kind });
+          }}
+          slides={slides}
+          {...(onPlay === undefined ? {} : { onPlay })}
+        />
       )}
 
       {rails.rails.length === 0 && !rails.failed && !firstFetch ? (
@@ -260,66 +322,6 @@ export function DiscoverView({ rails, search, onNavigate }: DiscoverViewProps): 
           ))}
         </div>
       )}
-
-      <form
-        className="flex items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          search.submit(search.query);
-        }}
-      >
-        <TextInput
-          className="max-w-md flex-1"
-          label={t("discover.search.label")}
-          onChange={(event) => {
-            search.setQuery(event.target.value);
-          }}
-          placeholder={t("discover.search.placeholder")}
-          value={search.query}
-        />
-        <Button disabled={search.searching || search.query.trim() === ""} type="submit">
-          {t("discover.search.action")}
-        </Button>
-      </form>
-
-      {/* Announced rather than drawn as a bar: there is no completion to show for a request whose
-          length nobody knows, and a determinate bar would be a number invented to fill a shape. */}
-      {search.searching ? (
-        <p className="text-body text-text-secondary" role="status">
-          {t("discover.search.searching")}
-        </p>
-      ) : null}
-
-      {!search.searching && search.failed ? (
-        <ErrorState
-          body={t("discover.searchFailed.body")}
-          title={t("discover.searchFailed.title")}
-        />
-      ) : null}
-
-      {!search.searching && !search.failed && search.results.length > 0 ? (
-        <ul aria-busy={search.searching} className="flex flex-col gap-1">
-          {search.results.map((row) => (
-            <li key={row.id}>
-              {/* A link, because it is one: it says where it goes, and a keyboard user opens it with
-                  `Enter` rather than activating a button. */}
-              <Link
-                href={routePath(routeForResult(row))}
-                onNavigate={() => {
-                  onNavigate(routeForResult(row));
-                }}
-              >
-                {row.name}
-              </Link>
-              <span className="ml-2 text-caption text-text-tertiary">{kindForResult(row)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {!search.searching && !search.failed && search.searched && search.results.length === 0 ? (
-        <EmptyState body={t("discover.none.body")} title={t("discover.none.title")} />
-      ) : null}
     </Screen>
   );
 }

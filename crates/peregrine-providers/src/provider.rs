@@ -200,15 +200,15 @@ impl SearchQuery {
 ///
 /// # What a *list* answer carries that a stub did not
 ///
-/// A provider's list endpoints — a rail, a search page — already answer with a poster, a score, a
-/// synopsis, and a vote count for every item, so a candidate carries all four
-/// ([`SearchCandidate::artwork_path`], [`SearchCandidate::rating`],
-/// [`SearchCandidate::overview`], and [`SearchCandidate::votes`]). That is what keeps filling a
-/// rail of posters from costing a second request per title (`PG-E7-08`), and it is why the fields
-/// belong here rather than on [`peregrine_domain::catalogue::TitleDetails`], which is what a
-/// *details* read answers.
+/// A provider's list endpoints — a rail, a search page — already answer with a poster, a backdrop, a
+/// score, a synopsis, and a vote count for every item, so a candidate carries all five
+/// ([`SearchCandidate::artwork_path`], [`SearchCandidate::backdrop_path`],
+/// [`SearchCandidate::rating`], [`SearchCandidate::overview`], and [`SearchCandidate::votes`]). That
+/// is what keeps filling a rail of posters from costing a second request per title (`PG-E7-08`), and
+/// it is why the fields belong here rather than on
+/// [`peregrine_domain::catalogue::TitleDetails`], which is what a *details* read answers.
 ///
-/// All four are optional, and a provider that sends none of them still produces a candidate: not
+/// All five are optional, and a provider that sends none of them still produces a candidate: not
 /// every list carries artwork or prose, and a provider's own field names never appear on this type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchCandidate {
@@ -217,6 +217,7 @@ pub struct SearchCandidate {
     kind: TitleKind,
     released: Option<Date>,
     artwork_path: Option<String>,
+    backdrop_path: Option<String>,
     rating: Option<f64>,
     overview: Option<String>,
     votes: Option<u64>,
@@ -226,10 +227,11 @@ impl SearchCandidate {
     /// Builds a candidate that carries only what every provider's list carries.
     ///
     /// The artwork, the rating, the synopsis, and the vote count are set with
-    /// [`SearchCandidate::with_artwork_path`], [`SearchCandidate::with_rating`],
-    /// [`SearchCandidate::with_overview`], and [`SearchCandidate::with_votes`], because a provider
-    /// that sends none of them is the rule rather than the exception and an eight-argument
-    /// constructor would make every call site state four `None`s it does not mean.
+    /// [`SearchCandidate::with_artwork_path`], [`SearchCandidate::with_backdrop_path`],
+    /// [`SearchCandidate::with_rating`], [`SearchCandidate::with_overview`], and
+    /// [`SearchCandidate::with_votes`], because a provider that sends none of them is the rule rather
+    /// than the exception and a ten-argument constructor would make every call site state five
+    /// `None`s it does not mean.
     #[must_use]
     pub const fn new(
         external_id: ExternalId,
@@ -243,6 +245,7 @@ impl SearchCandidate {
             kind,
             released,
             artwork_path: None,
+            backdrop_path: None,
             rating: None,
             overview: None,
             votes: None,
@@ -258,6 +261,24 @@ impl SearchCandidate {
     #[must_use]
     pub fn with_artwork_path(mut self, path: Option<String>) -> Self {
         self.artwork_path = path;
+        self
+    }
+
+    /// The same candidate, carrying the provider-relative path of its backdrop.
+    ///
+    /// A backdrop is a wide image behind a title rather than a portrait one beside its name, and it
+    /// is the second variant every list endpoint that sends a `poster_path` also sends. It travels
+    /// on this type for the reason the artwork does — the list answer is where it is free — and it
+    /// has an accessor of its own because the two are different pictures served at different sizes:
+    /// [`MetadataProvider::image`] decides which variant a path is asked for
+    /// ([`peregrine_domain::catalogue::ImageKind`]), and one path cannot stand in for the other.
+    ///
+    /// A blank or absent field is `None`, for the reason
+    /// [`SearchCandidate::with_artwork_path`] states, and the conformance suite asks every adapter
+    /// to map a whitespace path to one.
+    #[must_use]
+    pub fn with_backdrop_path(mut self, path: Option<String>) -> Self {
+        self.backdrop_path = path;
         self
     }
 
@@ -336,6 +357,16 @@ impl SearchCandidate {
     #[must_use]
     pub fn artwork_path(&self) -> Option<&str> {
         self.artwork_path.as_deref()
+    }
+
+    /// The provider-relative path of the title's backdrop, when the answer carried one.
+    ///
+    /// `None` is "the provider sent no wide image", which is a state a screen draws — a poster
+    /// cropped to the band, or a reserved box when there is no poster either — rather than a reason
+    /// to stretch one, because the two are different pictures and the cache keys them separately.
+    #[must_use]
+    pub fn backdrop_path(&self) -> Option<&str> {
+        self.backdrop_path.as_deref()
     }
 
     /// The provider's own score for the title, when the answer carried one.

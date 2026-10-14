@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  CARD_ASPECT,
   CARD_SIZES,
+  CARD_WIDTHS,
   formatRating,
   posterVisible,
   previewOverview,
@@ -59,6 +61,20 @@ describe("TitleCard geometry", () => {
     const defaultWidth = frameClasses(card()).find((name) => /^w-\[\d+px\]$/u.test(name));
     const middle = frameClasses(card({ size: "md" })).find((name) => /^w-\[\d+px\]$/u.test(name));
     expect(defaultWidth).toBe(middle);
+  });
+
+  it("keeps `CARD_WIDTHS` and the classes it draws in step", () => {
+    // The map exists for the rail, which has to leave room for a tile it cannot measure — its items
+    // are the caller's. Two statements of the same numbers are two things to drift, and the rail
+    // would silently under-reserve rather than fail, so this is where they are held together.
+    for (const size of CARD_SIZES) {
+      const drawn = frameClasses(card({ size })).find((name) => /^w-\[\d+px\]$/u.test(name));
+      expect(drawn, size).toBe(`w-[${String(CARD_WIDTHS[size])}px]`);
+    }
+
+    // And the height the rail derives from them is the ratio the frame draws.
+    expect(CARD_ASPECT).toBe(2 / 3);
+    expect(everyClass(card())).toContain("aspect-[2/3]");
   });
 });
 
@@ -232,6 +248,14 @@ describe("TitleCard hover preview", () => {
 
     expect(markup).toContain("transform:scale(1)");
     expect(markup).not.toContain("will-change");
+  });
+
+  it("rests in document order, with no lift of its own", () => {
+    // The lift is the revealed tile's (`previewLift`), and it is inline because it is a value that
+    // must be *absent* rather than empty on every tile that is not enlarged. What a static render can
+    // say is that no tile claims a stacking order before the interaction: the revealed half is the
+    // state machine's, and the browser is what showed it working.
+    expect(card()).not.toContain("z-index");
   });
 
   it("animates transform and opacity and nothing else", () => {

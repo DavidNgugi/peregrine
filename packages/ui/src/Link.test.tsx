@@ -63,4 +63,37 @@ describe("Link", () => {
 
     expect(markup).toContain("focus-visible:outline-focus-ring");
   });
+
+  it("can be drawn as a button without becoming one", () => {
+    // Discover's hero puts a Play button and a Details link side by side, and the link has to match
+    // the control beside it. It stays an anchor — the destination is in the markup, which is the
+    // whole reason the kit has a `Link` — and its classes come from `buttonVariants`, so the two
+    // cannot drift apart.
+    const plain = renderToStaticMarkup(<Link href="/library">Library</Link>);
+    const asButton = renderToStaticMarkup(
+      <Link href="/library" variant="secondary">
+        Library
+      </Link>,
+    );
+
+    expect(asButton).toContain("<a ");
+    expect(asButton).not.toContain("<button");
+    expect(asButton).toContain('href="/library"');
+    expect(asButton).toContain("border-border-subtle");
+    expect(asButton).toContain("h-9");
+    expect(asButton).not.toContain("hover:underline");
+    expect(plain).not.toContain("border-border-subtle");
+    expect(plain).toContain("hover:underline");
+  });
+
+  it("takes the size a button takes", () => {
+    const small = renderToStaticMarkup(
+      <Link href="/library" size="sm" variant="primary">
+        Library
+      </Link>,
+    );
+
+    expect(small).toContain("h-7");
+    expect(small).toContain("bg-accent");
+  });
 });

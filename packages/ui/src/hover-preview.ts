@@ -35,6 +35,71 @@ export const REVEAL_SCALE_CAP = 1.12;
 export const MIN_VISIBLE_RATIO = 0.6;
 
 /**
+ * The stacking order a revealed tile takes over the tiles it overlaps.
+ *
+ * A tile is `position: relative` and every tile's `z-index` is otherwise `auto`, so the two
+ * neighbours and the revealed tile paint in document order — which means the ramp of a tile with a
+ * later sibling is painted *under* that sibling, and half the lift disappears. A positive index puts
+ * the revealed tile in the step after every `auto` one, so its ramp falls across both neighbours.
+ */
+export const REVEAL_LIFT_Z = 10;
+
+/**
+ * §5's shadow ramp, as the two numbers a rail needs in order to leave it room.
+ *
+ * The ramp is a `box-shadow` of `0 12px 32px` on a pseudo-element that is `inset-0` of the tile, so
+ * it reaches 32 − 12 = 20 px above the tile and 12 + 32 = 44 px below it. These live here rather
+ * than only in the card's class because {@link revealRoom} has to answer with a number, and a number
+ * copied out of a class name is a number nobody updates.
+ */
+export const RAMP_BLUR_PX = 32;
+
+/** How far the ramp is pushed down, so more of it falls below the tile than above. */
+export const RAMP_OFFSET_Y_PX = 12;
+
+/** §4's focus ring: a 2 px outline at a 2 px offset, so the ring reaches 4 px past the tile. */
+export const FOCUS_RING_OUTSET_PX = 4;
+
+/**
+ * How far an enlarged tile reaches past its own box, and so how much room a rail has to leave it.
+ *
+ * **This is the rail's problem and not the tile's**, which is why it is arithmetic in this module
+ * rather than a constant in `Rail`: the tile's transform does not move anything, so a scroll
+ * container that clips — and `overflow-x: auto` computes `overflow-y` to `auto`, so every rail's
+ * scroller clips on both axes — cuts the enlarged tile, its focus ring, and the ramp that is the
+ * whole of the lift. A rail that left no room was a card the same size as its neighbours with the
+ * metadata panel drawn inside it, reported from a screenshot.
+ */
+export interface RevealRoom {
+  /** How far past the tile the room reaches on the left and the right. */
+  readonly sides: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/**
+ * The room a tile of `width` × `height` needs around it, at {@link REVEAL_SCALE}.
+ *
+ * Rounded up, because a fractional pixel of room is not a pixel of room. The default scale is the one
+ * §5 draws; a variant that revealed at {@link REVEAL_SCALE_CAP} would need more, and the `scale`
+ * parameter exists so that caller can ask for it rather than discovering it in a screenshot.
+ */
+export function revealRoom(
+  width: number,
+  height: number,
+  scale: number = REVEAL_SCALE,
+): RevealRoom {
+  const grown = revealScale(scale) - 1;
+  const grownX = (width * grown) / 2;
+  const grownY = (height * grown) / 2;
+  return {
+    sides: Math.ceil(grownX + FOCUS_RING_OUTSET_PX),
+    top: Math.ceil(grownY + RAMP_BLUR_PX - RAMP_OFFSET_Y_PX + FOCUS_RING_OUTSET_PX),
+    bottom: Math.ceil(grownY + RAMP_OFFSET_Y_PX + RAMP_BLUR_PX + FOCUS_RING_OUTSET_PX),
+  };
+}
+
+/**
  * Where the ladder is.
  *
  * `dwelling` is the 450 ms of nothing-that-shows that separates a pointer crossing a tile from a
@@ -126,6 +191,20 @@ export function previewScale(state: PreviewState): number {
 /** The cap, applied. Exported for the test that would fail if the number moved. */
 export function revealScale(requested: number): number {
   return Math.min(Math.max(requested, 1), REVEAL_SCALE_CAP);
+}
+
+/**
+ * The stacking order the tile paints at right now, or `null` for document order.
+ *
+ * The lift follows the *size* rather than the phase: a revealed tile is enlarged, and a tile that is
+ * animating back from a reveal is still enlarged while it shrinks — so it stays lifted until
+ * `settled` says the transform stopped, or its ramp would be cut in half by its neighbour for the
+ * length of the exit. A dwell is neither, so it lifts nothing.
+ */
+export function previewLift(state: PreviewState): number | null {
+  return state.phase === "revealed" || (state.animating && state.phase === "idle")
+    ? REVEAL_LIFT_Z
+    : null;
 }
 
 /**
