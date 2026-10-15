@@ -230,6 +230,17 @@ If you are an AI agent contributing to this repository:
 8. When a task is larger than five ideal days, break it down before writing code.
 9. Leave the repository in a state where the next contributor needs no context from you beyond the documents.
 
+### Output contract
+
+When the reply itself is the deliverable — a snippet, a patch, an answer to "write me X" — the reply is code, not commentary about code.
+
+- **Strict syntax.** Return only executable code, in one fenced block per language, that runs as written. No inline comments, docstrings, or type-hint explanations unless they were asked for. No template filler where a real symbol belongs.
+- **No preamble.** No "Here is the code", no restating the request, no markdown introduction, no running narration of the diff. The enforcement phrases are "No explanation needed" and "Concise code output only"; under them the whole reply is the code block.
+- **Prose, if any, comes after.** A prerequisite, tradeoff, or hazard the code cannot show goes in one short block after the code, never before it and never between blocks.
+- **Why, never what.** This is R19 applied to chat: a comment earns its place by recording a constraint, a workaround's reason, or a hazard, and nothing else. Committed files follow R19 in full — public library items keep their concise rustdoc line.
+- **Senior-engineer stance.** Write production-ready, low-entropy code and let it speak. Prefer the smallest correct change over a demonstration, and delete anything that does not change behaviour.
+- **Deterministic.** No invented API, dependency version, provider endpoint, or benchmark number, and no variation for its own sake. An unverified value is labelled as one rather than guessed.
+
 ### Skills to load
 
 Skills are task-scoped instruction sets. Load the ones that match the work before acting; the full audit, including install commands and verification status, is in [docs/research/skills.md](./docs/research/skills.md).
