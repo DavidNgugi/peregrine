@@ -199,15 +199,30 @@ describe("the two transitions §5 names", () => {
 });
 
 describe("the reveal scale", () => {
-  it("is 1.06, the number §5 names", () => {
-    expect(REVEAL_SCALE).toBe(1.06);
-    expect(previewScale(after(enter, dwell))).toBe(1.06);
+  it("enlarges both dimensions by thirty percent after the dwell", () => {
+    expect(REVEAL_SCALE).toBe(1.3);
+    expect(previewScale(after(enter, dwell))).toBe(1.3);
   });
 
-  it("is hard-capped at 1.12 so adjacent tiles cannot collide", () => {
-    expect(REVEAL_SCALE_CAP).toBe(1.12);
-    expect(revealScale(1.12)).toBe(1.12);
-    expect(revealScale(1.2)).toBe(1.12);
+  it("stays at its own size when the container reserved no room for it", () => {
+    // **A grid's columns are derived to fit the measured width, so it has nothing to give.** The
+    // enlargement is a transform, so a scroller that clips — and `overflow-y: auto` makes the vertical
+    // clip horizontal too — cuts an enlarged tile at both sides. The rail answers that with `revealRoom`;
+    // a grid answers it by not scaling, and this is the flag that says which one a caller is.
+    const revealed = after(enter, dwell);
+    expect(previewScale(revealed, false)).toBe(1);
+    expect(previewScale(revealed, true)).toBe(1.3);
+    // And the default is the rail's behaviour, so a caller that says nothing keeps the lift.
+    expect(previewScale(revealed)).toBe(1.3);
+    // A tile that has not been revealed is its own size either way.
+    expect(previewScale(IDLE_PREVIEW, false)).toBe(1);
+    expect(previewScale(IDLE_PREVIEW, true)).toBe(1);
+  });
+
+  it("caps the overlap with adjacent tiles at thirty percent", () => {
+    expect(REVEAL_SCALE_CAP).toBe(1.3);
+    expect(revealScale(1.3)).toBe(1.3);
+    expect(revealScale(1.5)).toBe(1.3);
   });
 
   it("never shrinks a card below its own size", () => {
@@ -230,7 +245,9 @@ describe("the lift that puts the revealed tile over its neighbours", () => {
     const leaving = after(enter, dwell, { type: "pointerLeave" });
     expect(leaving.animating).toBe(true);
     expect(previewLift(leaving)).toBe(REVEAL_LIFT_Z);
-    expect(previewLift(after(enter, dwell, { type: "pointerLeave" }, { type: "settled" }))).toBeNull();
+    expect(
+      previewLift(after(enter, dwell, { type: "pointerLeave" }, { type: "settled" })),
+    ).toBeNull();
   });
 
   it("is positive, so it paints after every tile that keeps document order", () => {
@@ -268,13 +285,13 @@ describe("the room a rail has to leave", () => {
     expect(room.sides).toBeGreaterThan(0);
   });
 
-  it("grows with the tile, and with a scale past the one §5 draws today", () => {
+  it("grows with the tile and with its scale", () => {
     // The rail sizes the room from the largest tile it can be asked to draw, and a variant that
-    // revealed at the cap needs more room than this one — which is why the scale is a parameter
+    // revealed at the cap needs more room than an unscaled one — which is why the scale is a parameter
     // rather than a constant read inside.
     expect(revealRoom(216, 324).sides).toBeGreaterThan(revealRoom(112, 168).sides);
     expect(revealRoom(144, 216, REVEAL_SCALE_CAP).sides).toBeGreaterThan(
-      revealRoom(144, 216).sides,
+      revealRoom(144, 216, 1).sides,
     );
   });
 
@@ -284,6 +301,17 @@ describe("the room a rail has to leave", () => {
       for (const side of [room.sides, room.top, room.bottom]) {
         expect(Number.isInteger(side), String(width)).toBe(true);
       }
+    }
+  });
+});
+
+describe("preview clip clearance", () => {
+  it("contains the enlarged card and its shadow at every size", () => {
+    for (const width of [88, 112, 144, 176, 216]) {
+      const height = width * 1.5;
+      const room = revealRoom(width, height);
+      expect(room.sides).toBeGreaterThanOrEqual(width * 0.15 + RAMP_BLUR_PX);
+      expect(room.bottom).toBeGreaterThanOrEqual(height * 0.15 + RAMP_OFFSET_Y_PX + RAMP_BLUR_PX);
     }
   });
 });

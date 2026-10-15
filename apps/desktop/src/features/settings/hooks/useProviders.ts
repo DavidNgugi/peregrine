@@ -22,6 +22,7 @@ import {
   eventTopics,
   normalizeIpcError,
   unwrap,
+  type CredentialStoreDto,
   type JobStarted,
   type JobState,
   type ProviderDto,
@@ -34,6 +35,8 @@ import { eventPayload, isTerminal, jobPhase } from "../../../lib/job-events.js";
 import {
   credentialFailureKey,
   credentialSuccessKey,
+  shouldPoll,
+  stillReading,
   type CredentialAction,
 } from "../provider-outcome.js";
 
@@ -54,6 +57,14 @@ export interface CredentialOutcome {
 export interface ProviderSettings {
   /** The known providers, in the order the core answered with. */
   readonly providers: readonly ProviderDto[];
+  /**
+   * What the last read of the credential store answered.
+   *
+   * **Not the same question as whether a provider is configured.** A keychain that refused access
+   * leaves every `configured` flag false exactly as a first run does, so a section that read the two
+   * as one thing would tell a user whose key is still in their keychain to paste it again.
+   */
+  readonly store: CredentialStoreDto;
   /** The read is still in flight. */
   readonly loading: boolean;
   /** The read failed, so the list is unknown rather than empty. */
@@ -70,7 +81,17 @@ export interface ProviderSettings {
   readonly testConnection: (provider: string) => Promise<void>;
   /** Removes whatever is stored, after the caller has confirmed it. */
   readonly removeKey: (provider: string) => Promise<void>;
+  /** Asks the core for the credential status again, after a read that has not answered. */
+  readonly reload: () => void;
 }
+
+/**
+ * How long the screen waits between status reads while the keychain has not answered.
+ *
+ * A second: long enough that the poll is not a spin, and short enough that a read which finishes
+ * just after the mount is on screen before a person has read the first sentence.
+ */
+const POLL_INTERVAL_MS = 1_000;
 
 /** The job being followed, and what started it. */
 interface Pending {
@@ -82,6 +103,7 @@ interface Pending {
 
 interface State {
   readonly providers: readonly ProviderDto[];
+  readonly store: CredentialStoreDto;
   readonly loading: boolean;
   readonly failed: boolean;
   readonly busy: boolean;
@@ -91,6 +113,9 @@ interface State {
 
 const INITIAL: State = {
   providers: [],
+  // Nobody has read the store yet, which is the state a launch is in until the startup refresh
+  // answers. Claiming "not configured" before then would be a claim nothing has established.
+  store: "unread",
   loading: true,
   failed: false,
   busy: false,
@@ -118,6 +143,9 @@ async function recordedCode(journalId: number): Promise<string | null> {
 /** The providers the core knows, and the operations the settings screen offers. */
 export function useProviders(): ProviderSettings {
   const [state, setState] = useState<State>(INITIAL);
+  // How many times this visit has asked again while the keychain had not answered. Bounded by
+  // `shouldPoll`, so a keychain that never answers cannot become a poll loop.
+  const [attempts, setAttempts] = useState(0);
   // The job being followed, in a ref rather than in state: the listener registered at mount has to
   // see a job started after it, and an event arriving before React has committed the state would
   // otherwise be dropped and the follow would never stop.
@@ -129,6 +157,7 @@ export function useProviders(): ProviderSettings {
       setState((previous) => ({
         ...previous,
         providers: answer.known,
+        store: answer.store,
         loading: false,
         failed: false,
       }));
@@ -143,6 +172,36 @@ export function useProviders(): ProviderSettings {
       }));
     }
   }, []);
+
+  /**
+   * Asks again, on the user's command.
+   *
+   * The read can be waiting on a macOS permission dialog, so "reopen the app" is not the only thing a
+   * person should be able to do about it: this is the same cached-status read the mount makes, and it
+   * is safe to repeat because it never blocks — the blocking half is the runtime's, off the command
+   * path.
+   */
+  const reload = useCallback((): void => {
+    setAttempts(0);
+    void readStatus();
+  }, [readStatus]);
+
+  // While the keychain has not answered, keep asking for a bounded while: the read finishes a moment
+  // after a launch, or after a permission dialog is dismissed, and a screen that read once would sit
+  // on "reading your keychain" until the user navigated away and back. `shouldPoll` is the bound, and
+  // it is a function with its own test because a hook cannot be run in this harness.
+  useEffect(() => {
+    if (!stillReading(state.store) || !shouldPoll(attempts)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAttempts((made) => made + 1);
+      void readStatus();
+    }, POLL_INTERVAL_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [attempts, readStatus, state.store]);
 
   useEffect(() => {
     void readStatus();
@@ -241,5 +300,5 @@ export function useProviders(): ProviderSettings {
     [start],
   );
 
-  return { ...state, saveKey, testConnection, removeKey };
+  return { ...state, saveKey, testConnection, removeKey, reload };
 }

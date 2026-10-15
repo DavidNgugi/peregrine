@@ -9,5 +9,15 @@ repository.workspace = true
 description = "Peregrine component crate."
 publish = false
 
+[dependencies]
+# The port names the domain's own vocabulary rather than a copy of it (AGENTS R3): `InfoHash` is a
+# torrent's identity that `download_job.info_hash` stores (`DATA_MODEL` §2.7), `SafetyReport` is
+# the gate's verdict that `add` refuses to do without, and `SafePath` is the only path type the
+# engine may be handed (ADR 0005).
+peregrine-domain = { workspace = true }
+# The refusal vocabulary is one closed `thiserror` enum per crate, so a caller matches on a variant
+# and never on a message (AGENTS §5, PG-E10-15).
+thiserror = { workspace = true }
+
 [lints]
 workspace = true

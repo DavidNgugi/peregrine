@@ -39,6 +39,7 @@ pub use descriptor::{Attribution, CachePolicy, DescriptorError, ProviderDescript
 pub use error::{ProviderError, TransportFailure};
 pub use hygiene::{Body, BodyCap};
 pub use provider::{
-    MetadataProvider, ProviderFuture, RAIL_PAGE_LIMIT, RailKind, SearchCandidate, SearchQuery,
+    BrowseRequest, BrowseSort, GenreRef, MetadataProvider, ProviderFuture, ProviderPage,
+    RAIL_PAGE_LIMIT, RailKind, SearchCandidate, SearchQuery,
 };
 pub use rate::RateLimiter;

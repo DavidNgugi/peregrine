@@ -85,6 +85,16 @@ peregrine-stream = { path = "crates/peregrine-stream" }
 peregrine-sync = { path = "crates/peregrine-sync" }
 peregrine-testkit = { path = "crates/peregrine-testkit" }
 peregrine-torrent = { path = "crates/peregrine-torrent" }
+# The loopback media server's HTTP stack (docs/ARCHITECTURE.md §5, ADR 0023). `axum` for the router,
+# `tower-http`'s `fs` feature for byte-range delivery of one file — range parsing, `Content-Range`,
+# `Accept-Ranges`, `HEAD`, and `416` are HTTP, not our logic, and hand-rolling them is where the
+# security bugs live. `set-header` is what puts `no-store` on every response (SECURITY.md T10).
+# Two features rather than the `full` set: nothing here cancels, compresses, or traces.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+# `cors` is one policy for one route, and the ADR records why it exists at all: the canvas a frame is
+# captured into is tainted unless the media response is CORS-readable, so `Access-Control-Allow-Origin`
+# is what lets the renderer turn a frame of the film into the film's poster (ADR 0023).
+tower-http = { version = "0.7.1", default-features = false, features = ["fs", "set-header", "cors"] }
 anyhow = { version = "1.0.104" }
 futures = { version = "0.3.34" }
 jiff = { version = "0.2.38", features = ["serde"] }
@@ -158,7 +168,10 @@ tauri-plugin-single-instance = { version = "2.5.3" }
 tauri-plugin-window-state = { version = "2.5.0" }
 thiserror = { version = "2.0.21" }
 tempfile = { version = "3.27.0" }
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+# `net` because the loopback media server binds its own listener and its tests speak HTTP over a
+# real socket (ADR 0023): `axum`'s `tokio` feature would enable it transitively, and relying on a
+# feature another crate happens to turn on is the hazard PG-E0-20 records.
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
 tokio-util = { version = "0.7.19" }
 toml = { version = "1.1.7" }
 tracing = { version = "0.1.44" }

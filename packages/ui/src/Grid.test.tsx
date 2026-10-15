@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Grid, gridColumns, gridWindow } from "./Grid.js";
+import { Grid, gridColumns, gridEndReached, gridWindow } from "./Grid.js";
 import { TitleCard } from "./TitleCard.js";
 
 const TILE = 144;
@@ -165,5 +165,77 @@ describe("Grid", () => {
 
   it("keys each tile by the caller's domain id", () => {
     expect(grid(6)).toContain('href="/title/movie/2"');
+  });
+  it("reserves placeholder rows in the flow while a page is in flight", () => {
+    // The affordance a reader needs at the end of a loaded page: without it, "the next page is on
+    // its way" and "there is nothing more" look exactly alike. The placeholders are laid out where
+    // the arriving tiles will be, so the geometry does not move when they land.
+    const markup = grid(4, {
+      loading: true,
+      placeholder: <span data-testid="placeholder" />,
+      placeholderRows: 1,
+    });
+
+    // Four items in four columns is one row; one reserved row of four cells is four placeholders.
+    const placeholders = markup.match(/data-testid="placeholder"/gu) ?? [];
+    expect(placeholders).toHaveLength(4);
+    // A skeleton is decorative: it is hidden from assistive technology, and the *fact* that
+    // something is loading is said in words by the screen (`role="status"`), not by the shape.
+    expect(markup).toContain('aria-hidden="true"');
+    // And the real tiles are still drawn beside them.
+    expect(markup).toContain("/title/movie/0");
+  });
+
+  it("reserves nothing when no page is in flight", () => {
+    // The placeholder is inert without `loading`: a grid that drew placeholders on its own would
+    // tell a reader a page was coming when none had been asked for.
+    const markup = grid(4, { placeholder: <span data-testid="placeholder" /> });
+
+    expect(markup).not.toContain('data-testid="placeholder"');
+  });
+
+  it("carries the reserved rows in the spacer, so the scrollbar is honest while a page is in the air", () => {
+    // The scrollbar has to account for the page on its way, or a reader scrolls to a bottom that
+    // moves as the tiles arrive. Four items is one row of four columns; two reserved rows make three.
+    expect(grid(4)).toContain(`height:${String(ROW)}px`);
+    expect(grid(4, { loading: true, placeholderRows: 2 })).toContain(`height:${String(3 * ROW)}px`);
+  });
+});
+
+describe("gridEndReached", () => {
+  it("never fires for an empty list, whatever the threshold", () => {
+    // The boundary the browse screen reaches on a filter that matches nothing: there is no page to
+    // ask for, and a "load more" fired there would ask a provider for one for ever.
+    expect(gridEndReached(0, windowOf({ itemCount: 0 }), 8)).toBe(false);
+    expect(gridEndReached(0, windowOf({ itemCount: 0 }), 0)).toBe(false);
+  });
+
+  it("fires when the drawn slice reaches the end", () => {
+    // One row of four visible with one of overscan draws eight of eight, which is the end.
+    const atEnd = windowOf({ itemCount: 8, scrollTop: ROW });
+    expect(atEnd.last).toBe(8);
+    expect(gridEndReached(8, atEnd, 0)).toBe(true);
+    expect(gridEndReached(8, atEnd, 8)).toBe(true);
+  });
+
+  it("fires within the threshold and not before it", () => {
+    // A hundred items in four columns at the top draws five rows — the four the viewport holds and
+    // one of overscan — so the slice ends at item 20. The end is then twenty items away, which a
+    // threshold of eight must not treat as arrived; a list of twenty-eight is exactly eight away and
+    // one of twenty-nine is not.
+    const top = windowOf({ itemCount: 100, scrollTop: 0 });
+    expect(top.last).toBe(20);
+    expect(gridEndReached(20, top, 0)).toBe(true);
+    expect(gridEndReached(28, top, 8)).toBe(true);
+    expect(gridEndReached(29, top, 8)).toBe(false);
+    expect(gridEndReached(100, top, 8)).toBe(false);
+  });
+
+  it("treats a negative threshold as no threshold", () => {
+    // A caller that computed a negative reach — a page size minus something larger than it — means
+    // "only at the end", not "always".
+    const top = windowOf({ itemCount: 100, scrollTop: 0 });
+    expect(gridEndReached(20, top, -5)).toBe(true);
+    expect(gridEndReached(21, top, -5)).toBe(false);
   });
 });

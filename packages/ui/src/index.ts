@@ -29,6 +29,9 @@ export type { ProgressProps } from "./Progress.js";
 export { Rail } from "./Rail.js";
 // `nextRailIndex` and `showsChevrons` are the rail's own decisions rather than primitives, so they
 // are not exported as ones: the rail's tests import them from the module, the way the card's do.
+// `SKELETON_TILES` is exported because a test asserts the row a loading rail draws, the way the
+// card's sizes are asserted against `CARD_WIDTHS`.
+export { SKELETON_TILES } from "./Rail.js";
 export type { RailProps } from "./Rail.js";
 export { Screen } from "./Screen.js";
 export type { ScreenProps } from "./Screen.js";
@@ -42,6 +45,8 @@ export { ShortcutKeys } from "./ShortcutKeys.js";
 export type { ShortcutKeysProps } from "./ShortcutKeys.js";
 export { Sidebar, SidebarItem } from "./Sidebar.js";
 export type { SidebarItemProps, SidebarProps } from "./Sidebar.js";
+export { Skeleton } from "./Skeleton.js";
+export type { SkeletonProps } from "./Skeleton.js";
 export { Switch } from "./Switch.js";
 export type { SwitchProps } from "./Switch.js";
 export { Table } from "./Table.js";

@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use peregrine_domain::catalogue::ImageKind;
 use peregrine_domain::id::Provider;
+use peregrine_providers::MetadataProvider;
 use peregrine_sync::{ImageCache, ImageKey, ImageVariant};
 
 /// Where the cache holds one provider's image, or `None` when it does not.
@@ -32,6 +33,30 @@ pub fn cached_image(
 ) -> Option<PathBuf> {
     let key = ImageKey::for_image(provider, path, ImageVariant::for_kind(kind));
     cache.contains(&key).then(|| cache.disk_path(&key))
+}
+
+/// One image, in the cache or fetched into it, or `None` when it cannot be had.
+///
+/// The other half of [`cached_image`]: it answers the path when the blob is here, and otherwise asks
+/// `provider` for it and stores it. Shared by the two writers that fill the cache from a *list*
+/// answer — the rails job, which fills a whole screen behind the one on screen, and the browse read,
+/// which fills the page a reader is waiting for — so an image is keyed, fetched, and stored one way
+/// (`PG-E6-09`).
+///
+/// A failure is `None` rather than an error because the caller's answer is the same either way: a
+/// reserved box on a tile, which is a state both screens already draw.
+pub(crate) async fn cached_or_fetched(
+    cache: &ImageCache,
+    provider: &dyn MetadataProvider,
+    path: &str,
+    kind: ImageKind,
+) -> Option<PathBuf> {
+    if let Some(found) = cached_image(cache, provider.descriptor().provider(), path, kind) {
+        return Some(found);
+    }
+    peregrine_sync::cache_image(provider, cache, path, kind)
+        .await
+        .ok()
 }
 
 /// What the catalogue and the cache hold for one title's primary poster.
@@ -66,8 +91,13 @@ pub struct ArtworkState {
     /// no configured provider has an id for cannot be filled in by any of them, so asking would spend
     /// a job and a journal row per visit and fetch nothing.
     pub answerable: bool,
-    /// Whether any provider has ever filled this title in.
-    pub synced: bool,
+    /// Whether a *details* read has ever filled this title in.
+    ///
+    /// Not "a provider has answered": a rail listing is a provider answering, and it carries no
+    /// runtime, no genre, and no cast — the fields a details read exists to fetch. The catalogue's
+    /// `metadata_state` is where the two are told apart, and `Listed` is the state that says a list
+    /// answer is all this title has had.
+    pub detailed: bool,
     /// What the catalogue and the cache hold.
     pub artwork: Artwork,
 }
@@ -85,14 +115,14 @@ impl ArtworkState {
         poster: Option<&Path>,
         answerable: bool,
     ) -> Self {
-        let artwork = match (row.poster.is_some(), poster.is_some()) {
+        let artwork = match (row.library.poster.is_some(), poster.is_some()) {
             (false, _) => Artwork::Unknown,
             (true, false) => Artwork::Missing,
             (true, true) => Artwork::Cached,
         };
         Self {
             answerable,
-            synced: row.synced,
+            detailed: row.detailed,
             artwork,
         }
     }
@@ -114,16 +144,20 @@ pub fn can_answer(configured: &[Provider], held: &[peregrine_domain::ExternalId]
 ///
 /// * **There is something to ask with.** No configured provider owns an id for this title, so none
 ///   of them can answer about it.
-/// * **The title has never been filled in.** Then a provider may hold everything the catalogue is
-///   missing, so the screen asks once.
+/// * **No details read has filled it in.** Then a provider may hold everything the catalogue is
+///   missing, so the screen asks once. A title a rail listed is in this case: the listing gave it a
+///   name, a poster, a score, and a synopsis, and the runtime and the genre are what the details
+///   read this rule starts is for. Reading "a provider has answered" instead — which is what
+///   `title.last_synced_at` says, and what a list answer sets — is what made a rail title look
+///   filled in and left those fields absent for ever.
 /// * **A provider is known to have artwork the cache does not hold.** Then the blob was evicted, or
 ///   the fill recorded the path and the bytes never arrived, and one request puts it back.
 ///
 /// What the three together *exclude* is the case that would otherwise ask forever: a title that has
-/// been filled in, whose provider had no poster. Asking again would spend a request to be told the
-/// same thing on every visit, which is the shape `AGENTS R24` exists to prevent.
+/// been filled in from its details, whose provider had no poster. Asking again would spend a request
+/// to be told the same thing on every visit, which is the shape `AGENTS R24` exists to prevent.
 ///
-/// **This is not the staleness policy.** When a *filled* title is due again — the six-month window,
+/// **This is not the staleness policy.** When a *detailed* title is due again — the six-month window,
 /// the state machine for `MetadataState::Stale` — is `PG-E6-15`'s, and nothing here has an opinion
 /// about it: a title whose metadata is old is a title this function says not to ask about.
 ///
@@ -131,7 +165,7 @@ pub fn can_answer(configured: &[Provider], held: &[peregrine_domain::ExternalId]
 /// and remembers that it did, so a refresh that produced nothing cannot become a request loop.
 #[must_use]
 pub const fn refresh_due(state: &ArtworkState) -> bool {
-    state.answerable && (!state.synced || matches!(state.artwork, Artwork::Missing))
+    state.answerable && (!state.detailed || matches!(state.artwork, Artwork::Missing))
 }
 
 #[cfg(test)]
@@ -238,28 +272,38 @@ mod tests {
     }
 
     /// The three facts, in the order the rule reads them.
-    fn state(answerable: bool, synced: bool, artwork: Artwork) -> ArtworkState {
+    fn state(answerable: bool, detailed: bool, artwork: Artwork) -> ArtworkState {
         ArtworkState {
             answerable,
-            synced,
+            detailed,
             artwork,
         }
     }
 
     #[test]
     fn a_title_nobody_has_filled_in_is_asked_about() {
-        // The first visit to a title the library just scanned: no fill has happened, so a provider
-        // may hold everything the catalogue is missing.
+        // The first visit to a title the library just scanned: no details read has happened, so a
+        // provider may hold everything the catalogue is missing.
         assert!(refresh_due(&state(true, false, Artwork::Unknown)));
-        // Even when the catalogue somehow records a poster: a fill that never completed still left
-        // the row saying a provider has never answered.
-        assert!(refresh_due(&state(true, false, Artwork::Cached)));
     }
 
     #[test]
-    fn a_filled_title_whose_provider_had_no_artwork_is_never_asked_again() {
+    fn a_listed_title_with_a_cached_poster_is_still_asked_about() {
+        // The defect this rule was repaired for. A rail lists a title, the rails job fetches the
+        // poster the list answer named, and the title then has a picture on disk and *no* runtime,
+        // genre, or cast — because only a details read carries those, and the row said a provider
+        // had answered. Reading "has a provider answered" as "is filled in" made this the one case
+        // the screen never asked about, for every title a rail had ever drawn.
+        assert!(
+            refresh_due(&state(true, false, Artwork::Cached)),
+            "a listed title with its poster on disk is exactly what a details read is for"
+        );
+    }
+
+    #[test]
+    fn a_details_filled_title_whose_provider_had_no_artwork_is_never_asked_again() {
         // The case that would otherwise spend a request on every visit, forever: the provider was
-        // asked, it had no poster, and asking again cannot change that (AGENTS R24).
+        // asked for the details, it had no poster, and asking again cannot change that (AGENTS R24).
         assert!(!refresh_due(&state(true, true, Artwork::Unknown)));
     }
 
@@ -276,7 +320,16 @@ mod tests {
     }
 
     /// One title row, with only the two fields the state is built from varying.
-    fn row(synced: bool, poster: Option<&str>) -> peregrine_storage::TitleDetailRow {
+    ///
+    /// `detailed` picks the stored state a details read and a list answer leave behind, and the
+    /// flag is read back off it, so the fixture cannot hold a pairing the catalogue could not:
+    /// `Listed` and a details read are different rows rather than one row with a boolean beside it.
+    fn row(detailed: bool, poster: Option<&str>) -> peregrine_storage::TitleDetailRow {
+        let metadata_state = if detailed {
+            peregrine_storage::MetadataState::Partial
+        } else {
+            peregrine_storage::MetadataState::Listed
+        };
         peregrine_storage::TitleDetailRow {
             library: peregrine_storage::LibraryTitleRow {
                 title: peregrine_storage::TitleIdentity {
@@ -285,19 +338,27 @@ mod tests {
                     subtype: peregrine_storage::TitleSubtype::Standard,
                     name: "Alien".to_owned(),
                     sort_name: "alien".to_owned(),
-                    metadata_state: peregrine_storage::MetadataState::Stub,
+                    metadata_state,
                     adult: false,
                 },
                 items: 0,
                 files: 0,
                 bytes: 0,
                 missing_files: 0,
+                // The poster reference lives on the list row, which is the one place both reads get it
+                // from; this fixture varies it, because it is an input to the rule under test.
+                poster: poster.map(|path| peregrine_storage::ArtworkPath {
+                    provider: Provider::Tmdb,
+                    path: path.to_owned(),
+                }),
             },
-            poster: poster.map(|path| peregrine_storage::ArtworkPath {
-                provider: Provider::Tmdb,
-                path: path.to_owned(),
-            }),
-            synced,
+            // Absent, because this fixture is about the *poster's* state: the hero's own fields are not
+            // an input to the refresh rule, and a test that set them would be claiming they were.
+            backdrop: None,
+            overview: None,
+            rating: None,
+            released: None,
+            detailed: metadata_state.has_details(),
         }
     }
 
@@ -361,10 +422,10 @@ mod tests {
         // job and write a journal row on every visit to a title no provider can be asked about, and
         // the job would answer immediately having done nothing.
         for artwork in [Artwork::Unknown, Artwork::Missing, Artwork::Cached] {
-            for synced in [false, true] {
+            for detailed in [false, true] {
                 assert!(
-                    !refresh_due(&state(false, synced, artwork)),
-                    "answerable=false must decide the rule on its own: {synced} {artwork:?}"
+                    !refresh_due(&state(false, detailed, artwork)),
+                    "answerable=false must decide the rule on its own: {detailed} {artwork:?}"
                 );
             }
         }

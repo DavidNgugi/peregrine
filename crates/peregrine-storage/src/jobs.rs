@@ -269,14 +269,40 @@ pub(crate) async fn update(
     Ok(result.rows_affected() > 0)
 }
 
+/// Closes out the journal rows a previous process left unfinished.
+///
+/// **A job cannot outlive the process that was running it, and the journal cannot tell the rows of a
+/// process that died from the rows of one that is still working** — there is no owner column, so every
+/// non-terminal row at open time belongs to a process that is gone. What that costs without this is
+/// not cosmetic: `job_dedupe_uq` is a partial unique index over the *non-terminal* rows, so a
+/// `queued` row holds its dedupe key for ever and nothing with that key can ever be submitted again.
+/// `Runtime::start_discover_rails`, which joins a live row rather than writing a second one, then
+/// joins a job that will never run — the screen fills nothing, every launch, and pressing Refresh
+/// goes through the same join.
+///
+/// Reported rather than deleted: the row keeps its attempts and gains the reason it stopped.
+/// `finished_at` is deliberately left alone, because the instant it stopped is exactly what nobody
+/// knows; `last_error` carries the reason, and the retention policy already reads `created_at` as the
+/// second window for a row that never recorded a finish.
+pub(crate) async fn fail_unfinished(
+    connection: &mut sqlx::SqliteConnection,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE job SET state = 'failed', next_attempt_at = NULL, \
+         last_error_code = 'INTERRUPTED', last_error = ?1 \
+         WHERE state IN ('queued','running','deferred')",
+    )
+    .bind("The process running this job ended before it finished.")
+    .execute(connection)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Reads one row.
 pub(crate) async fn get(
     pool: &sqlx::SqlitePool,
     id: i64,
 ) -> Result<Option<JobRecord>, StorageError> {
-    // The column list is spelled out rather than built with `format!`: `sqlx` 0.9 refuses
-    // a dynamically assembled statement unless it is explicitly audited, and a literal is
-    // the audit.
     let row = sqlx::query_as::<_, JobRow>(
         "SELECT id, kind, state, priority, dedupe_key, progress_permille, attempts, \
          max_attempts, next_attempt_at, last_error_code, last_error, created_at, \

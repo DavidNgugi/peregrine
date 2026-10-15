@@ -23,7 +23,7 @@
  */
 
 import { eventTopics, homeRails, normalizeIpcError, refreshRails } from "@peregrine/ipc-client";
-import type { HomeRailDto, IpcError } from "@peregrine/ipc-client";
+import type { HomeRailDto, IpcError, RailKindDto } from "@peregrine/ipc-client";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
@@ -61,8 +61,9 @@ export interface HomeRailsView {
 }
 
 /** The rails, and the refresh that fills them. */
-export function useHomeRails(): HomeRailsView {
+export function useHomeRails(kind?: RailKindDto): HomeRailsView {
   const [state, setState] = useState<{
+    kind: RailKindDto | undefined;
     rails: readonly HomeRailDto[];
     state: RailsState;
     loading: boolean;
@@ -70,6 +71,7 @@ export function useHomeRails(): HomeRailsView {
     refreshing: boolean;
     refreshError: IpcError | null;
   }>({
+    kind,
     rails: [],
     // Before any answer the screen draws the empty state it always drew: `ready` is the state that
     // does, and a read in flight is not a state this screen draws (`DESIGN_SYSTEM §11` rule 2).
@@ -97,9 +99,12 @@ export function useHomeRails(): HomeRailsView {
     setFollow(next);
   }, []);
 
+  const readVersion = useRef(0);
   const read = useCallback(async (): Promise<void> => {
+    const version = ++readVersion.current;
     try {
-      const rails = await homeRails();
+      const rails = await homeRails(kind);
+      if (version !== readVersion.current) return;
       setState((previous) => ({
         ...previous,
         // The state is the core's answer, carried on every rail because the answer is a list. The
@@ -107,15 +112,17 @@ export function useHomeRails(): HomeRailsView {
         // fills (`Runtime::home_rails` answers every rail, which the core's own test pins).
         state: rails[0]?.state ?? previous.state,
         rails,
+        kind,
         loading: false,
         failed: false,
       }));
     } catch (caught: unknown) {
+      if (version !== readVersion.current) return;
       const error = normalizeIpcError(caught);
       logUiError("homeRails", error);
       setState((previous) => ({ ...previous, loading: false, failed: true }));
     }
-  }, []);
+  }, [kind]);
 
   const refresh = useCallback(async (): Promise<void> => {
     setState((previous) => ({ ...previous, refreshError: null }));
@@ -171,5 +178,10 @@ export function useHomeRails(): HomeRailsView {
     };
   }, [applyFollow]);
 
-  return { ...state, refresh };
+  return {
+    ...state,
+    rails: state.kind === kind ? state.rails : [],
+    loading: state.kind !== kind || state.loading,
+    refresh,
+  };
 }

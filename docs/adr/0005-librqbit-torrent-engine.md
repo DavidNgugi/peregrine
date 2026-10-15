@@ -14,7 +14,7 @@ Three shapes were considered: a Rust engine in-process, C++ libtorrent bindings,
 
 Use **librqbit in-process**, behind a `TorrentEngine` trait in the core, with the adapter as a leaf crate.
 
-- The trait covers session lifecycle, add with file selection, sequential streaming with a steerable priority window, statistics, limits, pause and resume, and removal.
+- The trait covers session lifecycle, add with file selection, sequential streaming with a steerable priority window, statistics, limits, pause and resume, and removal. **Recovery is part of that surface, written into it when the trait was implemented (PG-E10-01):** an add carries an intent — a new transfer, or one whose payload may already be on disk, which is both a session reattaching after a restart and a finished job being put back to seed — and a session hands back the state to persist (`download_job.engine_state_json`) and can re-verify a torrent it already holds, so a restart resumes and a reseed verifies instead of re-fetching. The intent does not relax the gate: an add of either kind is built from a `Verdict::Allowed` report.
 - The safety inspection gate runs **before** the engine is given the torrent, on metadata only, so a hostile torrent never results in a written byte.
 - Resume state is persisted per job (`engine_state_json`) so a restart reattaches instead of re-downloading.
 - The engine never receives a path it has not been given through `PathGuard`.

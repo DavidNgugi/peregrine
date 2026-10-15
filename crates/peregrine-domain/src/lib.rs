@@ -25,6 +25,7 @@ pub mod name;
 pub mod notify;
 pub mod ordering;
 pub mod path;
+pub mod playback;
 pub mod ports;
 pub mod quality;
 pub mod rank;
@@ -37,7 +38,7 @@ pub mod text;
 pub mod watch;
 
 pub use account::{AccountError, AccountId, AccountScope, Visibility};
-pub use availability::{Asked, Availability, ItemJob, availability};
+pub use availability::{Asked, Availability, ItemJob, TitleOffer, availability};
 pub use catalogue::{
     AliasKind, CatalogueError, Company, CompanyRole, Credit, CreditKind, Episode, EpisodeNumber,
     EpisodeOrdering, EpisodePosition, EpisodeType, Genre, Keyword, MetadataState, OrderingScheme,
@@ -67,7 +68,7 @@ pub use centre::{
 pub use deeplink::{ExternalLink, ExternalLinkError};
 pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
 pub use event::{Event, SubjectKind, WatchSubject};
-pub use id::{ExternalId, ExternalIdError, Provider};
+pub use id::{ExternalId, ExternalIdError, InfoHash, InfoHashError, Provider};
 pub use inspect::{
     EntryKind, Finding, InspectionLimits, OptIn, Reason, SafetyReport, TorrentDescription,
     TorrentEntry, TorrentInspector, Verdict,
@@ -91,7 +92,8 @@ pub use ordering::{
     DEFAULT_SCHEME, EpisodeOrderingStrategy, OrderedEpisodes, Unplaced, UnplacedReason,
 };
 pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
-pub use ports::{Clock, IdGenerator};
+pub use playback::LocalPlayback;
+pub use ports::{Clock, IdGenerator, SessionToken, SessionTokenError, TokenSource};
 pub use quality::{
     GroupRules, QualityProfile, QualityProfileError, QualityRank, QualityRules, SizeCaps,
 };

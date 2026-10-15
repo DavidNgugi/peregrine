@@ -36,6 +36,8 @@ pub use peregrine_app::ShellStatus;
 mod contract_tests;
 #[cfg(test)]
 mod redaction;
+#[cfg(test)]
+mod test_support;
 
 use tauri_specta::{Builder, collect_commands, collect_events};
 
@@ -70,12 +72,20 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_unmatched,
             library::list_match_rules,
             library::get_title,
+            library::start_playback,
+            library::stop_playback,
+            library::start_poster_capture,
+            library::stop_poster_capture,
             discover::search_providers,
             discover::home_rails,
             discover::refresh_rails,
+            discover::browse,
+            discover::genres,
+            discover::recommendations,
             library::refresh_title,
             library::search_titles,
             library::list_episodes,
+            library::list_seasons,
             library::match_unmatched,
             library::forget_match_rule,
             providers::status,

@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-const { getBuildInfo, isSuccessful, unwrap } = await import("./client.js");
+const { getBuildInfo, homeRails, searchProviders, isSuccessful, unwrap } =
+  await import("./client.js");
 
 beforeEach(() => {
   invoke.mockReset();
@@ -75,5 +76,30 @@ describe("unwrap", () => {
       error: { code: "FROM_A_NEWER_CORE", message: "no", retryable: false },
     } as const;
     await expect(unwrap(Promise.resolve(failure))).rejects.toMatchObject({ code: "INTERNAL" });
+  });
+});
+
+describe("Discover title type", () => {
+  it("sends the same title type to rails and search", async () => {
+    invoke.mockResolvedValue([]);
+    await homeRails("show");
+    await searchProviders("Alien", 10, "show");
+    expect(invoke).toHaveBeenCalledWith("home_rails", { kind: "show" });
+    expect(invoke).toHaveBeenCalledWith("search_providers", {
+      query: "Alien",
+      limit: 10,
+      kind: "show",
+    });
+  });
+  it("retains the unfiltered read for callers without a title type", async () => {
+    invoke.mockResolvedValue([]);
+    await homeRails();
+    await searchProviders("Alien");
+    expect(invoke).toHaveBeenCalledWith("home_rails", { kind: null });
+    expect(invoke).toHaveBeenCalledWith("search_providers", {
+      query: "Alien",
+      limit: null,
+      kind: null,
+    });
   });
 });

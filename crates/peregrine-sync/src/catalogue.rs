@@ -5,7 +5,7 @@
 //! the rule calls ambiguous is counted and left alone, because the wrong answer there merges two titles
 //! or splits one.
 
-use peregrine_domain::catalogue::{MetadataState, TitleDetails};
+use peregrine_domain::catalogue::{ImageKind, MetadataState, TitleDetails, TitleKind};
 use peregrine_domain::matching::{Candidate, MatchDecision, match_candidate, sort_name};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_providers::error::ProviderError;
@@ -106,13 +106,32 @@ pub async fn sync_search(
     Ok(outcome)
 }
 
+/// What one title refresh wrote, and the pictures it left for the caller to fetch.
+///
+/// The pictures are here rather than fetched inside [`refresh_title`] because the bytes belong in the
+/// image cache and this layer has no cache: the caller that owns one is the caller that fetches
+/// (`AGENTS R11` — a blob never travels further than the cache that stores it). The title's own poster
+/// and backdrop are on `details`; this is everything the season and episode writes added.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefreshedTitle {
+    /// What the provider said about the title, as [`record_list_answer`] returns it.
+    pub details: TitleDetails,
+    /// Each picture to make sure the cache holds, as the kind and the provider-relative path.
+    pub artwork: Vec<(ImageKind, String)>,
+}
+
 /// Fills a title the catalogue holds from the provider that knows it.
 ///
-/// Answers with the details it wrote, or `None` when this provider cannot serve title details at all —
+/// Answers with what it wrote, or `None` when this provider cannot serve title details at all —
 /// a normal state rather than a failure, since a provider that declares only `search` is a provider this
 /// step skips. The details come back rather than a bare success because the caller needs the artwork
 /// paths they carry: filling a title and then fetching its poster is one step from a user's point of
 /// view, and a second read to learn what was just written would be a second read for nothing.
+///
+/// **A series is filled in two reads, and the second is what the title page draws.** `title` carries
+/// what a title has — a name, a synopsis, a poster, a score — and says nothing about the seasons under
+/// it; the season list and each season's episodes are what a switcher and its cards read (`PG-E5-06`,
+/// `PG-E7-13`). A film skips that step, and is not asked for seasons it cannot have.
 ///
 /// # Errors
 ///
@@ -123,7 +142,7 @@ pub async fn refresh_title(
     id: i64,
     kind: peregrine_domain::catalogue::TitleKind,
     at: i64,
-) -> Result<Option<peregrine_domain::catalogue::TitleDetails>, SyncError> {
+) -> Result<Option<RefreshedTitle>, SyncError> {
     // The id of *this* provider: a title may carry several, and asking the wrong provider for the wrong
     // one's identifier is how a film gets another film's synopsis.
     let external = database
@@ -149,11 +168,83 @@ pub async fn refresh_title(
             details.clone(),
             sort,
             peregrine_domain::catalogue::MetadataState::Partial,
-            provider_name,
+            provider_name.clone(),
             at,
         )
         .await?;
-    Ok(Some(details))
+
+    let artwork = match kind {
+        TitleKind::Show => {
+            refresh_seasons(provider, database, id, &external, &provider_name, at).await?
+        }
+        TitleKind::Movie => Vec::new(),
+    };
+    Ok(Some(RefreshedTitle { details, artwork }))
+}
+
+/// Reads a series' seasons and their episodes, and writes what the provider said about each.
+///
+/// **A season the provider does not hold is that season's problem and never the title's.** A series
+/// whose answer is missing one season still has the others, and failing the whole refresh would discard
+/// the seasons that did answer — a `404` on one season is a fact about a catalogue, not a fault of the
+/// provider. Every other failure propagates, because a rate limit or a transport fault is about the
+/// *provider* and asking again is what fixes it.
+///
+/// The order of the two writes matters: a season row is what `episode.season_id` points at, so the
+/// season is upserted first and the id it answers with is what its episodes are written against. That
+/// is also what makes an episode the library matched on disk keep the season it was placed in.
+async fn refresh_seasons(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    title_id: i64,
+    external: &peregrine_domain::ExternalId,
+    provider_name: &str,
+    at: i64,
+) -> Result<Vec<(ImageKind, String)>, SyncError> {
+    let seasons = match provider.seasons(external, TitleKind::Show).await {
+        Ok(seasons) => seasons,
+        // A series with no season list has no seasons to write, and a provider that does not serve
+        // seasons has said so: the title's own details were written before this ran, so neither is a
+        // failed refresh.
+        Err(ProviderError::NotFound { .. } | ProviderError::Unsupported { .. }) => {
+            return Ok(Vec::new());
+        }
+        Err(error) => return Err(SyncError::Provider(error)),
+    };
+
+    let mut artwork = Vec::new();
+    for season in seasons {
+        // Read before the write moves the answer, and collected whether or not the row changed: the
+        // cache may have been evicted, and the caller's `contains` check is the cheap one that decides.
+        let number = season.season_number;
+        let poster = season
+            .poster_path
+            .as_deref()
+            .map(|path| (ImageKind::Poster, path.to_owned()));
+        let (season_id, _) = database
+            .upsert_season_details(title_id, season, provider_name.to_owned(), at)
+            .await?;
+        artwork.extend(poster);
+
+        let episodes = match provider
+            .season_episodes(external, TitleKind::Show, number)
+            .await
+        {
+            Ok(episodes) => episodes,
+            // The one failure that belongs to the season rather than to the provider.
+            Err(ProviderError::NotFound { .. }) => continue,
+            Err(error) => return Err(SyncError::Provider(error)),
+        };
+        for episode in episodes {
+            if let Some(path) = episode.still_path.as_deref() {
+                artwork.push((ImageKind::Still, path.to_owned()));
+            }
+            database
+                .upsert_episode_details(title_id, season_id, episode, provider_name.to_owned(), at)
+                .await?;
+        }
+    }
+    Ok(artwork)
 }
 
 /// Writes what a *list* answer knows onto a title the catalogue holds, and answers with it.
@@ -171,10 +262,11 @@ pub async fn refresh_title(
 /// optional column is written with `COALESCE`, so a later list answer carrying `None` leaves the
 /// stored poster, backdrop, score, synopsis, and count alone (`PG-E5-07`). It also inherits the
 /// statement's two stamps, and they are worth naming rather than discovering: `metadata_state`
-/// follows `refresh_title`'s `Partial` — a list answer has filled some fields, not all — and
-/// `last_synced_at` is set, which is what `PG-E6-15`'s staleness policy and `crate::artwork`'s
-/// `refresh_due` read. A list answer *is* a provider answering about the title, so those two travel
-/// with it.
+/// becomes `Listed` — a list answer filled what a list carries, and no details read has happened,
+/// which is the state `crate::artwork`'s `refresh_due` reads to decide that asking for the details
+/// is still worth a request — and `last_synced_at` is set, because a provider did answer about the
+/// title at that instant, which is what the column says and what the staleness policy
+/// (`PG-E6-15`) will read.
 ///
 /// # Errors
 ///
@@ -214,13 +306,129 @@ pub async fn record_list_answer(
             title_id,
             details.clone(),
             sort_name(candidate.name().as_str()),
-            MetadataState::Partial,
+            MetadataState::Listed,
             candidate.external_id().provider().as_str().to_owned(),
             at,
         )
         .await?;
     Ok(details)
 }
+/// One list candidate as the catalogue now holds it.
+///
+/// The pair rather than a bare row id because both halves have a caller: a screen needs the id to
+/// navigate with, and it needs what was written — the name, the year, the score, the synopsis, the
+/// artwork paths — to draw the tile without a second read. Returning only the id would make every
+/// caller re-read the row it just wrote.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListedTitle {
+    /// The catalogue row, which is what opening the title needs.
+    pub title_id: i64,
+    /// What the write stored, as [`record_list_answer`] read it back.
+    pub details: TitleDetails,
+}
+
+/// Puts one *list* answer's candidate in the catalogue and writes what the list carried.
+///
+/// **The one writer for a list answer**, shared by the Discover rails job (`PG-E7-08`) and the
+/// browse read (`PG-E7-09`), because both are asking the same question of the same kind of answer:
+/// a provider's list gave us this candidate, do we already have it, and if so what does the list
+/// add? Two copies of that rule would be two chances for a film to be merged into two titles on one
+/// screen and one on another, which is exactly the class of mistake the matching rule exists to
+/// prevent.
+///
+/// **Identity first, and it is a read of its own** because it settles the common case without
+/// gathering anything: an id the catalogue already carries is this title, whatever it is called
+/// ([`sync_search`]'s rule, and for the same reason). Otherwise the matching rule decides, and a
+/// candidate it calls ambiguous is answered `None` rather than merged into a guess — a screen
+/// cannot draw a question mark, and `PG-E5-13` owns what a person does about one.
+///
+/// A candidate that becomes a new title is created as a [`peregrine_domain::catalogue::TitleSubtype::Standard`]
+/// stub and then immediately given the list's five fields, so a caller never sees the half-made row.
+///
+/// # Errors
+///
+/// [`SyncError::Storage`] when a read or the write fails.
+pub async fn upsert_list_candidate(
+    database: &Database,
+    candidate: &SearchCandidate,
+    at: i64,
+) -> Result<Option<ListedTitle>, SyncError> {
+    let title_id = match database
+        .title_for_external_id(candidate.external_id())
+        .await?
+    {
+        Some(id) => id,
+        None => match match_or_create(database, candidate, at).await? {
+            Some(id) => id,
+            None => return Ok(None),
+        },
+    };
+    let details = record_list_answer(database, title_id, candidate, at).await?;
+    Ok(Some(ListedTitle { title_id, details }))
+}
+
+/// The matching rule, and the stub it decides to write.
+///
+/// Private because the only caller is [`upsert_list_candidate`]: a caller that created a stub
+/// *without* writing the list answer it came from would leave a row the provider had already
+/// described with none of the description.
+async fn match_or_create(
+    database: &Database,
+    candidate: &SearchCandidate,
+    at: i64,
+) -> Result<Option<i64>, SyncError> {
+    let Some(name) = NonEmptyText::new(candidate.name().as_str()).ok() else {
+        return Ok(None);
+    };
+    let input = Candidate {
+        external_id: candidate.external_id().clone(),
+        name,
+        kind: candidate.kind(),
+        released: candidate.released(),
+    };
+    let locals = database
+        .local_titles_for_sort_name(
+            candidate.kind().as_str(),
+            &sort_name(candidate.name().as_str()),
+        )
+        .await?;
+
+    match match_candidate(&input, &locals) {
+        MatchDecision::Matched { local_id, .. } => match database
+            .attach_external_ids(
+                local_id,
+                &[TitleExternalId {
+                    id: candidate.external_id().clone(),
+                    is_primary: true,
+                    fetched_at: at,
+                }],
+            )
+            .await
+        {
+            // A concurrent writer attaching the same id to the same title is the outcome this call
+            // was trying to produce, so it is the same arm and not a silent failure.
+            Ok(()) | Err(StorageError::Conflict { .. }) => Ok(Some(local_id)),
+            Err(error) => Err(SyncError::Storage(error)),
+        },
+        MatchDecision::New => database
+            .upsert_provider_title(ProviderTitle {
+                external_id: candidate.external_id().clone(),
+                kind: candidate.kind(),
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: candidate.name().as_str().to_owned(),
+                sort_name: sort_name(candidate.name().as_str()),
+                is_primary: true,
+                at,
+            })
+            .await
+            .map(Some)
+            .map_err(SyncError::Storage),
+        // A question, not an answer: a screen cannot draw a guess, so the candidate is left out
+        // rather than merged into one of two titles.
+        MatchDecision::Ambiguous { .. } => Ok(None),
+    }
+}
+
 /// The candidate as the matching rule's input, or `None` when it cannot be one.
 ///
 /// The port's `NonEmptyText` is already non-empty, so this only fails on a name that is whitespace —

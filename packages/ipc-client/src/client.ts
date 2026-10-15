@@ -13,13 +13,21 @@
 
 import { commands } from "./generated/bindings.js";
 import type {
+  BrowsePageDto,
+  BrowseSortDto,
   BuildInfo,
+  GenreDto,
   HomeRailDto,
+  RailKindDto,
+  RecommendationsDto,
   JobStarted,
   LibraryRootDto,
+  CaptureSessionDto,
   EpisodeDto,
+  SeasonDto,
   LibraryTitleDto,
   MatchAsDto,
+  PlaybackSessionDto,
   MatchRuleDto,
   TitleDetailDto,
   TitleMatchDto,
@@ -125,8 +133,12 @@ export async function searchTitles(query: string, limit?: number): Promise<Title
  * the provider's answer before answering (`PG-E6-04`) — so a result can be opened and outlives the
  * provider being reachable.
  */
-export async function searchProviders(query: string, limit?: number): Promise<TitleMatchDto[]> {
-  return unwrap(commands.searchProviders(query, limit ?? null));
+export async function searchProviders(
+  query: string,
+  limit?: number,
+  kind?: RailKindDto,
+): Promise<TitleMatchDto[]> {
+  return unwrap(commands.searchProviders(query, limit ?? null, kind ?? null));
 }
 
 /**
@@ -137,8 +149,8 @@ export async function searchProviders(query: string, limit?: number): Promise<Ti
  * screen its layout before anything has painted (`FLOWS F2`). `poster` is an absolute path or
  * nothing, for the reason `getTitle`'s is.
  */
-export async function homeRails(): Promise<HomeRailDto[]> {
-  return unwrap(commands.homeRails());
+export async function homeRails(kind?: RailKindDto): Promise<HomeRailDto[]> {
+  return unwrap(commands.homeRails(kind ?? null));
 }
 
 /**
@@ -150,6 +162,48 @@ export async function homeRails(): Promise<HomeRailDto[]> {
  */
 export async function refreshRails(): Promise<JobStarted> {
   return unwrap(commands.refreshRails());
+}
+
+/**
+ * One page of a filtered, ordered list from the configured providers.
+ *
+ * The second call here that leaves the machine, and it is one request per *page* rather than one per
+ * filter change: a screen composes the request it wants and asks for it. What it resolves to is a
+ * page of titles the catalogue owns — the core writes the provider's answer before answering — so an
+ * item can be opened immediately and outlives the provider being reachable.
+ *
+ * `page` counts from one. `hasMore` is the provider's own answer rather than something a screen can
+ * infer from `items.length`, which is what makes "load more" decidable.
+ */
+export async function browse(
+  kind: RailKindDto,
+  page: number,
+  sort?: BrowseSortDto,
+  genre?: number,
+  minRating?: number,
+): Promise<BrowsePageDto> {
+  return unwrap(commands.browse(kind, page, sort ?? null, genre ?? null, minRating ?? null));
+}
+
+/**
+ * The genres the configured providers filter by for one kind.
+ *
+ * Read once per session in the core, so a filter control opening for the second time costs a lock and
+ * no request. `id` is the *provider's* own identifier and is what a browse request hands back.
+ */
+export async function genres(kind: RailKindDto): Promise<GenreDto[]> {
+  return unwrap(commands.genres(kind));
+}
+
+/**
+ * The titles the configured provider considers like one the catalogue holds.
+ *
+ * One request, and an empty answer is a real one rather than a failure: a title no configured
+ * provider holds an identifier for has no recommendations to fetch, so a title's page draws no rail
+ * for it rather than an error.
+ */
+export async function recommendations(titleId: number): Promise<RecommendationsDto> {
+  return unwrap(commands.recommendations({ id: titleId }));
 }
 
 /**
@@ -166,6 +220,46 @@ export async function getTitle(id: number): Promise<TitleDetailDto | null> {
 }
 
 /**
+ * Starts playing one of a title's files, replacing whatever was playing.
+ *
+ * The one call whose answer is a URL. It leaves the machine nowhere: the address is this process's own
+ * loopback listener, opened for one file and closed when the session ends (ADR 0023, SECURITY.md T10).
+ * A refusal is a title that is not here, holds no copy on disk, holds a copy outside every configured
+ * folder, or a file that cannot be served — each of them something the screen says beside the control.
+ */
+export async function startPlayback(titleId: number): Promise<PlaybackSessionDto> {
+  return unwrap(commands.startPlayback({ id: titleId }));
+}
+
+/**
+ * Opens a session for one title's file so a frame can be captured from it.
+ *
+ * Not `startPlayback` with a flag, and the name is the reason: nothing plays a capture session, and a
+ * caller reading `startPlayback` here could not tell whether the film was meant to be playing. It holds
+ * its own session, so a poster backfill cannot stop a film that is playing.
+ */
+export async function startPosterCapture(titleId: number): Promise<CaptureSessionDto> {
+  return unwrap(commands.startPosterCapture({ id: titleId }));
+}
+
+/**
+ * Stops a capture session, answering whether anything was open.
+ */
+export async function stopPosterCapture(sessionId: number): Promise<boolean> {
+  return unwrap(commands.stopPosterCapture({ id: sessionId }));
+}
+
+/**
+ * Stops whatever is playing, answering whether anything was.
+ *
+ * Deliberately not an error when nothing is playing: there is no state in which a caller asking for
+ * silence should be told no.
+ */
+export async function stopPlayback(sessionId: number): Promise<boolean> {
+  return unwrap(commands.stopPlayback({ id: sessionId }));
+}
+
+/**
  * Starts filling one title from its provider, artwork included, and answers with the job to watch.
  *
  * A job rather than a wait, because it leaves the machine twice — once for the title's details and
@@ -178,8 +272,20 @@ export async function refreshTitle(id: number, kind: RootKind): Promise<JobStart
 }
 
 /** A title's episodes, in the order a person watches them. */
-export async function listEpisodes(titleId: number): Promise<EpisodeDto[]> {
-  return unwrap(commands.listEpisodes({ id: titleId }, null));
+/**
+ * One title's episodes, or one season of them when `season` is given.
+ *
+ * The season is a filter on one read rather than a second command, because the two questions differ by
+ * one predicate — and a screen that had to pick between two reads would be a screen that could pick the
+ * one that drifts.
+ */
+export async function listEpisodes(titleId: number, season?: number): Promise<EpisodeDto[]> {
+  return unwrap(commands.listEpisodes({ id: titleId }, season ?? null, null));
+}
+
+/** One title's seasons, in the order its switcher lists them. */
+export async function listSeasons(titleId: number): Promise<SeasonDto[]> {
+  return unwrap(commands.listSeasons({ id: titleId }, null));
 }
 
 /**

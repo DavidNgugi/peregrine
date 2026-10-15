@@ -11,21 +11,23 @@
 //! is opened second, so a migration failure stops the app before any job can be accepted;
 //! and the event bus is last, so nothing is published into a bus whose sink is not ready.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
 use std::num::NonZeroU32;
 
 use peregrine_domain::text::NonEmptyText;
-use peregrine_domain::{Clock, IdGenerator, LibraryRoot, LibraryRootKind, ScanMode};
-use peregrine_platform::{SystemClock, UlidGenerator};
+use peregrine_domain::{
+    Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, SafePath, ScanMode,
+    TokenSource,
+};
+use peregrine_platform::{SystemClock, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
 use peregrine_storage::{
-    Cursor, Database, JobChange, JobPhase, JobRecord, LibraryTitleRow, NewJob, PageRequest,
-    StorageError,
+    Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
 };
 use peregrine_sync::{
     JobHandle, JobSpec, Scheduler, SchedulerConfig, SchedulerError, SchedulerMetrics,
@@ -231,20 +233,200 @@ pub enum CredentialRequest {
     Forget,
 }
 
-/// One title's own screen: what the library holds, where the cached poster is, and whether the
-/// screen should ask the provider for it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryTitleDetail {
-    /// The identity and the counts, which is everything the library screen lists too.
-    pub title: peregrine_storage::LibraryTitleRow,
-    /// Where the cached poster is, or `None` when the cache holds none.
+/// What a title's own page needs to decide about playing it.
+///
+/// Two answers from one read of the evidence, because they are two questions about the same rows: what
+/// the page may *offer* (acquisition, playback, or nothing), and what this build would actually do with
+/// the container of the copy the library holds. Splitting them would read the same items and files
+/// twice and let the two answers disagree about which file they were describing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TitlePlayback {
+    /// What the page may offer, which is `peregrine_domain::TitleOffer`'s rule.
+    pub offer: peregrine_domain::TitleOffer,
+    /// What this build would do with the file it would play, or `None` when the library holds no copy
+    /// that is on disk.
     ///
-    /// An absolute path on this machine rather than a URL or bytes: the webview turns it into an
-    /// `asset:` URL and the bytes never cross IPC (AGENTS R11).
+    /// `None` and `Some(LocalPlayback::Unknown)` are different: the first says there is nothing to
+    /// play, the second says there is a file whose container this build cannot name.
+    pub support: Option<LocalPlayback>,
+}
+
+/// The identity of one session, which is what a stop names.
+///
+/// **A stop has to say *which* session, and this is why.** A renderer's effect runs twice under
+/// `StrictMode` — mount, cleanup, mount — so the first mount's cleanup and the second mount's open are in
+/// flight together. Without an identity the cleanup's stop closes *whatever is current*, which by then is
+/// the session the second mount just opened and the element is already reading: the first request
+/// succeeds, the socket closes, and the screen is a black rectangle with no error anybody can see. Found in
+/// the running app, with a session log showing exactly one request answered and nothing after it.
+///
+/// A counter rather than a random id: the runtime mints it, nothing needs it to be unguessable, and
+/// `AGENTS R14` keeps randomness in an adapter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SessionId(u64);
+
+impl SessionId {
+    /// The number, as the wire spells it.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// The id a wire value names.
+    ///
+    /// **No check, and the absence is deliberate.** Zero is never minted — the counter starts at one — so a
+    /// zero from the wire is an id that matches no session, which the stop already answers `false` for. A
+    /// validating constructor here would turn "this is not yours" into an error the caller has to handle
+    /// for the same outcome.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
+/// One capture session: where the renderer can read a file, and where it posts the frame it drew.
+///
+/// A separate type from [`StartedPlayback`] because it carries a different set of facts: nothing here is
+/// about how a film would play, and a caller that wanted only the two URLs would otherwise be handed a
+/// container classification it has no use for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedCapture {
+    /// Which session this is, which a stop must name.
+    pub session_id: SessionId,
+    /// The title the frame is a poster of.
+    pub title_id: i64,
+    /// The library file being served to the capture.
+    pub media_file_id: i64,
+    /// The loopback URL the capturing element loads.
+    pub url: String,
+    /// Where the frame is posted, or `None` when this session keeps no poster.
+    pub thumbnail_url: Option<String>,
+}
+
+/// One playback session a screen can draw: what is playing, and where the bytes come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedPlayback {
+    /// Which session this is, which a stop must name.
+    pub session_id: SessionId,
+    /// The title the session belongs to.
+    pub title_id: i64,
+    /// The library file being served.
+    pub media_file_id: i64,
+    /// What this build is doing with the file's container.
+    pub support: LocalPlayback,
+    /// The loopback URL a media element follows.
+    ///
+    /// A URL rather than a path or bytes, and that is the surface ADR 0023 decides: the asset protocol
+    /// never exposes the library root, so the bytes travel over loopback HTTP (AGENTS R11).
+    pub url: String,
+    /// Where the renderer posts a frame it captured, or `None` when this session keeps no poster.
+    ///
+    /// Built by the core rather than spliced together by the renderer, because the token is in both URLs
+    /// and a second place the route is spelled is a second place it can drift.
+    pub thumbnail_url: Option<String>,
+    /// Whether this title has no poster for the renderer to capture one for.
+    ///
+    /// **The rule that stops a film still overwriting real artwork.** A capture costs a decode of the
+    /// film and a blob in the cache, and it exists for the title a provider has drawn nothing for — so the
+    /// core answers whether one is wanted rather than the renderer capturing on every play and hoping the
+    /// read prefers the provider's. This is `AGENTS R7` applied to the last surface that could decide it:
+    /// the answer needs the catalogue row, the cache, and the local key, none of which a renderer has.
+    pub needs_poster: bool,
+}
+
+/// One title as the library screen lists it: what the library holds, and where the cached poster is.
+///
+/// The list's own unit, and the pair both surfaces built on it need — the table of counts and the grid
+/// of tiles are two drawings of one read, and a tile that had to fetch its own poster would be a second
+/// derivation of the cache key. The row and the path travel together for the reason
+/// [`TitleEpisodeDetail`] states: a picture nothing can caption is not useful, and neither is a row
+/// whose tile is blank for a reason the screen cannot see.
+///
+/// `None` covers both "no provider ever named a poster" and "one was named and the blob is not here",
+/// which are the same thing to a reader and the two cases `artwork::cached_image` folds together.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryTitleEntry {
+    /// The identity, the counts, and the provider's poster reference.
+    pub row: peregrine_storage::LibraryTitleRow,
+    /// Where the cached poster is, or `None` when the cache holds none (AGENTS R11).
     pub poster: Option<PathBuf>,
+    /// Whether this title has no poster at all, so a frame of its own file is worth capturing.
+    ///
+    /// **Carried on the list rather than asked per tile**, because the answer needs the catalogue row and
+    /// two cache lookups: a grid of a hundred tiles asking a hundred times would be a hundred round trips
+    /// for a fact the read already had. It is `true` only when neither a provider's poster nor a generated
+    /// one exists, which is the same rule [`Runtime::needs_poster`] answers on the command path.
+    pub needs_poster: bool,
+}
+
+/// One title's own screen: what the library holds, where the cached poster is, whether the
+/// screen should ask the provider for it, and what its page may offer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryTitleDetail {
+    /// The identity, the counts, and the cached poster — exactly what the list answers, so a title's
+    /// page and its tile cannot disagree about what the library holds or what it has to show.
+    pub entry: LibraryTitleEntry,
+    /// Where the cached backdrop is, or `None` when the cache holds none.
+    ///
+    /// The wide picture the hero draws behind the title, resolved here for the reason the poster is: the
+    /// cache key is a hash this layer computes, and whether the blob is on disk is a `stat` only this
+    /// layer can make (AGENTS R7). Deliberately not on [`LibraryTitleEntry`]: no list draws a backdrop,
+    /// and the hero is the only surface that does.
+    pub backdrop: Option<PathBuf>,
+    /// The provider's synopsis, when one has been written.
+    pub overview: Option<String>,
+    /// The provider's score, when it has one.
+    pub rating: Option<f64>,
+    /// When it came out, from whichever date column its kind uses.
+    pub released: Option<jiff::civil::Date>,
     /// Whether opening the screen should ask a provider for this title, which is
     /// [`crate::artwork::refresh_due`]'s rule and not a screen's.
     pub refresh_due: bool,
+    /// What this title's own page may offer, and what this build would do with its copy.
+    ///
+    /// **The offer is the reason a title the library holds never draws a Download control.** The rule is
+    /// the core's for the reason every availability decision is (AGENTS R7): it reads the items, their
+    /// files, and the title's jobs, three sets a screen does not have and would have to re-derive
+    /// from a count — which is exactly how a page comes to offer a download of something it owns.
+    ///
+    /// **The support is the reason Play can say why it will not work** rather than being disabled with
+    /// no explanation: a `<video>` element reports a failure *code* after it has failed, never a reason,
+    /// and "this build cannot read that container yet" is a fact about the file that has to be known
+    /// before the press (ADR 0023 §5).
+    pub playback: TitlePlayback,
+}
+
+/// One episode as its card draws it: what the provider said, what the library holds, and where the
+/// cached still is.
+///
+/// The row and the path travel together because neither is useful alone: a card shows a still *for* an
+/// episode, and a path without the episode it belongs to is a picture nothing can caption.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitleEpisodeDetail {
+    /// The provider's fields and the library's counts.
+    pub row: peregrine_storage::TitleEpisodeRow,
+    /// Where the cached still is, or `None` when the cache holds none.
+    ///
+    /// An absolute path on this machine rather than a URL or bytes (AGENTS R11). `None` covers both
+    /// "no provider ever named one" and "one was named and the blob is not here", which a card draws
+    /// identically as its reserved box — the same two cases `LibraryTitleEntry::poster` folds
+    /// together, and for the same reason: the screen cannot act differently on them.
+    pub still: Option<PathBuf>,
+}
+
+/// One season as a switcher draws it, with the artwork the core resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleSeasonDetail {
+    /// The number, the name, the count, and the air date.
+    pub row: peregrine_storage::TitleSeasonRow,
+    /// Where the cached poster is, or `None` when the cache holds none.
+    pub poster: Option<PathBuf>,
 }
 
 /// One rail the Discover screen draws: its identity, the copy's fallback name, and its items.
@@ -288,6 +470,119 @@ pub enum RailsState {
     Ready,
 }
 
+/// What a title's recommendation rail holds, and the genres it implies.
+///
+/// The two travel together because the second is derived from the first and costs no request: a title
+/// page draws the rail and then offers a shelf of *more of the same genre*, and that genre is read off
+/// the candidates the provider just answered with rather than asked for separately.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Recommendations {
+    /// The rail's tiles, in the provider adapter's order.
+    pub items: Vec<crate::jobs::discover_rails::RailItem>,
+    /// The genres the rail shares, most-shared first, **named**.
+    ///
+    /// Named rather than identified because a shelf's heading is the only thing it has to say and a
+    /// screen that had to look the name up would be a screen that drew nothing until it arrived. The
+    /// names come from the kind's vocabulary, which `Runtime::genres` reads once per kind per session
+    /// and caches, so the second title page of a kind pays nothing for them.
+    pub genres: Vec<peregrine_providers::GenreRef>,
+}
+
+/// How many genre shelves a title page may offer.
+///
+/// Two, because a page that listed every shared genre would be a page of genre shelves with a title
+/// buried in it, and because the first two are the ones a reader recognises the title by.
+const MAX_GENRE_SHELVES: usize = 2;
+
+/// The genres a recommendation list implies, most-shared first.
+///
+/// **Inferred, and stated as an inference rather than as a fact about the title.** A list endpoint
+/// names each item's genres and a details endpoint names the title's own, and this build reads
+/// *neither* into the catalogue — nothing writes `title_genre` — so the shelves a title page offers are
+/// derived from what the provider listed *around* the title. For a franchise film or a genre picture
+/// that is the same answer as the title's own genres; for an odd one it is a hint, which is why the
+/// shelves are labelled by genre rather than described as the title's.
+///
+/// The rule: a genre must appear on at least a quarter of the items **and at least twice**, so one
+/// unusual neighbour cannot invent a shelf, and ties break by identifier so that two runs over the
+/// same answer produce the same shelves in the same order (`AGENTS R14`).
+fn shared_genres(candidates: &[peregrine_providers::provider::SearchCandidate]) -> Vec<u32> {
+    let mut counts: BTreeMap<u32, usize> = BTreeMap::new();
+    for candidate in candidates {
+        for genre in candidate.genre_ids() {
+            *counts.entry(*genre).or_default() += 1;
+        }
+    }
+    let floor = (candidates.len() / 4).max(2);
+    let mut kept: Vec<(u32, usize)> = counts
+        .into_iter()
+        .filter(|(_, count)| *count >= floor)
+        .collect();
+    kept.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
+    kept.into_iter()
+        .map(|(genre, _)| genre)
+        .take(MAX_GENRE_SHELVES)
+        .collect()
+}
+
+/// One page of a browsed list, as a screen draws it.
+/// **A page and not a list, because the screen has to know whether to keep scrolling.** `has_more`
+/// is the provider's own answer (`peregrine_providers::ProviderPage`), carried rather than derived:
+/// a screen that guessed from the number of tiles would either stop one page early or ask for a page
+/// past the provider's end on every scroll.
+///
+/// The items are [`RailItem`](crate::jobs::discover_rails::RailItem)s, which is the shape a rail
+/// already draws — a poster, a name, a year, a score — because a browse grid and a rail are the same
+/// tiles in a different arrangement, and a second type would be a second mapping of the same row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrowsePage {
+    /// The titles on this page, in the provider's order.
+    pub items: Vec<crate::jobs::discover_rails::RailItem>,
+    /// Whether asking for the next page would find anything.
+    pub has_more: bool,
+}
+
+/// The genre lists this session has read, one slot per kind.
+///
+/// **In memory, and deliberately not in the `genre` table.** That table holds a *catalogue's*
+/// genres by name, and a provider's vocabularies are per kind with the provider's own identifiers —
+/// TMDB numbers even the names its two lists share differently — so what a filter control needs is
+/// an answer about the provider's current vocabulary rather than a row. The cost is one request per
+/// kind per launch; the alternative is writing a provider's numbers into a table whose `name`
+/// column cannot say which kind it describes.
+#[derive(Debug, Default)]
+struct Genres {
+    /// One slot per kind, indexed by [`Genres::slot`]; `None` until a read has answered.
+    lists: RwLock<[Option<Vec<peregrine_providers::GenreRef>>; 2]>,
+}
+
+impl Genres {
+    /// Which slot a kind uses.
+    fn slot(kind: peregrine_domain::catalogue::TitleKind) -> usize {
+        match kind {
+            peregrine_domain::catalogue::TitleKind::Movie => 0,
+            peregrine_domain::catalogue::TitleKind::Show => 1,
+        }
+    }
+
+    /// The list this session already read for `kind`, if it read one.
+    fn get(
+        &self,
+        kind: peregrine_domain::catalogue::TitleKind,
+    ) -> Option<Vec<peregrine_providers::GenreRef>> {
+        self.lists.read().expect("the lock is not poisoned")[Self::slot(kind)].clone()
+    }
+
+    /// Records what a provider answered for `kind`.
+    fn put(
+        &self,
+        kind: peregrine_domain::catalogue::TitleKind,
+        list: Vec<peregrine_providers::GenreRef>,
+    ) {
+        self.lists.write().expect("the lock is not poisoned")[Self::slot(kind)] = Some(list);
+    }
+}
+
 /// What the diagnostics surface reports about the running process.
 #[derive(Debug, Clone)]
 pub struct Health {
@@ -324,6 +619,56 @@ pub struct ShellStatus {
     pub tray_enabled: bool,
 }
 
+/// Classifies a playback refusal into the one a person can act on.
+///
+/// The two refusals that are *about the file* get their own variants, because the sentence beside a
+/// Play control is different for each: a file that moved is a drive to check, a path that is not a file
+/// is a library problem, and a listener that will not bind is neither. Everything else keeps the stream
+/// layer's own error, unwrapped, so its message reaches the log intact.
+fn playback_error(error: peregrine_playback::PlaybackError) -> RuntimeError {
+    match &error {
+        peregrine_playback::PlaybackError::Serve(peregrine_stream::StreamError::Missing {
+            ..
+        }) => RuntimeError::MediaMissing,
+        peregrine_playback::PlaybackError::Serve(peregrine_stream::StreamError::NotAFile {
+            ..
+        }) => RuntimeError::MediaNotAFile,
+        // Every other reason a listener would not serve: one this process could not open, bind, or write.
+        // Ours rather than the user's, and carried through unchanged so the log keeps the detail.
+        peregrine_playback::PlaybackError::Serve(_) => RuntimeError::Playback(error),
+    }
+}
+
+/// The file of a title that a Play press would use, or `None` when the library holds none that is on
+/// disk.
+///
+/// **An item's own preference wins over the read order.** A library holds several copies of a film
+/// routinely — a remux and a smaller rip — and `media_item.preferred_file_id` is where the library's
+/// answer to "which one" lives, so following read order would play an arbitrary one of two. Missing
+/// files are filtered either way, because a copy the last scan could not find is a copy this build
+/// cannot serve and a session opened for one would fail at the first frame.
+///
+/// **What this deliberately does not do is rank.** Nothing here scores quality: `quality_label` is
+/// `PG-E14-11`'s and no build writes it yet, so a rule that read it would be a rule about a column that
+/// is always empty, and a "best copy" that was really the first row would be worse than no claim.
+fn playable_file(
+    evidence: &peregrine_storage::TitleEvidence,
+) -> Option<&peregrine_domain::MediaFile> {
+    let preferred = evidence.items.iter().find_map(|item| {
+        let wanted = item.item.preferred_file_id?;
+        item.files
+            .iter()
+            .find(|file| file.id == wanted && file.missing_since.is_none())
+    });
+    preferred.or_else(|| {
+        evidence
+            .items
+            .iter()
+            .flat_map(|item| item.files.iter())
+            .find(|file| file.missing_since.is_none())
+    })
+}
+
 /// The running application.
 pub struct Runtime {
     config: RuntimeConfig,
@@ -345,6 +690,34 @@ pub struct Runtime {
     /// What the Discover screen reads and the rails job writes, in memory for this slice (see
     /// `crate::jobs::discover_rails::HomeRails` for the cold-start cost).
     rails: Arc<crate::jobs::discover_rails::HomeRails>,
+    /// The genre vocabularies this session has read (see [`Genres`]).
+    genres: Arc<Genres>,
+    /// Posters this machine generated from the films themselves, and the sink a capture route stores
+    /// through. Held beside the artwork cache because that is where its blobs live.
+    posters: Arc<crate::local_posters::LocalPosters>,
+    /// Where session tokens come from. Injected for the reason the clock is: the domain may not touch a
+    /// random source, so the composition root is the only place that picks the adapter (AGENTS R14).
+    tokens: Arc<dyn TokenSource + Send + Sync>,
+    /// The next session id to hand out, shared by both slots so no id is reused while a stale stop could
+    /// still be in flight.
+    next_session: std::sync::atomic::AtomicU64,
+    /// Which session each slot is holding, so a stop can say whether it is the one it meant.
+    capture_id: Mutex<Option<SessionId>>,
+    /// The capture session that is open, if any.
+    ///
+    /// **Deliberately not the playback slot.** A poster backfill runs while a reader may be watching
+    /// something else, and one slot for both would mean opening a backfill session stopped the film. Two
+    /// listeners on two ports is exactly what the design allows.
+    capture: Mutex<Option<peregrine_playback::PlaybackSession>>,
+    /// Which playback session the slot is holding, for the same reason.
+    session_id: Mutex<Option<SessionId>>,
+    /// The playback session that is open, if any.
+    ///
+    /// At most one, and the field is the reason: a second press replaces the first session, which is
+    /// what makes the listener's lifetime the session's rather than the process's. The lock is a
+    /// `std::sync::Mutex` and is therefore **never held across an `await`** — every use takes the value
+    /// out, drops the guard, and only then awaits closing it.
+    session: Mutex<Option<peregrine_playback::PlaybackSession>>,
     startup: Duration,
 }
 
@@ -385,18 +758,15 @@ impl Runtime {
         // (AGENTS R8); the scheduler is handed both ports rather than reaching for them.
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
         let ids: Arc<dyn IdGenerator + Send + Sync> = Arc::new(UlidGenerator);
+        // The third adapter the domain may not reach for itself: a token has to come from a real random
+        // source, and `cargo xtask check-determinism` permits one in `peregrine-platform` and nowhere
+        // else.
+        let tokens: Arc<dyn TokenSource + Send + Sync> = Arc::new(TokenMinter);
         let scheduler = Arc::new(Scheduler::new(SchedulerConfig::new(
             Arc::clone(&clock),
             ids,
         )));
         let bus = Arc::new(EventBus::new(Arc::clone(&config.sink)));
-
-        let startup = started.elapsed();
-        info!(
-            startup_ms = startup.as_millis(),
-            database = %config.database_path().display(),
-            "the runtime is ready"
-        );
 
         // Read before the struct literal moves `config`. Not created here: the shell creates it when
         // it scopes the asset protocol to it, and a cache that makes directories on construction does
@@ -416,6 +786,37 @@ impl Runtime {
             });
         }
 
+        let artwork = Arc::new(peregrine_sync::ImageCache::new(artwork_root));
+        // Built here because it needs the cache, the database, and the clock together, and because the
+        // capture route that uses it has no other context to reach them through.
+        let posters = Arc::new(crate::local_posters::LocalPosters::new(
+            Arc::clone(&artwork),
+            Arc::clone(&database),
+            Arc::clone(&clock),
+        ));
+        let rails = Arc::new(crate::jobs::discover_rails::HomeRails::new());
+        let genres = Arc::new(Genres::default());
+        // The rails the last fetch published, so a launch draws them rather than seven empty
+        // headings it then re-fetches the same lists to fill (PG-E7-08). A read that fails is not a
+        // failure to start: the map stays empty, the first read of the screen starts a fetch, and the
+        // launch behaves exactly as it did before this manifest existed.
+        match database.discover_rails(installation_scope()).await {
+            Ok(rows) => rails.hydrate(&crate::jobs::discover_rails::manifest_rails(rows, &artwork)),
+            Err(error) => {
+                warn!(%error, "the rails manifest could not be read; the first fetch will fill the rails");
+            }
+        }
+
+        // Measured after the manifest read, because that read is part of what a launch does before
+        // the screen can be drawn from it: a number that excluded it would understate the cold start
+        // this budget exists to hold (`AGENTS` §6).
+        let startup = started.elapsed();
+        info!(
+            startup_ms = startup.as_millis(),
+            database = %config.database_path().display(),
+            "the runtime is ready"
+        );
+
         Ok(Self {
             config,
             database,
@@ -426,8 +827,16 @@ impl Runtime {
             _logging: logging,
             providers,
             secrets,
-            artwork: Arc::new(peregrine_sync::ImageCache::new(artwork_root)),
-            rails: Arc::new(crate::jobs::discover_rails::HomeRails::new()),
+            artwork,
+            rails,
+            genres,
+            posters,
+            tokens,
+            next_session: std::sync::atomic::AtomicU64::new(1),
+            capture_id: Mutex::new(None),
+            capture: Mutex::new(None),
+            session_id: Mutex::new(None),
+            session: Mutex::new(None),
             startup,
         })
     }
@@ -674,8 +1083,17 @@ impl Runtime {
     /// [`start_discover_rails`](Self::start_discover_rails), the same call the screen's button makes.
     /// That call reads the journal by its dedupe key before it writes anything, so a read while the
     /// fetch is in flight — or a read racing a press of Refresh — joins the live job rather than
-    /// writing a second row. With no provider configured there is nothing to ask and the answer says
-    /// so; with rails already in hand there is nothing to fetch.
+    /// writing a second row. With rails already in hand there is nothing to fetch.
+    ///
+    /// **`NoProvider` is answered only by a credential read that has finished**, which is the one
+    /// thing this read must not get wrong: the read of the credential store is blocking and runs off
+    /// the startup path (a keychain can raise an OS prompt), so the first read of a session routinely
+    /// arrives before it lands. A status that is empty because nobody has looked yet is not a status
+    /// that says nobody has configured a provider — answering `NoProvider` there told a user with a
+    /// key to go and set one up, and it never started the fetch that key would have filled the rails
+    /// with, so the only way through was to press Refresh once the prompt had been answered. The
+    /// fetch is enqueued instead, and the job waits for that same read before deciding it has
+    /// nothing to ask.
     ///
     /// # Errors
     ///
@@ -683,17 +1101,20 @@ impl Runtime {
     /// [`RuntimeError::Scheduler`] when the queue refuses the job. Reported rather than swallowed,
     /// because a read that answered "fetching" while nothing was queued would be a screen waiting
     /// for a job that does not exist.
-    pub async fn home_rails(&self) -> Result<Vec<HomeRail>, RuntimeError> {
+    pub async fn home_rails(
+        &self,
+        kind: Option<peregrine_domain::catalogue::TitleKind>,
+    ) -> Result<Vec<HomeRail>, RuntimeError> {
         let rails = self.rails.read();
         let state = if rails.iter().any(|(_, items)| !items.is_empty()) {
             RailsState::Ready
-        } else if self.providers.status().is_empty() {
+        } else if self.providers.refreshed() && self.providers.status().is_empty() {
             RailsState::NoProvider
         } else {
             self.start_discover_rails().await?;
             RailsState::Fetching
         };
-        Ok(rails
+        Ok(crate::jobs::discover_rails::rails_of_kind(rails, kind)
             .into_iter()
             .map(|(rail, items)| HomeRail { rail, items, state })
             .collect())
@@ -1038,16 +1459,286 @@ impl Runtime {
         &self,
         query: &str,
         limit: u32,
+        kind: Option<peregrine_domain::catalogue::TitleKind>,
     ) -> Result<Vec<peregrine_storage::TitleIdentity>, RuntimeError> {
         let adapters = self.providers.adapters();
         if let Some(provider) = adapters.first() {
             let text = NonEmptyText::new(query).map_err(|_| RuntimeError::EmptyQuery)?;
             let limit = NonZeroU32::new(limit).unwrap_or(NonZeroU32::MIN);
-            let search = peregrine_providers::provider::SearchQuery::new(text, limit, None);
+            let search = peregrine_providers::provider::SearchQuery::new(text, limit, kind);
             let at = self.clock.now().as_millisecond();
             peregrine_sync::sync_search(provider.as_ref(), &self.database, &search, at).await?;
         }
-        self.search_titles(query, limit).await
+        Ok(self
+            .database
+            .search_kind(installation_scope(), query, PageRequest::first(limit), kind)
+            .await?)
+    }
+
+    /// One page of a filtered, ordered list, written into the catalogue and answered as it is drawn.
+    ///
+    /// **A command and not a job, and that is a deliberate reading of `ARCHITECTURE §7` rule 2
+    /// rather than a shortcut around it.** The rule exists so a screen never waits on work it did
+    /// not ask for; this read *is* the work the reader asked for. A job would answer with an id and
+    /// no page, leaving the screen with nothing to draw until a job it cannot name stops — which is
+    /// the full-page spinner `PG-E7-02` forbids. The precedent is [`Runtime::discover`], the search
+    /// read: one provider request, written into the catalogue before it is answered, with the caller
+    /// waiting for it by definition.
+    ///
+    /// **The page is written before it is answered**, for the reason `discover` gives: an item is a
+    /// title the catalogue owns, with a row id a screen can open, rather than a row that exists only
+    /// in this response. [`peregrine_sync::upsert_list_candidate`] is the write, shared with the
+    /// rails job, so one film cannot be two titles on one screen and one on another.
+    ///
+    /// **The posters are fetched here too.** A grid of reserved boxes that fills in later is not the
+    /// page anybody asked for, and every one of these images is keyed by the provider and the path
+    /// the list answer already carried — so a page seen before costs a `stat` per tile and no
+    /// request, and what paces the first one is `AGENTS R24`'s per-host token bucket rather than a
+    /// constant here.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::NoProvider`] when no configured provider serves a queried list,
+    /// [`RuntimeError::Provider`] when the provider fails, and [`RuntimeError::Sync`] when the
+    /// answer cannot be written.
+    pub async fn browse(
+        &self,
+        request: &peregrine_providers::BrowseRequest,
+    ) -> Result<BrowsePage, RuntimeError> {
+        let Some(provider) = self.browsing_provider() else {
+            return Err(RuntimeError::NoProvider);
+        };
+        let at = self.clock.now().as_millisecond();
+        let answer = provider.browse(request).await?;
+
+        let mut items = Vec::with_capacity(answer.items().len());
+        // Aligned with `items`: the poster path item `i` would fetch, or `None` when the list answer
+        // named none. Kept beside the items rather than on them because a path is an input to a
+        // fetch and an item carries only what a screen draws.
+        let mut sources: Vec<Option<String>> = Vec::with_capacity(answer.items().len());
+        for candidate in answer.items() {
+            if let Some((item, source)) = self.listed_item(candidate, at).await? {
+                items.push(item);
+                sources.push(source);
+            }
+        }
+
+        self.fill_posters(&provider, &mut items, &sources).await;
+        Ok(BrowsePage {
+            items,
+            has_more: answer.has_more(),
+        })
+    }
+
+    /// The titles a provider considers like one the catalogue holds, as tiles.
+    ///
+    /// **A read of the title, not of the screen.** The identifier asked for is the one *this*
+    /// provider owns, which is the rule `peregrine_sync::refresh_title` states from the other
+    /// direction: a title may carry several providers' ids, and asking one of them for another's
+    /// number is how a film gets another film's recommendations. A title no configured provider
+    /// holds an id for is answered empty rather than as a failure — a title the library inferred
+    /// from a filename has no recommendations to fetch, and that is a fact rather than an error.
+    ///
+    /// **Empty is the answer for a title the catalogue does not hold, too**, which is the same
+    /// answer `get_title` gives for one this account may not see: the two are indistinguishable by
+    /// design (I37), and a rail is drawn or not drawn rather than explained.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::NoProvider`] when no configured provider serves a queried list,
+    /// [`RuntimeError::Provider`] when the provider fails, and [`RuntimeError::Sync`] when an
+    /// answer cannot be written.
+    pub async fn similar(&self, title_id: i64) -> Result<Recommendations, RuntimeError> {
+        let Some(provider) = self.browsing_provider() else {
+            return Err(RuntimeError::NoProvider);
+        };
+        let Some(row) = self
+            .database
+            .library_title(installation_scope(), title_id)
+            .await?
+        else {
+            return Ok(Recommendations::default());
+        };
+        let kind = row.library.title.kind;
+        let Some(external) = self
+            .database
+            .external_ids_of(title_id)
+            .await?
+            .into_iter()
+            .map(|held| held.id)
+            .find(|external| external.provider() == provider.descriptor().provider())
+        else {
+            return Ok(Recommendations::default());
+        };
+
+        let at = self.clock.now().as_millisecond();
+        let candidates = provider.similar(&external, kind).await?;
+        // Read before the candidates are consumed, because the genres travel on them.
+        let shared = shared_genres(&candidates);
+        // The names, from the vocabulary this session already has for the kind — a genre whose name is
+        // unknown is dropped rather than drawn as a number, which is what a shelf heading cannot be.
+        let vocabulary = self.genres(kind).await.unwrap_or_default();
+        let genres = shared
+            .into_iter()
+            .filter_map(|id| vocabulary.iter().find(|entry| entry.id() == id).cloned())
+            .collect();
+        let mut items = Vec::with_capacity(candidates.len());
+        let mut sources: Vec<Option<String>> = Vec::with_capacity(candidates.len());
+        for candidate in &candidates {
+            if let Some((item, source)) = self.listed_item(candidate, at).await? {
+                items.push(item);
+                sources.push(source);
+            }
+        }
+
+        self.fill_posters(&provider, &mut items, &sources).await;
+        Ok(Recommendations { items, genres })
+    }
+
+    /// One list candidate as a tile, and the poster path that tile would fetch.
+    ///
+    /// **The shared half of every read that answers with a list** — browse and the similar-titles
+    /// rail (`PG-E7-09`, `PG-E7-15`): write what the list carried, read the library's own answer
+    /// about the title, and hand back both the tile and the path the artwork pass needs. `None` is a
+    /// candidate the matching rule would not attribute, which is left out of the list rather than
+    /// merged into a guess.
+    async fn listed_item(
+        &self,
+        candidate: &peregrine_providers::provider::SearchCandidate,
+        at: i64,
+    ) -> Result<Option<(crate::jobs::discover_rails::RailItem, Option<String>)>, RuntimeError> {
+        let Some(listed) =
+            peregrine_sync::upsert_list_candidate(&self.database, candidate, at).await?
+        else {
+            return Ok(None);
+        };
+        let stored = self
+            .database
+            .library_title(installation_scope(), listed.title_id)
+            .await
+            .ok()
+            .flatten();
+        let source = stored
+            .as_ref()
+            .and_then(|row| row.library.poster.as_ref())
+            .map(|artwork| artwork.path.clone());
+        Ok(Some((
+            crate::jobs::discover_rails::RailItem {
+                title_id: listed.title_id,
+                kind: listed.details.kind,
+                name: listed.details.name.as_str().to_owned(),
+                year: listed.details.released.map(|date| i32::from(date.year())),
+                // Filled by the artwork pass, once the list's images have been asked for.
+                poster: None,
+                // A grid and a rail of recommendations draw no wide image, so the backdrop a hero
+                // uses is not read here.
+                backdrop_source: None,
+                backdrop: None,
+                playable: stored
+                    .as_ref()
+                    .is_some_and(|row| row.library.files > row.library.missing_files),
+                rating: listed.details.rating,
+                overview: listed.details.overview.clone(),
+                votes: listed.details.votes,
+            },
+            source,
+        )))
+    }
+
+    /// The genres the configured provider filters by for `kind`, read once per session.
+    ///
+    /// **Cache-first, and the cache is the session's** ([`Genres`]). A genre vocabulary is a handful
+    /// of rows that changes on the provider's clock, so re-asking on every visit to a filter control
+    /// would be a request per visit for an answer nothing had changed (`AGENTS R24`).
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::NoProvider`] when no configured provider serves a queried list,
+    /// and [`RuntimeError::Provider`] when the provider fails.
+    pub async fn genres(
+        &self,
+        kind: peregrine_domain::catalogue::TitleKind,
+    ) -> Result<Vec<peregrine_providers::GenreRef>, RuntimeError> {
+        if let Some(cached) = self.genres.get(kind) {
+            return Ok(cached);
+        }
+        let Some(provider) = self.browsing_provider() else {
+            return Err(RuntimeError::NoProvider);
+        };
+        let list = provider.genres(kind).await?;
+        self.genres.put(kind, list.clone());
+        Ok(list)
+    }
+
+    /// The first configured provider that can serve a queried list, if there is one.
+    ///
+    /// **One provider, because a page is one list.** Two providers' pages cannot be interleaved
+    /// without an order that belongs to neither. Selecting on the capability rather than taking the
+    /// first adapter is what keeps a search-only provider — an `OMDb` configured for ratings, say —
+    /// from answering a browse with a refusal.
+    fn browsing_provider(&self) -> Option<Arc<dyn peregrine_providers::MetadataProvider>> {
+        self.providers.adapters().into_iter().find(|adapter| {
+            adapter
+                .descriptor()
+                .can(peregrine_providers::Capability::Trending)
+        })
+    }
+
+    /// Fetches a page's posters into the cache and puts the paths on the items.
+    ///
+    /// **Concurrently, because they are independent images on a CDN** and a sequential loop would be
+    /// one round trip after another for a page the reader is looking at; what bounds the burst is
+    /// the provider client's own token bucket (`AGENTS R24`) rather than a constant here. A title
+    /// whose poster did not arrive keeps `None`, which is the reserved box a grid draws anyway — one
+    /// failed image is not a failed page.
+    ///
+    /// `sources` is aligned with `items`: entry `i` is the poster path item `i` would fetch.
+    async fn fill_posters(
+        &self,
+        provider: &Arc<dyn peregrine_providers::MetadataProvider>,
+        items: &mut [crate::jobs::discover_rails::RailItem],
+        sources: &[Option<String>],
+    ) {
+        let mut pending = tokio::task::JoinSet::new();
+        for (index, source) in sources.iter().enumerate() {
+            let Some(path) = source else {
+                continue;
+            };
+            // A blob the cache already holds costs a `stat` and no request, which is what makes a
+            // second visit to the same page cheap — and it is checked here rather than inside the
+            // task so the common case spawns nothing at all.
+            if let Some(found) = crate::artwork::cached_image(
+                &self.artwork,
+                provider.descriptor().provider(),
+                path,
+                peregrine_domain::catalogue::ImageKind::Poster,
+            ) {
+                if let Some(item) = items.get_mut(index) {
+                    item.poster = Some(found);
+                }
+                continue;
+            }
+            let provider = Arc::clone(provider);
+            let artwork = Arc::clone(&self.artwork);
+            let path = path.clone();
+            pending.spawn(async move {
+                let found = crate::artwork::cached_or_fetched(
+                    &artwork,
+                    provider.as_ref(),
+                    &path,
+                    peregrine_domain::catalogue::ImageKind::Poster,
+                )
+                .await;
+                (index, found)
+            });
+        }
+        while let Some(joined) = pending.join_next().await {
+            if let Ok((index, Some(found))) = joined
+                && let Some(item) = items.get_mut(index)
+            {
+                item.poster = Some(found);
+            }
+        }
     }
 
     /// One title, with the counts a screen shows, the cached poster, and whether opening the screen
@@ -1069,24 +1760,143 @@ impl Runtime {
         else {
             return Ok(None);
         };
-        let poster = row.poster.as_ref().and_then(|artwork| {
+        // Both posters are resolved before the row is taken apart, because the refresh rule below reads
+        // the whole row and the entry below consumes half of it. **Two values, not one**: the rule asks
+        // whether the *provider's* poster is on disk, while the entry carries whichever poster there is to
+        // draw.
+        let provider_poster = self.provider_poster(row.library.poster.as_ref());
+        let local_poster = crate::local_posters::cached(&self.artwork, id);
+        let needs_poster = provider_poster.is_none() && local_poster.is_none();
+        let poster = provider_poster.clone().or(local_poster);
+        let backdrop = row.backdrop.as_ref().and_then(|artwork| {
+            crate::artwork::cached_image(
+                &self.artwork,
+                artwork.provider,
+                &artwork.path,
+                peregrine_domain::catalogue::ImageKind::Backdrop,
+            )
+        });
+        let state = crate::artwork::ArtworkState::of(
+            &row,
+            provider_poster.as_deref(),
+            self.provider_can_serve(id).await?,
+        );
+        let playback = self.title_playback(id).await?;
+        Ok(Some(LibraryTitleDetail {
+            refresh_due: crate::artwork::refresh_due(&state),
+            playback,
+            entry: LibraryTitleEntry {
+                row: row.library,
+                poster,
+                needs_poster,
+            },
+            backdrop,
+            overview: row.overview,
+            rating: row.rating,
+            released: row.released,
+        }))
+    }
+
+    /// Whether this title has no poster for a capture to improve on.
+    ///
+    /// **The rule, in one place, because two commands ask it**: the player captures a frame while it
+    /// plays, and the library backfills one for every title that has none. Both must answer the same way,
+    /// or the backfill would fight the player for the same blob.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the catalogue row cannot be read.
+    async fn needs_poster(&self, title_id: i64) -> Result<bool, RuntimeError> {
+        let Some(row) = self
+            .database
+            .library_title(installation_scope(), title_id)
+            .await?
+        else {
+            return Err(RuntimeError::UnknownTitle);
+        };
+        Ok(self.provider_poster(row.library.poster.as_ref()).is_none()
+            && crate::local_posters::cached(&self.artwork, title_id).is_none())
+    }
+
+    /// One list row plus the cached poster the cache holds for it.
+    ///
+    /// The one place a title's primary poster reference becomes a path, so the table and the grid
+    /// cannot resolve it two ways: the reference is the row's, and the `stat` that decides whether the
+    /// blob is on disk is the cache's (AGENTS R7). A row whose reference is absent and a row whose
+    /// blob was evicted both answer `None`, which is the reserved box either way.
+    fn listed_title(&self, row: peregrine_storage::LibraryTitleRow) -> LibraryTitleEntry {
+        let provider = self.provider_poster(row.poster.as_ref());
+        let local = crate::local_posters::cached(&self.artwork, row.title.id);
+        LibraryTitleEntry {
+            needs_poster: provider.is_none() && local.is_none(),
+            poster: provider.or(local),
+            row,
+        }
+    }
+
+    /// The cached file a provider artwork reference names, or `None` when the cache holds none.
+    ///
+    /// Split out of [`Runtime::listed_title`] because a title's own read needs the same answer without
+    /// taking the row apart yet: its refresh rule reads the whole row, and the entry it returns owns
+    /// half of it.
+    /// **The provider's answer alone, and that distinction is load-bearing.** The refresh rule
+    /// ([`crate::artwork::refresh_due`]) asks whether the cache holds *the provider's* poster, and a
+    /// locally generated frame standing in for it here would make the rule answer "cached" for a title no
+    /// provider has ever drawn — which would stop the one request that could replace a film still with a
+    /// real poster. The fallback belongs to what a screen draws, not to what is due.
+    fn provider_poster(
+        &self,
+        reference: Option<&peregrine_storage::ArtworkPath>,
+    ) -> Option<PathBuf> {
+        reference.and_then(|artwork| {
             crate::artwork::cached_image(
                 &self.artwork,
                 artwork.provider,
                 &artwork.path,
                 peregrine_domain::catalogue::ImageKind::Poster,
             )
-        });
-        let state = crate::artwork::ArtworkState::of(
-            &row,
-            poster.as_deref(),
-            self.provider_can_serve(id).await?,
-        );
-        Ok(Some(LibraryTitleDetail {
-            refresh_due: crate::artwork::refresh_due(&state),
-            title: row.library,
-            poster,
-        }))
+        })
+    }
+
+    /// What one title's own page may offer and would do, from one read of the evidence the library
+    /// holds of it.
+    ///
+    /// The wiring rather than the rule: the derivations are [`peregrine_domain::availability`] per
+    /// item, [`peregrine_domain::TitleOffer`] over the title, and
+    /// [`peregrine_domain::LocalPlayback`] over the file that would play — and what this owns is
+    /// feeding them from the row's own sets rather than from a count (AGENTS R7).
+    ///
+    /// **`Asked::Nothing`, and it is exact rather than a placeholder.** [`peregrine_domain::Asked`]
+    /// is the one input the item row cannot supply — SM2's three pre-acquisition states collapse into
+    /// `wanted` there — and it is the watchlist that tells `watchlisted` from `discovered`. Nothing in
+    /// this build writes `watchlist_entry` and no command requests an acquisition, so nothing can have
+    /// asked for anything yet; the title-scoped read that will pass this in is `PG-E9-05`'s.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the evidence cannot be read.
+    async fn title_playback(&self, title_id: i64) -> Result<TitlePlayback, RuntimeError> {
+        let evidence = self
+            .database
+            .title_evidence(installation_scope(), title_id)
+            .await?;
+        let items: Vec<peregrine_domain::Availability> = evidence
+            .items
+            .iter()
+            .map(|item| {
+                peregrine_domain::availability(
+                    &item.item,
+                    peregrine_domain::Asked::Nothing,
+                    &item.jobs,
+                    &item.files,
+                )
+            })
+            .collect();
+        Ok(TitlePlayback {
+            offer: peregrine_domain::TitleOffer::of(&items, &evidence.jobs),
+            support: playable_file(&evidence)
+                .map(|file| LocalPlayback::of_name(file.path.as_str())),
+        })
     }
 
     /// Whether a configured provider owns an identifier `title_id` carries.
@@ -1124,31 +1934,363 @@ impl Runtime {
     pub async fn title_episodes(
         &self,
         title_id: i64,
+        season_number: Option<u32>,
         limit: u32,
-    ) -> Result<Vec<peregrine_storage::TitleEpisodeRow>, RuntimeError> {
-        Ok(self
+    ) -> Result<Vec<TitleEpisodeDetail>, RuntimeError> {
+        let rows = self
             .database
-            .list_title_episodes(installation_scope(), title_id, limit)
-            .await?)
+            .list_title_episodes(installation_scope(), title_id, season_number, limit)
+            .await?;
+        // One `stat` per episode, and no request: resolving a still is asking the cache whether it
+        // holds a blob whose key this layer computes, which is why it cannot be the screen's job
+        // (AGENTS R7) — the key is a hash and only the core knows whether the file is there.
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let still = row.still.as_ref().and_then(|artwork| {
+                    crate::artwork::cached_image(
+                        &self.artwork,
+                        artwork.provider,
+                        &artwork.path,
+                        peregrine_domain::catalogue::ImageKind::Still,
+                    )
+                });
+                TitleEpisodeDetail { row, still }
+            })
+            .collect())
+    }
+
+    /// A title's seasons, in the order a switcher lists them, each with its cached poster.
+    ///
+    /// The same shape as the episode read above and for the same reason: the artwork's key is this
+    /// layer's to compute, and a screen that resolved one would be hashing a provider's path itself.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses, which is the only failure this has.
+    pub async fn title_seasons(
+        &self,
+        title_id: i64,
+        limit: u32,
+    ) -> Result<Vec<TitleSeasonDetail>, RuntimeError> {
+        let rows = self
+            .database
+            .list_title_seasons(installation_scope(), title_id, limit)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let poster = row.poster.as_ref().and_then(|artwork| {
+                    crate::artwork::cached_image(
+                        &self.artwork,
+                        artwork.provider,
+                        &artwork.path,
+                        peregrine_domain::catalogue::ImageKind::Poster,
+                    )
+                });
+                TitleSeasonDetail { row, poster }
+            })
+            .collect())
     }
 
     /// A page of the titles the library holds, newest first.
     ///
     /// Read under [`installation_scope`], which is the whole of this build's account story: the
-    /// screen asks what *it* has, and on an installation with one account that is everything.
+    /// screen asks what *it* has, and on an installation with one account that is everything. Each row
+    /// leaves with the cached poster the cache holds for it, because the screen that draws this read is
+    /// a grid of tiles as often as it is a table of counts, and a tile cannot resolve a cache key.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Library`] when the database refuses; a poster the cache does not hold is `None`
+    /// rather than a failure, because a reserved box is a state the tile already draws.
     pub async fn library_titles(
         &self,
         after: Option<i64>,
         limit: u32,
-    ) -> Result<Vec<LibraryTitleRow>, RuntimeError> {
+    ) -> Result<Vec<LibraryTitleEntry>, RuntimeError> {
         let request = match after {
             Some(cursor) => PageRequest::after(Cursor::new(cursor), limit),
             None => PageRequest::first(limit),
         };
-        Ok(self
+        let rows = self
             .database
             .list_library_titles(installation_scope(), request)
-            .await?)
+            .await?;
+        Ok(rows.into_iter().map(|row| self.listed_title(row)).collect())
+    }
+
+    /// The file a title would play, the guarded path it lives at, and what this build would do with it.
+    ///
+    /// **One function, because two commands need the same four answers** and the two must agree about
+    /// which file they are describing: a capture session that chose a different copy from the playback
+    /// session would put a poster from one release on a tile whose Play button opens another. The four
+    /// steps are the title's existence under the scope (I37), the file the library actually has, the
+    /// containment check that produces a [`SafePath`], and the container's name.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::UnknownTitle`], [`RuntimeError::NoPlayableFile`], or
+    /// [`RuntimeError::FileOutsideRoots`].
+    async fn playable(
+        &self,
+        title_id: i64,
+    ) -> Result<(peregrine_domain::MediaFile, SafePath), RuntimeError> {
+        if self
+            .database
+            .library_title(installation_scope(), title_id)
+            .await?
+            .is_none()
+        {
+            return Err(RuntimeError::UnknownTitle);
+        }
+        let evidence = self
+            .database
+            .title_evidence(installation_scope(), title_id)
+            .await?;
+        let Some(file) = playable_file(&evidence) else {
+            return Err(RuntimeError::NoPlayableFile);
+        };
+        let safe = self
+            .guarded_media_path(Path::new(file.path.as_str()))
+            .await?;
+        Ok((file.clone(), safe))
+    }
+
+    /// Opens a session for one of a title's files so the renderer can capture a poster frame.
+    ///
+    /// **The same machinery as [`Runtime::start_playback`] and a separate command on purpose.** One file,
+    /// one listener, one token — and a different *intent*, which is the whole reason the name is
+    /// different: a reader who found `start_playback` called by a poster backfill could not tell whether
+    /// the film was meant to be playing. Nothing plays a capture session: the renderer loads the URL in an
+    /// element it never shows, draws one frame, posts it, and this is closed.
+    ///
+    /// It holds its own slot, so a backfill cannot stop a film and a film cannot stop a backfill.
+    ///
+    /// # Errors
+    ///
+    /// The same four refusals [`Runtime::start_playback`] documents.
+    pub async fn start_poster_capture(
+        &self,
+        title_id: i64,
+    ) -> Result<StartedCapture, RuntimeError> {
+        // Whatever capture was open stops first, and by its own id rather than by "current": the two are
+        // the same thing here, and naming it is the habit that keeps a stale stop from being able to close
+        // a session it does not own.
+        let opening = *self
+            .capture_id
+            .lock()
+            .expect("the capture id lock is not poisoned");
+        if let Some(held) = opening {
+            self.stop_poster_capture(held).await;
+        }
+
+        let (file, safe) = self.playable(title_id).await?;
+        let media_file_id = file.id;
+        let session = peregrine_playback::PlaybackSession::open(
+            media_file_id,
+            title_id,
+            &safe,
+            self.tokens.next_token(),
+            Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
+        )
+        .await
+        .map_err(playback_error)?;
+        let url = session.url().to_owned();
+        let thumbnail_url = session.thumbnail_url().map(str::to_owned);
+        let session_id = self.mint_session();
+        *self
+            .capture
+            .lock()
+            .expect("the capture lock is not poisoned") = Some(session);
+        *self
+            .capture_id
+            .lock()
+            .expect("the capture id lock is not poisoned") = Some(session_id);
+
+        Ok(StartedCapture {
+            session_id,
+            title_id,
+            media_file_id,
+            url,
+            thumbnail_url,
+        })
+    }
+
+    /// Stops the capture session `session_id` names, answering whether that one was open.
+    ///
+    /// **A stop that names the wrong session does nothing, and that is the point.** A renderer's cleanup
+    /// runs while the next mount's open may already have landed; a stop that closed "whatever is current"
+    /// would kill the session the screen is reading. `false` is the honest answer: nothing of *yours* was
+    /// open.
+    pub async fn stop_poster_capture(&self, session_id: SessionId) -> bool {
+        if *self
+            .capture_id
+            .lock()
+            .expect("the capture id lock is not poisoned")
+            != Some(session_id)
+        {
+            return false;
+        }
+        let session = self
+            .capture
+            .lock()
+            .expect("the capture lock is not poisoned")
+            .take();
+        *self
+            .capture_id
+            .lock()
+            .expect("the capture id lock is not poisoned") = None;
+        match session {
+            Some(session) => session.close().await,
+            None => false,
+        }
+    }
+
+    /// Starts playing one of a title's files, replacing whatever was playing.
+    ///
+    /// **Four decisions, in the order they matter.** The title is resolved under the installation scope,
+    /// so a title this account may not see is the same refusal as one that does not exist (I37). The
+    /// file is chosen by [`playable_file`] — what the library actually has, not what a count says. The
+    /// path is put through a [`PathGuard`] built from the configured roots, so the loopback server can
+    /// only ever be handed a [`SafePath`]. And the session replaces the previous one rather than
+    /// competing with it, which is what makes the listener's lifetime the session's (SECURITY.md T10).
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::UnknownTitle`] when no title the account may see has that id,
+    /// [`RuntimeError::NoPlayableFile`] when it holds none that is on disk,
+    /// [`RuntimeError::FileOutsideRoots`] when what it holds is outside every configured folder, and
+    /// [`RuntimeError::Playback`] when the file cannot be served.
+    pub async fn start_playback(&self, title_id: i64) -> Result<StartedPlayback, RuntimeError> {
+        // Whatever was playing stops first, and it stops before the new one is resolved: two listeners for
+        // one screen would be two sockets the runtime could not both own. Named by its id rather than by
+        // "current" — see `SessionId`, and the black rectangle a stale stop produced.
+        let opening = *self
+            .session_id
+            .lock()
+            .expect("the session id lock is not poisoned");
+        if let Some(held) = opening {
+            self.stop_playback(held).await;
+        }
+
+        let (file, safe) = self.playable(title_id).await?;
+        let media_file_id = file.id;
+        let support = LocalPlayback::of_name(file.path.as_str());
+        // Whether a poster is worth capturing on the way, asked from the same read the play needs: only
+        // when there is nothing to draw, which is the rule that stops a film still replacing real artwork.
+        let needs_poster = self.needs_poster(title_id).await?;
+
+        let session = peregrine_playback::PlaybackSession::open(
+            media_file_id,
+            title_id,
+            &safe,
+            self.tokens.next_token(),
+            Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
+        )
+        .await
+        .map_err(playback_error)?;
+        let url = session.url().to_owned();
+        let thumbnail_url = session.thumbnail_url().map(str::to_owned);
+        // The guard is dropped before the answer is built: nothing below this line awaits while holding
+        // it, which is the rule a `std::sync::Mutex` in an async runtime exists under.
+        let session_id = self.mint_session();
+        *self
+            .session
+            .lock()
+            .expect("the session lock is not poisoned") = Some(session);
+        *self
+            .session_id
+            .lock()
+            .expect("the session id lock is not poisoned") = Some(session_id);
+
+        Ok(StartedPlayback {
+            session_id,
+            title_id,
+            media_file_id,
+            support,
+            url,
+            thumbnail_url,
+            needs_poster,
+        })
+    }
+
+    /// Stops the playback session `session_id` names, answering whether that one was open.
+    ///
+    /// The same identity rule [`Runtime::stop_poster_capture`] documents, and it matters more here: a stale
+    /// stop closing the live session is a film that dies the moment it starts.
+    ///
+    /// The session is taken out of the lock and closed *after* the guards are dropped, so closing — which
+    /// awaits the listener's task — never happens under a lock another command could want.
+    pub async fn stop_playback(&self, session_id: SessionId) -> bool {
+        if *self
+            .session_id
+            .lock()
+            .expect("the session id lock is not poisoned")
+            != Some(session_id)
+        {
+            return false;
+        }
+        let session = self
+            .session
+            .lock()
+            .expect("the session lock is not poisoned")
+            .take();
+        *self
+            .session_id
+            .lock()
+            .expect("the session id lock is not poisoned") = None;
+        match session {
+            Some(session) => session.close().await,
+            None => false,
+        }
+    }
+
+    /// The next session id, in issue order.
+    fn mint_session(&self) -> SessionId {
+        SessionId(
+            self.next_session
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// Whether something is playing.
+    #[must_use]
+    pub fn is_playing(&self) -> bool {
+        self.session
+            .lock()
+            .expect("the session lock is not poisoned")
+            .is_some()
+    }
+
+    /// The media path as the filesystem layer will accept it, or a refusal naming why not.
+    ///
+    /// A `PathGuard` per configured root and the first that contains the path wins. **Every root is
+    /// tried rather than the file's own `root_id`**, because that column is nullable — a file recorded
+    /// before its root was known has none — and a check that answered `None` for such a file would
+    /// refuse a file the user can see in their own library. The guard is what re-establishes
+    /// containment: the scanner writes paths into a database, and the database is not the filesystem
+    /// (SECURITY.md's path-safety row).
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::FileOutsideRoots`] when no configured root contains the path,
+    /// [`RuntimeError::Storage`] when the roots cannot be read.
+    async fn guarded_media_path(&self, path: &Path) -> Result<SafePath, RuntimeError> {
+        let roots = self
+            .library()
+            .roots(PageRequest::first(MAX_MEDIA_ROOTS))
+            .await?;
+        for root in roots {
+            let Ok(guard) = peregrine_domain::PathGuard::new(Path::new(root.root.path.as_str()))
+            else {
+                continue;
+            };
+            if let Ok(safe) = guard.resolve(path) {
+                return Ok(safe);
+            }
+        }
+        Err(RuntimeError::FileOutsideRoots)
     }
 
     /// The library roots, newest first.
@@ -1511,6 +2653,14 @@ async fn newest_log_file(directory: &Path) -> Option<PathBuf> {
     newest
 }
 
+/// How many configured roots are checked when deciding whether a media path may be served.
+///
+/// A bound rather than an iteration to exhaustion because the read pages: a caller that asked for "all
+/// of them" would be a caller that could be made to hold an unbounded list. Two hundred roots is far
+/// past any plausible library, and a path that is inside a root past this one is *refused* rather than
+/// served — which is the direction that cannot leak (SECURITY.md's path-safety row).
+const MAX_MEDIA_ROOTS: u32 = 200;
+
 /// Why the runtime could not start, or could not do what it was asked.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -1565,6 +2715,38 @@ pub enum RuntimeError {
     #[error(transparent)]
     Library(#[from] crate::library::LibraryError),
 
+    /// The title a command named is not here, or this account may not see it.
+    ///
+    /// One variant for both, because they are one answer to a caller (I37): a title outside the scope
+    /// must be indistinguishable from one that does not exist.
+    #[error("that title is not in your library")]
+    UnknownTitle,
+
+    /// The library holds no copy of this title that is on disk.
+    #[error("the library holds no copy of that title that is on disk")]
+    NoPlayableFile,
+
+    /// A media file is outside every folder Peregrine is allowed to scan.
+    #[error("that file is outside every folder Peregrine is allowed to scan")]
+    FileOutsideRoots,
+
+    /// The file a playback session would serve is no longer where the last scan saw it.
+    ///
+    /// Its own variant rather than a wrapped stream error, because it is the one refusal a person can
+    /// act on differently from the others — the drive is unplugged, the file was moved — and a command
+    /// surface that had to reach into `peregrine-stream`'s error type to say so would be an edge taken
+    /// for a sentence.
+    #[error("that file is no longer where the last scan saw it")]
+    MediaMissing,
+
+    /// The path a playback session would serve is not a file.
+    #[error("that is not a file Peregrine can play")]
+    MediaNotAFile,
+
+    /// The file could not be served to the player, with the reason a user can read.
+    #[error(transparent)]
+    Playback(#[from] peregrine_playback::PlaybackError),
+
     /// No live job has that id.
     #[error("no job {job} is running; it may have finished already")]
     UnknownJob {
@@ -1580,6 +2762,15 @@ pub enum RuntimeError {
         /// The filesystem's error.
         source: std::io::Error,
     },
+
+    /// No configured provider can serve the request this read makes.
+    ///
+    /// A setting rather than a failure, and its own variant so the screen can say so: the answer to
+    /// it is "add a key in Settings", which is a different sentence from "the provider did not
+    /// answer". The rails read states the same fact as [`RailsState::NoProvider`], because a rail
+    /// list can be drawn empty while a browse page cannot.
+    #[error("no metadata provider that can serve this read is configured")]
+    NoProvider,
 }
 
 #[cfg(test)]
@@ -1627,22 +2818,24 @@ mod tests {
         (runtime, sink)
     }
 
-    /// Waits until the startup refresh has filled the registry's cache.
+    /// Waits until the startup refresh has finished reading the store.
     ///
     /// The refresh runs off the start-up path, so a test that asserted "nothing read the store"
-    /// without this would be racing it rather than measuring the poll.
+    /// without this would be racing it rather than measuring the poll. What is waited on is the read
+    /// finishing rather than the known list — which is the build's manifest and in place from
+    /// construction — and the read may end in a refusal, which is an answer and not a reason to wait.
     async fn await_cached_status(runtime: &Runtime) -> crate::providers::ProviderStatus {
-        tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let status = runtime.provider_status();
-                if !status.known.is_empty() {
+                if status.store != crate::providers::CredentialStore::Unread {
                     return status;
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("the startup refresh must fill the registry")
+        .expect("the startup refresh must finish, whatever it answers")
     }
 
     /// Waits for the journal row to reach a terminal phase.
@@ -1738,6 +2931,79 @@ mod tests {
     /// instead of measuring it. The gate is a `watch` the test closes when it is done, so nothing
     /// here waits on a clock or a sleep (`AGENTS R14`); everything but `rail` is the testkit fake,
     /// which is the same adapter the rails job's own tests drive.
+    /// The gate a [`GatedSecretStore`]'s read waits on: the flag that releases it, and the condvar
+    /// that wakes the waiting read.
+    type ReadGate = Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>;
+
+    /// A credential store whose read blocks until the test releases it.
+    ///
+    /// What a launch looks like on a machine whose keychain raises a prompt: the read runs on a
+    /// blocking thread, and the screen's first read arrives before it is answered. The gate is a
+    /// `Condvar` rather than a poll, so the fixture decides when the read lands instead of a sleep
+    /// deciding it (`AGENTS R14`).
+    struct GatedSecretStore {
+        /// Told once, when the read starts, so the test knows it is in the air.
+        entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        /// Set to true, and notified, when the read may finish.
+        gate: ReadGate,
+    }
+
+    impl GatedSecretStore {
+        fn holding_the_read() -> (Arc<Self>, tokio::sync::oneshot::Receiver<()>, ReadGate) {
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+            (
+                Arc::new(Self {
+                    entered: std::sync::Mutex::new(Some(entered_tx)),
+                    gate: Arc::clone(&gate),
+                }),
+                entered_rx,
+                gate,
+            )
+        }
+    }
+
+    impl SecretStore for GatedSecretStore {
+        fn get(
+            &self,
+            _key: &peregrine_secrets::SecretKey,
+        ) -> Result<Option<peregrine_secrets::Secret>, peregrine_secrets::SecretStoreError>
+        {
+            if let Some(entered) = self
+                .entered
+                .lock()
+                .expect("the lock is not poisoned")
+                .take()
+            {
+                let _ = entered.send(());
+            }
+            // Blocking, which is what this port is and why the runtime runs it on a blocking thread.
+            let (lock, condvar) = &*self.gate;
+            let mut released = lock.lock().expect("the lock is not poisoned");
+            while !*released {
+                released = condvar.wait(released).expect("the lock is not poisoned");
+            }
+            // Nothing is configured, so the registry this read fills holds no adapter: the test
+            // asserts what the *read path* decides without a request leaving the machine (`R14`).
+            Ok(None)
+        }
+
+        fn set(
+            &self,
+            _key: &peregrine_secrets::SecretKey,
+            _secret: &peregrine_secrets::Secret,
+        ) -> Result<(), peregrine_secrets::SecretStoreError> {
+            Ok(())
+        }
+
+        fn delete(
+            &self,
+            _key: &peregrine_secrets::SecretKey,
+        ) -> Result<(), peregrine_secrets::SecretStoreError> {
+            Ok(())
+        }
+    }
+
     struct GatedRailProvider {
         inner: peregrine_testkit::FakeMetadataProvider,
         released: tokio::sync::watch::Receiver<bool>,
@@ -1788,6 +3054,27 @@ mod tests {
             self.inner.title(id, kind)
         }
 
+        /// Delegated, so a season read in a test sees whatever the fake behind this wrapper answers.
+        fn seasons(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<peregrine_domain::catalogue::SeasonDetails>>
+        {
+            self.inner.seasons(id, kind)
+        }
+
+        /// Delegated, for the reason [`Self::seasons`] gives.
+        fn season_episodes(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+            season_number: peregrine_domain::catalogue::SeasonNumber,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<peregrine_domain::catalogue::EpisodeDetails>>
+        {
+            self.inner.season_episodes(id, kind, season_number)
+        }
+
         fn image(
             &self,
             path: &str,
@@ -1810,6 +3097,34 @@ mod tests {
                 while !*released.borrow_and_update() && released.changed().await.is_ok() {}
                 Ok(Vec::new())
             })
+        }
+
+        /// Delegated, so a browse in a test sees whatever the fake behind this gate answers.
+        fn browse(
+            &self,
+            request: &peregrine_providers::provider::BrowseRequest,
+        ) -> peregrine_providers::ProviderFuture<'_, peregrine_providers::ProviderPage> {
+            self.inner.browse(request)
+        }
+
+        /// Delegated, for the reason [`Self::browse`] gives.
+        fn genres(
+            &self,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<peregrine_providers::GenreRef>> {
+            self.inner.genres(kind)
+        }
+
+        /// Delegated, for the reason [`Self::browse`] gives.
+        fn similar(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<
+            '_,
+            Vec<peregrine_providers::provider::SearchCandidate>,
+        > {
+            self.inner.similar(id, kind)
         }
     }
 
@@ -1867,7 +3182,7 @@ mod tests {
         // which is a fact about the machine running the tests (AGENTS R14). The poster path is what
         // this test owns.
         let fresh = runtime.library_title(id).await.unwrap().expect("the stub");
-        assert_eq!(fresh.poster, None);
+        assert_eq!(fresh.entry.poster, None);
 
         // A provider that answered with no artwork at all: the title *has* been filled, so asking
         // again could only be told the same thing.
@@ -1884,7 +3199,7 @@ mod tests {
             .await
             .unwrap();
         let no_artwork = runtime.library_title(id).await.unwrap().expect("the title");
-        assert_eq!(no_artwork.poster, None);
+        assert_eq!(no_artwork.entry.poster, None);
 
         // And a fill that recorded a poster the cache does not hold: one request puts it there.
         runtime
@@ -1900,7 +3215,7 @@ mod tests {
             .await
             .unwrap();
         let known = runtime.library_title(id).await.unwrap().expect("the title");
-        assert_eq!(known.poster, None, "the bytes have not been fetched");
+        assert_eq!(known.entry.poster, None, "the bytes have not been fetched");
 
         // Once the blob is in the cache the screen has nothing to ask for — and the path it answers
         // with is inside the directory the runtime was told to write into, which is the one the
@@ -1914,9 +3229,10 @@ mod tests {
             .store(&key, b"pretend this is a jpeg")
             .expect("the artwork directory is writable");
         let cached = runtime.library_title(id).await.unwrap().expect("the title");
-        assert_eq!(cached.poster.as_deref(), Some(stored.disk_path()));
+        assert_eq!(cached.entry.poster.as_deref(), Some(stored.disk_path()));
         assert!(
             cached
+                .entry
                 .poster
                 .as_deref()
                 .expect("a path")
@@ -2321,7 +3637,7 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let (runtime, _sink) = runtime(&directory).await;
 
-        let rails = runtime.home_rails().await.unwrap();
+        let rails = runtime.home_rails(None).await.unwrap();
 
         assert_eq!(rails.len(), peregrine_providers::RailKind::ALL.len());
         assert!(rails.iter().all(|rail| rail.items.is_empty()));
@@ -2397,7 +3713,7 @@ mod tests {
         let (provider, released) = GatedRailProvider::holding_the_rails();
         let (runtime, _sink) = runtime_with_a_provider(&directory, Arc::new(provider)).await;
 
-        let first = runtime.home_rails().await.unwrap();
+        let first = runtime.home_rails(None).await.unwrap();
         assert_eq!(rails_state(&first), RailsState::Fetching);
         assert_eq!(first.len(), peregrine_providers::RailKind::ALL.len());
         assert!(
@@ -2407,7 +3723,7 @@ mod tests {
         let queued = rails_rows(&runtime).await;
         assert_eq!(queued.len(), 1, "a cold read queues exactly one fetch");
 
-        let second = runtime.home_rails().await.unwrap();
+        let second = runtime.home_rails(None).await.unwrap();
         assert_eq!(
             rails_state(&second),
             RailsState::Fetching,
@@ -2427,17 +3743,122 @@ mod tests {
 
     /// The state that has to keep saying "configure a provider key in Settings": with no provider
     /// there is nothing to ask, so a cold read queues nothing and answers `NoProvider`.
+    ///
+    /// The wait is part of the fixture and not of the rule: the credential read runs off the startup
+    /// path (a keychain can raise a prompt), so this test has to let it land before it can claim
+    /// anything about what a settled registry answers. A read that arrives first is the case
+    /// [`a_cold_read_before_the_credentials_are_read_starts_the_fetch`] pins.
     #[tokio::test]
     async fn a_cold_read_with_no_provider_queues_nothing() {
         let directory = TempDir::new().unwrap();
         let (runtime, _sink) = runtime(&directory).await;
+        let _ = await_cached_status(&runtime).await;
 
-        let rails = runtime.home_rails().await.unwrap();
+        let rails = runtime.home_rails(None).await.unwrap();
 
         assert_eq!(rails_state(&rails), RailsState::NoProvider);
         assert!(
             rails_rows(&runtime).await.is_empty(),
             "there is no provider to fetch from"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// The launch whose keychain is slow — a prompt, a locked login keyring, a first run from a new
+    /// binary — where the screen's first read arrives before the credential read has answered.
+    ///
+    /// `NoProvider` there is two mistakes at once: it tells a user who *has* a key to go and set one
+    /// up, and it starts nothing, so the rails stay empty until they press Refresh once the prompt has
+    /// been dismissed. The read enqueues the fetch instead, and the job waits for the read that is
+    /// still in the air.
+    #[tokio::test]
+    async fn a_cold_read_before_the_credentials_are_read_starts_the_fetch() {
+        let directory = TempDir::new().unwrap();
+        let (store, entered, gate) = GatedSecretStore::holding_the_read();
+        let (runtime, _sink) = runtime_with(&directory, store as Arc<dyn SecretStore>).await;
+        entered
+            .await
+            .expect("the runtime reads the store at startup");
+
+        let rails = runtime.home_rails(None).await.unwrap();
+        assert_eq!(
+            rails_state(&rails),
+            RailsState::Fetching,
+            "a read that has not answered yet is not a provider that is absent"
+        );
+        let queued = rails_rows(&runtime).await;
+        assert_eq!(
+            queued.len(),
+            1,
+            "and the fetch that will use the credential is queued, not refused"
+        );
+
+        // The read lands, and answers that nothing is configured: that is the answer the screen was
+        // waiting for, and it is the one it shows.
+        *gate.0.lock().expect("the gate is not poisoned") = true;
+        gate.1.notify_all();
+        let _ = await_cached_status(&runtime).await;
+
+        let settled = runtime.home_rails(None).await.unwrap();
+        assert_eq!(rails_state(&settled), RailsState::NoProvider);
+        assert_eq!(
+            rails_rows(&runtime).await,
+            queued,
+            "a settled registry queues nothing more"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// The relaunch PG-E7-08 exists for: the rails the last run published are drawn from the
+    /// catalogue and the cache, and nothing is fetched, because there is nothing to fill.
+    #[tokio::test]
+    async fn a_launch_hydrates_the_manifest_the_last_run_published() {
+        let directory = TempDir::new().unwrap();
+        let id = {
+            let database = peregrine_storage::Database::open(directory.path().join(DATABASE_FILE))
+                .await
+                .expect("the database opens");
+            let id = database
+                .insert_stub_title(peregrine_storage::StubTitle {
+                    kind: peregrine_domain::catalogue::TitleKind::Movie,
+                    subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                    name: "The Matrix".to_owned(),
+                    original_name: None,
+                    sort_name: "the matrix".to_owned(),
+                    at: 1_700_000_000_000,
+                })
+                .await
+                .expect("the title is written");
+            database
+                .replace_discover_rails(&[(
+                    peregrine_providers::RailKind::PopularMovies
+                        .as_str()
+                        .to_owned(),
+                    vec![id],
+                )])
+                .await
+                .expect("the manifest is written");
+            id
+        };
+
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let rails = runtime.home_rails(None).await.unwrap();
+        assert_eq!(
+            rails_state(&rails),
+            RailsState::Ready,
+            "the rails are here, so there is nothing to fetch"
+        );
+        let popular = rails
+            .iter()
+            .find(|rail| rail.rail == peregrine_providers::RailKind::PopularMovies)
+            .expect("every rail is reported");
+        assert_eq!(popular.items.len(), 1);
+        assert_eq!(popular.items[0].title_id, id);
+        assert_eq!(popular.items[0].name, "The Matrix");
+        assert!(
+            rails_rows(&runtime).await.is_empty(),
+            "a launch that has the rails starts no fetch"
         );
         runtime.shutdown().await;
     }
@@ -2453,7 +3874,7 @@ mod tests {
         ));
         let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
 
-        let cold = runtime.home_rails().await.unwrap();
+        let cold = runtime.home_rails(None).await.unwrap();
         assert_eq!(rails_state(&cold), RailsState::Fetching);
         let queued = rails_rows(&runtime).await;
         assert_eq!(queued.len(), 1);
@@ -2464,7 +3885,7 @@ mod tests {
             "the fetch lands and publishes: {row:?}"
         );
 
-        let warm = runtime.home_rails().await.unwrap();
+        let warm = runtime.home_rails(None).await.unwrap();
         assert_eq!(rails_state(&warm), RailsState::Ready);
         assert!(
             warm.iter().any(|rail| !rail.items.is_empty()),
@@ -2682,5 +4103,771 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    /// One browse request, which is what the command surface builds out of a screen's filters.
+    fn browse_request() -> peregrine_providers::BrowseRequest {
+        peregrine_providers::BrowseRequest::new(
+            peregrine_domain::catalogue::TitleKind::Movie,
+            std::num::NonZeroU32::new(1).expect("one is not zero"),
+            peregrine_providers::BrowseSort::Popularity,
+            None,
+            None,
+        )
+    }
+
+    /// A provider that answers the genre list once and fails afterwards.
+    ///
+    /// The cache rule is otherwise unobservable: two calls that both ask a working provider return
+    /// the same list whether the second one asked or not. A second call that *must* fail is what
+    /// makes "the session remembered it" a fact rather than an assumption.
+    struct GenreOnceProvider {
+        inner: peregrine_testkit::FakeMetadataProvider,
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    impl GenreOnceProvider {
+        fn answering(genres: Vec<peregrine_providers::GenreRef>) -> Self {
+            Self {
+                inner: peregrine_testkit::FakeMetadataProvider::publishing_rails(
+                    peregrine_domain::id::Provider::Tmdb,
+                    Vec::new(),
+                )
+                .with_genres_answer(genres),
+                asked: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl peregrine_providers::provider::MetadataProvider for GenreOnceProvider {
+        fn descriptor(&self) -> &peregrine_providers::ProviderDescriptor {
+            self.inner.descriptor()
+        }
+
+        fn check(&self) -> peregrine_providers::ProviderFuture<'_, ()> {
+            self.inner.check()
+        }
+
+        fn search(
+            &self,
+            query: &peregrine_providers::provider::SearchQuery,
+        ) -> peregrine_providers::ProviderFuture<
+            '_,
+            Vec<peregrine_providers::provider::SearchCandidate>,
+        > {
+            self.inner.search(query)
+        }
+
+        fn title(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>
+        {
+            self.inner.title(id, kind)
+        }
+
+        /// Delegated, so a season read in a test sees whatever the fake behind this wrapper answers.
+        fn seasons(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<peregrine_domain::catalogue::SeasonDetails>>
+        {
+            self.inner.seasons(id, kind)
+        }
+
+        /// Delegated, for the reason [`Self::seasons`] gives.
+        fn season_episodes(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+            season_number: peregrine_domain::catalogue::SeasonNumber,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<peregrine_domain::catalogue::EpisodeDetails>>
+        {
+            self.inner.season_episodes(id, kind, season_number)
+        }
+
+        fn image(
+            &self,
+            path: &str,
+            kind: peregrine_domain::catalogue::ImageKind,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<u8>> {
+            self.inner.image(path, kind)
+        }
+
+        fn rail(
+            &self,
+            rail: peregrine_providers::provider::RailKind,
+            page: std::num::NonZeroU32,
+        ) -> peregrine_providers::ProviderFuture<
+            '_,
+            Vec<peregrine_providers::provider::SearchCandidate>,
+        > {
+            self.inner.rail(rail, page)
+        }
+
+        fn browse(
+            &self,
+            request: &peregrine_providers::provider::BrowseRequest,
+        ) -> peregrine_providers::ProviderFuture<'_, peregrine_providers::ProviderPage> {
+            self.inner.browse(request)
+        }
+
+        fn genres(
+            &self,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<'_, Vec<peregrine_providers::GenreRef>> {
+            if self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                return self.inner.genres(kind);
+            }
+            Box::pin(async {
+                Err(peregrine_providers::error::ProviderError::Transport {
+                    provider: peregrine_domain::id::Provider::Tmdb,
+                    kind: peregrine_providers::error::TransportFailure::Connect,
+                })
+            })
+        }
+
+        fn similar(
+            &self,
+            id: &peregrine_domain::id::ExternalId,
+            kind: peregrine_domain::catalogue::TitleKind,
+        ) -> peregrine_providers::ProviderFuture<
+            '_,
+            Vec<peregrine_providers::provider::SearchCandidate>,
+        > {
+            self.inner.similar(id, kind)
+        }
+    }
+
+    /// A page is written into the catalogue before it is answered, so an item is a title the
+    /// catalogue owns — with a row id a screen can open — rather than a row of this response only.
+    ///
+    /// The observable form of that is identity across two calls: the same provider id answers the
+    /// same catalogue row the second time, which is only true if the first call wrote it.
+    #[tokio::test]
+    async fn a_browse_page_is_written_into_the_catalogue_and_answered_as_it_is_drawn() {
+        let directory = TempDir::new().unwrap();
+        let adapter = Arc::new(
+            peregrine_testkit::FakeMetadataProvider::publishing_rails(
+                peregrine_domain::id::Provider::Tmdb,
+                Vec::new(),
+            )
+            .with_browse_answer(peregrine_providers::ProviderPage::new(
+                vec![candidate("603", "The Matrix")],
+                true,
+            )),
+        );
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let first = runtime.browse(&browse_request()).await.unwrap();
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(first.items[0].name, "The Matrix");
+        assert!(
+            first.items[0].title_id > 0,
+            "the item carries a catalogue row"
+        );
+        assert!(
+            first.has_more,
+            "the provider's own answer about another page is carried rather than guessed"
+        );
+
+        let second = runtime.browse(&browse_request()).await.unwrap();
+        assert_eq!(
+            second.items[0].title_id, first.items[0].title_id,
+            "the identity the first call wrote is what the second call matched"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// No configured provider can serve a queried list, so there is nothing to browse and the
+    /// refusal says so rather than asking a provider that cannot answer.
+    #[tokio::test]
+    async fn browsing_without_a_provider_that_can_serve_a_list_is_a_typed_refusal() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let refused = runtime
+            .browse(&browse_request())
+            .await
+            .expect_err("no provider");
+        assert!(
+            matches!(refused, RuntimeError::NoProvider),
+            "got {refused:?}"
+        );
+        let refused = runtime
+            .genres(peregrine_domain::catalogue::TitleKind::Movie)
+            .await
+            .expect_err("no provider");
+        assert!(
+            matches!(refused, RuntimeError::NoProvider),
+            "got {refused:?}"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// A provider that can search but not list is not asked to list.
+    ///
+    /// The registry may hold several providers, and a ratings fallback that declares `search` alone
+    /// is a normal configuration — so browse selects on the capability rather than taking the first
+    /// adapter and reporting its refusal as the installation's.
+    #[tokio::test]
+    async fn a_search_only_provider_is_not_asked_for_a_queried_list() {
+        let directory = TempDir::new().unwrap();
+        let adapter = Arc::new(peregrine_testkit::FakeMetadataProvider::searching(
+            peregrine_domain::id::Provider::Tmdb,
+            Vec::new(),
+        ));
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let refused = runtime
+            .browse(&browse_request())
+            .await
+            .expect_err("no list");
+        assert!(
+            matches!(refused, RuntimeError::NoProvider),
+            "a provider that cannot list is not the provider to ask: {refused:?}"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// A genre vocabulary is read once per kind per session: the second read answers from the
+    /// runtime's own memory, which is what keeps a filter control from costing a request per visit.
+    #[tokio::test]
+    async fn the_genre_vocabulary_is_read_once_per_kind() {
+        let directory = TempDir::new().unwrap();
+        let genre = peregrine_providers::GenreRef::new(
+            28,
+            peregrine_domain::text::NonEmptyText::new("Action").expect("real text"),
+        );
+        let adapter = Arc::new(GenreOnceProvider::answering(vec![genre.clone()]));
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let first = runtime
+            .genres(peregrine_domain::catalogue::TitleKind::Movie)
+            .await
+            .expect("the first read asks the provider");
+        assert_eq!(first, vec![genre.clone()]);
+
+        let second = runtime
+            .genres(peregrine_domain::catalogue::TitleKind::Movie)
+            .await
+            .expect("the second read is answered from the session's memory");
+        assert_eq!(second, first);
+
+        // And the other kind is its own slot rather than the same one. The provider fails every call
+        // after the first, so a *series* read that answered would mean the film vocabulary had been
+        // handed to the series filter — which is the mistake a per-kind cache exists to prevent.
+        let other = runtime
+            .genres(peregrine_domain::catalogue::TitleKind::Show)
+            .await;
+        assert!(
+            other.is_err(),
+            "the film vocabulary is not the series vocabulary"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// The genre a shelf is built from is the genre the provider actually listed the rail under.
+    ///
+    /// A rule rather than a formula: a genre has to appear on a quarter of the rail *and* at least
+    /// twice, so one unusual neighbour cannot invent a shelf, and ties break by identifier so two runs
+    /// over one answer produce the same shelves in the same order.
+    #[test]
+    fn shared_genres_keeps_what_a_rail_agrees_on_and_invents_nothing() {
+        let listed = |genres: &[u32]| candidate("1", "A title").with_genre_ids(genres.to_vec());
+
+        // Three of four share 28 and two share 12; one item alone carries 99.
+        let rail = vec![
+            listed(&[28, 12]),
+            listed(&[28]),
+            listed(&[28, 12]),
+            listed(&[99]),
+        ];
+        assert_eq!(
+            shared_genres(&rail),
+            vec![28, 12],
+            "most-shared first, and a tie would break by identifier"
+        );
+        assert!(
+            !shared_genres(&rail).contains(&99),
+            "a genre on one item of four is below the floor of two"
+        );
+
+        assert!(
+            shared_genres(&[listed(&[1]), listed(&[2])]).is_empty(),
+            "two items that agree on nothing offer no shelf"
+        );
+        assert!(
+            shared_genres(&[]).is_empty(),
+            "an empty rail cannot invent a shelf"
+        );
+    }
+
+    /// A title's recommendations are read from the provider that owns its identifier.
+    ///
+    /// **The right provider, asked about the right title.** `peregrine_sync::refresh_title` states the
+    /// same rule from the other direction: a title may carry several providers' identifiers, and
+    /// asking one of them for another's number is how a film gets another film's recommendations.
+    /// A title no configured provider holds an identifier for is answered empty rather than as a
+    /// failure — a title the library inferred from a filename has none to fetch.
+    #[tokio::test]
+    async fn a_title_s_recommendations_come_from_the_provider_that_owns_its_identifier() {
+        let directory = TempDir::new().unwrap();
+        let adapter = Arc::new(
+            peregrine_testkit::FakeMetadataProvider::publishing_rails(
+                peregrine_domain::id::Provider::Tmdb,
+                Vec::new(),
+            )
+            .with_similar_answer(vec![candidate("604", "The Matrix Reloaded")]),
+        );
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let held = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "The Matrix".to_owned(),
+                original_name: None,
+                sort_name: "matrix".to_owned(),
+                at: 0,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            runtime.similar(held).await.unwrap().items.is_empty(),
+            "a title no provider can be asked about has no recommendations to fetch"
+        );
+
+        runtime
+            .database
+            .attach_external_ids(
+                held,
+                &[peregrine_storage::TitleExternalId {
+                    id: peregrine_domain::id::ExternalId::new(
+                        peregrine_domain::id::Provider::Tmdb,
+                        "603",
+                    )
+                    .expect("a fixture id"),
+                    is_primary: true,
+                    fetched_at: 0,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let found = runtime.similar(held).await.unwrap();
+        assert_eq!(found.items.len(), 1);
+        assert_eq!(found.items[0].name, "The Matrix Reloaded");
+        assert!(
+            found.items[0].title_id > 0,
+            "a recommendation is a title the catalogue owns"
+        );
+
+        // A title the catalogue does not hold is empty rather than an error, which is the same answer
+        // `library_title` gives for one this account may not see (I37).
+        let absent = runtime.similar(9_999).await.unwrap();
+        assert!(
+            absent.items.is_empty(),
+            "a title the catalogue does not hold has no recommendations, and that is not an error: {absent:?}"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// A scanned library holding one file, and the title the scan made of it.
+    ///
+    /// **A real scan of a real file rather than hand-written rows**, and that is the point: what
+    /// `start_playback` needs is a path the *scanner* wrote, a root that path is really inside, and a
+    /// container the file's name really states. A fixture that inserted `media_file` rows directly
+    /// would be asserting a shape no scan produces, and the containment check is exactly the kind of
+    /// thing that passes such a fixture and fails a real library.
+    async fn scanned(directory: &TempDir, name: &str) -> (Runtime, i64) {
+        let movies = directory.path().join("Movies");
+        std::fs::create_dir_all(&movies).expect("the library folder is creatable");
+        std::fs::write(movies.join(name), vec![9_u8; 4096]).expect("the fixture file writes");
+        let (runtime, _sink) = runtime(directory).await;
+        runtime
+            .add_library_root(
+                &movies.to_string_lossy(),
+                LibraryRootKind::Movies,
+                ScanMode::Manual,
+            )
+            .await
+            .expect("the folder becomes a root");
+        let started = runtime.start_library_scan().await.expect("a scan starts");
+        let row = await_terminal(&runtime, started.journal_id).await;
+        assert_eq!(
+            row.state,
+            JobPhase::Succeeded,
+            "the scan must succeed: {row:?}"
+        );
+        let listed = runtime.library_titles(None, 10).await.unwrap();
+        let title = listed
+            .into_iter()
+            .next()
+            .expect("the scan indexed the file as a title");
+        (runtime, title.row.title.id)
+    }
+
+    /// The whole path, end to end: a file on disk, a scan, a Play press, and a URL that serves the
+    /// bytes.
+    ///
+    /// The HTTP behaviour is `peregrine-stream`'s to assert; what this owns is the wiring — that the
+    /// title resolves, that the file is the one the library holds, that the path passes containment, and
+    /// that a session is open afterwards.
+    #[tokio::test]
+    async fn a_scanned_file_can_be_played_over_a_loopback_url() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
+
+        let started = runtime.start_playback(id).await.expect("the film plays");
+
+        assert_eq!(started.title_id, id);
+        assert!(started.media_file_id > 0);
+        assert_eq!(
+            started.support,
+            LocalPlayback::Webview,
+            "an MP4 is what the webview's own media stack reads, which is the case this whole slice \
+             exists for"
+        );
+        assert!(
+            started.url.starts_with("http://127.0.0.1:"),
+            "loopback only, and the port is ephemeral: {}",
+            started.url
+        );
+        assert!(
+            !started
+                .url
+                .contains(&directory.path().to_string_lossy().into_owned()),
+            "the URL names the session, never the file: {}",
+            started.url
+        );
+        assert!(runtime.is_playing());
+        // The socket is really listening, which the URL alone cannot show.
+        let port: u16 = started
+            .url
+            .rsplit(':')
+            .next()
+            .and_then(|tail| tail.split('/').next())
+            .and_then(|text| text.parse().ok())
+            .expect("the url carries a port");
+        tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("the session is listening");
+
+        assert!(
+            runtime.stop_playback(started.session_id).await,
+            "a stop that names the session it opened closes it"
+        );
+        assert!(!runtime.is_playing(), "and stopping ends it");
+
+        runtime.shutdown().await;
+    }
+
+    /// A second press replaces the first session rather than opening a second listener.
+    ///
+    /// SECURITY.md T10 asks for a socket that dies with its session, and "one at a time" is what makes
+    /// that reachable: a runtime holding two sessions could not close both when the window went away.
+    #[tokio::test]
+    async fn playing_again_replaces_the_session_and_frees_the_first_port() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
+
+        let first = runtime
+            .start_playback(id)
+            .await
+            .expect("the first press plays");
+        let first_port: u16 = first
+            .url
+            .rsplit(':')
+            .next()
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        let second = runtime
+            .start_playback(id)
+            .await
+            .expect("the second press plays");
+
+        assert_ne!(
+            first.url, second.url,
+            "a new session, not the old URL re-answered"
+        );
+        assert!(
+            tokio::net::TcpStream::connect(("127.0.0.1", first_port))
+                .await
+                .is_err(),
+            "the replaced session's socket is closed"
+        );
+        assert!(runtime.is_playing());
+
+        runtime.shutdown().await;
+    }
+
+    /// A container the webview does not demux is answered as such, so the page can say why.
+    ///
+    /// The tenth file in this project's own library is an HEVC MKV, and a Play control that offered it
+    /// without a word would produce a black rectangle and a failed decode (`ADR 0023 §5`).
+    #[tokio::test]
+    async fn a_container_the_webview_cannot_read_is_named_before_it_is_pressed() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned(&directory, "Nuremberg (2025).mkv").await;
+
+        let detail = runtime
+            .library_title(id)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+
+        assert_eq!(
+            detail.playback.support,
+            Some(LocalPlayback::ExternalPlayer),
+            "an MKV needs mpv, and the page is told so before the press"
+        );
+        assert_eq!(
+            detail.playback.offer,
+            peregrine_domain::TitleOffer::Play,
+            "the library does hold it, so the offer is not the thing that changes"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// A poster is captured only for a title that has none, and a stored frame stops the asking.
+    ///
+    /// **The rule that stops a film still overwriting real artwork.** A capture costs a decode of the film
+    /// and a blob in the cache, and it exists for the title a provider has drawn nothing for — so the
+    /// answer is `true` only when neither a provider's poster nor a generated one is on disk, and it turns
+    /// `false` the moment either arrives.
+    #[tokio::test]
+    async fn a_poster_is_wanted_only_while_a_title_has_none() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
+
+        assert!(
+            runtime.needs_poster(id).await.unwrap(),
+            "a freshly scanned stub is exactly the title a capture exists for"
+        );
+
+        // A provider that has filled the title in with a poster path, and the blob the fetch left.
+        runtime
+            .database
+            .update_title_metadata(
+                id,
+                details("Alien", Some("/poster.jpg")),
+                "alien".to_owned(),
+                peregrine_storage::MetadataState::Partial,
+                "tmdb".to_owned(),
+                1,
+            )
+            .await
+            .unwrap();
+        assert!(
+            runtime.needs_poster(id).await.unwrap(),
+            "the catalogue records a poster the cache does not hold, so there is still nothing to draw"
+        );
+
+        let key = peregrine_sync::ImageKey::for_image(
+            peregrine_domain::Provider::Tmdb,
+            "/poster.jpg",
+            peregrine_sync::ImageVariant::PosterW342,
+        );
+        peregrine_sync::ImageCache::new(runtime.config().artwork_directory())
+            .store(&key, b"pretend this is a jpeg")
+            .expect("the artwork directory is writable");
+        assert!(
+            !runtime.needs_poster(id).await.unwrap(),
+            "the provider's poster is on disk, so a film still would be a downgrade"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// A frame this machine generated is a poster, and it stops the asking exactly as a provider's does.
+    #[tokio::test]
+    async fn a_generated_poster_answers_the_read_even_though_no_provider_drew_one() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
+        assert!(runtime.needs_poster(id).await.unwrap());
+
+        // The sink a capture route stores through, driven the way the route drives it — on a blocking
+        // thread, which is what `ThumbnailSink::store`'s contract requires and what makes its `block_on`
+        // legal. The route itself is `peregrine-stream`'s to test; what this owns is that a stored frame
+        // reaches the reads.
+        let posters = Arc::clone(&runtime.posters);
+        tokio::task::spawn_blocking(move || {
+            peregrine_stream::ThumbnailSink::store(
+                posters.as_ref(),
+                id,
+                &[0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01],
+            )
+        })
+        .await
+        .expect("the blocking task completes")
+        .expect("the artwork directory is writable");
+
+        assert!(!runtime.needs_poster(id).await.unwrap());
+
+        let listed = runtime.library_titles(None, 10).await.unwrap();
+        let entry = listed.first().expect("the fixture's title");
+        assert!(
+            entry.poster.is_some(),
+            "the tile has a picture: a generated poster is the fallback the screen draws"
+        );
+        assert!(!entry.needs_poster);
+
+        let detail = runtime.library_title(id).await.unwrap().expect("the title");
+        assert!(
+            detail.playback.support.is_some(),
+            "and the page still knows what would play"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// A title the library holds nothing of cannot be played, and a title that is not here is a
+    /// different refusal.
+    #[tokio::test]
+    async fn playing_something_the_library_does_not_hold_is_refused_by_name() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        let refused = runtime
+            .start_playback(4_242)
+            .await
+            .expect_err("nothing is here to play");
+
+        assert!(
+            matches!(refused, RuntimeError::UnknownTitle),
+            "a title that does not exist reads the same as one this account may not see (I37): {refused:?}"
+        );
+        assert!(!runtime.is_playing(), "and no session was left open");
+
+        runtime.shutdown().await;
+    }
+
+    /// Stopping when nothing is playing is an answer rather than a failure.
+    #[tokio::test]
+    async fn stopping_nothing_reports_that_it_stopped_nothing() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+
+        // A stop naming a session this runtime never opened is `false` rather than an error: there is no
+        // state in which asking for silence should be refused, and nothing of the caller's was open.
+        assert!(!runtime.stop_playback(SessionId::default()).await);
+
+        runtime.shutdown().await;
+    }
+
+    /// The file a press would use: an item's own preference wins, and a copy the scan could not find
+    /// never does.
+    #[test]
+    fn the_playable_file_follows_the_library_s_own_preference() {
+        use peregrine_domain::{MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText};
+        use peregrine_storage::{ItemEvidence, TitleEvidence};
+
+        fn file(id: i64, name: &str, missing: bool) -> MediaFile {
+            let at = jiff::Timestamp::from_millisecond(1_700_000_000_000).expect("in range");
+            let mut file = MediaFile {
+                id,
+                media_item_id: 1,
+                path: NonEmptyText::new(name).expect("fixture text"),
+                root_id: Some(1),
+                size_bytes: 4_096,
+                mtime_ms: at,
+                added_at: at,
+                missing_since: None,
+                container: None,
+                duration_ms: None,
+                video_codec: None,
+                video_profile: None,
+                width: None,
+                height: None,
+                bit_depth: None,
+                hdr_format: None,
+                frame_rate: None,
+                bitrate_kbps: None,
+                audio_codec: None,
+                audio_channels: None,
+                audio_layout: None,
+                audio_languages: None,
+                subtitle_format: None,
+                probe_version: None,
+                probe_json: None,
+                quality_label: None,
+                updated_at: at,
+            };
+            if missing {
+                file.mark_missing(at);
+            }
+            file
+        }
+
+        fn item(preferred: Option<i64>, files: Vec<MediaFile>) -> ItemEvidence {
+            let at = jiff::Timestamp::from_millisecond(1_700_000_000_000).expect("in range");
+            ItemEvidence {
+                item: MediaItem {
+                    id: 1,
+                    title_id: 7,
+                    episode_id: None,
+                    state: MediaItemState::Available,
+                    origin: MediaOrigin::Scan,
+                    preferred_file_id: preferred,
+                    quality_label: None,
+                    created_at: at,
+                    updated_at: at,
+                },
+                files,
+                jobs: Vec::new(),
+            }
+        }
+
+        // Read order says the first file; the item's preference says the second, and the preference is
+        // what a person chose.
+        let evidence = TitleEvidence {
+            items: vec![item(
+                Some(2),
+                vec![file(1, "/a.mp4", false), file(2, "/b.mkv", false)],
+            )],
+            jobs: Vec::new(),
+        };
+        assert_eq!(
+            playable_file(&evidence).map(|file| file.id),
+            Some(2),
+            "the item's preferred file wins over read order"
+        );
+
+        // A preference for a copy the scan could not find falls through rather than answering a file
+        // that cannot be opened.
+        let evidence = TitleEvidence {
+            items: vec![item(
+                Some(1),
+                vec![file(1, "/a.mp4", true), file(2, "/b.mkv", false)],
+            )],
+            jobs: Vec::new(),
+        };
+        assert_eq!(playable_file(&evidence).map(|file| file.id), Some(2));
+
+        // Nothing present is nothing to play, which is the state `NoPlayableFile` names.
+        let evidence = TitleEvidence {
+            items: vec![item(None, vec![file(1, "/a.mp4", true)])],
+            jobs: Vec::new(),
+        };
+        assert!(playable_file(&evidence).is_none());
+        assert!(
+            playable_file(&TitleEvidence {
+                items: Vec::new(),
+                jobs: Vec::new(),
+            })
+            .is_none(),
+            "a title the library holds nothing of has nothing to play"
+        );
     }
 }

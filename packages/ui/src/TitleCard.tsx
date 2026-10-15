@@ -8,6 +8,7 @@ import {
   DWELL_MS,
   IDLE_PREVIEW,
   MIN_VISIBLE_RATIO,
+  REVEAL_LIFT_Z,
   nextPreview,
   panelVisible,
   previewLift,
@@ -41,8 +42,8 @@ import { twMerge } from "./merge.js";
  * halves are the ones a Node test cannot reach (`PG-E21-03`).
  *
  * **No layout thrash, which is why the layer is inside fixed bounds.** The card never changes size:
- * the revealed panel is `inset-0` within the tile's own box, the only animated properties are
- * `transform` and `opacity`, the shadow ramp rides a pseudo-element's opacity rather than an
+ * the revealed panel is absolutely positioned at the poster's foot. Only `transform` and
+ * `opacity` animate, the shadow ramp rides a pseudo-element's opacity rather than an
  * animated `box-shadow`, and `will-change` is on for exactly the card that is transitioning and off
  * every other tile in the grid (§5 rule 3). `contain: layout style` — and deliberately not `paint`,
  * which would clip the ramp's own shadow to the tile's box.
@@ -217,12 +218,13 @@ export interface TitlePreviewPanelProps {
   /** The score the panel repeats beside its star, when the catalogue holds one. */
   readonly rating?: number | null;
   /**
-   * How many people voted, already written for a person, such as "24,000 votes".
+   * The title's name, when the tile was asked to draw one.
    *
-   * A string rather than the count, because writing a number is a locale decision and `packages/ui`
-   * has no locale (`AGENTS R7` keeps the rule out of the UI, and this is the words).
+   * `null` is the ordinary case, and the reason is in the module comment: a provider's poster *is* the
+   * title's name, composed for the box, and a caption under it is a second source of truth for the same
+   * fact. A captured frame is not — see `TitleCardProps::showTitle`.
    */
-  readonly votesLabel?: string | null;
+  readonly name?: string | null;
   /** The caller's one line — "1999 · Film" — which is also the tile's accessible name. */
   readonly meta?: string | null;
   /** The synopsis the list answer carried. Whitespace-collapsed and clamped to three lines. */
@@ -232,7 +234,7 @@ export interface TitlePreviewPanelProps {
 }
 
 /**
- * The metadata layer the ladder reveals, inside the enlarged tile.
+ * The metadata layer the ladder reveals at the foot of the enlarged poster.
  *
  * **It is not a control surface.** PG-E9-01 owns the watchlist and bookmark actions, and an enabled
  * button that does nothing is worse than an absent one — the rule PG-E1-07 already set for the menu
@@ -242,20 +244,23 @@ export interface TitlePreviewPanelProps {
  * destination.
  *
  * **It is hidden from assistive technology, and deliberately.** Everything it shows is either
- * already in the tile's accessible name — the meta line, the rating's spoken form, the vote count —
- * or, for the synopsis, prose a person chose to hover for; announcing it again inside the link would
- * make the link's name a paragraph.
+ * already in the tile's accessible name — the meta line and the rating's spoken form — or, for the
+ * synopsis, prose a person chose to hover for; announcing it again inside the link would make the
+ * link's name a paragraph.
+ *
+ * **The vote count is gone, and that is a decision rather than an omission.** A tile is judged by its
+ * artwork and its score; how many people voted on a title thousands of strangers also rated is noise
+ * on every tile in a rail, and it was the longest string the panel drew.
  */
 export function TitlePreviewPanel({
   rating,
-  votesLabel,
+  name,
   meta,
   overview,
   detailsLabel,
 }: TitlePreviewPanelProps): ReactElement {
   const prose = previewOverview(overview);
   const showsScore = rating !== null && rating !== undefined;
-  const votes = said(votesLabel);
   const metaLine = said(meta);
   const details = said(detailsLabel);
 
@@ -263,33 +268,30 @@ export function TitlePreviewPanel({
     <span
       aria-hidden="true"
       className={clsx(
-        "absolute inset-0 flex flex-col justify-end gap-1 overflow-hidden rounded-[inherit]",
-        // A surface over the artwork rather than `--surface-scrim`, and that is a defect found by
-        // looking at the light theme: the scrim token is a *dimming* layer — 0.12 L at 72% in dark
-        // and 0.30 L at 45% in light — so it is dark in both themes while `--text-primary` is light
-        // in one and dark in the other. Text over arbitrary artwork therefore has no readable
-        // pairing with it, and the kit has no "text on media" token to pair instead (that is
-        // `packages/theme`'s, PG-E21-07/PG-E21-11). The theme's own surface at 85% keeps the artwork
-        // visible while the text stays on the surface the contrast rules were validated against.
-        "bg-surface-0/85 p-2 text-caption text-text-primary",
+        "absolute inset-x-0 bottom-0 flex max-h-full flex-col justify-end gap-1 overflow-hidden rounded-b-[inherit]",
+        // The theme surface pairs with its text in both themes; the media scrim is dark in both.
+        "bg-linear-to-b from-transparent via-surface-1 via-20% to-surface-1 p-2 pt-4 text-caption text-text-primary",
       )}
       data-preview-panel=""
     >
-      {showsScore || votes !== null ? (
+      {showsScore ? (
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          {rating === null || rating === undefined ? null : (
-            <span className="inline-flex items-center gap-0.5 tabular-nums">
-              <Icon className="text-state-warn" name="star" size={16} />
-              {formatRating(rating)}
-            </span>
-          )}
-          {votes === null ? null : <span className="text-text-secondary">{votes}</span>}
+          <span className="inline-flex items-center gap-0.5 tabular-nums">
+            <Icon className="text-state-warn" name="star" size={16} />
+            {formatRating(rating)}
+          </span>
         </span>
       ) : null}
-      {metaLine === null ? null : <span className="text-text-secondary">{metaLine}</span>}
+      {/* The name, when the caller asked for it — see `TitleCardProps::showTitle`. `truncate` rather than
+          a wrap, because a wrapped line inside a panel that is pinned to the poster's foot pushes the meta
+          and the action out of the visible box, which is what it did before this was clamped. */}
+      {name === null ? null : <span className="truncate font-medium">{name}</span>}
+      {metaLine === null ? null : (
+        <span className="truncate text-text-secondary">{metaLine}</span>
+      )}
       {prose === null ? null : <span className="line-clamp-3">{prose}</span>}
       {details === null ? null : (
-        <span className="mt-0.5 inline-flex w-fit items-center rounded-sm bg-accent px-2 py-1 font-medium text-text-on-accent">
+        <span className="mt-0.5 inline-flex w-full items-center justify-center rounded-full bg-accent px-2 py-1 font-medium text-text-on-accent">
           {details}
         </span>
       )}
@@ -317,12 +319,29 @@ export interface TitleCardProps {
   readonly rating?: number | null;
   /** How the rating is spoken, such as "rated 8.5 out of 10". The number alone is not a name. */
   readonly ratingLabel?: string | null;
-  /** How the vote count is written, such as "24,000 votes". Absent draws no count. */
-  readonly votesLabel?: string | null;
   /** The synopsis the list answer carried, drawn in the revealed panel's three clamped lines. */
   readonly overview?: string | null;
   /** The Details verb, localized. Absent draws no action in the panel. */
   readonly detailsLabel?: string | null;
+  /**
+   * Whether the container left room for the tile's enlargement on hover.
+   *
+   * True for a rail, which reserves it through `revealRoom`; **false for a grid**, whose columns are
+   * derived to fit the measured width and therefore have no room to give. A grid that scaled anyway had
+   * its outer tiles cut off by the scroller on both sides, which is what a screenshot of a fresh library
+   * showed.
+   */
+  readonly lift?: boolean;
+  /**
+   * Whether the revealed panel draws the title's name.
+   *
+   * **A per-surface decision, and there is exactly one surface on the other side of it.** A provider's
+   * poster identifies its title — composed for the 2:3 box, and what a reader recognises — so a rail of
+   * them says nothing with a caption the artwork did not already say. A **captured frame** is a
+   * photograph of one moment of a film: it identifies nothing, and a library tiled with them is a wall a
+   * reader cannot read. So the library asks for the name and the rails do not.
+   */
+  readonly showTitle?: boolean;
   readonly availability?: CardAvailability;
   /** The chip's word, localized by the caller. Without it the state draws no chip. */
   readonly availabilityLabel?: string;
@@ -354,9 +373,9 @@ export function TitleCard({
   placeholder,
   rating,
   ratingLabel,
-  votesLabel,
   overview,
   detailsLabel,
+  showTitle = false,
   availability,
   availabilityLabel,
   size,
@@ -444,7 +463,7 @@ export function TitleCard({
   const showsChip = signal !== null && chip !== null;
 
   const metaLine = said(meta);
-  const spoken = [title, metaLine, said(ratingLabel), said(votesLabel), showsChip ? chip : null]
+  const spoken = [title, metaLine, said(ratingLabel), showsChip ? chip : null]
     .filter((part): part is string => part !== null)
     .join(", ");
 
@@ -499,7 +518,7 @@ export function TitleCard({
         // The lift, for the reason `REVEAL_LIFT_Z` gives: without it the ramp of a tile that has a
         // later sibling is painted under that sibling, which is half the lift `PG-E7-05` is judged
         // on. `null` is document order, which is what every tile that is not enlarged uses.
-        ...(lift === null ? {} : { zIndex: lift }),
+        ...(lift === null && !focused ? {} : { zIndex: lift ?? REVEAL_LIFT_Z }),
       }}
       {...(tabIndex === undefined ? {} : { tabIndex })}
       {...(onNavigate === undefined ? {} : { onNavigate })}
@@ -567,9 +586,9 @@ export function TitleCard({
         <TitlePreviewPanel
           detailsLabel={said(detailsLabel)}
           meta={metaLine}
+          name={showTitle ? title : null}
           overview={overview ?? null}
           rating={rating ?? null}
-          votesLabel={said(votesLabel)}
         />
       ) : null}
     </Link>

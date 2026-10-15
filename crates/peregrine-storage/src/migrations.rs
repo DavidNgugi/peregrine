@@ -171,14 +171,15 @@ mod tests {
         "title_fts_idx",
     ];
 
-    /// The forty tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 41] = [
+    /// The forty-two tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
+    const DOCUMENTED_TABLES: [&str; 42] = [
         "account",
         "cast_session",
         "company",
         "credit",
         "dataset_state",
         "device",
+        "discover_rail",
         "download_file",
         "download_job",
         "episode",
@@ -788,14 +789,22 @@ mod tests {
         ("error_message", "TEXT", 0, None, 0),
     ];
 
+    // Migration 0015.
+    const DISCOVER_RAIL: &[ColumnShape] = &[
+        ("rail", "TEXT", 1, None, 1),
+        ("position", "INTEGER", 1, None, 2),
+        ("title_id", "INTEGER", 1, None, 0),
+    ];
+
     /// Every documented table with the column shape its migration must produce.
-    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 40] = [
+    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 41] = [
         ("account", ACCOUNT),
         ("cast_session", CAST_SESSION),
         ("company", COMPANY),
         ("credit", CREDIT),
         ("dataset_state", DATASET_STATE),
         ("device", DEVICE),
+        ("discover_rail", DISCOVER_RAIL),
         ("download_file", DOWNLOAD_FILE),
         ("download_job", DOWNLOAD_JOB),
         ("episode", EPISODE),
@@ -846,6 +855,7 @@ mod tests {
         ("credit", "episode", "episode_id", "id", "CASCADE"),
         ("credit", "person", "person_id", "id", "CASCADE"),
         ("credit", "title", "title_id", "id", "CASCADE"),
+        ("discover_rail", "title", "title_id", "id", "CASCADE"),
         (
             "download_file",
             "download_job",
@@ -945,9 +955,10 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 41] = [
+    const DOCUMENTED_INDICES: [&str; 42] = [
         "credit_person_idx",
         "credit_title_order_idx",
+        "discover_rail_title_idx",
         "download_job_active_idx",
         "download_job_hash_uq",
         "download_job_title_idx",
@@ -1098,6 +1109,7 @@ mod tests {
             "notification_pending_idx",
             "(delivery_state) WHERE delivery_state = 'pending'",
         ),
+        ("discover_rail_title_idx", "(title_id)"),
     ];
 
     /// The file every fixture in this module keeps its database in.
@@ -2221,6 +2233,7 @@ mod tests {
          VALUES ('download.completed', 'Download complete', 0)",
         "INSERT INTO cast_session (device_id, state, delivery, started_at) \
          VALUES (1, 'playing', 'direct', 0)",
+        "INSERT INTO discover_rail (rail, position, title_id) VALUES ('popular_movies', 0, 1)",
         "INSERT INTO provider_cache \
          (key, provider, resource, fetched_at, expires_at, schema_version, body, size_bytes) \
          VALUES ('sha256:provider', 'tmdb', 'movie', 0, 0, 1, X'00', 1)",
@@ -2244,6 +2257,8 @@ mod tests {
         SELECT 'dataset_state' AS table_name, COUNT(*) AS n FROM dataset_state
         UNION ALL
         SELECT 'device' AS table_name, COUNT(*) AS n FROM device
+        UNION ALL
+        SELECT 'discover_rail' AS table_name, COUNT(*) AS n FROM discover_rail
         UNION ALL
         SELECT 'download_file' AS table_name, COUNT(*) AS n FROM download_file
         UNION ALL

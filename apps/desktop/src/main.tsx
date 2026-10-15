@@ -22,7 +22,10 @@ void resolvePlatform().then((platform) => {
           to the browser entry, and the shell stays renderable without one (its tests have none).
           A path this build has no screen for opens the home screen, which is what a browser does
           with a URL it cannot resolve. */}
-      <App platform={platform} route={parseRoute(window.location.pathname) ?? HOME} />
+      <App
+        platform={platform}
+        route={parseRoute(window.location.pathname + window.location.search) ?? HOME}
+      />
     </StrictMode>,
   );
 });

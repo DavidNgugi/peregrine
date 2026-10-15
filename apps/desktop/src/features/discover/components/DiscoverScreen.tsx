@@ -2,21 +2,26 @@ import {
   Button,
   EmptyState,
   ErrorState,
+  IconButton,
   Link,
   Rail,
   Screen,
   TextInput,
   TitleCard,
 } from "@peregrine/ui";
-import type { RailItemDto, TitleMatchDto } from "@peregrine/ipc-client";
-import { useState, type ReactElement } from "react";
+import type { RailItemDto, RailKindDto, TitleMatchDto } from "@peregrine/ipc-client";
+import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
 import { imageUrl } from "../../../lib/media.js";
-import { useDiscoverSearch } from "../hooks/useDiscoverSearch.js";
+import {
+  MIN_QUERY_CHARS,
+  useDiscoverSearch,
+  type SearchSource,
+} from "../hooks/useDiscoverSearch.js";
 import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
-import { DiscoverHero, type HeroSlide } from "./DiscoverHero.js";
+import { DiscoverHero, DiscoverHeroSkeleton, type HeroSlide } from "./DiscoverHero.js";
 import { heroSlides } from "./hero-rotation.js";
 
 /**
@@ -39,12 +44,7 @@ import { heroSlides } from "./hero-rotation.js";
  * biggest" is layout rather than policy, and it maps a cached path to a URL through `lib/media.ts`,
  * the one place that names the asset protocol.
  *
- * **The search box is at the top, above the hero**, which is where a person looks for it first: the
- * form is the same form, moved rather than rebuilt, and the answers it produces stay beside it — a
- * box at the top whose results appeared below the rails would be a box whose results nobody finds.
- * It is submitted rather than typed: it leaves the machine, and a request per keystroke is a request
- * per keystroke against somebody else's API (`AGENTS R24`). It stays because a rail is what a
- * provider chose to publish and a search is what the person came for.
+ * Search is submitted rather than fired per keystroke because it leaves the machine (AGENTS R24).
  *
  * **The two halves are split so the drawing can be tested.** [`DiscoverScreen`] is the data layer —
  * two hooks and one piece of local state — and [`DiscoverView`] takes what they answered as props,
@@ -77,7 +77,14 @@ export interface DiscoverViewProps {
     readonly searching: boolean;
     readonly failed: boolean;
     readonly searched: boolean;
-    readonly submit: (query: string) => void;
+    /**
+     * Which of the two answered — the catalogue's own index, or a provider asked because the catalogue
+     * had nothing. The screen says which, because the two are not the same claim: one is instant and
+     * offline, and the other has just written what it found into the catalogue.
+     */
+    readonly source: SearchSource;
+    /** Runs the search now rather than after the debounce: the form's submit, and the magnifier. */
+    readonly searchNow: () => void;
     readonly query: string;
     readonly setQuery: (query: string) => void;
   };
@@ -90,6 +97,148 @@ export interface DiscoverViewProps {
    */
   readonly onPlay?: (slide: HeroSlide) => void;
   readonly onNavigate: (route: Route) => void;
+  /**
+   * The selected type, or `undefined` for **All**.
+   *
+   * `| undefined` is not the usual "this prop may be omitted": here the absence *is* a choice — the
+   * unfiltered read — so a caller passing a value that happens to be `undefined` means All rather
+   * than nothing, and `exactOptionalPropertyTypes` would otherwise force every call site to spell
+   * that with a conditional spread.
+   */
+  readonly titleKind?: RailKindDto | undefined;
+  readonly onKindChange?: (kind: RailKindDto | undefined) => void;
+  /**
+   * One more control for the toolbar's trailing end — the shell's theme switch, which has no other
+   * home now that the window draws no title bar.
+   */
+  readonly trailing?: ReactNode;
+}
+
+/** Search and category controls shared by the hero and its empty-artwork fallback. */
+export function DiscoverToolbar({
+  search,
+  rails,
+  titleKind,
+  onKindChange,
+  feedback,
+  trailing,
+}: {
+  readonly search: DiscoverViewProps["search"];
+  readonly rails: Pick<HomeRailsView, "refresh" | "refreshing">;
+  readonly titleKind: RailKindDto | undefined;
+  readonly onKindChange: (kind: RailKindDto | undefined) => void;
+  readonly feedback?: ReactNode;
+  readonly trailing?: ReactNode;
+}): ReactElement {
+  const { t } = useTranslation();
+  return (
+    <div className="relative flex flex-wrap items-center gap-3" data-discover-toolbar="">
+      <form
+        role="search"
+        // **The pill is the field, so the pill draws the focus ring.** The input inside it is restyled
+        // into a transparent, borderless, rounded box (`[&_input]:...` below), and with the primitive's
+        // default focus ring it drew a *second* rounded outline inside this one — two concentric pills
+        // on focus, which is what a reader saw. `focus-within` puts the token ring on the shape a person
+        // reads as the field, and `focusRing="none"` is how the input is told the caller owns it.
+        className="flex min-w-0 basis-full items-center gap-2 rounded-full border border-border-strong bg-surface-0/70 px-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus-ring sm:basis-auto sm:flex-1"
+        onSubmit={(event) => {
+          event.preventDefault();
+          search.searchNow();
+        }}
+      >
+        <TextInput
+          autoComplete="off"
+          className="min-w-0 flex-1 [&_input]:h-11 [&_input]:rounded-full [&_input]:border-0 [&_input]:bg-transparent"
+          focusRing="none"
+          label={t("discover.search.label")}
+          labelHidden
+          name="query"
+          type="search"
+          onChange={(event) => search.setQuery(event.target.value)}
+          placeholder={t("discover.search.placeholder")}
+          value={search.query}
+        />
+        {/* **The magnifier rather than the word.** The pill is the field, and the control that
+            submits it is the field's own affordance — a word inside a text field reads as part of the
+            label, which is why the reference puts the mark there. It is still a submit button in a
+            form, so `Enter` in the field and a click do the same thing — which is also the escape hatch
+            from the debounce: a reader who has decided the catalogue does not have it should not wait
+            for a timer. Its accessible name is the same string the word was (`IconButton` takes a
+            required `label`, and `title` shows it to a pointer). `size-9` keeps a 36 px target inside
+            the 44 px pill — the mark is 20 px (§9's toolbar size) with 8 px around it. */}
+        <IconButton
+          className="size-9"
+          disabled={search.searching || search.query.trim().length < MIN_QUERY_CHARS}
+          icon="search"
+          label={t("discover.search.action")}
+          title={t("discover.search.action")}
+          type="submit"
+          variant="ghost"
+        />
+      </form>
+      <div className="ms-auto flex shrink-0 items-center gap-2">
+        <div
+          role="group"
+          aria-label={t("discover.filter.label")}
+          className="flex items-center gap-1 rounded-full border border-border-subtle bg-surface-0/70 p-1"
+        >
+          {/* **All is a choice and not the absence of one.** Every rail is what a home screen shows by
+            default, and a first launch that drew only films would look empty to a household whose
+            provider publishes mostly series — so the unfiltered read is the one the control starts
+            on, and `undefined` is how it travels: the core's `home_rails(None)` keeps every rail and
+            `search_providers` asks for both kinds. */}
+          {([undefined, "movie", "show"] as const).map((kind) => (
+            <Button
+              key={kind ?? "all"}
+              aria-pressed={titleKind === kind}
+              className="rounded-full"
+              onClick={() => onKindChange(kind)}
+              variant={titleKind === kind ? "primary" : "ghost"}
+            >
+              {t(
+                kind === undefined
+                  ? "discover.filter.all"
+                  : kind === "movie"
+                    ? "discover.filter.movies"
+                    : "discover.filter.shows",
+              )}
+            </Button>
+          ))}
+        </div>
+        {/* **An icon, at the row's own height, on the trailing edge.** As a word it was a smaller box
+            than everything beside it — `h-7` against the search field's `h-11` and the filter group's
+            `p-1` plus `h-9` — so it read as a control that had drifted out of the row it belongs to.
+            `size-11` puts it on the same 44 px as both, and the trailing edge is where an action that
+            re-asks every provider belongs: it is not a filter, and sitting between the search field and
+            the selector made it look like one.
+
+            It turns while a fetch is in flight, which is the one piece of state an icon-only control
+            can show — `Button`'s text used to say "Refreshing…" and a dimmed glyph says nothing. That
+            is information rather than decoration, which is what §5 rule 4 permits (the same argument
+            the loading sweep records), it is `transform` only (§5 rule 2), and under reduced motion it
+            stops while the state stays in the label, `disabled`, and the native tooltip. */}
+        <IconButton
+          className={[
+            // A surface and a border of its own, because a lone icon on the hero artwork is a glyph
+            // floating beside two pills rather than a control: the filter group carries the same
+            // `border-border-subtle` and the same translucent surface, so the two read as siblings.
+            "size-11 rounded-full border border-border-subtle bg-surface-0/70",
+            rails.refreshing ? "[&>svg]:animate-spin [&>svg]:motion-reduce:animate-none" : "",
+          ].join(" ")}
+          disabled={rails.refreshing}
+          icon="refresh"
+          label={rails.refreshing ? t("discover.refresh.running") : t("discover.refresh.action")}
+          onClick={() => {
+            void rails.refresh();
+          }}
+          title={rails.refreshing ? t("discover.refresh.running") : t("discover.refresh.action")}
+          variant="ghost"
+        />
+        {trailing}
+      </div>
+      {feedback}
+    </div>
+  );
 }
 
 /** The screen as it is drawn, from answers. */
@@ -98,8 +247,11 @@ export function DiscoverView({
   search,
   onPlay,
   onNavigate,
+  titleKind,
+  onKindChange,
+  trailing,
 }: DiscoverViewProps): ReactElement {
-  const { i18n, t } = useTranslation();
+  const { t } = useTranslation();
 
   const routeFor = (item: RailItemDto): Route => ({
     id: item.titleId,
@@ -115,20 +267,15 @@ export function DiscoverView({
     item.kind === "movie" ? t("discover.kind.movie") : t("discover.kind.show");
   const kindForResult = (row: TitleMatchDto): string =>
     row.kind === "movies" ? t("discover.kind.movie") : t("discover.kind.show");
-  // The two spoken forms the tile's name carries, and the panel repeats: the score beside its star
-  // and the count beside it. `null` is the core's "the provider said nothing", which draws and
-  // announces nothing rather than a zero nobody claimed. The count is grouped by the locale the
-  // screen is in, because i18next interpolates a number as it is and "24000 votes" is not a number
-  // anybody writes.
+  // The score the tile draws and announces. `null` is the core's "the provider said nothing", which
+  // draws and announces nothing rather than a zero nobody claimed.
+  //
+  // **No count anywhere, and the core still carries it** — a list answer sends how many people voted,
+  // `RailItem` holds it, and `RailItemDto` hands it over, which is where it stays until a screen that
+  // is *about* one title has a use for it. On a rail of posters it was noise on every tile, and on the
+  // hero's band it was the least useful thing on the line.
   const ratingLabel = (item: RailItemDto): string | null =>
     item.rating === null ? null : t("card.rating", { score: item.rating });
-  const votesLabel = (item: RailItemDto): string | null =>
-    item.votes === null
-      ? null
-      : t("card.votes", {
-          count: item.votes,
-          formatted: new Intl.NumberFormat(i18n.language).format(item.votes),
-        });
 
   // The hero's rotation, resolved here because a URL, a year and a count are the caller's words and
   // not the kit's: the component draws what it is handed and decides only what the timing is.
@@ -143,7 +290,6 @@ export function DiscoverView({
     overview: item.overview,
     score: item.rating === null ? null : item.rating.toFixed(1),
     scoreLabel: ratingLabel(item),
-    votesLabel: votesLabel(item),
     playable: item.playable,
   }));
 
@@ -151,90 +297,106 @@ export function DiscoverView({
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
   const firstFetch = rails.state === "fetching";
+  // A read of a *different* selection — the Movies / TV shows switch — is also a moment where what is
+  // on screen is not the answer yet, and the hook answers with no rails until it is. That is one IPC
+  // round trip, far too short to draw placeholders in, and long enough that "Nothing here yet" would
+  // be a claim about a catalogue nobody has read: so the screen says nothing rather than something
+  // wrong, and the fetch that *is* worth placeholders is the one above.
+  const unknownYet = firstFetch || rails.loading;
+
+  const feedback =
+    search.searching || search.failed || search.searched ? (
+      <div className="absolute start-0 top-full z-30 mt-2 flex max-h-80 w-full max-w-2xl flex-col gap-2 overflow-y-auto rounded-md border border-border-subtle bg-surface-1 p-3">
+        {/* Announced rather than drawn as a bar: there is no completion to show for a request whose
+          length nobody knows, and a determinate bar would be a number invented to fill a shape. */}
+        {search.searching ? (
+          <p className="text-body text-text-secondary" role="status">
+            {t("discover.search.searching")}
+          </p>
+        ) : null}
+
+        {!search.searching && search.failed ? (
+          <ErrorState
+            body={t("discover.searchFailed.body")}
+            title={t("discover.searchFailed.title")}
+          />
+        ) : null}
+
+        {!search.searching && !search.failed && search.results.length > 0 ? (
+          <>
+            {/* **Which of the two answered, said out loud.** The catalogue's own index is instant and
+                offline; a provider answer is something the core has just written down. A reader who is
+                told "in your catalogue" knows the title is one they can open right now, and one told
+                "from your providers" knows a request was spent — and the two are otherwise
+                indistinguishable on screen. */}
+            <p className="text-caption text-text-tertiary">
+              {t(
+                search.source === "catalogue"
+                  ? "discover.search.source.catalogue"
+                  : "discover.search.source.provider",
+              )}
+            </p>
+            <ul aria-busy={search.searching} className="flex flex-col gap-1">
+              {search.results.map((row) => (
+                <li key={row.id}>
+                  {/* A link, because it is one: it says where it goes, and a keyboard user opens it with
+                    `Enter` rather than activating a button. */}
+                  <Link
+                    href={routePath(routeForResult(row))}
+                    onNavigate={() => {
+                      onNavigate(routeForResult(row));
+                    }}
+                  >
+                    {row.name}
+                  </Link>
+                  <span className="ml-2 text-caption text-text-tertiary">{kindForResult(row)}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
+        {!search.searching && !search.failed && search.searched && search.results.length === 0 ? (
+          <EmptyState body={t("discover.none.body")} title={t("discover.none.title")} />
+        ) : null}
+      </div>
+    ) : null;
+  const toolbar = (
+    <DiscoverToolbar
+      search={search}
+      rails={rails}
+      titleKind={titleKind}
+      onKindChange={(kind) => onKindChange?.(kind)}
+      feedback={feedback}
+      {...(trailing === undefined ? {} : { trailing })}
+    />
+  );
 
   return (
-    <Screen title={t("discover.title")}>
-      {/* The search box, and everything it answers, at the top of the screen: this is where the
-          reference puts it and where a person looks for it. */}
-      <form
-        className="flex items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          search.submit(search.query);
-        }}
-      >
-        <TextInput
-          className="max-w-md flex-1"
-          label={t("discover.search.label")}
-          onChange={(event) => {
-            search.setQuery(event.target.value);
-          }}
-          placeholder={t("discover.search.placeholder")}
-          value={search.query}
+    <Screen title={t("discover.title")} className="[&>header]:sr-only">
+      {slides.length === 0 ? (
+        /* No slides is no hero — unless the first fetch is in the air, where the band is what keeps
+           the screen from re-laying out when the hero arrives. The toolbar rides it either way, so
+           the controls a person is already using do not move. */
+        firstFetch ? (
+          <DiscoverHeroSkeleton bleed toolbar={toolbar} />
+        ) : (
+          toolbar
+        )
+      ) : (
+        <DiscoverHero
+          bleed
+          toolbar={toolbar}
+          onOpen={(slide) => onNavigate({ id: slide.id, kind: "title", titleKind: slide.kind })}
+          slides={slides}
+          {...(onPlay === undefined ? {} : { onPlay })}
         />
-        <Button disabled={search.searching || search.query.trim() === ""} type="submit">
-          {t("discover.search.action")}
-        </Button>
-      </form>
-
-      {/* Announced rather than drawn as a bar: there is no completion to show for a request whose
-          length nobody knows, and a determinate bar would be a number invented to fill a shape. */}
-      {search.searching ? (
-        <p className="text-body text-text-secondary" role="status">
-          {t("discover.search.searching")}
+      )}
+      {rails.refreshError === null ? null : (
+        <p className="text-caption text-state-danger" role="status">
+          {t("discover.refresh.failed")}
         </p>
-      ) : null}
-
-      {!search.searching && search.failed ? (
-        <ErrorState
-          body={t("discover.searchFailed.body")}
-          title={t("discover.searchFailed.title")}
-        />
-      ) : null}
-
-      {!search.searching && !search.failed && search.results.length > 0 ? (
-        <ul aria-busy={search.searching} className="flex flex-col gap-1">
-          {search.results.map((row) => (
-            <li key={row.id}>
-              {/* A link, because it is one: it says where it goes, and a keyboard user opens it with
-                  `Enter` rather than activating a button. */}
-              <Link
-                href={routePath(routeForResult(row))}
-                onNavigate={() => {
-                  onNavigate(routeForResult(row));
-                }}
-              >
-                {row.name}
-              </Link>
-              <span className="ml-2 text-caption text-text-tertiary">{kindForResult(row)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {!search.searching && !search.failed && search.searched && search.results.length === 0 ? (
-        <EmptyState body={t("discover.none.body")} title={t("discover.none.title")} />
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          disabled={rails.refreshing}
-          onClick={() => {
-            void rails.refresh();
-          }}
-          variant="secondary"
-        >
-          {rails.refreshing ? t("discover.refresh.running") : t("discover.refresh.action")}
-        </Button>
-        {/* A failed start is reported where the control is: the rails below are still the last good
-            answer, and replacing them with an error would throw away what did arrive. */}
-        {rails.refreshError === null ? null : (
-          <p className="text-caption text-state-danger" role="status">
-            {t("discover.refresh.failed")}
-          </p>
-        )}
-      </div>
-
+      )}
       {rails.failed ? (
         <ErrorState body={t("discover.failed.body")} title={t("discover.failed.title")} />
       ) : null}
@@ -248,19 +410,7 @@ export function DiscoverView({
         </p>
       ) : null}
 
-      {/* No slides is no hero: an empty catalogue draws its empty state below rather than a band of
-          nothing above it, and one slide draws itself without a rotation (`hero-rotation.ts`). */}
-      {slides.length === 0 ? null : (
-        <DiscoverHero
-          onOpen={(slide) => {
-            onNavigate({ id: slide.id, kind: "title", titleKind: slide.kind });
-          }}
-          slides={slides}
-          {...(onPlay === undefined ? {} : { onPlay })}
-        />
-      )}
-
-      {rails.rails.length === 0 && !rails.failed && !firstFetch ? (
+      {rails.rails.length === 0 && !rails.failed && !unknownYet ? (
         <EmptyState
           body={t("discover.empty.body")}
           className="m-auto max-w-md items-center text-center"
@@ -270,11 +420,11 @@ export function DiscoverView({
       ) : null}
 
       {rails.rails.length === 0 ? null : (
-        <div className="flex flex-col gap-6">
+        <div className="flex shrink-0 flex-col gap-6">
           {/* Nothing fetched yet, or a fetch that found nothing. Every rail below still draws its
               own empty state, so "no provider has answered yet" stays distinguishable from "this
               rail is empty on purpose". */}
-          {nothingAtAll && !firstFetch ? (
+          {nothingAtAll && !unknownYet ? (
             <EmptyState
               body={t("discover.empty.body")}
               className="max-w-md"
@@ -288,7 +438,7 @@ export function DiscoverView({
                 /* While the first fetch is in the air the rails keep their geometry and stay
                    silent: the section's line above already says what is happening, and "add a
                    provider key in Settings" is the wrong sentence for a user who has one. */
-                firstFetch ? null : (
+                unknownYet ? null : (
                   <EmptyState
                     body={t("discover.rail.empty.body")}
                     size="inline"
@@ -299,6 +449,11 @@ export function DiscoverView({
               itemKey={(item) => item.titleId}
               items={rail.items}
               key={rail.rail}
+              /* A rail whose first fetch has not answered yet draws placeholders at the size of the
+                 tiles that will replace them (`DESIGN_SYSTEM §11` rule 2), rather than eight empty
+                 headings over a wall of nothing. A rail that already holds items keeps drawing them
+                 while a refresh runs: stale posters are more use than placeholders. */
+              {...(firstFetch ? { skeleton: "lg" as const } : {})}
               renderItem={(item, tabIndex) => (
                 <TitleCard
                   detailsLabel={t("card.details")}
@@ -311,10 +466,9 @@ export function DiscoverView({
                   poster={imageUrl(item.poster)}
                   rating={item.rating}
                   ratingLabel={ratingLabel(item)}
-                  size="sm"
+                  size="lg"
                   tabIndex={tabIndex}
                   title={item.name}
-                  votesLabel={votesLabel(item)}
                 />
               )}
               title={t(RAIL_HEADINGS[rail.rail] ?? "discover.rail.unknown")}
@@ -329,27 +483,44 @@ export function DiscoverView({
 /** Discover, wired to the core. */
 export function DiscoverScreen({
   onNavigate,
+  titleKind,
+  trailing,
 }: {
   readonly onNavigate: (route: Route) => void;
+  /** The selected type, or `undefined` for **All** — which is also what a bare `/` means. */
+  readonly titleKind?: RailKindDto | undefined;
+  readonly trailing?: ReactNode;
 }): ReactElement {
-  const rails = useHomeRails();
-  const { failed, results, searched, searching, search } = useDiscoverSearch();
-  const [query, setQuery] = useState("");
+  const rails = useHomeRails(titleKind);
+  // The box's text lives in the hook, because the debounce does: a screen that held it would have to
+  // run the timer itself, and the "catalogue first" rule would be split across two files.
+  const { failed, results, searched, searching, source, query, setQuery, searchNow } =
+    useDiscoverSearch(titleKind);
 
   return (
     <DiscoverView
       onNavigate={onNavigate}
+      titleKind={titleKind}
+      {...(trailing === undefined ? {} : { trailing })}
+      onKindChange={(kind) => {
+        // All is the absence of the parameter rather than `type=all`: `/` is the home screen, and a
+        // URL that spelled it would be a second spelling of the same place.
+        onNavigate(
+          kind === undefined ? { kind: "discover" } : { kind: "discover", titleKind: kind },
+        );
+        // Nothing to re-run here: the hook takes the kind as an argument, so the change re-runs the
+        // search through its own effect — one place owns that rule rather than two.
+      }}
       rails={rails}
       search={{
         results,
         searching,
         failed,
         searched,
+        source,
         query,
         setQuery,
-        submit: (text) => {
-          void search(text);
-        },
+        searchNow,
       }}
     />
   );

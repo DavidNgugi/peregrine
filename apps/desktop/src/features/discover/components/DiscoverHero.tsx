@@ -1,14 +1,15 @@
-import { Button, Icon, Link } from "@peregrine/ui";
-import { useEffect, useState, type ReactElement } from "react";
+import { Icon, IconButton, Link, Skeleton } from "@peregrine/ui";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { RailItemDto } from "@peregrine/ipc-client";
+
+import { heroPlay } from "../../../lib/play-action.js";
 
 import {
   advance,
   currentSlide,
   FIRST_SLIDE,
-  heroPlay,
   HERO_INTERVAL_MS,
   rotationRuns,
   selectSlide,
@@ -64,8 +65,6 @@ export interface HeroSlide {
   readonly score: string | null;
   /** The score as it is spoken, such as "rated 8.2 out of 10". */
   readonly scoreLabel: string | null;
-  /** The vote count as the caller wrote it, such as "24,000 votes". */
-  readonly votesLabel: string | null;
   /** The core's answer about whether the library holds a file for this title. */
   readonly playable: boolean;
 }
@@ -73,6 +72,7 @@ export interface HeroSlide {
 export interface DiscoverHeroProps {
   /** The rotation, already chosen and resolved (`heroSlides` and the caller's own formatting). */
   readonly slides: readonly HeroSlide[];
+  readonly toolbar?: ReactNode;
   /**
    * What Play does, when this build can play anything at all.
    *
@@ -82,10 +82,26 @@ export interface DiscoverHeroProps {
    */
   readonly onPlay?: (slide: HeroSlide) => void;
   readonly onOpen: (slide: HeroSlide) => void;
+  /**
+   * Whether the band runs to the window's own edges.
+   *
+   * **Discover passes `true`, and the numbers are the screen's inset written the other way.** A hero
+   * inset by 24 px on the sides and 16 above reads as a card floating on the page rather than as the
+   * page's own artwork, and the reference has it full-bleed with the toolbar over it. The margins
+   * cancel `Screen`'s `px-6 py-4` exactly, and the rounding goes with them: a corner radius belongs to
+   * a box, and this is no longer one.
+   */
+  readonly bleed?: boolean;
 }
 
 /** The hero, from slides the caller has already resolved. */
-export function DiscoverHero({ slides, onPlay, onOpen }: DiscoverHeroProps): ReactElement | null {
+export function DiscoverHero({
+  slides,
+  onPlay,
+  onOpen,
+  toolbar,
+  bleed = false,
+}: DiscoverHeroProps): ReactElement | null {
   const { t } = useTranslation();
   const [rotation, setRotation] = useState<RotationState>(FIRST_SLIDE);
   const count = slides.length;
@@ -117,9 +133,20 @@ export function DiscoverHero({ slides, onPlay, onOpen }: DiscoverHeroProps): Rea
   return (
     <section
       aria-label={t("discover.hero.label")}
-      className="relative overflow-hidden rounded-md border border-border-subtle bg-surface-2"
+      className={[
+        "relative shrink-0 overflow-hidden bg-surface-2",
+        bleed ? "-mx-6 -mt-4" : "rounded-md",
+      ].join(" ")}
     >
-      <div className="relative flex aspect-video w-full flex-col justify-end">
+      {toolbar === undefined ? null : (
+        <div className="absolute inset-x-0 top-0 z-20 p-4">{toolbar}</div>
+      )}
+      <div
+        className={
+          "relative flex aspect-video min-h-[28rem] w-full flex-col justify-end" +
+          (toolbar === undefined ? "" : " pt-28 sm:pt-20")
+        }
+      >
         {slides.map((item) => {
           const source = item.backdrop ?? item.poster;
           return source === null ? null : (
@@ -149,57 +176,74 @@ export function DiscoverHero({ slides, onPlay, onOpen }: DiscoverHeroProps): Rea
           aria-hidden="true"
           className="absolute inset-0 bg-linear-to-t from-surface-0 via-surface-0/70 to-transparent"
         />
-        <div className="relative flex flex-col gap-3 p-6">
-          <h2 className="text-display text-text-primary">{slide.name}</h2>
-          <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-body text-text-secondary">
-            <span>{slide.meta}</span>
-            {slide.score === null ? null : (
-              <span className="inline-flex items-center gap-1 text-text-primary tabular-nums">
-                <Icon className="text-state-warn" name="star" size={16} />
-                <span aria-hidden="true">{slide.score}</span>
-                <span className="sr-only">{slide.scoreLabel ?? slide.score}</span>
-              </span>
-            )}
-            {slide.votesLabel === null ? null : <span>{slide.votesLabel}</span>}
-          </p>
-          {slide.overview === null ? null : (
-            <p className="line-clamp-3 max-w-[60ch] text-body text-text-secondary">
-              {slide.overview}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-linear-to-r from-surface-0 via-surface-0/40 to-transparent"
+        />
+        <div className="relative flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex min-w-0 flex-col gap-3 lg:max-w-[55%]">
+            <h2 className="text-display text-text-primary">{slide.name}</h2>
+            <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-body text-text-secondary">
+              <span>{slide.meta}</span>
+              {slide.score === null ? null : (
+                <span className="inline-flex items-center gap-1 text-text-primary tabular-nums">
+                  <Icon className="text-state-warn" name="star" size={16} />
+                  <span aria-hidden="true">{slide.score}</span>
+                  <span className="sr-only">{slide.scoreLabel ?? slide.score}</span>
+                </span>
+              )}
             </p>
-          )}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <Button
-              disabled={play.kind === "unavailable"}
-              onClick={() => {
-                onPlay?.(slide);
-              }}
-              variant="primary"
-            >
-              {t("discover.hero.play")}
-            </Button>
-            {/* A link rather than a button, because it says where it goes and a context menu can
-                offer it; `variant` is what keeps it looking like the control beside it. */}
-            <Link
-              href={slide.href}
-              onNavigate={() => {
-                onOpen(slide);
-              }}
-              variant="secondary"
-            >
-              {t("card.details")}
-            </Link>
-            {play.kind === "play" ? null : (
-              <p className="text-caption text-text-secondary" role="status">
-                {t(play.reason === "noFile" ? "discover.hero.noFile" : "discover.hero.noPlayer")}
+            {slide.overview === null ? null : (
+              <p className="line-clamp-3 max-w-[60ch] text-body text-text-secondary">
+                {slide.overview}
               </p>
             )}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              {/* **A round control, and the mark rather than the word.** Play is the one action on this
+                  band, and a filled circle with a triangle is what it is everywhere a person has met one
+                  — the word beside it was the last thing on a line that already says the title, the year,
+                  the score, and the synopsis. `size-9` is the height the control beside it draws at, so
+                  the two are one row rather than two sizes, and the name it needs is still there for a
+                  screen reader (and in the tooltip). */}
+              <IconButton
+                className="size-9 rounded-full"
+                disabled={play.kind === "unavailable"}
+                icon="play"
+                label={t("discover.hero.play")}
+                onClick={() => {
+                  onPlay?.(slide);
+                }}
+                title={t("discover.hero.play")}
+                variant="primary"
+              />
+              {/* A link rather than a button, because it says where it goes and a context menu can
+                offer it; `variant` is what keeps it looking like the control beside it. The
+                information mark is the same signal the reference puts there: the label says *more*,
+                and the glyph says more of what. */}
+              <Link
+                className="rounded-full"
+                href={slide.href}
+                onNavigate={() => {
+                  onOpen(slide);
+                }}
+                variant="secondary"
+              >
+                <Icon name="info" size={20} />
+                {t("card.details")}
+              </Link>
+              {play.kind === "play" ? null : (
+                <p className="text-caption text-text-secondary" role="status">
+                  {t(play.reason === "noFile" ? "discover.hero.noFile" : "discover.hero.noPlayer")}
+                </p>
+              )}
+            </div>
           </div>
           {/* A rotation of one has no strip: a row of one control that re-shows the slide already
               up is a control that does nothing, and `PG-E1-07` says absent rather than inert. */}
           {rotationRuns(count) ? (
             <ul
               aria-label={t("discover.hero.strip")}
-              className="flex flex-wrap items-center gap-2 pt-1"
+              className="grid w-full max-w-md shrink-0 grid-cols-5 gap-2 lg:w-[42%]"
             >
               {slides.map((item, index) => {
                 const thumb = item.backdrop ?? item.poster;
@@ -209,11 +253,11 @@ export function DiscoverHero({ slides, onPlay, onOpen }: DiscoverHeroProps): Rea
                       aria-current={index === active}
                       aria-label={t("discover.hero.show", { name: item.name })}
                       className={[
-                        "block aspect-video w-24 overflow-hidden rounded-sm border-2",
+                        "block aspect-video w-full overflow-hidden rounded-md border-2",
                         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
                         index === active
                           ? "border-accent opacity-100"
-                          : "border-transparent opacity-70 hover:opacity-100",
+                          : "border-accent/40 opacity-70 hover:opacity-100",
                       ].join(" ")}
                       onClick={() => {
                         setRotation((current) => selectSlide(current, index, count));
@@ -237,6 +281,81 @@ export function DiscoverHero({ slides, onPlay, onOpen }: DiscoverHeroProps): Rea
               })}
             </ul>
           ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The hero's own geometry, waiting for the rails that will fill it (docs/DESIGN_SYSTEM.md §11 rule 2:
+ * "cached content or a skeleton with real geometry").
+ *
+ * **Drawn rather than omitted, and that is the decision worth stating.** An empty catalogue draws no
+ * hero at all — that is [`DiscoverHero`]'s rule and it stays, because a band of nothing above the
+ * rails is a heading for content that does not exist. The *first fetch* of a session is the other
+ * case: the content does exist and is on its way, the toolbar is already on screen, and the rails
+ * below are drawing their own placeholders — so a missing band here would move everything the moment
+ * the hero arrived. The box, the toolbar's padding, and the trailing strip are the hero's own, which
+ * makes the swap a cross-fade rather than a re-layout.
+ *
+ * The placeholders inside are decoration; `aria-busy` on the region is what says "still filling", and
+ * the line the screen puts above the rails says what is being fetched, in words.
+ */
+export function DiscoverHeroSkeleton({
+  toolbar,
+  bleed = false,
+}: {
+  readonly toolbar?: ReactNode;
+  /** Whether the band runs to the window's own edges, for the same reason [`DiscoverHero`] does. */
+  readonly bleed?: boolean;
+}): ReactElement {
+  const { t } = useTranslation();
+
+  return (
+    <section
+      aria-busy="true"
+      aria-label={t("discover.hero.label")}
+      className={[
+        "relative shrink-0 overflow-hidden bg-surface-2",
+        bleed ? "-mx-6 -mt-4" : "rounded-md",
+      ].join(" ")}
+    >
+      {toolbar === undefined ? null : (
+        <div className="absolute inset-x-0 top-0 z-20 p-4">{toolbar}</div>
+      )}
+      <div
+        className={
+          "relative flex aspect-video min-h-[28rem] w-full flex-col justify-end" +
+          (toolbar === undefined ? "" : " pt-28 sm:pt-20")
+        }
+      >
+        <Skeleton className="absolute inset-0 rounded-none" />
+        <div className="relative flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
+          <div aria-hidden="true" className="flex min-w-0 flex-col gap-3 lg:max-w-[55%]">
+            {/* The copy's blocks: a display line, the meta line, and the three lines of synopsis the
+                real hero clamps to (`line-clamp-3`), so the band's height does not depend on how long
+                the first title's synopsis turns out to be. */}
+            <Skeleton className="h-9 w-4/5 rounded-sm" />
+            <Skeleton className="h-5 w-2/5 rounded-sm" />
+            <Skeleton className="h-4 w-full max-w-[60ch] rounded-sm" />
+            <Skeleton className="h-4 w-11/12 max-w-[60ch] rounded-sm" />
+            <Skeleton className="h-4 w-2/3 max-w-[60ch] rounded-sm" />
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <Skeleton className="h-10 w-28 rounded-full" />
+              <Skeleton className="h-10 w-32 rounded-full" />
+            </div>
+          </div>
+          <div
+            aria-hidden="true"
+            className="grid w-full max-w-md shrink-0 grid-cols-5 gap-2 lg:w-[42%]"
+          >
+            {Array.from({ length: 5 }, (_, index) => (
+              // A fixed row of five, which is the rotation's own cap (`hero-rotation.ts`): the index
+              // is a stable identity for a placeholder that never reorders.
+              <Skeleton className="aspect-video w-full" key={index} />
+            ))}
+          </div>
         </div>
       </div>
     </section>

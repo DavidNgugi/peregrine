@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { revealRoom } from "./hover-preview.js";
-import { nextRailIndex, Rail, RAIL_INSET, showsChevrons } from "./Rail.js";
+import { nextRailIndex, Rail, RAIL_INSET, showsChevrons, SKELETON_TILES } from "./Rail.js";
 import { CARD_ASPECT, CARD_WIDTHS, TitleCard } from "./TitleCard.js";
 
 const ITEMS = ["a", "b", "c"] as const;
@@ -150,5 +150,43 @@ describe("Rail", () => {
     // Named rather than assumed: a scroller that stopped scrolling would make the test above pass
     // for the wrong reason and break the rail.
     expect(rail()).toContain("overflow-x-auto");
+  });
+
+  it("draws placeholders at the loading tile's own size while the items are on the way", () => {
+    // `PG-E7-16`'s loading state, and §11 rule 2's "skeleton with real geometry": the placeholders
+    // are the size of the tiles that replace them, so the arrival of the real content moves nothing.
+    // The size is the caller's, because the rail cannot know what its items will be.
+    const loading = rail({ items: [], skeleton: "lg" });
+
+    expect(loading.match(/aspect-ratio/gu)).toHaveLength(SKELETON_TILES);
+    expect(loading).toContain(`width:${String(CARD_WIDTHS.lg)}px`);
+    expect(loading).toContain(`aspect-ratio:${String(CARD_ASPECT)}`);
+    // No `ul`: there are no items, so there is no list, and a list a reader cannot act on is noise.
+    expect(loading).not.toContain("<ul");
+    expect(loading).toContain('aria-busy="true"');
+    expect(loading).toContain('aria-hidden="true"');
+  });
+
+  it("keeps the caller's empty state when it is not loading, and its items when it has them", () => {
+    // The three states are exclusive, and the order matters: a *revalidating* rail keeps its posters
+    // rather than trading readable content for placeholders, which would be the worse answer.
+    const loading = rail({ empty: <p>Nothing here yet</p>, items: [], skeleton: "md" });
+    expect(loading).not.toContain("Nothing here yet");
+
+    const empty = rail({ empty: <p>Nothing here yet</p>, items: [] });
+    expect(empty).toContain("Nothing here yet");
+    expect(empty).not.toContain("aspect-ratio");
+
+    const filled = rail({ skeleton: "md" });
+    expect(filled).toContain('href="/title/movie/a"');
+    expect(filled).not.toContain("aspect-ratio");
+  });
+
+  it("draws no edge affordance and no keyboard stop over placeholders", () => {
+    // A page control over a row that cannot scroll is a control that does nothing, and a loading row
+    // is not a tab stop: there is nothing in it to move focus to.
+    const loading = rail({ items: [], skeleton: "sm" });
+    expect(loading).not.toContain("chevron-");
+    expect(loading).not.toContain("tabindex");
   });
 });

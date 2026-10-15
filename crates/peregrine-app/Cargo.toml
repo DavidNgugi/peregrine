@@ -12,10 +12,13 @@ publish = false
 [dependencies]
 peregrine-domain = { workspace = true }
 peregrine-platform = { workspace = true }
+peregrine-playback = { workspace = true }
 peregrine-secrets = { workspace = true }
 peregrine-providers = { workspace = true }
 peregrine-storage = { workspace = true }
+peregrine-stream = { workspace = true }
 peregrine-sync = { workspace = true }
+peregrine-torrent = { workspace = true }
 jiff = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

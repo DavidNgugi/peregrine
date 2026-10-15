@@ -12,7 +12,8 @@ import {
 import { revealRoom } from "./hover-preview.js";
 import { IconButton } from "./IconButton.js";
 import { twMerge } from "./merge.js";
-import { CARD_ASPECT, CARD_WIDTHS } from "./TitleCard.js";
+import { Skeleton } from "./Skeleton.js";
+import { CARD_ASPECT, CARD_WIDTHS, type CardSize } from "./TitleCard.js";
 
 /**
  * A horizontal rail: one row of tiles that pages sideways, with its heading and its edges.
@@ -79,8 +80,31 @@ export interface RailProps<T> {
   readonly renderItem: (item: T, tabIndex: number) => ReactNode;
   /** What the rail shows when it has nothing in it (PG-E7-08 requires one per rail). */
   readonly empty?: ReactNode;
+  /**
+   * The tile size the rail draws placeholders at while its items are on the way, or `undefined` for
+   * a rail that is not loading (`PG-E7-16`'s loading state).
+   *
+   * A size rather than a node, because the row's geometry is this component's: the placeholders have
+   * to sit on the same inset, the same gap, and the same clip box as tiles would, or the arrival of
+   * the real content moves the heading above and the rail below — which is the whole point of a
+   * skeleton (§11 rule 2). A placeholder is decoration and carries no tab stop: a loading rail is not
+   * a keyboard stop, and there is nothing in it to move focus to.
+   *
+   * It applies only when the rail has no items: a rail that is *revalidating* keeps drawing what it
+   * has, because replacing readable content with placeholders is a worse answer than the stale one.
+   */
+  readonly skeleton?: CardSize;
   readonly className?: string;
 }
+
+/**
+ * How many placeholders a loading rail draws.
+ *
+ * A screenful at every tile size the kit ships (a rail clips what does not fit), and constant rather
+ * than derived from a measurement because a count that changed with the window would re-render the
+ * row on every resize for no gain: nothing here is real content.
+ */
+export const SKELETON_TILES = 8;
 
 /**
  * Where an arrow key takes the focus, or `null` for a key this rail does not own.
@@ -143,12 +167,48 @@ function focusableWithin(child: Element | undefined): HTMLElement | null {
   return child.querySelector<HTMLElement>("a, button, [tabindex]");
 }
 
+/**
+ * The placeholders a loading rail draws, on the row's own inset, gap, and clip box.
+ *
+ * A `div` rather than the `ul` its items live in: there are no items, so there is no list, and a list
+ * of eight things a reader cannot act on is noise. It is `aria-hidden` for the same reason — the
+ * state is announced in words by whatever put the rail into it — while `aria-busy` on the rail's own
+ * region is what tells assistive technology the section is still filling.
+ */
+function SkeletonRow({ size }: { readonly size: CardSize }): ReactElement {
+  const width = CARD_WIDTHS[size];
+  return (
+    <div
+      aria-hidden="true"
+      className="flex gap-3 overflow-hidden"
+      style={{
+        margin: `${String(RAIL_INSET.y - ROOM.top)}px ${String(RAIL_INSET.x - ROOM.sides)}px ${String(RAIL_INSET.y - ROOM.bottom)}px`,
+        padding: `${String(ROOM.top)}px ${String(ROOM.sides)}px ${String(ROOM.bottom)}px`,
+      }}
+    >
+      {Array.from({ length: SKELETON_TILES }, (_, index) => (
+        // The index is the identity here and that is not the rule about keys being domain ids: a
+        // fixed count of placeholders never reorders, and a placeholder has no domain to be identified
+        // by. The width and the ratio are the tile's, from the constants `TitleCard` draws itself
+        // with, because a placeholder that guessed at either would move the row when the tile
+        // arrived — which is the one thing a skeleton exists to prevent.
+        <Skeleton
+          className="shrink-0"
+          key={index}
+          style={{ aspectRatio: String(CARD_ASPECT), width }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function Rail<T>({
   title,
   items,
   itemKey,
   renderItem,
   empty,
+  skeleton,
   className,
 }: RailProps<T>): ReactElement {
   const titleId = useId();
@@ -217,11 +277,25 @@ export function Rail<T>({
   };
 
   return (
-    <section aria-labelledby={titleId} className={twMerge(clsx("flex flex-col gap-2"), className)}>
+    <section
+      aria-busy={skeleton !== undefined && items.length === 0}
+      aria-labelledby={titleId}
+      // **The rail clips its own horizontal overhang, and that is a bug fix rather than tidiness.**
+      // The strip's deliberate overhang — the room the hover ladder and the edge chevrons need — sits
+      // *outside* the scroller's clip box, so with `overflow: visible` here it leaked to whatever
+      // ancestor happened to be a scroll container. A page whose own `overflow-y: auto` computes
+      // `overflow-x: auto` then grew a horizontal scrollbar and the whole view panned sideways, which
+      // is exactly what a reader reported. `clip` rather than `hidden` on purpose: it contains the
+      // overhang *without* becoming a scroll container, so it cannot swallow the vertical room the
+      // enlarged card needs and cannot add a second horizontal scrollbar of its own.
+      className={twMerge(clsx("flex flex-col gap-2 overflow-x-clip"), className)}
+    >
       <h2 className="text-title-2 text-text-primary" id={titleId}>
         {title}
       </h2>
-      {items.length === 0 ? (
+      {items.length === 0 && skeleton !== undefined ? (
+        <SkeletonRow size={skeleton} />
+      ) : items.length === 0 ? (
         (empty ?? null)
       ) : (
         <div className="group/rail relative min-w-0">

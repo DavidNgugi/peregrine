@@ -54,3 +54,11 @@ sha256 = "31640dc788edcabbedd9bd47e600ec0e5f3bd9b24413d9024efb21cc5ebe1480"
 [[migration]]
 file = "0013_image_cache_pin.sql"
 sha256 = "07184806ab54771ea95632132d9762a07cf66bac914fd876f445878efc8ea716"
+
+[[migration]]
+file = "0014_listed_metadata_state.sql"
+sha256 = "f5f3772d979508176d45e41f104664e7bcf30bae2618fd1d8135323a9b3265b8"
+
+[[migration]]
+file = "0015_discover_rails.sql"
+sha256 = "f50313bb547ffccd5ba87acb09f1135cafeace32f7ad2e4fd524d82e9029da39"

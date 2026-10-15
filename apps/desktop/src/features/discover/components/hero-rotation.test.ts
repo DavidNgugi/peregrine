@@ -5,7 +5,6 @@ import {
   advance,
   currentSlide,
   FIRST_SLIDE,
-  heroPlay,
   heroSlides,
   HERO_INTERVAL_MS,
   HERO_ROTATION_MAX,
@@ -57,8 +56,9 @@ describe("which items rotate", () => {
     // fetching, so the hero cannot ask for a backdrop nobody fetched.
     expect(heroSlides([])).toEqual([]);
     expect(heroSlides([rail([])])).toEqual([]);
-    expect(heroSlides([rail([], "trending_week"), rail([item(4), item(5)])]).map((i) => i.titleId))
-      .toEqual([4, 5]);
+    expect(
+      heroSlides([rail([], "trending_week"), rail([item(4), item(5)])]).map((i) => i.titleId),
+    ).toEqual([4, 5]);
     expect(heroSlides([rail([item(1), item(2), item(3), item(4), item(5), item(6)])])).toHaveLength(
       HERO_ROTATION_MAX,
     );
@@ -134,22 +134,5 @@ describe("how long a slide stays up", () => {
     // The number is an argument rather than a round one (see the constant), and this is the one place
     // it is written twice: the component reads it, and a change to it has to be a change here.
     expect(HERO_INTERVAL_MS).toBe(8_000);
-  });
-});
-
-describe("the hero's primary action", () => {
-  it("plays only when there is a file and something that can play it", () => {
-    expect(heroPlay(true, true)).toEqual({ kind: "play" });
-  });
-
-  it("names the title's own reason first, because that is the one a person can act on", () => {
-    expect(heroPlay(false, true)).toEqual({ kind: "unavailable", reason: "noFile" });
-    expect(heroPlay(false, false)).toEqual({ kind: "unavailable", reason: "noFile" });
-  });
-
-  it("says when the build has no player rather than drawing a control that fires nothing", () => {
-    // This build's state: `PG-E15` owns playback and no surface for it exists, so the hero is handed
-    // no handler and Play is disabled with a reason — never enabled and inert.
-    expect(heroPlay(true, false)).toEqual({ kind: "unavailable", reason: "noPlayer" });
   });
 });

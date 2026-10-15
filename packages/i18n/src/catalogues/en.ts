@@ -7,12 +7,11 @@
  */
 export const en = {
   translation: {
-    app: {
-      name: "Peregrine",
-    },
     shell: {
       nav: {
         label: "Screens",
+        collapse: "Hide the sidebar",
+        expand: "Show the sidebar",
       },
       theme: {
         switchToLight: "Switch to the light theme",
@@ -28,6 +27,7 @@ export const en = {
     },
     discover: {
       title: "Discover",
+      filter: { label: "Title type", all: "All", movies: "Movies", shows: "TV shows" },
       empty: {
         title: "Nothing here yet",
         body: "Peregrine has no catalogue data yet. Refresh to ask the providers — a provider key is set up in Settings.",
@@ -74,6 +74,13 @@ export const en = {
         placeholder: "A film or a series",
         action: "Search",
         searching: "Searching the providers…",
+        // **Which of the two answered.** The catalogue's index is instant and offline; a provider
+        // answer has just been written into the catalogue. The two are otherwise indistinguishable,
+        // and a reader is entitled to know whether a request was spent.
+        source: {
+          catalogue: "In your catalogue",
+          provider: "From your providers",
+        },
       },
       searchFailed: {
         title: "The search could not be made",
@@ -90,6 +97,45 @@ export const en = {
       result: {
         movie: "Film",
         show: "Series",
+      },
+    },
+    // The queried grid, which is the screen a rail cannot be: a rail is a list the provider
+    // publishes, and this is a list the reader composes out of filters.
+    browse: {
+      title: "Browse",
+      kind: { label: "Title type" },
+      genre: {
+        label: "Genre",
+        // The word for the unfiltered choice, and it is a choice rather than an absence: the filter
+        // is applied by the provider, so "All genres" is a request that asks for every one of them.
+        all: "All genres",
+      },
+      sort: {
+        label: "Sort by",
+        popularity: "Most popular",
+        rating: "Best rated",
+        newest: "Newest",
+        oldest: "Oldest",
+      },
+      rating: {
+        label: "Minimum rating",
+        any: "Any rating",
+        // Out of ten, which is the scale the badge on a tile shows. `{{score}}` is a whole number,
+        // so no plural form is needed in any locale that counts stars this way.
+        floor: "{{score}}+ stars",
+      },
+      grid: { label: "Browse results" },
+      loading: "Loading more…",
+      // The other half of `loading`: a reader who has reached the end of the loaded pages has to be
+      // able to tell "nothing more is coming" from "the next page is still on its way".
+      end: "That is everything for these filters.",
+      empty: {
+        title: "Nothing matches these filters",
+        body: "The provider has no title that fits. Try another genre, a lower rating, or a different order.",
+      },
+      failed: {
+        title: "This page could not be loaded",
+        body: "The provider did not answer. Check your connection and the API key in Settings, then scroll again.",
       },
     },
     jobs: {
@@ -136,10 +182,39 @@ export const en = {
     // state, a rating's spoken form, a vote count, and one verb. They live here rather than under
     // `discover` because every screen that draws a tile reads them.
     card: {
-      details: "Details",
+      details: "View More",
       rating: "rated {{score}} out of 10",
+      // **Both plural forms, because a count of one is not a count of many.** `TitleCard` passes
+      // `count` alongside a `formatted` string it has already grouped by locale, so the number reads
+      // the same as every other count in the tile; i18next picks `_one` or `_other` from `count`. One
+      // `votes` key cannot do this in any language whose plural rules are not English's, which is why
+      // the pair is the shape rather than a single string with a number in it.
       votes_one: "{{formatted}} vote",
       votes_other: "{{formatted}} votes",
+    },
+    player: {
+      title: "Player",
+      playing: "Playing from your library",
+      back: "Back to the title",
+      starting: "Opening the file…",
+      // Reached when the core refused, which is the block above it; this is the body under the error.
+      nothing: {
+        title: "Nothing is playing.",
+        body: "The file could not be opened. Its title page says whether the library still holds a copy.",
+      },
+      refused: "That file could not be played.",
+      // The sentence beside the control shown when the webview refused to start playing on its own — which
+      // is a gesture the route change spent, not a fault in the file.
+      start: "Play",
+      // The element's own fallback text, for a platform whose media stack will not take the stream.
+      unsupported: "This build cannot play that file's format.",
+      // What the session's container means, said beside the element rather than as a refusal: it explains
+      // which reader is doing the work and what that costs.
+      support: {
+        webview: "Playing with this system's own video decoder.",
+        externalPlayer: "Playing with an external player.",
+        unknown: "Peregrine does not recognise this file's format. Playing it may not work.",
+      },
     },
     title: {
       section: "In your library",
@@ -155,7 +230,64 @@ export const en = {
       },
       episodes: {
         title: "Episodes",
-        description: "Every episode the library holds, in the order they are watched.",
+        description: "The season you have chosen, in the order the episodes are watched.",
+        failed: "That season's episodes could not be read. Choosing it again tries once more.",
+        none: {
+          title: "Nothing listed for this season.",
+          body: "No provider has described this season's episodes yet, and the library holds none of them.",
+        },
+      },
+      // The hero: the wide picture, the name, the facts, and the actions the core says it can honour.
+      // The reasons a control is disabled are `lib/play-action.ts`'s, one sentence per value of the
+      // offer the core derives, and each names the thing a reader can act on.
+      hero: {
+        released: "{{date}}",
+        seasons: "{{count}} season",
+        seasons_other: "{{count}} seasons",
+        episodes: "{{count}} episode",
+        episodes_other: "{{count}} episodes",
+        play: "Play",
+        download: "Download",
+        noFile: "The library holds no file for this title yet.",
+        fileMissing: "The library recorded a file for this title, and it is not on disk right now.",
+        arriving: "A download for this title is in flight.",
+        noPlayer: "This build has no player yet, so there is nothing to play it with.",
+        // The container, said before the press rather than after the black rectangle. It names what is
+        // missing — an external player — rather than what failed, because nothing has failed yet and a
+        // reader can go and get one.
+        container:
+          "This build cannot read that file's format yet. It needs an external player, which is not installed.",
+        // An admission rather than a refusal: the format is not one Peregrine can name, and the
+        // system's own decoder may well take it. Saying nothing would make a failure look like a bug.
+        unnamedContainer:
+          "Peregrine does not recognise this file's format. Playing it may not work.",
+        acquire: "Acquiring is not built yet, so Download is shown disabled rather than offered.",
+      },
+      // The switcher. `{{number}}` is the only thing a chip needs for a season a provider named the
+      // way it names every season — "Season 4" — and the provider's own name is used only when it says
+      // something the number does not.
+      season: {
+        label: "Seasons",
+        number: "Season {{number}}",
+        specials: "Specials",
+      },
+      // One episode's card. Every field but the number is optional, because an episode the library
+      // holds and no provider has described is the ordinary state of a fresh scan.
+      episode: {
+        still: {
+          none: "No still yet",
+          alt: "Still for episode {{number}}, {{name}}",
+        },
+        aired: "Aired {{date}}",
+        runtime: "{{minutes}} min",
+        // The word and not the dot: a card's state is carried by its word (§2.2), and the dot's colour
+        // mapping belongs to `TitleCard`, which owns the one copy of it.
+        availability: {
+          available: "In your library",
+          partial: "Partly here",
+          missing: "Files are gone",
+          wanted: "Not acquired",
+        },
       },
       missing: {
         title: "This title is not here.",
@@ -164,6 +296,23 @@ export const en = {
       unavailable: {
         title: "This title could not be read.",
         body: "Peregrine's core did not answer, so this page is unknown rather than empty. Going back and returning tries the read again.",
+      },
+      // The provider's recommendations for the title on screen. One string, because the rail draws
+      // the heading and there is no second surface for a description — a `Section` wrapped around it
+      // printed these words twice.
+      similar: {
+        title: "More like this",
+      },
+      // The endless feed under the episodes: the recommendations, then the catalogue's own pages of the
+      // genres they share. One heading, because it is one list rather than a rail plus a shelf per genre.
+      feed: {
+        title: "More like this",
+        description: "Recommended titles, then everything else in the genres they share.",
+        end: "That is everything your providers have for this title.",
+        failed: {
+          title: "More titles could not be loaded",
+          body: "What arrived is above. Scroll again to try for the rest.",
+        },
       },
     },
     library: {
@@ -237,6 +386,32 @@ export const en = {
         files: "Copies",
         size: "Size",
         missing: "Missing",
+      },
+      // The list/grid choice. The label names the group rather than either drawing; the two buttons
+      // carry their own words.
+      view: {
+        label: "How to show your library",
+        list: "List",
+        grid: "Grid",
+      },
+      // The grid's own accessible name, and it says what the region *holds* rather than calling them
+      // results: nothing here was searched for, these are the user's own files.
+      grid: { label: "Titles in your library" },
+      // **Posters this machine makes from the films themselves.** A freshly scanned folder is titles no
+      // provider has described, and the screen captures a frame of each so the grid is not a wall of grey.
+      // Both plural forms for the reason `card.votes` gives; the number is the count already stored.
+      posters: {
+        working_one: "Making a poster from the film… {{count}} done",
+        working_other: "Making posters from the films… {{count}} done",
+        done_one: "{{count}} poster made from the film.",
+        done_other: "{{count}} posters made from the films.",
+      },
+      tile: {
+        // The table's Missing column in words, drawn in the tile's revealed panel. Both plural forms
+        // for the reason `card.votes` gives: a count of one is not a count of many, and i18next picks
+        // the form from `count`.
+        missing_one: "{{count}} copy missing",
+        missing_other: "{{count}} copies missing",
       },
       kind: {
         films: "Film",
@@ -315,10 +490,28 @@ export const en = {
       providers: {
         title: "Metadata providers",
         description:
-          "The services Peregrine asks about films and series. A key is stored in your operating system's keychain, never in Peregrine's database, and you can remove it again here.",
+          "The services Peregrine asks about films and series. A key is stored in your operating system's keychain, never in Peregrine's database, so reinstalling Peregrine does not remove it. You can remove it again here.",
         entry: "{{endpoint}} · {{state}}",
         configured: "Configured",
         notConfigured: "No key stored",
+        // The three states of a credential store that is not simply answering. They exist because a
+        // keychain that refused access leaves every provider looking unconfigured, and telling a
+        // user their key is missing when it is still in the keychain is the sentence that makes
+        // reinstalling look like it deleted something.
+        store: {
+          unread: "Checking the keychain…",
+          denied: "Keychain access refused",
+          unavailable: "No keychain available",
+        },
+        storeNotice: {
+          unread:
+            "Peregrine has not finished reading your keychain. The first read from a newly built copy of the app can raise macOS's permission dialog — look for it behind this window or in the Dock and choose Allow, then reopen Peregrine. The dialog is macOS asking whether this build may read the “Peregrine” entry; declining it does not delete the key.",
+          denied:
+            "macOS asked whether Peregrine may read your keychain and the answer was no, so Peregrine cannot tell whether a key is stored. Nothing has been deleted: your key is still in Keychain Access under “Peregrine”. Allow the request when the system asks, or open Keychain Access, find the “Peregrine” item, and set its access control to allow Peregrine — then reopen the app.",
+          unavailable:
+            "This system has no keychain Peregrine can use, so a key cannot be stored or read here. Keys you entered on another machine or OS login are not lost; they are simply not available in this session.",
+        },
+        retry: "Try again",
         checking: "Asking the provider whether that key works…",
         remove: "Remove",
         unavailable: {

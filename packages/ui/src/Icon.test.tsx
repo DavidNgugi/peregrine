@@ -16,7 +16,11 @@ describe("Icon", () => {
       expect(markup, name).toContain('viewBox="0 0 24 24"');
       expect(markup, name).toContain('stroke-width="1.5"');
       expect(markup, name).toContain('fill="none"');
-      expect(markup, name).toMatch(/<(path|circle)/u);
+      // Geometry, whatever shape it is drawn with: a mark made only of `g`s or `title`s would be an
+      // icon that draws nothing. `rect` is here for the marks that are squares — a grid of tiles is
+      // four of them, and a rounded rectangle is what that shape is rather than four path commands
+      // spelling one out.
+      expect(markup, name).toMatch(/<(path|circle|rect)/u);
     }
   });
 

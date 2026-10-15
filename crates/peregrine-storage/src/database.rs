@@ -8,11 +8,14 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoo
 use tracing::{info, warn};
 
 use peregrine_domain::{
-    AccountScope, LibraryRoot, MediaFile, MediaItem, ScanMode, SubtitleTrack, UnmatchedFile,
-    WatchProgress, WatchlistEntry,
+    AccountScope, DownloadEvent, DownloadState, LibraryRoot, MediaFile, MediaItem, ScanMode,
+    SubtitleTrack, TorrentDescription, UnmatchedFile, WatchProgress, WatchlistEntry,
 };
 
 use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
+use crate::download::{
+    DownloadFileRow, DownloadJobRow, DownloadStatistics, DownloadTransitionError, NewDownloadJob,
+};
 use crate::error::StorageError;
 use crate::integrity::Recovery;
 use crate::jobs::{JobChange, JobRecord, NewJob};
@@ -62,6 +65,18 @@ impl Database {
         let recovery = recover(path).await?;
         let mut connection = open_writer_connection(path).await?;
         crate::migrations::apply(&mut connection, path).await?;
+        // No job survives the process that was running it, and a row left non-terminal holds its
+        // dedupe key against every later submission (`crate::jobs::fail_unfinished`). Done before the
+        // writer task starts, so the first write of this process already sees a settled journal.
+        let interrupted = crate::jobs::fail_unfinished(&mut connection)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+        if interrupted > 0 {
+            warn!(
+                jobs = interrupted,
+                "closed out the jobs a previous process left unfinished"
+            );
+        }
 
         let writer = WriterHandle::spawn(connection);
         let readers = open_reader_pool(path)
@@ -150,6 +165,149 @@ impl Database {
     /// A page of journal rows, newest first.
     pub async fn list_jobs(&self, request: PageRequest) -> Result<Vec<JobRecord>, StorageError> {
         crate::jobs::list(&self.readers, request).await
+    }
+
+    /// Creates one `download_job` row in `queued` and returns the row the database holds.
+    ///
+    /// `queued` is a literal in the statement: it is the one state `FLOWS` F6 admits a job in,
+    /// and no caller may name a state. Every later move goes through
+    /// [`Database::transition_download_job`].
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Conflict`] when a live job already holds this torrent's info hash (I36,
+    /// `download_job_hash_uq`).
+    pub async fn create_download_job(
+        &self,
+        job: NewDownloadJob,
+    ) -> Result<DownloadJobRow, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::CreateDownloadJob(Box::new(job)))
+            .await?
+        {
+            WriteResponse::DownloadJobCreated(row) => Ok(*row),
+            other => Err(unexpected_response("create_download_job", &other)),
+        }
+    }
+
+    /// Applies one event to a job's state, writing the safety report the event carries.
+    ///
+    /// `Ok(None)` means no job holds that id. A refusal is the domain's answer and not a storage
+    /// failure, and nothing is written for one.
+    pub async fn transition_download_job(
+        &self,
+        id: i64,
+        event: DownloadEvent,
+    ) -> Result<Option<DownloadState>, DownloadTransitionError> {
+        let response = self
+            .writer
+            .send(WriteRequest::TransitionDownloadJob {
+                id,
+                event: Box::new(event),
+            })
+            .await?;
+        match response {
+            WriteResponse::DownloadJobTransitioned { state } => Ok(state),
+            WriteResponse::DownloadJobRefused { rejection } => Err(rejection.into()),
+            other => Err(unexpected_response("transition_download_job", &other).into()),
+        }
+    }
+
+    /// Writes one coalesced statistics tick, reporting whether the job was there.
+    pub async fn record_download_statistics(
+        &self,
+        id: i64,
+        statistics: DownloadStatistics,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordDownloadStatistics {
+                id,
+                statistics: Box::new(statistics),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("record_download_statistics", &other)),
+        }
+    }
+
+    /// Writes a job's `download_file` rows from the metadata's list and the engine's selection.
+    pub async fn select_download_files(
+        &self,
+        job_id: i64,
+        description: TorrentDescription,
+        selection: &[usize],
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SelectDownloadFiles {
+                job_id,
+                description: Box::new(description),
+                selection: selection.to_vec(),
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("select_download_files", &other)),
+        }
+    }
+
+    /// Persists the engine's own state for one job, reporting whether the job was there.
+    pub async fn record_download_engine_state(
+        &self,
+        id: i64,
+        state: &[u8],
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordEngineState {
+                id,
+                state: state.to_vec(),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("record_download_engine_state", &other)),
+        }
+    }
+
+    /// One download job, or `None` when no such row exists or `scope` may not see its title.
+    pub async fn download_job(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<DownloadJobRow>, StorageError> {
+        crate::download::job(&self.readers, scope, id).await
+    }
+
+    /// A page of download jobs in `states`, newest first.
+    pub async fn list_download_jobs(
+        &self,
+        scope: AccountScope,
+        states: &[DownloadState],
+        request: PageRequest,
+    ) -> Result<Vec<DownloadJobRow>, StorageError> {
+        crate::download::list_jobs(&self.readers, scope, states, request).await
+    }
+
+    /// One job's file rows, in the metadata's own order.
+    pub async fn download_files(
+        &self,
+        scope: AccountScope,
+        job_id: i64,
+    ) -> Result<Vec<DownloadFileRow>, StorageError> {
+        crate::download::files(&self.readers, scope, job_id).await
+    }
+
+    /// The engine's persisted state for one job, when `scope` may see its title.
+    pub async fn download_engine_state(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<Vec<u8>>, StorageError> {
+        crate::download::engine_state(&self.readers, scope, id).await
     }
 
     /// Inserts one title in its `stub` state and reports its row id.
@@ -266,6 +424,46 @@ impl Database {
         }
     }
 
+    /// Every title the Discover rails held when they were last published, in rail and then in
+    /// that rail's own order.
+    ///
+    /// The manifest is membership: what a rail draws comes from the `title` row and the library,
+    /// which [`crate::DiscoverRailRow`] documents. A title outside the scope is absent from the
+    /// answer rather than reported, for the reason every scoped read gives (AGENTS R34).
+    pub async fn discover_rails(
+        &self,
+        scope: peregrine_domain::AccountScope,
+    ) -> Result<Vec<crate::DiscoverRailRow>, StorageError> {
+        crate::discover_rail::read(&self.readers, scope).await
+    }
+
+    /// Replaces the whole rails manifest with what one fetch published.
+    ///
+    /// Whole, and not per rail, because that is what a publish is: the caller has one run's
+    /// answer, and a manifest that kept a rail this run did not answer would hydrate a screen
+    /// with membership the last publish does not have.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when a statement fails, including a title the catalogue does not hold —
+    /// the manifest names catalogue rows, and the transaction leaves the previous manifest in
+    /// place rather than writing a partial one.
+    pub async fn replace_discover_rails(
+        &self,
+        rails: &[(String, Vec<i64>)],
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ReplaceDiscoverRails {
+                rails: rails.to_vec(),
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("replace_discover_rails", &other)),
+        }
+    }
+
     /// The local titles a candidate name could be, with everything the matching rule reads.
     ///
     /// Unscoped on purpose, like `title_for_external_id`: this is the sync's own view for deciding
@@ -317,6 +515,17 @@ impl Database {
         request: PageRequest,
     ) -> Result<Vec<TitleIdentity>, StorageError> {
         crate::fts::search(&self.readers, scope, query, request).await
+    }
+
+    /// One account-scoped page matching the query and optional title kind, filtered before its limit.
+    pub async fn search_kind(
+        &self,
+        scope: peregrine_domain::AccountScope,
+        query: &str,
+        request: PageRequest,
+        kind: Option<peregrine_domain::catalogue::TitleKind>,
+    ) -> Result<Vec<TitleIdentity>, StorageError> {
+        crate::fts::search_kind(&self.readers, scope, query, request, kind).await
     }
 
     /// Rewrites one title's search index row from the source tables.
@@ -561,6 +770,19 @@ impl Database {
         crate::library::list_items_for_title(&self.readers, scope, title_id, request).await
     }
 
+    /// Every item of one title with the files and jobs its availability is derived from.
+    ///
+    /// One read rather than three per screen: `peregrine_domain::availability` and
+    /// `peregrine_domain::TitleOffer` read the whole evidence set, and a caller that assembled it
+    /// from the paged reads would truncate a long series or issue two queries per episode.
+    pub async fn title_evidence(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+    ) -> Result<crate::library::TitleEvidence, StorageError> {
+        crate::library::title_evidence(&self.readers, scope, title_id).await
+    }
+
     /// Inserts one media file and reports the id `SQLite` assigned.
     ///
     /// `media_file.path` is `UNIQUE`, so two items can never claim one file (I3): the second
@@ -788,17 +1010,35 @@ impl Database {
         crate::library::library_title(&self.readers, scope, id).await
     }
 
-    /// A title's episodes, in the order a person watches them.
+    /// A title's episodes, in the order a person watches them, optionally one season of them.
     ///
     /// Bounded rather than paged: a title's episodes are a few hundred rows at most, and a keyset
     /// cursor over a `(season, episode)` pair would need a two-column cursor for no gain.
+    ///
+    /// `season_number` is the switcher's filter and `None` is every season, because the two questions
+    /// differ by one predicate and a second read would be the one that drifts.
     pub async fn list_title_episodes(
         &self,
         scope: AccountScope,
         title_id: i64,
+        season_number: Option<u32>,
         limit: u32,
     ) -> Result<Vec<crate::library::TitleEpisodeRow>, StorageError> {
-        crate::library::list_title_episodes(&self.readers, scope, title_id, limit).await
+        crate::library::list_title_episodes(&self.readers, scope, title_id, season_number, limit)
+            .await
+    }
+
+    /// A title's seasons, in the order a switcher lists them.
+    ///
+    /// Scoped like the episode read above, and bounded for the same reason: a show's seasons are a
+    /// handful of rows.
+    pub async fn list_title_seasons(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::library::TitleSeasonRow>, StorageError> {
+        crate::library::list_title_seasons(&self.readers, scope, title_id, limit).await
     }
 
     /// Inserts one season and answers the id `SQLite` assigned.
@@ -831,6 +1071,71 @@ impl Database {
         {
             WriteResponse::RowInserted { id } => Ok(id),
             other => Err(unexpected_response("insert_stub_episode", &other)),
+        }
+    }
+
+    /// Writes what a provider said about one season, and answers its row id with whether anything
+    /// moved.
+    ///
+    /// An upsert on the season's own unique key, so a stub the library created is filled rather than
+    /// duplicated; `changed` is `false` when the statement stored the values that were already there,
+    /// which is what makes a re-run's idempotence observable (see
+    /// `catalogue::upsert_season_details` for the `COALESCE` and ordering rules it obeys).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the statement fails.
+    pub async fn upsert_season_details(
+        &self,
+        title_id: i64,
+        details: peregrine_domain::catalogue::SeasonDetails,
+        provider: String,
+        at: i64,
+    ) -> Result<(i64, bool), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpsertSeasonDetails {
+                title_id,
+                details: Box::new(details),
+                provider,
+                at,
+            })
+            .await?
+        {
+            WriteResponse::RowUpserted { id, changed } => Ok((id, changed)),
+            other => Err(unexpected_response("upsert_season_details", &other)),
+        }
+    }
+
+    /// Writes what a provider said about one episode, and answers whether anything moved.
+    ///
+    /// Keyed on the canonical numbers, and descriptive columns only: enrichment never renumbers an
+    /// episode and never moves it between seasons (`catalogue::upsert_episode_details`).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the statement fails.
+    pub async fn upsert_episode_details(
+        &self,
+        title_id: i64,
+        season_id: i64,
+        details: peregrine_domain::catalogue::EpisodeDetails,
+        provider: String,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpsertEpisodeDetails {
+                title_id,
+                season_id,
+                details: Box::new(details),
+                provider,
+                at,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("upsert_episode_details", &other)),
         }
     }
 
@@ -1320,6 +1625,7 @@ fn connection_options(path: &Path) -> SqliteConnectOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::JobPhase;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -1331,6 +1637,68 @@ mod tests {
         Database::open(directory.path().join("peregrine.sqlite"))
             .await
             .unwrap()
+    }
+
+    /// A job that a process was running when it stopped existing.
+    fn unfinished_job(kind: &str, dedupe_key: &str) -> NewJob {
+        NewJob {
+            kind: kind.to_owned(),
+            priority: 100,
+            dedupe_key: Some(dedupe_key.to_owned()),
+            payload_json: "{}".to_owned(),
+            max_attempts: 2,
+            // Injected, never the wall clock (AGENTS R14).
+            created_at: 1_700_000_000_000,
+        }
+    }
+
+    /// A job cannot outlive the process that was running it, and a row left non-terminal is worse
+    /// than a wrong status: `job_dedupe_uq` covers the non-terminal rows only, so the key is held
+    /// against every later submission — which is what left Discover joining a job that would never
+    /// run, on every launch, with pressing Refresh going through the same join.
+    #[tokio::test]
+    async fn opening_the_database_closes_the_jobs_a_previous_process_left_unfinished() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("peregrine.sqlite");
+
+        {
+            let database = Database::open(&path).await.unwrap();
+            database
+                .insert_job(unfinished_job("discover.rails", "discover.rails"))
+                .await
+                .unwrap();
+            // The write is the writer task's, so the file is only guaranteed to hold it once the
+            // handle is gone — which is also what a killed process leaves behind.
+            drop(database);
+        }
+
+        let database = Database::open(&path).await.unwrap();
+        let row = database
+            .list_jobs(PageRequest::first(10))
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.kind == "discover.rails")
+            .expect("the row is still there, reported rather than deleted");
+        assert_eq!(row.state, JobPhase::Failed);
+        assert_eq!(row.last_error_code.as_deref(), Some("INTERRUPTED"));
+        assert!(
+            row.last_error.is_some(),
+            "the row says why it stopped: {row:?}"
+        );
+        assert!(
+            row.finished_at.is_none(),
+            "the instant it stopped is exactly what nobody knows"
+        );
+
+        // And the key is free again, which is the whole point: the next launch can submit the fetch.
+        assert!(
+            database
+                .insert_job(unfinished_job("discover.rails", "discover.rails"))
+                .await
+                .is_ok(),
+            "a closed row must not hold its dedupe key against the next process"
+        );
     }
 
     fn event(writer: i64, sequence: i64) -> NewEvent {

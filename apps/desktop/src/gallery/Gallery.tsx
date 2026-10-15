@@ -40,6 +40,7 @@ import {
   ShortcutKeys,
   Sidebar,
   SidebarItem,
+  Skeleton,
   Switch,
   Table,
   TextInput,
@@ -48,6 +49,16 @@ import {
 } from "@peregrine/ui";
 import type { ReactElement, ReactNode } from "react";
 import { useState } from "react";
+import { createI18n } from "@peregrine/i18n";
+import { I18nextProvider } from "react-i18next";
+import { DiscoverToolbar } from "../features/discover/components/DiscoverScreen.js";
+import type { RailKindDto } from "@peregrine/ipc-client";
+import {
+  DiscoverHero,
+  DiscoverHeroSkeleton,
+} from "../features/discover/components/DiscoverHero.js";
+
+const galleryI18n = createI18n();
 
 /**
  * Every primitive this page shows, by its exported name.
@@ -75,6 +86,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "ShortcutKeys",
   "Sidebar",
   "SidebarItem",
+  "Skeleton",
   "Switch",
   "Table",
   "TextInput",
@@ -356,6 +368,28 @@ export function Gallery(): ReactElement {
   const [theme, toggleTheme] = useGalleryTheme();
   const [on, setOn] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [heroKind, setHeroKind] = useState<RailKindDto | undefined>(undefined);
+  const [heroQuery, setHeroQuery] = useState("");
+
+  // One toolbar for the hero's three states below (filled, loading, empty): it is the same control
+  // surface either way, and a second copy is a second thing to keep in step with Discover.
+  const heroToolbar = (
+    <DiscoverToolbar
+      onKindChange={setHeroKind}
+      rails={{ refresh: () => Promise.resolve(), refreshing: false }}
+      search={{
+        query: heroQuery,
+        setQuery: setHeroQuery,
+        searchNow: () => undefined,
+        searching: false,
+        failed: false,
+        searched: false,
+        source: "none",
+        results: [],
+      }}
+      titleKind={heroKind}
+    />
+  );
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-8">
@@ -399,7 +433,7 @@ export function Gallery(): ReactElement {
             label="Five thousand titles"
             renderItem={(item) => (
               <TitleCard
-                detailsLabel="Details"
+                detailsLabel="View More"
                 href={`/title/movie/${String(item.id)}`}
                 overview="One tile of five thousand, at the geometry §4 fixes."
                 poster={POSTER}
@@ -586,13 +620,32 @@ export function Gallery(): ReactElement {
         component="Rail"
         description="A row of tiles that pages sideways. One tab stop for the whole rail, the arrows move inside it, and each chevron appears only on an edge there is still somewhere to go from. Tab to it, then press ← → Home End."
       >
-        <div className="w-full">
+        <div className="flex w-full flex-col gap-6">
+          <I18nextProvider i18n={galleryI18n}>
+            <DiscoverHero
+              toolbar={heroToolbar}
+              onOpen={() => undefined}
+              slides={RAIL_TITLES.slice(0, 5).map((item) => ({
+                id: item.id,
+                name: item.title,
+                kind: item.kind === "movie" ? "movie" : "show",
+                meta: item.meta,
+                href: `/title/${item.kind}/${item.id}`,
+                backdrop: POSTER,
+                poster: POSTER,
+                overview: item.overview,
+                score: item.rating.toFixed(1),
+                scoreLabel: `rated ${String(item.rating)} out of 10`,
+                playable: false,
+              }))}
+            />
+          </I18nextProvider>
           <Rail
             itemKey={(item) => item.id}
             items={RAIL_TITLES}
             renderItem={(item, tabIndex) => (
               <TitleCard
-                detailsLabel="Details"
+                detailsLabel="View More"
                 href={`/title/${item.kind}/${item.id}`}
                 meta={item.meta}
                 overview={item.overview}
@@ -602,17 +655,30 @@ export function Gallery(): ReactElement {
                 size="md"
                 tabIndex={tabIndex}
                 title={item.title}
-                votesLabel={item.votes === null ? null : `${item.votes.toLocaleString("en")} votes`}
               />
             )}
             title="Trending this week"
+          />
+          {/* The state a launch actually starts in, drawn rather than described (`PG-E7-16`): the
+              hero's band with the toolbar on it, and a rail of placeholders at the tile's own size.
+              Turn on the OS's reduce-motion setting and the sweep is a still surface — the same
+              content, without the movement. */}
+          <I18nextProvider i18n={galleryI18n}>
+            <DiscoverHeroSkeleton toolbar={heroToolbar} />
+          </I18nextProvider>
+          <Rail<number>
+            itemKey={(item) => item}
+            items={[]}
+            renderItem={() => null}
+            skeleton="md"
+            title="Trending this week, still fetching"
           />
         </div>
       </Section_>
 
       <Section_
         component="TitleCard"
-        description="A poster tile, and the hover preview PG-E7-05 is judged on. Rest a pointer on one for 450 ms: it grows to 1.06 over 180 ms with the metadata scrimmed inside the enlarged layer, and the tiles beside it do not move. Leave, scroll, hide the tab, or scroll it below 60% and it cancels; Tab to it and the panel appears without the scale. The 2:3 box is reserved before the bytes arrive, so a late, failed, or never-cached image never moves the grid; every word comes from the caller, because the kit holds no copy."
+        description="A poster tile, and the hover preview PG-E7-05 is judged on. Rest a pointer on one for 450 ms: it grows to 1.30 over 180 ms with metadata revealed at the foot of the enlarged poster, and the tiles beside it do not move. Leave, scroll, hide the tab, or scroll it below 60% and it cancels; Tab to it and the panel appears without the scale. The 2:3 box is reserved before the bytes arrive, so a late, failed, or never-cached image never moves the grid; every word comes from the caller, because the kit holds no copy."
       >
         <div className="flex w-full flex-col gap-6">
           <div className="flex flex-wrap items-end gap-3">
@@ -621,7 +687,7 @@ export function Gallery(): ReactElement {
                 <TitleCard
                   availability="acquiring"
                   availabilityLabel="Downloading"
-                  detailsLabel="Details"
+                  detailsLabel="View More"
                   href="/title/movie/1"
                   meta="1979 · Film"
                   overview="The crew of a commercial towing ship answers a distress call and finds something aboard that should not be there."
@@ -630,7 +696,6 @@ export function Gallery(): ReactElement {
                   ratingLabel="rated 8.5 out of 10"
                   size={size}
                   title="Alien"
-                  votesLabel="14,208 votes"
                 />
                 <span className="text-micro text-text-tertiary">{size}</span>
               </div>
@@ -641,7 +706,7 @@ export function Gallery(): ReactElement {
                 answer carries, prose with no score, a score with no prose, and a title the provider
                 said nothing about at all. */}
             <TitleCard
-              detailsLabel="Details"
+              detailsLabel="View More"
               href="/title/movie/2"
               meta="2010 · Film"
               overview="A thief who enters dreams to steal secrets is asked to plant one instead."
@@ -650,24 +715,22 @@ export function Gallery(): ReactElement {
               ratingLabel="rated 7.3 out of 10"
               size="lg"
               title="Inception"
-              votesLabel="37,402 votes"
             />
             <TitleCard
               availability="unavailable"
               availabilityLabel="Unavailable"
-              detailsLabel="Details"
+              detailsLabel="View More"
               href="/title/movie/3"
               meta="1999 · Film"
               overview="A hacker learns that the world he lives in is a construction, and what it is for."
               poster={POSTER}
               size="lg"
               title="The Matrix"
-              votesLabel="26,113 votes"
             />
             <TitleCard
               availability="watchlisted"
               availabilityLabel=""
-              detailsLabel="Details"
+              detailsLabel="View More"
               href="/title/movie/4"
               meta="2019 · Film"
               placeholder="oklch(0.45 0.06 250)"
@@ -710,6 +773,18 @@ export function Gallery(): ReactElement {
           <Progress label="Half" value={42} />
           <Progress label="Over the top, and clamped" value={140} />
         </div>
+      </Section_>
+
+      <Section_
+        component="Skeleton"
+        description="A placeholder for content whose geometry is known and whose bytes are not, which is what §11 rule 2 asks for where a spinner would go: the reserved box is what keeps the arriving content from moving anything. It carries no shape of its own — the caller states the width and the ratio, because only the caller knows what is coming — and the sweep is a transform on a pseudo-element, so it composites rather than repainting the surface. Turn on the system's reduce-motion setting and it is a still surface."
+      >
+        {/* The two ways a caller states the shape: as a value, which is what a caller holding a
+            number has — the kit's own tile widths are a map, and Tailwind cannot read a class name
+            out of one — and as the utility classes that make a line of placeholder text. */}
+        <Skeleton style={{ aspectRatio: "2 / 3", width: 176 }} />
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-4 w-24" />
       </Section_>
 
       <Section_

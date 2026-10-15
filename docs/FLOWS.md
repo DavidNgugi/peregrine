@@ -64,6 +64,10 @@ Tests: wizard resumability (kill mid-wizard, relaunch), missing keyring backend 
 
 ## F2 — Cold start and discovery hydration
 
+Discover places search over the hero with a Movies / TV shows selector at the trailing edge. The `type` URL parameter selects a core-filtered rail and search projection; switching it does not fetch a fresh set of rails when the cache already holds a catalogue.
+
+**The rails a launch draws come from `discover_rail`, the membership manifest a fetch writes whole** (`DATA_MODEL` §2.8): which titles each rail held, in that rail's order, with everything a rail *draws* read from the `title` row the list answer already wrote and the cached blob's path taken from the cache. A launch with a manifest draws the last fetch's rails and starts nothing — seven lists a provider publishes change on the provider's clock, not on the user's — and a launch without one enqueues the fetch, which is the same read-triggers-the-fetch rule below. What that enqueue is *not* conditional on is the credential read having finished: the read is blocking and runs off the startup path because a keychain can raise a prompt, so the fetch is enqueued and the job waits for the read rather than reporting a provider the user has as missing. `NoProvider` — "set a key up in Settings" — is answered only by a credential read that has finished.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -356,6 +360,28 @@ sequenceDiagram
 ```
 
 Both paths share one `MediaSource` abstraction, so resume, track selection, subtitle attachment, and progress reporting are implemented once. mpv runs with `--no-config` and a fixed flag set so a user's global mpv config cannot inject scripts into our session, and its video surface is attached per platform: `--wid` on Windows and X11, an app-positioned child window on macOS, and a documented degraded hand-off on Wayland ([adr/0013](./adr/0013-mpv-distribution-and-video-surface.md)).
+
+### What 1.0 actually does, and how it differs
+
+The diagram above is the target: an mpv session with tracks, resume, subtitles, progress, and next-up.
+**What exists is the local-file path only, with the webview's own decoder as the player** ([adr/0023](./adr/0023-in-app-video-surface.md)),
+and the differences are worth stating where the flow is, because they are what a reader will meet:
+
+* **`PlaybackSession` replaces `PlaybackService` for now.** It opens the loopback listener for one file
+  and answers two URLs; there is no probe, no resume, no track selection, and no `player://state` — the
+  element's own events are the only state, and `watch_progress` is written by nobody.
+* **The surface is a `<video>` element in the page, not an mpv child window.** So the container has to be
+  one the platform's media stack demuxes: `peregrine_domain::LocalPlayback` answers that from the file's
+  name before the press, and a title whose container needs mpv says so instead of going black.
+* **The resume point is always the start.** `watch_progress` exists in storage and nothing writes it, so
+  `start=resume_ms` has nothing to resume *from*.
+* **A local file becomes its own poster.** When the core answers that a title has no poster to draw, the
+  renderer captures a frame a tenth of the way in, posts it to the same listener, and the image cache
+  keeps it under the title — so a freshly scanned folder of stubs has pictures before any provider is
+  configured at all.
+
+The torrent path, the mpv adapter, resume, tracks, subtitles, progress, and next-up are `PG-E16`'s and
+`PG-E10`'s, unchanged.
 
 Tests: resume at 2%, at 50%, at 99% (must not resume 3 s before credits), seek storm during buffering, mpv crash mid-playback (state becomes `failed`, app survives, retry resumes from the last known position), track selection persistence per show, and an EPIPE on the mpv IPC socket (treated as a crash, not a hang).
 
@@ -845,11 +871,11 @@ stateDiagram-v2
     removed --> [*]
 ```
 
-Terminal states: `completed`, `removed`, `failed`. Every non-terminal state has a persisted `engine_state_json`, so a restart reattaches rather than restarting the transfer. Progress writes are coalesced to at most 1 Hz per job.
+Terminal states: `completed`, `removed`, `failed`. Every state in which the engine is actually holding the torrent — `downloading`, `paused`, `seeding` — has a persisted `engine_state_json`, so a restart reattaches rather than restarting the transfer. The states before the engine has it (`queued`, `inspecting`, `metadata`, `blocked`) have none, which is F6's own order: the job row is inserted at `queued`, and the engine's state is written when it accepts the torrent. Progress writes are coalesced to at most 1 Hz per job.
 
 A retry after a failure is **a new job, not an edge of this one**. `download_job_hash_uq` is unique over the live states, so a failed job vacates its infohash and the retry is inserted fresh with its own `safety_report_json`; that is deliberate, because re-inspecting the same torrent on a retry is how a gate gets skipped. `download::transition` therefore treats `failed` as absorbing, and the diagram above no longer draws a `failed --> queued` arrow it does not have.
 
-`removed` is reachable from **every** non-terminal state, because a user has to be able to cancel a job they are still waiting for. Without the edges from `queued`, `inspecting`, and `metadata`, a job parked behind the active-set limit — which can be hours — has no way out, and a download manager that cannot cancel a queued download is not one. `download::transition` (PG-E4-11) currently rejects `Removed` in those four states, so the machine owes this row.
+`removed` is reachable from **every** non-terminal state, because a user has to be able to cancel a job they are still waiting for. Without the edges from `queued`, `inspecting`, and `metadata`, a job parked behind the active-set limit — which can be hours — has no way out, and a download manager that cannot cancel a queued download is not one. `download::transition` (PG-E4-11) implements all seven, `Event::download_edge` names each of them, and `a_job_can_be_removed_from_every_non_terminal_state` is the test that holds the row.
 
 ### SM2 — Media availability
 

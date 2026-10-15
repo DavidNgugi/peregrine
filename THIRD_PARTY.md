@@ -37,7 +37,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 628 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 635 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -72,6 +72,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `autocfg` | 1.5.1 |
 | `aws-lc-rs` | 1.18.2 |
 | `aws-lc-sys` | 0.46.0 |
+| `axum` | 0.8.9 |
+| `axum-core` | 0.5.6 |
 | `base64` | 0.21.7 |
 | `base64` | 0.22.1 |
 | `base64` | 0.23.1 |
@@ -243,6 +245,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `http-body` | 1.1.0 |
 | `http-body-util` | 0.1.5 |
 | `http-range` | 0.1.5 |
+| `http-range-header` | 0.4.2 |
 | `httparse` | 1.10.1 |
 | `httpdate` | 1.0.3 |
 | `hybrid-array` | 0.4.15 |
@@ -304,10 +307,12 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `mac-notification-sys` | 0.6.15 |
 | `markup5ever` | 0.39.0 |
 | `matchers` | 0.2.0 |
+| `matchit` | 0.8.4 |
 | `md-5` | 0.11.0 |
 | `memchr` | 2.8.3 |
 | `memoffset` | 0.9.1 |
 | `mime` | 0.3.17 |
+| `mime_guess` | 2.0.5 |
 | `miniz_oxide` | 0.8.9 |
 | `miniz_oxide` | 0.9.1 |
 | `mio` | 1.2.4 |
@@ -543,6 +548,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `toml_writer` | 1.1.3+spec-1.1.0 |
 | `tower` | 0.5.3 |
 | `tower-http` | 0.6.11 |
+| `tower-http` | 0.7.1 |
 | `tower-layer` | 0.3.3 |
 | `tower-service` | 0.3.3 |
 | `tracing` | 0.1.44 |
@@ -558,6 +564,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `typenum` | 1.20.1 |
 | `uds_windows` | 1.2.1 |
 | `ulid` | 3.0.0 |
+| `unicase` | 2.10.0 |
 | `unicode-bidi` | 0.3.18 |
 | `unicode-ident` | 1.0.26 |
 | `unicode-normalization` | 0.1.25 |

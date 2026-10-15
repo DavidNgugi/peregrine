@@ -46,6 +46,54 @@ pub const MANIFEST: &[ProviderManifest] = &[ProviderManifest {
     requires_logo: true,
 }];
 
+/// What the last credential read answered, which is not the same question as whether a key is stored.
+///
+/// **A refused read is not an absent key, and conflating the two is how a user concludes that
+/// reinstalling deleted their key.** A keychain that denies access — on macOS the item's access
+/// control is bound to the code signature of the application that created it, so a rebuilt or
+/// reinstalled binary is a different application to the Keychain and raises a prompt — leaves
+/// `configured` empty exactly as a first run does. A screen that read the two as one thing tells a
+/// user whose key is still in their keychain to go and paste it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CredentialStore {
+    /// Nobody has read the store yet.
+    ///
+    /// The state a launch is in for the first moments after the window opens: the read is blocking
+    /// and runs off the start-up path, so a settings screen can be looked at before it has answered.
+    /// "Not configured" would be a claim nothing has established.
+    #[default]
+    Unread,
+    /// The store answered, so `configured` is the whole truth about what is stored.
+    Answered,
+    /// The store refused access, so whether a key is stored cannot be known from here.
+    Denied,
+    /// There is no store this system can use — a headless session, or a machine with no keychain.
+    Unavailable,
+}
+
+impl CredentialStore {
+    /// Every value, in the order a screen checks them.
+    pub const ALL: [Self; 4] = [
+        Self::Unread,
+        Self::Answered,
+        Self::Denied,
+        Self::Unavailable,
+    ];
+
+    /// What a store failure means to a screen, or `Answered` when the store was read.
+    ///
+    /// One place decides it, so the registry and anything else that classifies a failure cannot
+    /// disagree about which message a user is shown.
+    #[must_use]
+    pub const fn of(error: &peregrine_secrets::SecretStoreError) -> Self {
+        match error {
+            peregrine_secrets::SecretStoreError::Denied => Self::Denied,
+            peregrine_secrets::SecretStoreError::Unavailable
+            | peregrine_secrets::SecretStoreError::Failed => Self::Unavailable,
+        }
+    }
+}
+
 /// What this installation has configured.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProviderStatus {
@@ -53,9 +101,27 @@ pub struct ProviderStatus {
     pub known: Vec<&'static str>,
     /// The providers that hold a credential and can therefore be asked.
     pub configured: Vec<&'static str>,
+    /// What the last read of the credential store answered.
+    pub store: CredentialStore,
 }
 
 impl ProviderStatus {
+    /// The state before any read: every provider this build can talk to, and nothing known yet about
+    /// what is stored.
+    ///
+    /// **`known` is a constant of the build and never an answer from the store.** A screen that
+    /// learned the build's own provider list from a keyring read would claim this build knows no
+    /// provider at all whenever that read was refused or had not happened yet — the same mistake, in
+    /// the same direction, as showing a refusal as an absent key.
+    #[must_use]
+    pub fn unread() -> Self {
+        Self {
+            known: MANIFEST.iter().map(|entry| entry.provider).collect(),
+            configured: Vec::new(),
+            store: CredentialStore::Unread,
+        }
+    }
+
     /// Whether anything can be asked at all. A search with no provider is an empty result rather than
     /// a failure, and the interface says so instead of showing an error.
     #[must_use]
@@ -71,7 +137,6 @@ impl ProviderStatus {
 /// So the read happens once, off the command path, and a health check reads this cache: a diagnostics
 /// check that stalled on a keychain prompt would be worse than no diagnostics at all (`ARCHITECTURE §7`
 /// rule 2, and the test that caught it).
-#[derive(Default)]
 pub struct ProviderRegistry {
     /// The built adapters, so a request never waits on a keyring. A credential is held by the adapter
     /// that uses it, which is the one place it has to live; caching the *adapter* rather than the key
@@ -79,6 +144,27 @@ pub struct ProviderRegistry {
     adapters:
         std::sync::RwLock<Vec<std::sync::Arc<dyn peregrine_providers::provider::MetadataProvider>>>,
     status: std::sync::RwLock<ProviderStatus>,
+    /// Whether the credential read has finished, whatever it answered.
+    ///
+    /// **A fact of its own, and the one a caller waiting on the read needs.** `configured` is empty
+    /// both before the read and after a read that found nothing, so on its own it cannot tell "no
+    /// provider is configured" from "nobody has looked yet" — and a screen that read the second as
+    /// the first would tell a user who *has* a key to go and set one up, while never starting the
+    /// fetch that key would have filled the rails with.
+    refreshed: std::sync::atomic::AtomicBool,
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self {
+            adapters: std::sync::RwLock::new(Vec::new()),
+            // The known set is in place before the first read, so a status polled in the window
+            // before the read answers names what the build can talk to and claims nothing about
+            // what is stored.
+            status: std::sync::RwLock::new(ProviderStatus::unread()),
+            refreshed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
 }
 
 impl std::fmt::Debug for ProviderRegistry {
@@ -116,12 +202,52 @@ impl ProviderRegistry {
 
     /// Reads the store and remembers the answer.
     ///
+    /// The "the read has finished" flag is set whatever this answers, and that is the point of it:
+    /// a caller waiting for the read — a launch with an empty catalogue, deciding whether there is
+    /// anything to fetch with — must not wait for ever because the store refused to be read.
+    ///
+    /// **A refused read is recorded as such rather than left looking like an empty store.** The
+    /// adapters are deliberately *not* replaced on a failure: a refresh that fails after an earlier
+    /// success leaves the built adapters holding the credential they were built with, so the session
+    /// can still ask the provider, and the status keeps the answer that was true.
+    ///
     /// # Errors
     ///
     /// [`peregrine_secrets::SecretStoreError`] when the store cannot be read. A keyring that is
-    /// unavailable, or a machine with no keychain at all, leaves the registry at nothing configured.
+    /// unavailable, or a machine with no keychain at all, leaves the registry at nothing configured
+    /// **and says which of those it was**.
     pub fn refresh(&self, store: &dyn SecretStore) -> Result<ProviderStatus, BuildError> {
+        let outcome = self.rebuild(store);
+        self.refreshed
+            .store(true, std::sync::atomic::Ordering::Release);
+        // Only a store failure says anything about the store, and only `store` is written: `known`
+        // is the build's own list and `configured` keeps the answer that was true, because the
+        // adapters built from a key that was read once are still in hand.
+        if let Err(BuildError::Store(error)) = &outcome {
+            let mut status = self.status.write().expect("the lock is not poisoned");
+            status.store = CredentialStore::of(error);
+        }
+        outcome
+    }
+
+    /// Whether the credential read has finished, whether or not it found a provider.
+    #[must_use]
+    pub fn refreshed(&self) -> bool {
+        self.refreshed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Reads the store and builds what it holds, without touching the flag.
+    ///
+    /// **The status is written as soon as the store has answered, before any adapter is built.** The
+    /// store read and the adapter build can fail independently, and they mean different things: a
+    /// failed build is *not* "nobody has looked in the keychain", and a screen told that would sit on
+    /// "reading your keychain" for ever while the app knew perfectly well what was stored. Writing
+    /// the answer first makes the two failures distinguishable — the store's own answer is on screen
+    /// either way, and only a failed *read* changes what the status says about the store.
+    fn rebuild(&self, store: &dyn SecretStore) -> Result<ProviderStatus, BuildError> {
         let status = status(store)?;
+        *self.status.write().expect("the lock is not poisoned") = status.clone();
+
         let mut adapters = Vec::new();
         for entry in MANIFEST {
             if let Some(adapter) = build(entry, store)? {
@@ -129,7 +255,6 @@ impl ProviderRegistry {
             }
         }
         *self.adapters.write().expect("the lock is not poisoned") = adapters;
-        *self.status.write().expect("the lock is not poisoned") = status.clone();
         Ok(status)
     }
 
@@ -226,7 +351,11 @@ pub fn status(
             configured.push(entry.provider);
         }
     }
-    Ok(ProviderStatus { known, configured })
+    Ok(ProviderStatus {
+        known,
+        configured,
+        store: CredentialStore::Answered,
+    })
 }
 
 /// Builds the adapter for one manifest entry from its stored credential.
@@ -322,6 +451,131 @@ mod tests {
             vec!["tmdb"]
         );
         assert_eq!(registry.status().configured, vec!["tmdb"]);
+        assert_eq!(
+            registry.status().store,
+            super::CredentialStore::Answered,
+            "a store that answered is not a store that was refused"
+        );
+    }
+
+    /// A keychain that refuses access says so, and says it *instead of* "nothing is stored".
+    ///
+    /// **The defect this test exists for is a sentence, and it is the one a user reads as data
+    /// loss.** On macOS the item's access control is bound to the code signature of the application
+    /// that created it, so a rebuilt or reinstalled binary is a different application to the
+    /// Keychain and is asked. A denial leaves `configured` empty exactly as a first run does, and
+    /// the screen that could not tell the two apart told a user whose key was still in their
+    /// keychain to go and paste it again.
+    #[test]
+    fn a_refused_read_is_recorded_as_a_refusal_and_not_as_an_empty_store() {
+        struct Refusing(peregrine_secrets::SecretStoreError);
+
+        impl peregrine_secrets::SecretStore for Refusing {
+            fn get(
+                &self,
+                _key: &peregrine_secrets::SecretKey,
+            ) -> Result<Option<peregrine_secrets::Secret>, peregrine_secrets::SecretStoreError>
+            {
+                Err(self.0)
+            }
+
+            fn set(
+                &self,
+                _key: &peregrine_secrets::SecretKey,
+                _secret: &peregrine_secrets::Secret,
+            ) -> Result<(), peregrine_secrets::SecretStoreError> {
+                Err(self.0)
+            }
+
+            fn delete(
+                &self,
+                _key: &peregrine_secrets::SecretKey,
+            ) -> Result<(), peregrine_secrets::SecretStoreError> {
+                Err(self.0)
+            }
+        }
+
+        for (error, expected) in [
+            (
+                peregrine_secrets::SecretStoreError::Denied,
+                super::CredentialStore::Denied,
+            ),
+            (
+                peregrine_secrets::SecretStoreError::Unavailable,
+                super::CredentialStore::Unavailable,
+            ),
+        ] {
+            let registry = super::ProviderRegistry::new();
+            assert!(
+                registry.refresh(&Refusing(error)).is_err(),
+                "a store that refuses cannot be reported as a success"
+            );
+            let status = registry.status();
+            assert_eq!(status.store, expected);
+            assert!(
+                status.configured.is_empty(),
+                "a refused read configures nothing, which is why the reason has to travel"
+            );
+            assert!(
+                registry.refreshed(),
+                "the read finished, however it ended: nothing waits for ever on a refusal"
+            );
+        }
+    }
+
+    /// The state before any read is its own answer, so a screen cannot claim nothing is configured
+    /// while the read is still in flight.
+    #[test]
+    fn a_registry_nobody_has_read_is_unread_rather_than_unconfigured() {
+        let registry = super::ProviderRegistry::new();
+        assert_eq!(registry.status().store, super::CredentialStore::Unread);
+        assert!(!registry.refreshed());
+    }
+
+    /// A store that was read once and then refused keeps the answer that was true, because the
+    /// adapters it built still hold the credential and the session can still ask the provider.
+    #[test]
+    fn a_later_refusal_does_not_forget_a_provider_that_was_configured() {
+        /// A store whose every call is refused, so the registry's second read fails.
+        struct Refusing;
+        impl peregrine_secrets::SecretStore for Refusing {
+            fn get(
+                &self,
+                _key: &peregrine_secrets::SecretKey,
+            ) -> Result<Option<peregrine_secrets::Secret>, peregrine_secrets::SecretStoreError>
+            {
+                Err(peregrine_secrets::SecretStoreError::Denied)
+            }
+
+            fn set(
+                &self,
+                _key: &peregrine_secrets::SecretKey,
+                _secret: &peregrine_secrets::Secret,
+            ) -> Result<(), peregrine_secrets::SecretStoreError> {
+                Err(peregrine_secrets::SecretStoreError::Denied)
+            }
+
+            fn delete(
+                &self,
+                _key: &peregrine_secrets::SecretKey,
+            ) -> Result<(), peregrine_secrets::SecretStoreError> {
+                Err(peregrine_secrets::SecretStoreError::Denied)
+            }
+        }
+
+        let registry = super::ProviderRegistry::new();
+        let store = MemorySecretStore::with_provider("tmdb", "a-key");
+        registry.refresh(&store).expect("the store answers");
+
+        assert!(registry.refresh(&Refusing).is_err());
+
+        let status = registry.status();
+        assert_eq!(status.store, super::CredentialStore::Denied);
+        assert_eq!(
+            status.configured,
+            vec!["tmdb"],
+            "the adapters built from the key are still in hand, so the provider is still usable"
+        );
     }
 
     #[test]
@@ -342,6 +596,55 @@ mod tests {
         assert!(super::entry("tmdb").is_some());
         assert!(super::entry("nobody").is_none());
         assert!(super::entry("").is_none());
+    }
+
+    #[test]
+    fn a_finished_read_is_reported_even_when_it_found_nothing() {
+        // The two facts `status` alone cannot tell apart, and the reason the flag exists: a caller
+        // waiting for the read — a launch deciding whether anything can fill the rails — has to
+        // know when to stop waiting, and "found nothing" is a finished read.
+        let registry = super::ProviderRegistry::new();
+        assert!(!registry.refreshed(), "nothing has looked yet");
+
+        registry
+            .refresh(&MemorySecretStore::new())
+            .expect("the store answers");
+        assert!(registry.refreshed());
+        assert!(registry.status().is_empty(), "and it found no provider");
+
+        // A store that refuses is a finished read too: the wait must not be for ever because the
+        // keychain was locked.
+        let refusing = super::ProviderRegistry::new();
+        assert!(refusing.refresh(&Refusing).is_err());
+        assert!(refusing.refreshed());
+    }
+
+    /// A store whose every call fails, which is a locked keychain or a machine with none.
+    struct Refusing;
+
+    impl peregrine_secrets::SecretStore for Refusing {
+        fn get(
+            &self,
+            _key: &peregrine_secrets::SecretKey,
+        ) -> Result<Option<peregrine_secrets::Secret>, peregrine_secrets::SecretStoreError>
+        {
+            Err(peregrine_secrets::SecretStoreError::Unavailable)
+        }
+
+        fn set(
+            &self,
+            _key: &peregrine_secrets::SecretKey,
+            _secret: &peregrine_secrets::Secret,
+        ) -> Result<(), peregrine_secrets::SecretStoreError> {
+            Err(peregrine_secrets::SecretStoreError::Unavailable)
+        }
+
+        fn delete(
+            &self,
+            _key: &peregrine_secrets::SecretKey,
+        ) -> Result<(), peregrine_secrets::SecretStoreError> {
+            Err(peregrine_secrets::SecretStoreError::Unavailable)
+        }
     }
 
     #[test]

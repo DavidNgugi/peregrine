@@ -2,12 +2,31 @@ import { createI18n } from "@peregrine/i18n";
 import type { LibraryTitleDto, MatchRuleDto, UnmatchedFileDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { ScanControl } from "../hooks/useScan.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
 import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
+import type { LibraryView } from "../hooks/useLibraryView.js";
 import { LibraryScreen } from "./LibraryScreen.js";
+
+// A tile's poster is loaded through Tauri's own bridge, which a Node test does not have. The factory
+// is hoisted above the imports, which is why the spy lives in `vi.hoisted` — the shape
+// `TitleScreen.test.tsx` and `lib/media.test.ts` use, so the three cannot disagree about the bridge.
+const bridge = vi.hoisted(() => ({
+  convertFileSrc: vi.fn((path: string) => `asset://localhost/${encodeURIComponent(path)}`),
+  inTauri: true,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: bridge.convertFileSrc,
+  isTauri: () => bridge.inTauri,
+}));
+
+beforeEach(() => {
+  bridge.convertFileSrc.mockClear();
+  bridge.inTauri = true;
+});
 
 const i18n = createI18n();
 
@@ -22,6 +41,10 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
     files: 2,
     bytes: 8 * 1024 * 1024 * 1024,
     missingFiles: 0,
+    poster: null,
+    // False by default: a fixture is not a title the backfill should ask the core about, and a test that
+    // wants one says so.
+    needsPoster: false,
     ...overrides,
   };
 }
@@ -127,18 +150,32 @@ function markup(
   scan: ScanControl = scanControl(),
   unmatched: UnmatchedQueue = queue(),
   remembered: MatchRules = rules(),
+  view: LibraryView = "grid",
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <LibraryScreen
         onNavigate={() => undefined}
+        onView={() => undefined}
         rules={remembered}
         scan={scan}
         titles={state}
         unmatched={unmatched}
+        view={view}
       />
     </I18nextProvider>,
   );
+}
+
+/**
+ * The same screen drawn as the table.
+ *
+ * The two drawings answer different questions and only one of them has columns, so a test about a
+ * *column* has to ask for the table — asserting it against the default would be asserting a column
+ * that is not on screen.
+ */
+function markupList(state: LibraryTitles): string {
+  return markup(state, scanControl(), queue(), rules(), "list");
 }
 
 describe("LibraryScreen", () => {
@@ -163,12 +200,72 @@ describe("LibraryScreen", () => {
   it("shows a missing count only when something is missing", () => {
     // A column of dashes for a healthy library is noise, and a zero would read as "none missing"
     // on a row where the scan has not run yet: the dash says the question does not apply.
-    const none = markup(library({ titles: [title({ missingFiles: 0 })] }));
-    const some = markup(library({ titles: [title({ files: 3, missingFiles: 1 })] }));
+    const none = markupList(library({ titles: [title({ missingFiles: 0 })] }));
+    const some = markupList(library({ titles: [title({ files: 3, missingFiles: 1 })] }));
 
     expect(none).toContain("—");
     expect(some).toContain("Missing");
     expect(some).toContain("1");
+  });
+
+  it("draws a grid of tiles by default, because that is the drawing a library is opened for", () => {
+    const html = markup(library({ titles: [title()] }));
+
+    expect(html).toContain('data-library-grid=""');
+    expect(html).toContain('aria-label="Titles in your library"');
+    expect(html).not.toContain("<table");
+    expect(html).toContain('aria-pressed="true">Grid</button>');
+    expect(html).toContain('aria-pressed="false">List</button>');
+  });
+
+  it("draws the table when the list is chosen, and the control says which drawing is on", () => {
+    const html = markupList(library({ titles: [title()] }));
+
+    expect(html).toContain("<table");
+    expect(html).not.toContain('data-library-grid=""');
+    // Both choices are on screen and exactly one of them is pressed, which is what makes the control
+    // a choice rather than two buttons: a screen reader announces the pressed state, not the colour.
+    expect(html).toContain('aria-pressed="true">List</button>');
+    expect(html).toContain('aria-pressed="false">Grid</button>');
+  });
+
+  it("offers no view control over a library with nothing in it", () => {
+    // A toggle over an empty library is a control for a choice nobody can see, and the empty state is
+    // where a scan is wanted instead.
+    const html = markup(library());
+
+    expect(html).not.toContain('data-library-view=""');
+  });
+
+  it("says how many copies are missing on the tile, in words rather than as a dash", () => {
+    // The table's dash is a mark in a column that exists to be scanned down. A tile has no column, so
+    // the same fact is a phrase — and its absence on a healthy title is silence, not a zero.
+    const none = markup(library({ titles: [title({ missingFiles: 0 })] }));
+    const some = markup(library({ titles: [title({ files: 3, missingFiles: 1 })] }));
+
+    expect(none).not.toContain("missing");
+    expect(some).toContain("1 copy missing");
+    expect(markup(library({ titles: [title({ files: 3, missingFiles: 3 })] }))).toContain(
+      "3 copies missing",
+    );
+  });
+
+  it("loads a tile's poster over the asset protocol, and never through IPC", () => {
+    // The whole point of the poster travelling on the list read: the core resolves the cache path for
+    // every row, and only `lib/media.ts` turns one into a URL (AGENTS R11).
+    const html = markup(library({ titles: [title({ poster: "/cache/images/9f2c.webp" })] }));
+
+    expect(bridge.convertFileSrc).toHaveBeenCalledWith("/cache/images/9f2c.webp");
+    expect(html).toContain("asset://localhost/");
+
+    // A reference that is not a cache path is no picture at all, which is the reserved box.
+    bridge.convertFileSrc.mockClear();
+    const remote = markup(
+      library({ titles: [title({ poster: "https://image.tmdb.org/t/p/w342/poster.jpg" })] }),
+    );
+
+    expect(bridge.convertFileSrc).not.toHaveBeenCalled();
+    expect(remote).not.toContain("asset://localhost/");
   });
 
   it("distinguishes an empty library from a read that failed", () => {

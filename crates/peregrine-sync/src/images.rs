@@ -50,21 +50,41 @@ const PARTIAL_SUFFIX: &str = "partial";
 
 /// Which size of an image the cache keeps.
 ///
-/// Two, and only the two `docs/research/data-sources.md` recommends: a `w342` poster is about
-/// 63 KB and a `w780` backdrop about 291 KB, and every other size the provider offers is proxied
-/// through rather than stored. Every variant kept is a variant evicted later, and the byte cap is
-/// a user setting (PG-E6-10).
+/// The three provider variants are the ones `docs/research/data-sources.md` recommends — a `w342`
+/// poster is about 63 KB and a `w780` backdrop about 291 KB — and every other size the provider offers
+/// is proxied through rather than stored. Every variant kept is a variant evicted later, and the byte
+/// cap is a user setting (PG-E6-10).
+///
+/// **[`Self::LocalPoster`] is not a provider variant at all**, which is why it is last and why
+/// `for_kind` does not answer it: it holds a frame this machine generated from a file the library
+/// holds, for a title no provider has drawn a poster for. `docs/ARCHITECTURE.md` §17 already promised
+/// the cache would hold "local-thumbnail variants"; this is that promise, and it is a variant rather
+/// than a second cache because the accounting, the eviction order, and the asset-protocol scope are
+/// the same for both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ImageVariant {
     /// A grid poster.
     PosterW342,
     /// A detail-page backdrop.
     BackdropW780,
+    /// One episode's own wide image.
+    StillW300,
+    /// A poster this machine generated from a frame of the title's own file.
+    ///
+    /// Sized by whatever the capture produced rather than by a provider's ladder, so there is no width
+    /// in the name: the name is part of the cache key and nothing more, and a "size" here would be a
+    /// claim about bytes a renderer chose.
+    LocalPoster,
 }
 
 impl ImageVariant {
     /// Every variant the cache keeps.
-    pub const ALL: [Self; 2] = [Self::PosterW342, Self::BackdropW780];
+    pub const ALL: [Self; 4] = [
+        Self::PosterW342,
+        Self::BackdropW780,
+        Self::StillW300,
+        Self::LocalPoster,
+    ];
 
     /// The provider's own name for the size, which is part of the cache key.
     ///
@@ -76,6 +96,8 @@ impl ImageVariant {
         match self {
             Self::PosterW342 => "w342",
             Self::BackdropW780 => "w780",
+            Self::StillW300 => "w300",
+            Self::LocalPoster => "local",
         }
     }
 
@@ -89,6 +111,7 @@ impl ImageVariant {
         match kind {
             ImageKind::Poster => Self::PosterW342,
             ImageKind::Backdrop => Self::BackdropW780,
+            ImageKind::Still => Self::StillW300,
         }
     }
 }
@@ -98,13 +121,41 @@ impl ImageVariant {
 pub struct ImageKey(String);
 
 impl ImageKey {
+    /// The key a locally generated poster for one title is stored under.
+    ///
+    /// **`local` in the provider slot, and the title's id in the path slot**, which is what keeps the
+    /// key's shape one shape: `sha256(provider|path|variant)` is what `image_cache`'s three columns
+    /// hold, and a second shape would be a second set of columns to keep in step. `local` is not a
+    /// [`Provider`] — that enum is closed over the metadata services — but the column has no
+    /// constraint on it, and inventing a provider variant for something no provider serves would be
+    /// the worse lie.
+    ///
+    /// **Keyed by the title rather than by the file**, and that is the load-bearing choice: the reads
+    /// that draw a poster answer for a *title*, and a key derived from a media file would make every
+    /// one of them read the title's items and files first — a second query per row on a screen that
+    /// draws a hundred rows. A title can hold several files; it has one poster.
+    #[must_use]
+    pub fn for_local_title(title_id: i64, variant: ImageVariant) -> Self {
+        Self::digest("local", &title_id.to_string(), variant)
+    }
+
     /// The key for one image of one provider at one variant.
     #[must_use]
     pub fn for_image(provider: Provider, path: &str, variant: ImageVariant) -> Self {
+        Self::digest(provider.as_str(), path, variant)
+    }
+
+    /// `sha256(owner|path|variant)`, lowercase hex — the one place the key is spelled.
+    ///
+    /// A shared private function rather than a body in `for_image`, because the two constructors must
+    /// agree about the separators and the encoding: a second copy is a second thing to change, and the
+    /// failure it would produce is a blob written under one name and looked for under another, which
+    /// renders as a poster that never arrives.
+    fn digest(owner: &str, path: &str, variant: ImageVariant) -> Self {
         let mut hasher = Sha256::new();
-        // The separators are what make the three fields unambiguous: without them, provider
-        // `ab` with path `c` and provider `a` with path `bc` would hash the same bytes.
-        hasher.update(provider.as_str().as_bytes());
+        // The separators are what make the three fields unambiguous: without them, owner `ab` with
+        // path `c` and owner `a` with path `bc` would hash the same bytes.
+        hasher.update(owner.as_bytes());
         hasher.update(b"|");
         hasher.update(path.as_bytes());
         hasher.update(b"|");
@@ -425,10 +476,39 @@ mod tests {
     }
 
     #[test]
-    fn the_two_kept_variants_are_the_two_the_research_recommends() {
+    fn the_kept_variants_are_the_four_the_screens_ask_for() {
         let named: Vec<&str> = ImageVariant::ALL.iter().map(|one| one.as_str()).collect();
 
-        assert_eq!(named, ["w342", "w780"]);
+        assert_eq!(named, ["w342", "w780", "w300", "local"]);
+    }
+
+    #[test]
+    fn a_local_poster_is_keyed_by_its_title_and_can_never_collide_with_a_provider_s() {
+        // Three properties, and each of them is a defect if it fails. Two titles must not share one
+        // file. One title's local poster must not be the same blob as another title's. And a local key
+        // must never equal a provider key, or a generated frame could shadow the artwork a provider was
+        // about to deliver — which would leave a screen showing a film still where a poster belongs and
+        // no request ever made to replace it.
+        let seven = ImageKey::for_local_title(7, ImageVariant::LocalPoster);
+        let eight = ImageKey::for_local_title(8, ImageVariant::LocalPoster);
+
+        assert_ne!(seven, eight);
+        assert_eq!(
+            seven,
+            ImageKey::for_local_title(7, ImageVariant::LocalPoster),
+            "the same title always has the same key, or the second capture writes a competitor"
+        );
+        assert_ne!(
+            seven,
+            ImageKey::for_image(Provider::Tmdb, "7", ImageVariant::PosterW342),
+            "the provider slot is what keeps the two apart"
+        );
+        assert_ne!(
+            seven,
+            ImageKey::for_local_title(7, ImageVariant::PosterW342),
+            "and the variant is what keeps a local poster from answering a backdrop lookup"
+        );
+        assert_eq!(seven.as_str().len(), 64, "still a hex digest: {seven}");
     }
 
     #[test]
@@ -445,12 +525,26 @@ mod tests {
             ImageVariant::for_kind(ImageKind::Backdrop),
             ImageVariant::BackdropW780
         );
-        // And every variant is some kind's: a variant nothing maps to is a size fetched by nothing.
+        assert_eq!(
+            ImageVariant::for_kind(ImageKind::Still),
+            ImageVariant::StillW300
+        );
+        // **Every *provider* variant is some kind's**, because a variant nothing maps to is a size fetched
+        // by nothing. The one exception is asserted rather than skipped: `LocalPoster` is deliberately no
+        // kind's variant — it holds a frame this machine generated, not a size a provider serves, and a
+        // `for_kind` that answered it would make a poster lookup read a capture.
         for variant in ImageVariant::ALL {
-            let named = [ImageKind::Poster, ImageKind::Backdrop]
+            let named = [ImageKind::Poster, ImageKind::Backdrop, ImageKind::Still]
                 .into_iter()
                 .any(|kind| ImageVariant::for_kind(kind) == variant);
-            assert!(named, "{variant:?} is no kind's variant");
+            if variant == ImageVariant::LocalPoster {
+                assert!(
+                    !named,
+                    "a local poster is not a kind's variant, and must not be"
+                );
+            } else {
+                assert!(named, "{variant:?} is no kind's variant");
+            }
         }
     }
 

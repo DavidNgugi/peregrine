@@ -78,13 +78,23 @@ stored_enum! {
 }
 
 stored_enum! {
-    /// How complete a title's metadata is, as `title.metadata_state` stores it.
+    /// How far a title's metadata has been taken, as `title.metadata_state` stores it.
     ///
     /// `Stale` and `Failed` are not errors: what is stored is still shown, and the state says
     /// whether a refresh is due or the last one failed.
+    ///
+    /// **`Listed` is a provenance and not a completeness**, which is why it sits apart from the
+    /// three that describe how much is known. A list answer — a rail, a search page — carries a
+    /// name, a date, a poster, a score, a synopsis, and a vote count, and nothing else: a runtime,
+    /// a genre, a cast member, and a season count are what only a *details* read returns. A title
+    /// a rail listed therefore has fields and is still a title nobody has read, and the state
+    /// vocabulary had no way to say so before this variant existed — every list write stamped
+    /// `Partial`, which is indistinguishable from a details read that got halfway.
     MetadataState {
         /// The identity exists and nothing else does.
         Stub => "stub",
+        /// A list answer filled what a list carries, and no details read has happened.
+        Listed => "listed",
         /// Some fields are filled.
         Partial => "partial",
         /// Every field the providers supply is filled.
@@ -93,6 +103,24 @@ stored_enum! {
         Stale => "stale",
         /// The last refresh failed.
         Failed => "failed",
+    }
+}
+
+impl MetadataState {
+    /// Whether a *details* read has filled this title in, as opposed to a list answer.
+    ///
+    /// The question `crate::catalogue`'s readers ask when they decide whether asking the provider
+    /// again is worth a request. `Stub` and `Listed` are the two states a title holds without a
+    /// details read ever having happened; the rest all follow one.
+    ///
+    /// The match names every variant rather than negating two, so a state added later has to
+    /// answer this question instead of inheriting an answer nobody chose.
+    #[must_use]
+    pub const fn has_details(self) -> bool {
+        match self {
+            Self::Stub | Self::Listed => false,
+            Self::Partial | Self::Complete | Self::Stale | Self::Failed => true,
+        }
     }
 }
 
@@ -257,17 +285,25 @@ pub struct EpisodePosition {
     pub episode_number: EpisodeNumber,
 }
 
-/// Which of a title's two pictures is wanted.
+/// Which picture of a title, or of one of its episodes, is wanted.
 ///
-/// The *kind* rather than a pixel size: sizes are a provider's own naming (`TMDB` calls them `w342` and
-/// `w780`), and a domain type that named one provider's sizes would have to change the day another
-/// provider numbers theirs differently. The adapter picks the size that suits the kind.
+/// The *kind* rather than a pixel size: sizes are a provider's own naming (`TMDB` calls them `w342`,
+/// `w780`, and `w300`), and a domain type that named one provider's sizes would have to change the day
+/// another provider numbers theirs differently. The adapter picks the size that suits the kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImageKind {
     /// The portrait image a grid or a detail page shows.
     Poster,
     /// The wide image a hero shows behind the title.
     Backdrop,
+    /// The wide image one episode shows on its own card.
+    ///
+    /// A third kind rather than a reuse of [`ImageKind::Backdrop`] because the two are different
+    /// pictures at a different size and belong to different things: hashing an episode's still under
+    /// the backdrop's variant would let a card draw whatever wide image the *title* happened to have,
+    /// which is a wrong picture that looks like a right one — the failure a cache key exists to make
+    /// impossible.
+    Still,
 }
 
 /// The fields a provider supplies for one title.
@@ -319,6 +355,70 @@ pub struct TitleDetails {
     pub poster_path: Option<String>,
     /// The provider-relative path of the primary backdrop.
     pub backdrop_path: Option<String>,
+}
+
+/// The fields a provider supplies for one season.
+///
+/// [`TitleDetails`]'s sibling for the row under it, and it is here rather than in `peregrine-storage`
+/// for the same reason: it is what a provider *said*, so an adapter can build one knowing nothing
+/// about the database, and the layer between them decides what to store.
+///
+/// **The number is the row's identity and never its content.** It is the key an upsert matches on
+/// (`DATA_MODEL` §2.3: canonical numbering is the aired order the primary provider publishes), so
+/// every other field here is descriptive. A provider whose own scheme disagrees gets an
+/// `episode_ordering` row, not a renumbered episode, because rewriting the numbers breaks every
+/// already-matched file.
+///
+/// Every field but the number is optional, for [`TitleDetails`]'s reason: providers omit freely, and
+/// an absent field must never mean "clear what is stored".
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeasonDetails {
+    /// The season's position within the title; `0` is the specials season.
+    pub season_number: SeasonNumber,
+    /// The season's own name, when the provider gives one.
+    pub name: Option<String>,
+    /// The season's synopsis.
+    pub overview: Option<String>,
+    /// The date the season first aired.
+    pub air_date: Option<Date>,
+    /// The provider-relative path of the season's poster.
+    pub poster_path: Option<String>,
+    /// How many episodes the provider says the season has, which a season row keeps its own count
+    /// for: the number is what a switcher shows before any episode has been read.
+    pub episode_count: Option<u32>,
+}
+
+/// The fields a provider supplies for one episode.
+///
+/// The pair in [`EpisodePosition`] is the identity an upsert matches on; everything else is
+/// descriptive, and `episode.season_id` is assigned once by the row's first writer — a later
+/// enrichment does not move an episode between seasons any more than it renumbers one.
+///
+/// `rating` and `votes` are apart from the rest because they are the only two that are not text: a
+/// provider that has not been voted on reports a score of zero, and the adapter is what knows its own
+/// spelling of "unrated" (the port's `SearchCandidate::rating` documents the same rule).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpisodeDetails {
+    /// The season the episode belongs to, as the provider publishes it.
+    pub season_number: SeasonNumber,
+    /// The episode's number inside that season.
+    pub episode_number: EpisodeNumber,
+    /// The episode's title.
+    pub name: Option<String>,
+    /// The episode's synopsis.
+    pub overview: Option<String>,
+    /// The date it first aired, when the provider dates it.
+    pub air_date: Option<Date>,
+    /// How long it runs, in minutes.
+    pub runtime_minutes: Option<u32>,
+    /// The provider-relative path of the episode's still.
+    pub still_path: Option<String>,
+    /// This provider's own rating for the episode, on its own scale.
+    pub rating: Option<f64>,
+    /// How many people gave it.
+    pub votes: Option<u64>,
+    /// Where the episode sits in its season — a premiere, a finale, a special.
+    pub episode_type: Option<EpisodeType>,
 }
 
 /// One row of `title`: a film or a series, with the denormalized artwork the browse grid
@@ -769,7 +869,7 @@ mod tests {
         );
         assert_check_values!(
             MetadataState,
-            ["stub", "partial", "complete", "stale", "failed"]
+            ["stub", "listed", "partial", "complete", "stale", "failed"]
         );
         assert_check_values!(AliasKind, ["alternative", "working", "original"]);
         assert_check_values!(

@@ -1,9 +1,10 @@
 /**
  * The hook layer for one title's own screen.
  *
- * Two reads, because the screen shows two things: the title with its totals and its poster, and its
- * episodes in the order a person watches them. They are separate because they are separate questions
- * — a film has no episodes, and a title the library holds nothing of still has a page.
+ * **One read, because the episodes left.** The first shape read the title and every episode of it, on
+ * the argument that the screen showed both. It now shows one *season* of them, chosen by a switcher,
+ * which is `useSeasons`'s question — and two hooks reading the same table to answer two halves of one
+ * heading was a read per title whose rows the other hook had already asked for.
  *
  * **`missing` is its own state rather than an error.** `getTitle` answers `null` for a title this
  * account may not see and for an id that names nothing, and the two are the same answer by design
@@ -21,14 +22,14 @@
  * a slow screen (`ARCHITECTURE` §7 rule 2).
  */
 
-import {
-  eventTopics,
-  getTitle,
-  listEpisodes,
-  normalizeIpcError,
-  refreshTitle,
+import { eventTopics, getTitle, normalizeIpcError, refreshTitle } from "@peregrine/ipc-client";
+import type {
+  IpcError,
+  LibraryTitleDto,
+  LocalPlaybackDto,
+  RootKind,
+  TitleOfferDto,
 } from "@peregrine/ipc-client";
-import type { EpisodeDto, IpcError, LibraryTitleDto, RootKind } from "@peregrine/ipc-client";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
@@ -40,29 +41,58 @@ import {
   type RefreshFollow,
 } from "./refresh-follow.js";
 
-/** One title, its episodes, and what the screen needs to know about the reads. */
+/** One title and what the screen needs to know about the read. */
 export interface TitleDetail {
   /** The title, once the read has answered. */
   readonly title: LibraryTitleDto | null;
-  /** Its episodes, in watch order; empty for a film and for a title with nothing here. */
-  readonly episodes: readonly EpisodeDto[];
+  /**
+   * What pressing Play would do, as the core classified the file's container, or `null` when the
+   * library holds no copy on disk.
+   *
+   * The rule is the core's (`peregrine_domain::LocalPlayback`) and this carries its answer for the
+   * reason every other field here does: a screen that decided it from a file extension would be
+   * deciding playback in TypeScript (`AGENTS R7`).
+   */
+  readonly playSupport: LocalPlaybackDto | null;
   /** Where its cached poster is, as the core reported it, or `null` when there is none. */
   readonly poster: string | null;
+  /** Where its cached backdrop is, or `null` when the cache holds none. */
+  readonly backdrop: string | null;
+  /** The provider's synopsis, when one has been written. */
+  readonly overview: string | null;
+  /** The provider's score, when it has one. */
+  readonly rating: number | null;
+  /** When it came out, as the core rendered the stored column. */
+  readonly released: string | null;
+  /**
+   * What this title's page may offer, which the core derived rather than this hook (AGENTS R7).
+   *
+   * Never `null`, and the value in the states where no title was read is never drawn: the screen draws
+   * the hero only in the branch a successful read produced, so the offer a user sees is always the one
+   * the core computed for that title.
+   */
+  readonly offer: TitleOfferDto;
   /** The reads are still in flight. */
   readonly loading: boolean;
   /** The core answered that there is no such title here. */
   readonly missing: boolean;
   /** A read failed, so what is here is unknown rather than absent. */
   readonly failed: boolean;
-  /** Re-reads the title and its episodes. */
+  /** Re-reads the title. */
   readonly refresh: () => Promise<void>;
 }
 
 /** Everything the hook holds about the read itself. */
 interface TitleState {
   readonly title: LibraryTitleDto | null;
-  readonly episodes: readonly EpisodeDto[];
+  /** Carried through from the read; see [`TitleDetail::playSupport`]. */
+  readonly playSupport: LocalPlaybackDto | null;
   readonly poster: string | null;
+  readonly backdrop: string | null;
+  readonly overview: string | null;
+  readonly rating: number | null;
+  readonly released: string | null;
+  readonly offer: TitleOfferDto;
   readonly loading: boolean;
   readonly missing: boolean;
   readonly failed: boolean;
@@ -70,8 +100,14 @@ interface TitleState {
 
 const EMPTY: TitleState = {
   title: null,
-  episodes: [],
+  playSupport: null,
   poster: null,
+  backdrop: null,
+  overview: null,
+  rating: null,
+  released: null,
+  // Nothing has been read, so nothing is offered. The hero is not drawn in this state.
+  offer: "acquire",
   loading: true,
   missing: false,
   failed: false,
@@ -150,24 +186,30 @@ export function useTitle(id: number | null): TitleDetail {
       if (answer === null) {
         setState({
           title: null,
-          episodes: [],
+          playSupport: null,
           poster: null,
+          backdrop: null,
+          overview: null,
+          rating: null,
+          released: null,
+          offer: "acquire",
           loading: false,
           missing: true,
           failed: false,
         });
         return;
       }
-      // Only asked once the title is known: a film has no episodes, and asking the core to prove that
-      // costs a query whose answer the title's kind already gives.
-      const episodes = answer.title.kind === "movies" ? [] : await listEpisodes(id);
-      if (visit.current !== id) {
-        return;
-      }
       setState({
         title: answer.title,
-        episodes,
-        poster: answer.poster,
+      playSupport: answer.playSupport,
+        // The poster is the read's own row rather than a field beside it: the title the core answered
+        // with carries the cached path, so a page and a tile cannot disagree about what there is to draw.
+        poster: answer.title.poster,
+        backdrop: answer.backdrop,
+        overview: answer.overview,
+        rating: answer.rating,
+        released: answer.released,
+        offer: answer.offer,
         loading: false,
         missing: false,
         failed: false,
@@ -184,8 +226,13 @@ export function useTitle(id: number | null): TitleDetail {
       logUiError("getTitle", error);
       setState({
         title: null,
-        episodes: [],
+        playSupport: null,
         poster: null,
+        backdrop: null,
+        overview: null,
+        rating: null,
+        released: null,
+        offer: "acquire",
         loading: false,
         missing: false,
         failed: true,

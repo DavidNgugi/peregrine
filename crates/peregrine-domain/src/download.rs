@@ -18,6 +18,10 @@
 //! - **Terminal states absorb.** Nothing leaves `completed`, `failed`, or `removed`: a
 //!   completion that arrives after a removal must not resurrect the job, and a retry after a
 //!   failure is a new job rather than an edge (see [`DownloadState::Failed`]).
+//! - **`removed` is reachable from every non-terminal state.** A job parked behind the active-set
+//!   limit must still be cancellable — from the queue, from inspection, and from the metadata
+//!   fetch — and a seeding job the user stops is removed rather than paused first: F12's "stop it
+//!   before deleting the file" is a rule about the file, not about the job (FLOWS SM1).
 //! - **A full disk pauses rather than fails** (ARCHITECTURE §15), and the pause is reversible.
 //!
 //! Rehydration is the one place a state is written down rather than reached:
@@ -140,7 +144,7 @@ pub enum DownloadEvent {
     /// A level rather than an edge: it pauses a transfer and changes nothing for a job that is
     /// not writing bytes, so reporting the same condition twice is not an error.
     DiskFull,
-    /// The user removed a transfer, or dismissed a block (SM1's three `--> removed` edges).
+    /// The user removed a transfer, or dismissed a block (SM1's seven `--> removed` edges).
     ///
     /// Removal and dismissal are one event because they reach one state and write one
     /// `removed_at`; SM1 draws them separately only because the affordance differs.
@@ -268,6 +272,7 @@ pub fn transition(
         }
         DownloadState::Queued => match event {
             DownloadEvent::Admitted => Ok(DownloadState::Inspecting),
+            DownloadEvent::Removed => Ok(DownloadState::Removed),
             DownloadEvent::DiskFull | DownloadEvent::Progress => Ok(state),
             _ => Err(TransitionRejected::OutOfOrder { state, event: name }),
         },
@@ -278,6 +283,7 @@ pub fn transition(
                 Verdict::Allowed => DownloadState::Metadata,
                 Verdict::OptInRequired | Verdict::Blocked => DownloadState::Blocked,
             }),
+            DownloadEvent::Removed => Ok(DownloadState::Removed),
             DownloadEvent::DiskFull | DownloadEvent::Progress => Ok(state),
             _ => Err(TransitionRejected::OutOfOrder { state, event: name }),
         },
@@ -298,6 +304,7 @@ pub fn transition(
         DownloadState::Metadata => match event {
             DownloadEvent::EngineAccepted => Ok(DownloadState::Downloading),
             DownloadEvent::MetadataTimedOut => Ok(DownloadState::Failed),
+            DownloadEvent::Removed => Ok(DownloadState::Removed),
             DownloadEvent::DiskFull | DownloadEvent::Progress => Ok(state),
             _ => Err(TransitionRejected::OutOfOrder { state, event: name }),
         },
@@ -320,6 +327,10 @@ pub fn transition(
         DownloadState::Seeding => match event {
             DownloadEvent::Paused => Ok(DownloadState::Paused),
             DownloadEvent::SeedingSatisfied => Ok(DownloadState::Completed),
+            // SM1 draws this one directly: a user who removes a seeding job is not made to stop it
+            // first. F12 pauses before a *file* is deleted, which is a different act with a
+            // different plan.
+            DownloadEvent::Removed => Ok(DownloadState::Removed),
             DownloadEvent::DiskFull | DownloadEvent::Progress => Ok(state),
             _ => Err(TransitionRejected::OutOfOrder { state, event: name }),
         },
@@ -464,6 +475,7 @@ pub(crate) mod tests {
             Kind::Admitted,
             DownloadState::Inspecting,
         ),
+        (DownloadState::Queued, Kind::Removed, DownloadState::Removed),
         (DownloadState::Queued, Kind::DiskFull, DownloadState::Queued),
         (DownloadState::Queued, Kind::Progress, DownloadState::Queued),
         (
@@ -480,6 +492,11 @@ pub(crate) mod tests {
             DownloadState::Inspecting,
             Kind::Inspected(Verdict::Blocked),
             DownloadState::Blocked,
+        ),
+        (
+            DownloadState::Inspecting,
+            Kind::Removed,
+            DownloadState::Removed,
         ),
         (
             DownloadState::Inspecting,
@@ -500,6 +517,11 @@ pub(crate) mod tests {
             DownloadState::Metadata,
             Kind::MetadataTimedOut,
             DownloadState::Failed,
+        ),
+        (
+            DownloadState::Metadata,
+            Kind::Removed,
+            DownloadState::Removed,
         ),
         (
             DownloadState::Metadata,
@@ -554,6 +576,11 @@ pub(crate) mod tests {
             DownloadState::Seeding,
             Kind::SeedingSatisfied,
             DownloadState::Completed,
+        ),
+        (
+            DownloadState::Seeding,
+            Kind::Removed,
+            DownloadState::Removed,
         ),
         (
             DownloadState::Seeding,
@@ -977,26 +1004,32 @@ pub(crate) mod tests {
         );
     }
 
-    /// A job is paused before it is removed, because SM1 gives `seeding` no removal edge: a
-    /// seeding job that is removed has to be stopped first, and F12 says the same about deleting
-    /// a file that is still being seeded.
+    /// FLOWS SM1: `removed` is reachable from **every** non-terminal state, because a user has to
+    /// be able to cancel a job they are still waiting for. A job parked behind the active-set
+    /// limit — which can be hours — has no other way out, and a download manager that cannot
+    /// cancel a queued download is not one. F12's "stop it before deleting the file" is a rule
+    /// about the file rather than about the job, so a seeding job is removed rather than paused
+    /// first.
     #[test]
-    fn a_seeding_job_is_stopped_before_it_is_removed() {
-        assert_eq!(
-            transition(DownloadState::Seeding, DownloadEvent::Removed),
-            Err(TransitionRejected::OutOfOrder {
-                state: DownloadState::Seeding,
-                event: "removed",
-            })
-        );
-        assert_eq!(
-            transition(DownloadState::Seeding, DownloadEvent::Paused),
-            Ok(DownloadState::Paused)
-        );
-        assert_eq!(
-            transition(DownloadState::Paused, DownloadEvent::Removed),
-            Ok(DownloadState::Removed)
-        );
+    fn a_job_can_be_removed_from_every_non_terminal_state() {
+        for state in DownloadState::ALL {
+            if state.is_terminal() {
+                assert_eq!(
+                    transition(*state, DownloadEvent::Removed),
+                    Err(TransitionRejected::Terminal {
+                        state: *state,
+                        event: "removed",
+                    }),
+                    "{state:?} is terminal and must stay put"
+                );
+            } else {
+                assert_eq!(
+                    transition(*state, DownloadEvent::Removed),
+                    Ok(DownloadState::Removed),
+                    "{state:?} has no way out for a user who cancels"
+                );
+            }
+        }
     }
 
     proptest! {
@@ -1032,6 +1065,10 @@ pub(crate) mod tests {
         /// I4 along a whole path, not one step: a job can only be anywhere past `inspecting`
         /// if an event carrying a report was applied to get there. A rejected event grants
         /// nothing.
+        ///
+        /// `Removed` is exempt because a cancellation is not an advance: SM1 draws that edge out
+        /// of every non-terminal state, and a job cancelled from the queue was never inspected
+        /// because there was nothing to inspect yet.
         #[test]
         fn no_event_path_advances_past_inspecting_without_a_report(
             kinds in prop::collection::vec(kind_strategy(), 0..24),
@@ -1043,7 +1080,10 @@ pub(crate) mod tests {
                     state = next;
                     reported |= matches!(kind, Kind::Inspected(_) | Kind::Consented(_));
                 }
-                if !matches!(state, DownloadState::Queued | DownloadState::Inspecting) {
+                if !matches!(
+                    state,
+                    DownloadState::Queued | DownloadState::Inspecting | DownloadState::Removed
+                ) {
                     prop_assert!(reported, "I4: reached {:?} with no safety report", state);
                 }
             }

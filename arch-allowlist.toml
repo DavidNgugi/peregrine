@@ -449,6 +449,12 @@ may_depend_on = [
   # caller's test module. Same shape as the `peregrine-providers` edge above: a test crate depending
   # on a leaf, never the other way.
   "peregrine-secrets",
+  # Added for PG-E10-01. The torrent engine conformance suite has to name the port it asserts
+  # against, and that port lives in `peregrine-torrent` — the same trait-and-adapters-together shape
+  # the `peregrine-providers` comment above already describes for that crate. Writing the suite
+  # against a copy of the port would make it assert a copy's contract. The edge points from a test
+  # crate to a leaf, so it is not a cycle and no shipping build changes.
+  "peregrine-torrent",
 ]
 runtime = [
   # Both are the vocabulary of the ports: a fake clock answers with `jiff::Timestamp`

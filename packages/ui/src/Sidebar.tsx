@@ -9,35 +9,61 @@ import { Icon, type IconName } from "./Icon.js";
  * The window has no browser back button and no hamburger menu, so this is where the
  * screens are reached from: one labelled `nav` landmark holding one row per screen. The
  * rows are buttons here rather than links because this build has no router yet — the shell
- * switches screens from state (PG-E7-01) and PG-E7-02 replaces that with typed routes, at
+ * switches screens from state (PG-E7-01) and PG-E7-02 replaces that with typed links, at
  * which point the row becomes a link and keeps every other behaviour it has.
  *
- * The column is 232 px and falls back to a 60 px icon rail when the window is narrower than
- * the `lg` breakpoint. The window's own minimum is 960 logical px
- * (`apps/desktop/src-tauri/tauri.conf.json`), so the rail is what a narrow window gets; the
- * label stays in the accessibility tree at both widths rather than being hidden, because a
- * row named by an icon alone cannot be read out.
+ * **The column carries the window's top-left, and `header` is the caller's slot for it.** There is no
+ * title bar of our own (§8 rules a fake one out), so the platform's window controls sit over this
+ * column — the traffic lights on macOS — and the strip above the rows is where a person grabs the
+ * window. The metrics and the drag region are the *caller's*: this package knows nothing about a
+ * platform, so the slot is a node and the shell states the inset.
+ *
+ * **Two things collapse it, and they are not the same thing.** A window narrower than the `lg`
+ * breakpoint falls back to the 60 px icon rail whatever the user asked for, because a 232 px column
+ * in a 960 px window is a third of the screen; and `collapsed` is the user's own answer, which the
+ * shell owns and a control toggles. The label stays in the accessibility tree at either width rather
+ * than being hidden, because a row named by an icon alone cannot be read out.
  */
 export interface SidebarProps {
   /** The landmark's accessible name; a page with two `nav` elements needs both named. */
   readonly label: string;
+  /**
+   * The strip above the rows: the caller's window chrome for whatever platform this is.
+   *
+   * It sits outside the scroller, so a control in it stays where it is while the screens scroll.
+   */
+  readonly header?: ReactNode;
+  /** The user's own answer to "show me the labels", which the shell owns and a control toggles. */
+  readonly collapsed?: boolean;
+  /** The id a collapse control points at with `aria-controls`. */
+  readonly id?: string;
   readonly children: ReactNode;
   readonly className?: string;
 }
 
-export function Sidebar({ label, children, className }: SidebarProps): ReactElement {
+export function Sidebar({
+  label,
+  header,
+  collapsed = false,
+  id,
+  children,
+  className,
+}: SidebarProps): ReactElement {
   return (
     <nav
       aria-label={label}
       className={twMerge(
         clsx(
-          "flex w-[232px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-subtle bg-surface-1 p-2",
-          "max-lg:w-[60px]",
+          "group/sidebar flex w-[232px] shrink-0 flex-col overflow-hidden border-r border-border-subtle bg-surface-1",
+          collapsed ? "w-[60px]" : "max-lg:w-[60px]",
         ),
         className,
       )}
+      data-collapsed={collapsed ? "true" : "false"}
+      id={id}
     >
-      {children}
+      {header}
+      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">{children}</div>
     </nav>
   );
 }
@@ -56,7 +82,15 @@ export interface SidebarItemProps {
   readonly className?: string;
 }
 
-/** One screen in the sidebar. */
+/**
+ * One screen in the sidebar.
+ *
+ * **The rail's two widths are one set of classes written twice, on purpose.** A collapsed column and
+ * a narrow window put a row in the same state — icon centred, label kept for a screen reader — and
+ * Tailwind has no "or" between a media query and an ancestor's attribute, so each rule names both.
+ * The alternative is a bespoke stylesheet keyed on the attribute, which is a second way to style a
+ * component in a kit that has one.
+ */
 export function SidebarItem({
   icon,
   label,
@@ -75,7 +109,7 @@ export function SidebarItem({
           current
             ? "bg-surface-2 text-text-primary"
             : "text-text-secondary hover:bg-surface-2 hover:text-text-primary",
-          "max-lg:justify-center max-lg:px-0",
+          "max-lg:justify-center max-lg:px-0 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0",
         ),
         className,
       )}
@@ -84,7 +118,9 @@ export function SidebarItem({
     >
       <Icon name={icon} size={20} />
       {/* `sr-only` rather than `hidden` at rail width: it keeps the row's name. */}
-      <span className="truncate max-lg:sr-only">{label}</span>
+      <span className="truncate max-lg:sr-only group-data-[collapsed=true]/sidebar:sr-only">
+        {label}
+      </span>
     </button>
   );
 }

@@ -583,10 +583,74 @@ mod tests {
             })
         }
 
+        fn seasons(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
+        ) -> ProviderFuture<'_, Vec<peregrine_domain::catalogue::SeasonDetails>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "get_season",
+                })
+            })
+        }
+
+        fn season_episodes(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
+            _season_number: peregrine_domain::catalogue::SeasonNumber,
+        ) -> ProviderFuture<'_, Vec<peregrine_domain::catalogue::EpisodeDetails>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "get_season",
+                })
+            })
+        }
+
         fn rail(
             &self,
             _rail: peregrine_providers::RailKind,
             _page: std::num::NonZeroU32,
+        ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
+
+        fn browse(
+            &self,
+            _request: &peregrine_providers::BrowseRequest,
+        ) -> ProviderFuture<'_, peregrine_providers::ProviderPage> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
+
+        fn genres(
+            &self,
+            _kind: TitleKind,
+        ) -> ProviderFuture<'_, Vec<peregrine_providers::GenreRef>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
+
+        fn similar(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
         ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
             Box::pin(async {
                 Err(ProviderError::Unsupported {

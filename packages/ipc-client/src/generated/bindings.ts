@@ -160,18 +160,33 @@ export const commands = {
 	 *  that says the title is not here.
 	 */
 	getTitle: (title: TitleRef) => typedError<{
-	/**  The title itself, exactly as the library screen lists it. */
+	/**  The title itself, exactly as the library screen lists it, its cached poster included. */
 	title: LibraryTitleDto,
 	/**
-	 *  The absolute path of the cached poster, or `null` when the cache holds none.
+	 *  The absolute path of the cached backdrop, or `null` when the cache holds none.
 	 * 
-	 *  A filesystem path rather than a URL or bytes: `apps/desktop/src/lib/media.ts` is the only
-	 *  module that turns one into something an `<img>` can load, and the bytes themselves travel over
-	 *  the asset protocol and never over IPC (AGENTS R11). A path this platform cannot spell as UTF-8
-	 *  is reported as `null` rather than lossily — a corrupted path is a request the asset protocol
-	 *  refuses, which is the state that looks like a rendering bug.
+	 *  The wide picture a hero draws behind the title, carried on the same terms as the poster: a path
+	 *  and never bytes (AGENTS R11), and `null` for a path this platform cannot spell as UTF-8.
+	 *  Deliberately not on [`LibraryTitleDto`]: no list draws a backdrop.
 	 */
-	poster: string | null,
+	backdrop: string | null,
+	/**
+	 *  The provider's synopsis, when one has been written.
+	 * 
+	 *  `null` is the ordinary state of a title no provider has filled in, and the hero draws no
+	 *  paragraph for it rather than an empty one.
+	 */
+	overview: string | null,
+	/**  The provider's score, when it has one. */
+	rating: number | null,
+	/**
+	 *  When it came out, as `YYYY-MM-DD`, from whichever date column its kind uses.
+	 * 
+	 *  The core's rendering of the stored column rather than a date on the wire: which of the two
+	 *  columns holds it is a fact about the schema, and a screen that chose between them would be
+	 *  repeating a rule the `SQL` already expresses.
+	 */
+	released: string | null,
 	/**
 	 *  Whether opening this screen should ask the provider for the title.
 	 * 
@@ -182,7 +197,61 @@ export const commands = {
 	 *  policy — when an already-filled title is due again — is `PG-E6-15`'s and is not this flag.
 	 */
 	refreshDue: boolean,
+	/**
+	 *  What this title's page may offer, which is the core's rule rather than a screen's.
+	 * 
+	 *  The one field a Download control reads: `acquire` is the only value that offers acquisition,
+	 *  and `play` is the only one that offers playback, so a title the library holds cannot be
+	 *  offered for download however its counts read. See [`TitleOfferDto`].
+	 */
+	offer: TitleOfferDto,
+	/**
+	 *  What pressing Play would actually do, or `null` when the library holds no copy on disk.
+	 * 
+	 *  **The reason Play can say why it will not work** rather than being inert with no explanation: a
+	 *  `<video>` element reports a failure *code* after it has failed, never a reason, and "this build
+	 *  cannot read that container yet" is a fact about the file that has to be known before the press
+	 *  (`ADR 0023 §5`). `null` and `unknown` mean different things: the first is nothing to play, the
+	 *  second is a file whose container this build cannot name.
+	 */
+	playSupport: LocalPlaybackDto | null,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
+	/**
+	 *  Starts playing one of a title's files, replacing whatever was playing.
+	 * 
+	 *  The one command whose answer is a URL. It leaves the machine nowhere: the address it answers with is
+	 *  this process's own loopback listener, opened for one file and closed when the session ends
+	 *  (`ADR 0023`, SECURITY.md T10).
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the title is not here, holds no copy on disk, holds a copy outside every configured
+	 *  folder, or the file cannot be served.
+	 */
+	startPlayback: (title: TitleRef) => typedError<PlaybackSessionDto, AppError_Serialize>(__TAURI_INVOKE("start_playback", { title })),
+	/**
+	 *  Stops the playback session `session` names, answering whether that one was open.
+	 * 
+	 *  Deliberately infallible: there is no state in which a caller asking for silence should be told no, and a
+	 *  screen that has just lost its session needs an answer rather than an error to report.
+	 */
+	stopPlayback: (session: SessionRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("stop_playback", { session })),
+	/**
+	 *  Opens a session for one title's file so the renderer can capture a poster frame from it.
+	 * 
+	 *  **Not `start_playback` with a flag, and the name is the reason.** Both open the same listener for the
+	 *  same file, and the difference is intent: nothing plays a capture session, and a reader who found
+	 *  `start_playback` called by a poster backfill could not tell whether the film was meant to be playing. It
+	 *  holds its own slot, so a backfill cannot stop a film and a film cannot stop a backfill.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the title is not here, holds no copy on disk, holds a copy outside every configured
+	 *  folder, or the file cannot be served.
+	 */
+	startPosterCapture: (title: TitleRef) => typedError<CaptureSessionDto, AppError_Serialize>(__TAURI_INVOKE("start_poster_capture", { title })),
+	/**  Stops the capture session `session` names, answering whether that one was open. */
+	stopPosterCapture: (session: SessionRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("stop_poster_capture", { session })),
 	/**
 	 *  Searches the configured providers, writes what they know, and answers with what the catalogue holds.
 	 * 
@@ -194,7 +263,11 @@ export const commands = {
 	 *  [`AppError`] when a provider or the catalogue fails. A provider that is slow, rate-limited, or
 	 *  unreachable is reported rather than hidden, and the screen keeps whatever it already had.
 	 */
-	searchProviders: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit })),
+	searchProviders: (query: string, limit: number | null, kind: 
+/**  A film. */
+"movie" | 
+/**  A series. */
+"show" | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit, kind })),
 	/**
 	 *  Every rail the Discover screen draws, from what the catalogue and the cache already hold.
 	 * 
@@ -213,7 +286,11 @@ export const commands = {
 	 * 
 	 *  [`AppError`] when the runtime is not running, or when the cold read cannot start the fetch.
 	 */
-	homeRails: () => typedError<HomeRailDto[], AppError_Serialize>(__TAURI_INVOKE("home_rails")),
+	homeRails: (kind: 
+/**  A film. */
+"movie" | 
+/**  A series. */
+"show" | null) => typedError<HomeRailDto[], AppError_Serialize>(__TAURI_INVOKE("home_rails", { kind })),
 	/**
 	 *  Fills the rails the configured providers publish, artwork included, and answers with the job.
 	 * 
@@ -227,6 +304,63 @@ export const commands = {
 	 *  [`AppError`] when the journal or the queue refuses the job.
 	 */
 	refreshRails: () => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("refresh_rails")),
+	/**
+	 *  One page of a list composed from filters, from the configured providers.
+	 * 
+	 *  **A command and not a job**, which is a deliberate reading of `ARCHITECTURE §7` rule 2 rather
+	 *  than a shortcut around it: the rule keeps a screen from waiting on work it did not ask for, and
+	 *  this read *is* the work the reader asked for. `search_providers` is the same shape and the
+	 *  precedent — one provider request, written into the catalogue, answered while the caller waits. A
+	 *  job would answer with an id and no page, leaving the screen with nothing to draw until a job it
+	 *  cannot name stops, which is the full-page spinner `PG-E7-02` forbids.
+	 * 
+	 *  `page` counts from one, every filter is optional, and `min_rating` is a whole score out of ten —
+	 *  the scale the filter control draws. Both numbers are clamped rather than refused: a page of zero
+	 *  and a floor above the scale are a caller's arithmetic rather than hostile input, and the closest
+	 *  legal request is a better answer than a failure.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running, when no provider is configured, or when a provider
+	 *  or the catalogue fails. A provider that is slow, rate-limited, or unreachable is reported rather
+	 *  than hidden, and the screen keeps whatever it already had.
+	 */
+	browse: (kind: RailKindDto, page: number, sort: 
+/**  What the provider's audience is watching, most first. */
+"popularity" | 
+/**  The best reviewed first. */
+"rating" | 
+/**  The most recently released first. */
+"newest" | 
+/**  The oldest first. */
+"oldest" | null, genre: number | null, minRating: number | null) => typedError<BrowsePageDto, AppError_Serialize>(__TAURI_INVOKE("browse", { kind, page, sort, genre, minRating })),
+	/**
+	 *  The genres the configured providers filter by for `kind`.
+	 * 
+	 *  The core answers this once per session: a provider's genre vocabulary changes on the provider's
+	 *  clock, and a filter control that re-asked on every visit would spend a request per visit for an
+	 *  answer nothing had changed (`AGENTS R24`).
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running, when no provider is configured, or when the
+	 *  provider fails.
+	 */
+	genres: (kind: RailKindDto) => typedError<GenreDto[], AppError_Serialize>(__TAURI_INVOKE("genres", { kind })),
+	/**
+	 *  The titles the configured provider considers like one the catalogue holds.
+	 * 
+	 *  A rail on a title's own page (`PG-E7-11`, `PG-E7-15`), and one provider request. **Empty is a
+	 *  real answer rather than a failure**: a title no configured provider holds an identifier for has no
+	 *  recommendations to fetch — a title the library inferred from a filename, or one another provider
+	 *  described — and the screen draws no rail for it instead of an error.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running, when no provider is configured, or when the
+	 *  provider fails.
+	 */
+	recommendations: (title: TitleRef) => typedError<RecommendationsDto, AppError_Serialize>(__TAURI_INVOKE("recommendations", { title })),
 	/**
 	 *  Starts filling one title from its provider, artwork included, and answers with the job.
 	 * 
@@ -248,7 +382,9 @@ export const commands = {
 	 */
 	searchTitles: (query: string, limit: number | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_titles", { query, limit })),
 	/**  A title's episodes, in the order a person watches them. */
-	listEpisodes: (title: TitleRef, limit: number | null) => typedError<EpisodeDto[], AppError_Serialize>(__TAURI_INVOKE("list_episodes", { title, limit })),
+	listEpisodes: (title: TitleRef, season: number | null, limit: number | null) => typedError<EpisodeDto[], AppError_Serialize>(__TAURI_INVOKE("list_episodes", { title, season, limit })),
+	/**  The seasons a title has, in the order its switcher lists them. */
+	listSeasons: (title: TitleRef, limit: number | null) => typedError<SeasonDto[], AppError_Serialize>(__TAURI_INVOKE("list_seasons", { title, limit })),
 	/**
 	 *  Answers one parked file by placing it as the title its parse read.
 	 * 
@@ -369,6 +505,37 @@ export type AttributionDto = {
 	requiresLogo: boolean,
 };
 
+/**
+ *  One page of a browsed list: the titles on it and whether another page follows.
+ * 
+ *  **`has_more` is the provider's answer rather than a screen's arithmetic.** A screen that inferred
+ *  it from the number of tiles would either stop one page early or ask for a page past the
+ *  provider's end on every scroll, and neither is something a reader can tell from the page.
+ */
+export type BrowsePageDto = {
+	/**  The titles on this page, drawn exactly as a rail item is. */
+	items: RailItemDto[],
+	/**  Whether asking for the next page would find anything. */
+	hasMore: boolean,
+};
+
+/**
+ *  How a browse page is ordered, as the wire spells it.
+ * 
+ *  Its own type rather than the port's, for the reason [`RailKindDto`] gives: a wire spelling is a
+ *  contract this crate owns, and the two are free to move apart — a rename of the port's identifier
+ *  would otherwise be a silent change to a URL a webview had bookmarked.
+ */
+export type BrowseSortDto = 
+/**  What the provider's audience is watching, most first. */
+"popularity" | 
+/**  The best reviewed first. */
+"rating" | 
+/**  The most recently released first. */
+"newest" | 
+/**  The oldest first. */
+"oldest";
+
 /**  What the About box and the diagnostics bundle need to identify this build. */
 export type BuildInfo = {
 	/**  The application name the bundle was built under. */
@@ -382,7 +549,53 @@ export type BuildInfo = {
 	target: string,
 };
 
-/**  One episode of a title, as its screen lists it. */
+/**
+ *  One open capture session: where the renderer reads a file and where it posts the frame it drew.
+ * 
+ *  The same shape as [`PlaybackSessionDto`] and a separate one, because the two answer different
+ *  questions: nothing here is about how a film would play, and a caller that wanted only a frame should
+ *  not be handed a container classification it has no use for.
+ */
+export type CaptureSessionDto = {
+	/**  Which session this is, and what a stop must name. */
+	sessionId: number,
+	/**  The title the frame is a poster of, so a caller can confirm it is captioned by the right title. */
+	titleId: number,
+	/**  The library file being served to the capture. */
+	mediaFileId: number,
+	/**  The loopback URL the capturing element loads. */
+	url: string,
+	/**  Where the frame is posted, or `null` when this session keeps no poster. */
+	thumbnailUrl: string | null,
+};
+
+/**
+ *  What the last read of the credential store answered, as the settings screen spells it.
+ * 
+ *  **A refused read is not an absent key.** The screen that read the two as one thing would tell a
+ *  user whose key is still in their keychain to paste it again, which is the shape of "reinstalling
+ *  deleted my key". `peregrine_app::providers::CredentialStore` carries the reason; this is its wire
+ *  spelling, and the mapping between them is total so a new reason is a compile error here.
+ */
+export type CredentialStoreDto = 
+/**  Nobody has read the store yet, so nothing is known about what it holds. */
+"unread" | 
+/**  The store answered, so a provider's `configured` flag is the whole truth. */
+"answered" | 
+/**  The store refused access: the key may well still be stored. */
+"denied" | 
+/**  There is no store this system can use. */
+"unavailable";
+
+/**
+ *  One episode of a title, as its card draws it.
+ * 
+ *  **Widened from a totals row to a card.** The first shape carried the two numbers, the name, and four
+ *  counts, because the only surface in front of it was a table of what the library holds. A card shows
+ *  a still, an air date, a runtime, a score and a synopsis, so those are here — and every one of them
+ *  is optional, because an episode the library holds and no provider has described is the ordinary
+ *  state of a fresh scan and a card must draw it rather than refuse it.
+ */
 export type EpisodeDto = {
 	/**  The season it sits in, which zero is for a show's specials. */
 	seasonNumber: number,
@@ -390,6 +603,26 @@ export type EpisodeDto = {
 	episodeNumber: number,
 	/**  Its name, when a provider sync has filled one in. */
 	name: string | null,
+	/**  The provider's synopsis, when it sent one. */
+	overview: string | null,
+	/**
+	 *  When it first aired, as `YYYY-MM-DD`, when the core can read the stored date.
+	 * 
+	 *  A string rather than a parsed date on the wire: the screen prints it, and the one place that
+	 *  knows how the column is spelled is the core.
+	 */
+	airDate: string | null,
+	/**  How long it runs, when the provider stated one. */
+	runtimeMinutes: number | null,
+	/**  The provider's score for this episode alone, when it has one. */
+	rating: number | null,
+	/**
+	 *  The cached still's absolute path, or `null` when the cache holds none.
+	 * 
+	 *  A path and never bytes (AGENTS R11): the webview turns it into an `asset:` URL through
+	 *  `lib/media.ts`, which is the only module that names the protocol.
+	 */
+	still: string | null,
 	/**  How many items the library holds for it. */
 	items: number,
 	/**  How many files those items have. */
@@ -472,6 +705,21 @@ export type EventHealth = {
 	dropped: number,
 	/**  Whether anything was refused or discarded. */
 	degraded: boolean,
+};
+
+/**
+ *  One genre a provider filters by, as a filter control draws it.
+ * 
+ *  The id is the *provider's* own, which is what a browse request hands back to it, and the name is
+ *  the label. It is not a catalogue genre: `peregrine-storage`'s `genre` table numbers rows and this
+ *  numbers a provider's vocabulary, and the two are not the same set — TMDB's film and series
+ *  vocabularies disagree, and the table has no column that could say which one a row came from.
+ */
+export type GenreDto = {
+	/**  The provider's own identifier, which its filter takes. */
+	id: number,
+	/**  The label a filter control draws. */
+	name: string,
 };
 
 /**
@@ -653,7 +901,16 @@ export type LibraryRootDto = {
 	createdAt: number,
 };
 
-/**  One title the library holds, as the library screen shows it. */
+/**
+ *  One title the library holds, as the library screen shows it.
+ * 
+ *  **The poster travels with the row, and that is why the grid and the table are one read.** The screen
+ *  draws this read twice — a table of counts and a grid of tiles — and a tile cannot resolve the cache
+ *  key its poster is stored under, so the path is resolved by the core for every row (AGENTS R7). It is
+ *  a path and never bytes: `apps/desktop/src/lib/media.ts` is the only module that names the asset
+ *  protocol (AGENTS R11). `null` covers both "no provider has named one" and "one was named and the blob
+ *  is not here", which draw the same reserved box.
+ */
 export type LibraryTitleDto = {
 	/**  The row id, which is the paging cursor. */
 	id: number,
@@ -675,7 +932,39 @@ export type LibraryTitleDto = {
 	bytes: number,
 	/**  How many of them are marked missing. */
 	missingFiles: number,
+	/**
+	 *  The absolute path of the cached poster, or `null` when the cache holds none.
+	 * 
+	 *  A path this platform cannot spell as UTF-8 is reported as `null` rather than lossily: the value
+	 *  is the whole of what the webview gets, and a corrupted path is a request the asset protocol
+	 *  refuses — the state that looks like a rendering bug rather than like a title with no artwork.
+	 */
+	poster: string | null,
+	/**
+	 *  Whether this title has no poster, so a frame of its own file is worth capturing.
+	 * 
+	 *  The core's answer, for the reason every availability decision is (AGENTS R7): it is "no provider has
+	 *  drawn one *and* no frame has been generated", which needs the catalogue row and two cache lookups —
+	 *  and a grid that decided it from `poster === null` would be wrong for a title whose poster exists but
+	 *  whose blob an eviction took.
+	 */
+	needsPoster: boolean,
 };
+
+/**
+ *  What this build will do with a local file, as the webview spells it.
+ * 
+ *  The wire shape of `peregrine_domain::LocalPlayback`, and a separate type for the reason every DTO
+ *  here is: the domain cannot depend on `specta` (AGENTS R6), and a domain value renamed should not
+ *  silently rename a word the webview switches on.
+ */
+export type LocalPlaybackDto = 
+/**  A container the webview's own media stack demuxes, so it plays with no sidecar. */
+"webview" | 
+/**  A container the webview does not demux, so this build cannot play it until mpv ships. */
+"externalPlayer" | 
+/**  A name this build does not recognise as a media container at all. */
+"unknown";
 
 /**  The two titles an answer can file a parked file under. */
 export type MatchAsDto = 
@@ -703,6 +992,46 @@ export type MatchRuleRef = {
 };
 
 /**
+ *  One open playback session: what is playing, and where the bytes come from.
+ * 
+ *  **A URL and not a path**, and that is the surface `ADR 0023` decides: the asset protocol never
+ *  exposes the library root, so a local file is served over loopback HTTP and this is the address the
+ *  renderer's media element follows (AGENTS R11). The session token is inside the URL rather than a
+ *  field beside it, because a `<video>` element cannot set a header — one value, one place it can go
+ *  wrong.
+ */
+export type PlaybackSessionDto = {
+	/**  Which session this is, and what a stop must name. */
+	sessionId: number,
+	/**  The title this session belongs to, so a screen can confirm it is drawing the one it asked for. */
+	titleId: number,
+	/**  The library file being served. */
+	mediaFileId: number,
+	/**  What this build is doing with the file's container. */
+	support: LocalPlaybackDto,
+	/**  The loopback URL a media element follows. */
+	url: string,
+	/**
+	 *  The loopback URL a frame the renderer captured is posted to, or `null` when this session keeps no
+	 *  poster.
+	 * 
+	 *  **A second URL rather than something the renderer derives from the first.** Both carry the session
+	 *  token, and a renderer that swapped one path segment for another would be a second place the route
+	 *  is spelled — which is exactly the kind of drift a bearer credential makes expensive.
+	 */
+	thumbnailUrl: string | null,
+	/**
+	 *  Whether the renderer should capture a poster frame while it plays.
+	 * 
+	 *  The core's answer, and it is `true` only for a title with no poster to draw: capturing costs a
+	 *  decode of the film and a blob in the cache, and its whole purpose is the title a provider has drawn
+	 *  nothing for. A renderer that captured on every play would overwrite real artwork with a film still
+	 *  the first time a provider's poster was evicted.
+	 */
+	needsPoster: boolean,
+};
+
+/**
  *  One provider this build knows how to talk to, as a screen renders it.
  * 
  *  The display name and the endpoint come from the manifest rather than from the screen, so a
@@ -725,11 +1054,14 @@ export type ProviderDto = {
  *  One list rather than a known set and a configured set: a provider is known by being here
  *  and configured by its flag, and two lists of the same entries would be two things to keep
  *  in step. A provider that needs a credential and has none is here and not configured, which
- *  is the state every installation starts in.
+ *  is the state every installation starts in — **and `store` is the one fact that tells that state
+ *  apart from a keychain the app was not allowed to read.**
  */
 export type ProviderStatusDto = {
 	/**  The providers this build knows, whether or not they can be used. */
 	known: ProviderDto[],
+	/**  What the last read of the credential store answered. */
+	store: CredentialStoreDto,
 };
 
 /**  One title in a rail, as the screen draws it. */
@@ -831,6 +1163,21 @@ export type RailsStateDto =
 /**  The rails hold what the providers answered. */
 "ready";
 
+/**
+ *  What a title's recommendation rail holds, and the genre shelves it implies.
+ * 
+ *  The genres ride along rather than being asked for separately because they are derived from the same
+ *  answer: a title page draws the rail and then offers "more of this genre", and that genre is read off
+ *  the titles the provider listed around this one. **They are the provider's genre identifiers**, which
+ *  is what a browse request takes; the names come from [`genres`], which a filter control reads anyway.
+ */
+export type RecommendationsDto = {
+	/**  The rail's titles. */
+	items: RailItemDto[],
+	/**  The genres the rail shares, most-shared first and already named; empty when none is shared. */
+	genres: GenreDto[],
+};
+
 /**  What a root is expected to hold, as the webview spells it. */
 export type RootKind = 
 /**  Films. */
@@ -877,6 +1224,39 @@ export type SchedulerHealth = {
 	retriesScheduled: number,
 };
 
+/**  One season of a title, as its switcher draws it. */
+export type SeasonDto = {
+	/**  Its number, which zero is for a show's specials. */
+	seasonNumber: number,
+	/**  Its name, when a provider sync has filled one in. */
+	name: string | null,
+	/**
+	 *  How many episodes the provider says it has, when it said.
+	 * 
+	 *  The provider's count rather than a count of rows this build holds, for the reason the storage
+	 *  row states: a season nobody has fetched yet has a number, and a switcher reading `0` for it
+	 *  would offer a season that looks empty when it has simply not been read.
+	 */
+	episodeCount: number | null,
+	/**  When it first aired, as `YYYY-MM-DD`, when the core can read the stored date. */
+	airDate: string | null,
+	/**  The cached poster's absolute path, or `null` when the cache holds none. */
+	poster: string | null,
+};
+
+/**
+ *  The session a stop names.
+ * 
+ *  **A stop that did not name one would close whatever is current**, and a renderer's effect runs twice
+ *  under `StrictMode`: the first mount's cleanup and the second mount's open are in flight together, so a
+ *  stop by "current" closes the session the screen is already reading. That produced a film that made one
+ *  request and then sat behind a black rectangle.
+ */
+export type SessionRef = {
+	/**  The session's id, as opening it returned it. */
+	id: number,
+};
+
 /**
  *  One row of the Settings shortcut list.
  * 
@@ -904,26 +1284,43 @@ export type ShortcutBinding = {
 };
 
 /**
- *  One title as its own screen reads it: the library's answer, plus the artwork.
+ *  One title as its own screen reads it: the library's answer, plus what a provider could still add.
  * 
  *  Nested rather than a wider [`LibraryTitleDto`] because the two answer different questions and are
  *  read by different screens: the list is "what the library holds", and this is "what the library
- *  holds, and what a provider could still add". A hundred-row page must not carry a poster path it
- *  never draws, and one DTO cannot mean two things.
+ *  holds, and what a provider could still add". One DTO cannot mean two things — and the poster is on
+ *  the nested one rather than here for exactly that reason: it is a fact about the title the library
+ *  holds, so it is the same field on every screen that draws the title, and a second copy beside the
+ *  nested row would be a second value that could disagree with it.
  */
 export type TitleDetailDto = {
-	/**  The title itself, exactly as the library screen lists it. */
+	/**  The title itself, exactly as the library screen lists it, its cached poster included. */
 	title: LibraryTitleDto,
 	/**
-	 *  The absolute path of the cached poster, or `null` when the cache holds none.
+	 *  The absolute path of the cached backdrop, or `null` when the cache holds none.
 	 * 
-	 *  A filesystem path rather than a URL or bytes: `apps/desktop/src/lib/media.ts` is the only
-	 *  module that turns one into something an `<img>` can load, and the bytes themselves travel over
-	 *  the asset protocol and never over IPC (AGENTS R11). A path this platform cannot spell as UTF-8
-	 *  is reported as `null` rather than lossily — a corrupted path is a request the asset protocol
-	 *  refuses, which is the state that looks like a rendering bug.
+	 *  The wide picture a hero draws behind the title, carried on the same terms as the poster: a path
+	 *  and never bytes (AGENTS R11), and `null` for a path this platform cannot spell as UTF-8.
+	 *  Deliberately not on [`LibraryTitleDto`]: no list draws a backdrop.
 	 */
-	poster: string | null,
+	backdrop: string | null,
+	/**
+	 *  The provider's synopsis, when one has been written.
+	 * 
+	 *  `null` is the ordinary state of a title no provider has filled in, and the hero draws no
+	 *  paragraph for it rather than an empty one.
+	 */
+	overview: string | null,
+	/**  The provider's score, when it has one. */
+	rating: number | null,
+	/**
+	 *  When it came out, as `YYYY-MM-DD`, from whichever date column its kind uses.
+	 * 
+	 *  The core's rendering of the stored column rather than a date on the wire: which of the two
+	 *  columns holds it is a fact about the schema, and a screen that chose between them would be
+	 *  repeating a rule the `SQL` already expresses.
+	 */
+	released: string | null,
 	/**
 	 *  Whether opening this screen should ask the provider for the title.
 	 * 
@@ -934,6 +1331,24 @@ export type TitleDetailDto = {
 	 *  policy — when an already-filled title is due again — is `PG-E6-15`'s and is not this flag.
 	 */
 	refreshDue: boolean,
+	/**
+	 *  What this title's page may offer, which is the core's rule rather than a screen's.
+	 * 
+	 *  The one field a Download control reads: `acquire` is the only value that offers acquisition,
+	 *  and `play` is the only one that offers playback, so a title the library holds cannot be
+	 *  offered for download however its counts read. See [`TitleOfferDto`].
+	 */
+	offer: TitleOfferDto,
+	/**
+	 *  What pressing Play would actually do, or `null` when the library holds no copy on disk.
+	 * 
+	 *  **The reason Play can say why it will not work** rather than being inert with no explanation: a
+	 *  `<video>` element reports a failure *code* after it has failed, never a reason, and "this build
+	 *  cannot read that container yet" is a fact about the file that has to be known before the press
+	 *  (`ADR 0023 §5`). `null` and `unknown` mean different things: the first is nothing to play, the
+	 *  second is a file whose container this build cannot name.
+	 */
+	playSupport: LocalPlaybackDto | null,
 };
 
 /**  One title a search found, as the picker lists it. */
@@ -945,6 +1360,23 @@ export type TitleMatchDto = {
 	/**  Whether it is a film or a series. */
 	kind: RootKind,
 };
+
+/**
+ *  What a title's own page may offer, as the webview spells it.
+ * 
+ *  The wire shape of `peregrine_domain::TitleOffer`, and its own type for the reason every DTO here
+ *  is: the domain crate cannot depend on `specta` (AGENTS R6), and a domain value renamed should not
+ *  silently rename a word the webview matches on.
+ */
+export type TitleOfferDto = 
+/**  A copy is on disk, so there is something to play. */
+"play" | 
+/**  An acquisition for this title is in flight. */
+"arriving" | 
+/**  File rows exist and no copy of any of them is present. */
+"absent" | 
+/**  Nothing is held and nothing is arriving, so acquisition is what is left to offer. */
+"acquire";
 
 /**
  *  The title a command acts on.

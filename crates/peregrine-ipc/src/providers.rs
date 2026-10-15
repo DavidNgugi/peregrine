@@ -39,17 +39,51 @@ pub struct ProviderDto {
     pub configured: bool,
 }
 
+/// What the last read of the credential store answered, as the settings screen spells it.
+///
+/// **A refused read is not an absent key.** The screen that read the two as one thing would tell a
+/// user whose key is still in their keychain to paste it again, which is the shape of "reinstalling
+/// deleted my key". `peregrine_app::providers::CredentialStore` carries the reason; this is its wire
+/// spelling, and the mapping between them is total so a new reason is a compile error here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CredentialStoreDto {
+    /// Nobody has read the store yet, so nothing is known about what it holds.
+    Unread,
+    /// The store answered, so a provider's `configured` flag is the whole truth.
+    Answered,
+    /// The store refused access: the key may well still be stored.
+    Denied,
+    /// There is no store this system can use.
+    Unavailable,
+}
+
+impl From<peregrine_app::providers::CredentialStore> for CredentialStoreDto {
+    fn from(store: peregrine_app::providers::CredentialStore) -> Self {
+        use peregrine_app::providers::CredentialStore;
+        match store {
+            CredentialStore::Unread => Self::Unread,
+            CredentialStore::Answered => Self::Answered,
+            CredentialStore::Denied => Self::Denied,
+            CredentialStore::Unavailable => Self::Unavailable,
+        }
+    }
+}
+
 /// What this installation has configured, as the settings screen reads it.
 ///
 /// One list rather than a known set and a configured set: a provider is known by being here
 /// and configured by its flag, and two lists of the same entries would be two things to keep
 /// in step. A provider that needs a credential and has none is here and not configured, which
-/// is the state every installation starts in.
+/// is the state every installation starts in — **and `store` is the one fact that tells that state
+/// apart from a keychain the app was not allowed to read.**
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStatusDto {
     /// The providers this build knows, whether or not they can be used.
     pub known: Vec<ProviderDto>,
+    /// What the last read of the credential store answered.
+    pub store: CredentialStoreDto,
 }
 
 impl From<ProviderStatus> for ProviderStatusDto {
@@ -68,7 +102,10 @@ impl From<ProviderStatus> for ProviderStatusDto {
                 configured: status.configured.contains(&entry.provider),
             })
             .collect();
-        Self { known }
+        Self {
+            known,
+            store: CredentialStoreDto::from(status.store),
+        }
     }
 }
 
@@ -203,7 +240,8 @@ mod tests {
             directory.path(),
             directory.path().join("artwork"),
             Arc::new(SilentSink),
-        );
+        )
+        .with_secrets(Arc::new(crate::test_support::NoCredentials));
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();
@@ -211,17 +249,22 @@ mod tests {
         app
     }
 
-    /// Waits for the startup refresh to fill the cache, which runs off the startup and command
-    /// paths. Bounded rather than open-ended, so a refresh that never happens fails the test that
-    /// asked instead of hanging it.
+    /// Waits for the startup refresh to *finish*, which runs off the startup and command paths.
+    ///
+    /// **The read finishing is the thing to wait for, not the known list.** `known` is the build's own
+    /// manifest and is in place before any read happens, so a wait on it would pass instantly and test
+    /// nothing; the read is what can be late, and it can end in a refusal on a machine with no usable
+    /// keychain — which is an answer this test must accept rather than wait past.
     async fn await_cache(runtime: &Runtime) {
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            while runtime.provider_status().known.is_empty() {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while runtime.provider_status().store
+                == peregrine_app::providers::CredentialStore::Unread
+            {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("the startup refresh must fill the registry");
+        .expect("the startup refresh must finish, whatever it answers");
     }
 
     /// A provider the build knows is named and placed even before the cache is filled.
@@ -249,10 +292,80 @@ mod tests {
         let answer = ProviderStatusDto::from(ProviderStatus {
             known: Vec::new(),
             configured: vec!["tmdb"],
+            store: peregrine_app::providers::CredentialStore::Answered,
         });
 
         assert_eq!(answer.known.len(), 1);
         assert!(answer.known[0].configured);
+        assert_eq!(answer.store, CredentialStoreDto::Answered);
+    }
+
+    /// A keychain the app was not allowed to read crosses as its own state, so the screen can say
+    /// "your key is still there" instead of "no key stored".
+    #[test]
+    fn a_refused_credential_read_is_not_an_absent_key() {
+        for (store, expected) in [
+            (
+                peregrine_app::providers::CredentialStore::Denied,
+                CredentialStoreDto::Denied,
+            ),
+            (
+                peregrine_app::providers::CredentialStore::Unavailable,
+                CredentialStoreDto::Unavailable,
+            ),
+            (
+                peregrine_app::providers::CredentialStore::Unread,
+                CredentialStoreDto::Unread,
+            ),
+        ] {
+            let answer = ProviderStatusDto::from(ProviderStatus {
+                known: Vec::new(),
+                configured: Vec::new(),
+                store,
+            });
+            assert_eq!(
+                answer.store, expected,
+                "the reason a read failed must survive the wire"
+            );
+            assert!(
+                answer.known.iter().all(|entry| !entry.configured),
+                "a refused read configures nothing"
+            );
+        }
+    }
+
+    /// Every reason the store can give has a spelling the webview can switch on, and the mapping is
+    /// total — a fourth reason in the core is a compile error here rather than a silent `unread`.
+    #[test]
+    fn every_credential_store_state_has_its_own_word() {
+        use peregrine_app::providers::CredentialStore;
+        let words: Vec<CredentialStoreDto> = CredentialStore::ALL
+            .iter()
+            .map(|store| CredentialStoreDto::from(*store))
+            .collect();
+        assert_eq!(
+            words,
+            vec![
+                CredentialStoreDto::Unread,
+                CredentialStoreDto::Answered,
+                CredentialStoreDto::Denied,
+                CredentialStoreDto::Unavailable,
+            ]
+        );
+        for (store, word) in CredentialStore::ALL.iter().zip(words) {
+            assert_eq!(
+                serde_json::to_value(word).expect("serializes"),
+                serde_json::Value::String(
+                    match store {
+                        CredentialStore::Unread => "unread",
+                        CredentialStore::Answered => "answered",
+                        CredentialStore::Denied => "denied",
+                        CredentialStore::Unavailable => "unavailable",
+                    }
+                    .to_owned()
+                )
+            );
+        }
     }
 
     /// A name the build does not know cannot become a row by appearing in the cache.
@@ -261,6 +374,7 @@ mod tests {
         let answer = ProviderStatusDto::from(ProviderStatus {
             known: vec!["nobody"],
             configured: vec!["nobody"],
+            store: peregrine_app::providers::CredentialStore::Answered,
         });
 
         assert_eq!(answer.known.len(), peregrine_app::providers::MANIFEST.len());
@@ -303,11 +417,14 @@ mod tests {
 
         assert_eq!(tmdb.display_name, "TMDB");
         assert_eq!(tmdb.endpoint, TMDB_ENDPOINT);
-        // Whether anything is stored is the machine's answer rather than this test's, so the
-        // flag is asserted against the cache the command read instead of a fixed value.
+        assert!(
+            !tmdb.configured,
+            "the fixture's store holds nothing, so the flag is this test's answer and not the machine's"
+        );
         assert_eq!(
-            tmdb.configured,
-            state.runtime().unwrap().provider_status().configured == vec!["tmdb"]
+            answer.store,
+            CredentialStoreDto::Answered,
+            "the store answered: it holds nothing, which is not the same as being refused"
         );
 
         crate::runtime::shutdown(app.handle()).await;

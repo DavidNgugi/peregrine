@@ -17,6 +17,8 @@
 mod backup;
 mod catalogue;
 mod database;
+mod discover_rail;
+mod download;
 mod error;
 mod fts;
 mod image_cache;
@@ -41,13 +43,19 @@ pub use catalogue::{
     TitleExternalId, TitleIdentity, TitleKind, TitleSubtype,
 };
 pub use database::Database;
+pub use discover_rail::DiscoverRailRow;
+pub use download::{
+    AddedBy, DownloadFileRow, DownloadJobRow, DownloadSource, DownloadStatistics,
+    DownloadTransitionError, MagnetUri, NewDownloadJob,
+};
 pub use error::StorageError;
 pub use image_cache::ImageCacheEntry;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{
-    ArtworkPath, LibraryRootRow, LibraryTitleRow, MediaFileRow, MediaItemRow, SubtitleTrackRow,
-    TitleDetailRow, TitleEpisodeRow, UnmatchedFileRow,
+    ArtworkPath, ItemEvidence, LibraryRootRow, LibraryTitleRow, MediaFileRow, MediaItemRow,
+    SubtitleTrackRow, TitleDetailRow, TitleEpisodeRow, TitleEvidence, TitleSeasonRow,
+    UnmatchedFileRow,
 };
 pub use maintenance::{
     MaintenanceOutcome, MaintenancePlan, MaintenanceRequest, MaintenanceStep, StepOutcome,

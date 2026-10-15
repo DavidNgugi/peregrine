@@ -285,6 +285,40 @@ impl From<RuntimeError> for AppError {
                     .with_detail("That file's path cannot be stored.")
                     .with_cause(inner.to_string()),
             },
+            // Nothing is configured to ask: a setting rather than a failure, and the one answer a
+            // user can act on is where to set it. `Unsupported` rather than `ProviderUnavailable`
+            // because retrying changes nothing until a key exists.
+            RuntimeError::NoProvider => AppError::new(ErrorCode::Unsupported)
+                .with_detail("No metadata provider is configured. Add an API key in Settings.")
+                .with_cause("no configured provider serves this read"),
+            // **A playback refusal, and every one of them is something a person can act on** — which
+            // is why the details are written here rather than passed through. A title that is not
+            // here and one this account may not see are one answer on purpose (I37), and the file's
+            // own path never reaches the payload: `FileOutsideRoots` says where the refusal is about
+            // without naming where the file is (ARCHITECTURE §7 rule 3).
+            RuntimeError::UnknownTitle => AppError::new(ErrorCode::NotFound)
+                .with_detail("That title is not in your library.")
+                .with_cause("no visible title has that id"),
+            RuntimeError::NoPlayableFile => AppError::new(ErrorCode::NotFound)
+                .with_detail("Your library has no copy of that title that is on this machine.")
+                .with_cause("the title holds no file whose scan says it is present"),
+            RuntimeError::FileOutsideRoots => AppError::new(ErrorCode::PermissionDenied)
+                .with_detail("That file is outside the folders Peregrine is allowed to read.")
+                .with_cause("no configured library root contains the media file's path"),
+            // The two refusals that are about the file, which the runtime classified so that this
+            // surface never has to name the stream crate's error type. Both are "there is nothing to
+            // play here", and each says the one thing a person can do about it.
+            RuntimeError::MediaMissing => AppError::new(ErrorCode::NotFound)
+                .with_detail("That file is no longer where the last scan saw it.")
+                .with_cause("the media file is not on disk"),
+            RuntimeError::MediaNotAFile => AppError::new(ErrorCode::NotFound)
+                .with_detail("That is not a file Peregrine can play.")
+                .with_cause("the recorded path is not a regular file"),
+            // Anything else is this process failing to serve a file it can see — a listener that
+            // would not bind, a file that would not open — which is ours rather than the user's.
+            RuntimeError::Playback(inner) => AppError::new(ErrorCode::Internal)
+                .with_detail("Playback could not be started.")
+                .with_cause(inner.to_string()),
         }
     }
 }
@@ -525,6 +559,7 @@ mod tests {
                 ErrorCode::PermissionDenied,
                 false,
             ),
+            (RuntimeError::NoProvider, ErrorCode::Unsupported, false),
         ]
     }
 
@@ -574,7 +609,10 @@ mod command_tests {
             directory.path(),
             directory.path().join("artwork"),
             Arc::new(SilentSink),
-        );
+        )
+        // A command test never reaches the developer's keychain (`AGENTS R14`): a real read from a
+        // freshly built binary raises a macOS access prompt and waits on a person.
+        .with_secrets(Arc::new(crate::test_support::NoCredentials));
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();

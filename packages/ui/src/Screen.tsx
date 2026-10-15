@@ -17,10 +17,16 @@ import { twMerge } from "./merge.js";
  */
 export interface ScreenProps {
   readonly title: string;
-  /** One line about what the screen is. */
-  readonly subtitle?: string;
+  /**
+   * One line about what the screen is.
+   *
+   * `| undefined` for the reason `Section` gives: `exactOptionalPropertyTypes` is on, and a caller
+   * that forwards its own optional value — or picks a subtitle only when it has something to say —
+   * would otherwise have to build its props conditionally to express the same thing.
+   */
+  readonly subtitle?: string | undefined;
   readonly children: ReactNode;
-  readonly className?: string;
+  readonly className?: string | undefined;
 }
 
 export function Screen({ title, subtitle, children, className }: ScreenProps): ReactElement {
@@ -29,7 +35,17 @@ export function Screen({ title, subtitle, children, className }: ScreenProps): R
   return (
     <section
       aria-labelledby={titleId}
-      className={twMerge(clsx("flex h-full flex-col gap-6 overflow-y-auto px-6 py-4"), className)}
+      // **`overflow-x-hidden` is load-bearing, and its absence was a bug.** `overflow-y-auto` is not
+      // one axis: CSS computes the other from `visible` to `auto`, so a screen holding anything wide —
+      // a rail's strip, a grid's spacer, a long table — became horizontally scrollable as a whole, and
+      // panning it slid the page's own heading off behind the shell's sidebar. Horizontal scrolling
+      // belongs to the thing that owns it (a rail's strip, a grid's window), never to a page.
+      // `min-w-0` is the other half: without it a flex child defaults to `min-width: auto` and grows
+      // to its content instead of to the box it was given, which is how a page's width escapes.
+      className={twMerge(
+        clsx("flex h-full min-w-0 flex-col gap-6 overflow-x-hidden overflow-y-auto px-6 py-4"),
+        className,
+      )}
     >
       <header className="flex items-baseline justify-between gap-4">
         <h1 className="text-title-1 text-text-primary" id={titleId}>

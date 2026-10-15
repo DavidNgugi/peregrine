@@ -10,6 +10,9 @@
 //! its cached poster. The bytes never cross IPC (`AGENTS R11`), and neither does the provider's own
 //! path.
 
+use std::num::NonZeroU32;
+
+use peregrine_app::{BrowseRequest, BrowseSort, GenreRef};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Number;
@@ -18,7 +21,7 @@ use tauri::State;
 use crate::error::AppError;
 use crate::guard::guard_response;
 use crate::jobs::JobStarted;
-use crate::library::TitleMatchDto;
+use crate::library::{TitleMatchDto, TitleRef};
 use crate::runtime::RuntimeState;
 
 /// Which of the two a rail item is, as the wire spells it.
@@ -34,6 +37,15 @@ pub enum RailKindDto {
     Movie,
     /// A series.
     Show,
+}
+
+impl From<RailKindDto> for peregrine_app::TitleKind {
+    fn from(kind: RailKindDto) -> Self {
+        match kind {
+            RailKindDto::Movie => Self::Movie,
+            RailKindDto::Show => Self::Show,
+        }
+    }
 }
 
 /// One title in a rail, as the screen draws it.
@@ -181,6 +193,113 @@ impl From<peregrine_app::HomeRail> for HomeRailDto {
     }
 }
 
+/// How a browse page is ordered, as the wire spells it.
+///
+/// Its own type rather than the port's, for the reason [`RailKindDto`] gives: a wire spelling is a
+/// contract this crate owns, and the two are free to move apart — a rename of the port's identifier
+/// would otherwise be a silent change to a URL a webview had bookmarked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowseSortDto {
+    /// What the provider's audience is watching, most first.
+    #[default]
+    Popularity,
+    /// The best reviewed first.
+    Rating,
+    /// The most recently released first.
+    Newest,
+    /// The oldest first.
+    Oldest,
+}
+
+impl From<BrowseSortDto> for BrowseSort {
+    fn from(sort: BrowseSortDto) -> Self {
+        match sort {
+            BrowseSortDto::Popularity => Self::Popularity,
+            BrowseSortDto::Rating => Self::Rating,
+            BrowseSortDto::Newest => Self::Newest,
+            BrowseSortDto::Oldest => Self::Oldest,
+        }
+    }
+}
+
+/// What a title's recommendation rail holds, and the genre shelves it implies.
+///
+/// The genres ride along rather than being asked for separately because they are derived from the same
+/// answer: a title page draws the rail and then offers "more of this genre", and that genre is read off
+/// the titles the provider listed around this one. **They are the provider's genre identifiers**, which
+/// is what a browse request takes; the names come from [`genres`], which a filter control reads anyway.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationsDto {
+    /// The rail's titles.
+    pub items: Vec<RailItemDto>,
+    /// The genres the rail shares, most-shared first and already named; empty when none is shared.
+    pub genres: Vec<GenreDto>,
+}
+
+impl From<peregrine_app::Recommendations> for RecommendationsDto {
+    fn from(found: peregrine_app::Recommendations) -> Self {
+        Self {
+            items: found.items.into_iter().map(RailItemDto::from).collect(),
+            // The binding is what lets `GenreDto::from` resolve: the blanket `From<T> for T` makes a
+            // bare path ambiguous when the target type is only known through the struct literal.
+            genres: found
+                .genres
+                .into_iter()
+                .map(GenreDto::from)
+                .collect::<Vec<_>>(),
+        }
+    }
+}
+
+/// One genre a provider filters by, as a filter control draws it.
+///
+/// The id is the *provider's* own, which is what a browse request hands back to it, and the name is
+/// the label. It is not a catalogue genre: `peregrine-storage`'s `genre` table numbers rows and this
+/// numbers a provider's vocabulary, and the two are not the same set — TMDB's film and series
+/// vocabularies disagree, and the table has no column that could say which one a row came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreDto {
+    /// The provider's own identifier, which its filter takes.
+    pub id: u32,
+    /// The label a filter control draws.
+    pub name: String,
+}
+
+impl From<GenreRef> for GenreDto {
+    fn from(genre: GenreRef) -> Self {
+        Self {
+            id: genre.id(),
+            name: genre.name().as_str().to_owned(),
+        }
+    }
+}
+
+/// One page of a browsed list: the titles on it and whether another page follows.
+///
+/// **`has_more` is the provider's answer rather than a screen's arithmetic.** A screen that inferred
+/// it from the number of tiles would either stop one page early or ask for a page past the
+/// provider's end on every scroll, and neither is something a reader can tell from the page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowsePageDto {
+    /// The titles on this page, drawn exactly as a rail item is.
+    pub items: Vec<RailItemDto>,
+    /// Whether asking for the next page would find anything.
+    pub has_more: bool,
+}
+
+impl From<peregrine_app::BrowsePage> for BrowsePageDto {
+    fn from(page: peregrine_app::BrowsePage) -> Self {
+        Self {
+            items: page.items.into_iter().map(RailItemDto::from).collect(),
+            has_more: page.has_more,
+        }
+    }
+}
+
 /// Searches the configured providers, writes what they know, and answers with what the catalogue holds.
 ///
 /// An empty query is an empty result rather than an error: the search box calls this as the user types,
@@ -196,6 +315,7 @@ pub async fn search_providers(
     state: State<'_, RuntimeState>,
     query: String,
     limit: Option<u32>,
+    kind: Option<RailKindDto>,
 ) -> Result<Vec<TitleMatchDto>, AppError> {
     let query = query.trim().to_owned();
     if query.is_empty() {
@@ -203,7 +323,11 @@ pub async fn search_providers(
     }
     let found = state
         .runtime()?
-        .discover(&query, limit.unwrap_or(20).clamp(1, 100))
+        .discover(
+            &query,
+            limit.unwrap_or(20).clamp(1, 100),
+            kind.map(Into::into),
+        )
         .await?;
     Ok(guard_response(
         "discover::search_providers",
@@ -229,8 +353,11 @@ pub async fn search_providers(
 /// [`AppError`] when the runtime is not running, or when the cold read cannot start the fetch.
 #[tauri::command]
 #[specta::specta]
-pub async fn home_rails(state: State<'_, RuntimeState>) -> Result<Vec<HomeRailDto>, AppError> {
-    let rails = state.runtime()?.home_rails().await?;
+pub async fn home_rails(
+    state: State<'_, RuntimeState>,
+    kind: Option<RailKindDto>,
+) -> Result<Vec<HomeRailDto>, AppError> {
+    let rails = state.runtime()?.home_rails(kind.map(Into::into)).await?;
     Ok(guard_response(
         "discover::home_rails",
         rails.into_iter().map(HomeRailDto::from).collect(),
@@ -254,11 +381,101 @@ pub async fn refresh_rails(state: State<'_, RuntimeState>) -> Result<JobStarted,
     Ok(guard_response("discover::refresh_rails", started.into()))
 }
 
+/// One page of a list composed from filters, from the configured providers.
+///
+/// **A command and not a job**, which is a deliberate reading of `ARCHITECTURE §7` rule 2 rather
+/// than a shortcut around it: the rule keeps a screen from waiting on work it did not ask for, and
+/// this read *is* the work the reader asked for. `search_providers` is the same shape and the
+/// precedent — one provider request, written into the catalogue, answered while the caller waits. A
+/// job would answer with an id and no page, leaving the screen with nothing to draw until a job it
+/// cannot name stops, which is the full-page spinner `PG-E7-02` forbids.
+///
+/// `page` counts from one, every filter is optional, and `min_rating` is a whole score out of ten —
+/// the scale the filter control draws. Both numbers are clamped rather than refused: a page of zero
+/// and a floor above the scale are a caller's arithmetic rather than hostile input, and the closest
+/// legal request is a better answer than a failure.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is not running, when no provider is configured, or when a provider
+/// or the catalogue fails. A provider that is slow, rate-limited, or unreachable is reported rather
+/// than hidden, and the screen keeps whatever it already had.
+#[tauri::command]
+#[specta::specta]
+pub async fn browse(
+    state: State<'_, RuntimeState>,
+    kind: RailKindDto,
+    page: u32,
+    sort: Option<BrowseSortDto>,
+    genre: Option<u32>,
+    min_rating: Option<u8>,
+) -> Result<BrowsePageDto, AppError> {
+    let request = BrowseRequest::new(
+        kind.into(),
+        NonZeroU32::new(page.max(1)).unwrap_or(NonZeroU32::MIN),
+        sort.unwrap_or_default().into(),
+        genre,
+        min_rating.map(|floor| floor.min(10)),
+    );
+    let found = state.runtime()?.browse(&request).await?;
+    Ok(guard_response(
+        "discover::browse",
+        BrowsePageDto::from(found),
+    ))
+}
+
+/// The genres the configured providers filter by for `kind`.
+///
+/// The core answers this once per session: a provider's genre vocabulary changes on the provider's
+/// clock, and a filter control that re-asked on every visit would spend a request per visit for an
+/// answer nothing had changed (`AGENTS R24`).
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is not running, when no provider is configured, or when the
+/// provider fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn genres(
+    state: State<'_, RuntimeState>,
+    kind: RailKindDto,
+) -> Result<Vec<GenreDto>, AppError> {
+    let list = state.runtime()?.genres(kind.into()).await?;
+    // The binding's type is what lets `GenreDto::from` resolve: the blanket `From<T> for T` makes the
+    // bare path ambiguous when the target type is only known through `guard_response`'s parameter.
+    let dtos: Vec<GenreDto> = list.into_iter().map(GenreDto::from).collect();
+    Ok(guard_response("discover::genres", dtos))
+}
+
+/// The titles the configured provider considers like one the catalogue holds.
+///
+/// A rail on a title's own page (`PG-E7-11`, `PG-E7-15`), and one provider request. **Empty is a
+/// real answer rather than a failure**: a title no configured provider holds an identifier for has no
+/// recommendations to fetch — a title the library inferred from a filename, or one another provider
+/// described — and the screen draws no rail for it instead of an error.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is not running, when no provider is configured, or when the
+/// provider fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn recommendations(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+) -> Result<RecommendationsDto, AppError> {
+    let found = state.runtime()?.similar(title.id).await?;
+    Ok(guard_response(
+        "discover::recommendations",
+        RecommendationsDto::from(found),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use peregrine_app::{HomeRail, RailItem, TitleKind};
 
     use super::*;
+    use peregrine_app::{HomeRail, RailItem, TitleKind};
 
     /// The rail kinds the core names, as this layer sends them.
     ///

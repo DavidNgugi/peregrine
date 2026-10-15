@@ -1,14 +1,18 @@
 //! A scripted metadata provider.
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::Duration;
 
-use peregrine_domain::catalogue::{TitleDetails, TitleKind};
+use peregrine_domain::catalogue::{
+    EpisodeDetails, SeasonDetails, SeasonNumber, TitleDetails, TitleKind,
+};
 use peregrine_domain::id::ExternalId;
 use peregrine_domain::id::Provider;
 use peregrine_providers::{
-    CachePolicy, Capabilities, Capability, MetadataProvider, ProviderDescriptor, ProviderError,
-    ProviderFuture, RailKind, RatePolicy, SearchCandidate, SearchQuery,
+    BrowseRequest, CachePolicy, Capabilities, Capability, GenreRef, MetadataProvider,
+    ProviderDescriptor, ProviderError, ProviderFuture, ProviderPage, RailKind, RatePolicy,
+    SearchCandidate, SearchQuery,
 };
 
 /// A descriptor that is well formed for the capabilities it is given.
@@ -60,6 +64,21 @@ pub struct FakeMetadataProvider {
     /// the honest default for a fixture whose caller is testing a search: a fake built for one
     /// operation is not also claiming a provider's trending list is empty.
     rail_answer: Result<Vec<SearchCandidate>, ProviderError>,
+    /// What every browse page answers. Defaults to an empty page in every constructor below, for
+    /// the reason `rail_answer` does: a fake built for a search is not also claiming a catalogue
+    /// with nothing in it.
+    browse_answer: Result<ProviderPage, ProviderError>,
+    /// What the genre list answers. Empty by default, for the same reason.
+    genres_answer: Result<Vec<GenreRef>, ProviderError>,
+    /// What a read of the titles like one title answers. Empty by default, for the same reason.
+    similar_answer: Result<Vec<SearchCandidate>, ProviderError>,
+    /// What the season list answers. Empty by default, for the same reason.
+    seasons_answer: Result<Vec<SeasonDetails>, ProviderError>,
+    /// What each season's episode list answers, keyed by the number asked for. A season nobody
+    /// scripted answers an empty list, and one scripted as a failure answers that failure — which is
+    /// how "one season of several 404s" is written down, since the fake holds answers rather than a
+    /// sequence.
+    episodes_answer: BTreeMap<u32, Result<Vec<EpisodeDetails>, ProviderError>>,
     /// What a probe answers. Defaults to `Ok(())` in every constructor below: a fake built to test a
     /// search is not also claiming its credential is bad, and a test that wants the refusal asks for it
     /// by name.
@@ -89,6 +108,13 @@ impl FakeMetadataProvider {
                 capability: "images",
             }),
             rail_answer: Ok(Vec::new()),
+            browse_answer: Ok(ProviderPage::empty()),
+            genres_answer: Ok(Vec::new()),
+            similar_answer: Ok(Vec::new()),
+            // Empty by default, for the reason `rail_answer` is: a fake built for one operation is
+            // not also claiming a provider with no seasons.
+            seasons_answer: Ok(Vec::new()),
+            episodes_answer: BTreeMap::new(),
             check_answer: Ok(()),
         }
     }
@@ -110,6 +136,13 @@ impl FakeMetadataProvider {
                 capability: "images",
             }),
             rail_answer: Ok(Vec::new()),
+            browse_answer: Ok(ProviderPage::empty()),
+            genres_answer: Ok(Vec::new()),
+            similar_answer: Ok(Vec::new()),
+            // Empty by default, for the reason `rail_answer` is: a fake built for one operation is
+            // not also claiming a provider with no seasons.
+            seasons_answer: Ok(Vec::new()),
+            episodes_answer: BTreeMap::new(),
             check_answer: Ok(()),
         }
     }
@@ -129,6 +162,13 @@ impl FakeMetadataProvider {
             title_answer: Ok(details),
             image_answer: Ok(bytes),
             rail_answer: Ok(Vec::new()),
+            browse_answer: Ok(ProviderPage::empty()),
+            genres_answer: Ok(Vec::new()),
+            similar_answer: Ok(Vec::new()),
+            // Empty by default, for the reason `rail_answer` is: a fake built for one operation is
+            // not also claiming a provider with no seasons.
+            seasons_answer: Ok(Vec::new()),
+            episodes_answer: BTreeMap::new(),
             check_answer: Ok(()),
         }
     }
@@ -148,6 +188,11 @@ impl FakeMetadataProvider {
                 capability: "images",
             }),
             rail_answer: Ok(Vec::new()),
+            browse_answer: Ok(ProviderPage::empty()),
+            genres_answer: Ok(Vec::new()),
+            similar_answer: Ok(Vec::new()),
+            seasons_answer: Ok(Vec::new()),
+            episodes_answer: BTreeMap::new(),
             check_answer: Err(ProviderError::Unauthorized { provider }),
         }
     }
@@ -187,6 +232,93 @@ impl FakeMetadataProvider {
         self
     }
 
+    /// The same fake, answering `page` to every browse request.
+    ///
+    /// A builder rather than another constructor, for the reason
+    /// [`FakeMetadataProvider::with_rail_answer`] gives: the descriptor is *not* rewritten, so a
+    /// fake whose descriptor does not declare `trending` answers a browse the port says it may not
+    /// serve. That is deliberate — the conformance suite decides whether a provider may do that,
+    /// and a builder that silently widened the capability set would make the fake agree with itself.
+    #[must_use]
+    pub fn with_browse_answer(mut self, page: ProviderPage) -> Self {
+        self.browse_answer = Ok(page);
+        self
+    }
+
+    /// The same fake, answering `genres` to every genre read.
+    #[must_use]
+    pub fn with_genres_answer(mut self, genres: Vec<GenreRef>) -> Self {
+        self.genres_answer = Ok(genres);
+        self
+    }
+
+    /// The same fake, answering `candidates` to every read of what is like one title.
+    #[must_use]
+    pub fn with_similar_answer(mut self, candidates: Vec<SearchCandidate>) -> Self {
+        self.similar_answer = Ok(candidates);
+        self
+    }
+
+    /// A provider that declares `search`, `title`, and `season`, answering `details` to every title
+    /// read and `seasons` to every season list.
+    ///
+    /// The season capability is *declared* here rather than left to a builder, because the port's rule
+    /// is that a provider either answers a capability or refuses it, and the refusal is a different
+    /// test: [`FakeMetadataProvider::describing`] is the provider that cannot be asked about a season.
+    /// The episodes of each season are scripted separately through
+    /// [`FakeMetadataProvider::with_episodes`], so a fake built here and left alone is a series whose
+    /// seasons are published and whose episodes nobody has read.
+    #[must_use]
+    pub fn describing_episodes(
+        provider: Provider,
+        details: TitleDetails,
+        seasons: Vec<SeasonDetails>,
+    ) -> Self {
+        Self {
+            descriptor: fake_descriptor(
+                provider,
+                Capabilities::EMPTY
+                    .with(Capability::Search)
+                    .with(Capability::Title)
+                    .with(Capability::Season),
+            ),
+            answer: Ok(Vec::new()),
+            title_answer: Ok(details),
+            image_answer: Err(ProviderError::Unsupported {
+                provider,
+                capability: "images",
+            }),
+            rail_answer: Ok(Vec::new()),
+            browse_answer: Ok(ProviderPage::empty()),
+            genres_answer: Ok(Vec::new()),
+            similar_answer: Ok(Vec::new()),
+            seasons_answer: Ok(seasons),
+            episodes_answer: BTreeMap::new(),
+            check_answer: Ok(()),
+        }
+    }
+
+    /// The same fake, answering `episodes` for the season numbered `season_number`.
+    ///
+    /// One season at a time, because that is the shape of the question: a title's seasons are separate
+    /// requests, and a test that needs one of them to fail while the others are written needs to say
+    /// *which* one.
+    #[must_use]
+    pub fn with_episodes(mut self, season_number: u32, episodes: Vec<EpisodeDetails>) -> Self {
+        self.episodes_answer.insert(season_number, Ok(episodes));
+        self
+    }
+
+    /// The same fake, failing the season numbered `season_number` with `error`.
+    ///
+    /// The provider-having-a-bad-day case at one season, which the title page's refresh must not turn
+    /// into a failed title: a series whose answer is missing one season still has the others.
+    #[must_use]
+    pub fn with_season_failure(mut self, season_number: u32, error: ProviderError) -> Self {
+        self.episodes_answer.insert(season_number, Err(error));
+        self
+    }
+
     /// A provider that declares `search`, `trending`, `title`, and `images`, and answers each with
     /// what the caller scripted.
     ///
@@ -214,6 +346,13 @@ impl FakeMetadataProvider {
             title_answer: Ok(details),
             image_answer: Ok(image),
             rail_answer: Ok(rails),
+            browse_answer: Ok(ProviderPage::empty()),
+            genres_answer: Ok(Vec::new()),
+            similar_answer: Ok(Vec::new()),
+            // Empty by default, for the reason `rail_answer` is: a fake built for one operation is
+            // not also claiming a provider with no seasons.
+            seasons_answer: Ok(Vec::new()),
+            episodes_answer: BTreeMap::new(),
             check_answer: Ok(()),
         }
     }
@@ -227,6 +366,21 @@ impl FakeMetadataProvider {
     pub fn failing_rails(mut self, error: ProviderError) -> Self {
         self.rail_answer = Err(error);
         self
+    }
+
+    /// Why this fake refuses a season read, or `None` when it answers one.
+    ///
+    /// Two refusals and both are the port's: a film has no seasons, and a provider that has not
+    /// declared `season` has said it cannot serve one. A fake that answered anyway would be a fake no
+    /// adapter can be, which is exactly what the conformance suite exists to catch.
+    fn season_refusal(&self, kind: TitleKind) -> Option<ProviderError> {
+        if kind == TitleKind::Movie || !self.descriptor.can(Capability::Season) {
+            return Some(ProviderError::Unsupported {
+                provider: self.descriptor.provider(),
+                capability: Capability::Season.as_str(),
+            });
+        }
+        None
     }
 
     /// A provider that declares `search` and returns `candidates`.
@@ -272,6 +426,33 @@ impl MetadataProvider for FakeMetadataProvider {
         Box::pin(async move { answer })
     }
 
+    fn seasons(&self, _id: &ExternalId, kind: TitleKind) -> ProviderFuture<'_, Vec<SeasonDetails>> {
+        if let Some(refusal) = self.season_refusal(kind) {
+            return Box::pin(async move { Err(refusal) });
+        }
+        let answer = self.seasons_answer.clone();
+        Box::pin(async move { answer })
+    }
+
+    fn season_episodes(
+        &self,
+        _id: &ExternalId,
+        kind: TitleKind,
+        season_number: SeasonNumber,
+    ) -> ProviderFuture<'_, Vec<EpisodeDetails>> {
+        if let Some(refusal) = self.season_refusal(kind) {
+            return Box::pin(async move { Err(refusal) });
+        }
+        // A season nobody scripted answers an empty list rather than a refusal: the list itself was
+        // served, and a season the provider published with no episodes read is a real state.
+        let answer = self
+            .episodes_answer
+            .get(&season_number.get())
+            .cloned()
+            .unwrap_or(Ok(Vec::new()));
+        Box::pin(async move { answer })
+    }
+
     fn search(&self, _query: &SearchQuery) -> ProviderFuture<'_, Vec<SearchCandidate>> {
         // The refusal comes first, and the fake makes it for the same reason an adapter must:
         // a capability the descriptor does not declare is one the provider has said it cannot
@@ -305,6 +486,51 @@ impl MetadataProvider for FakeMetadataProvider {
             return Box::pin(async move { Err(refusal) });
         }
         let answer = self.rail_answer.clone();
+        Box::pin(async move { answer })
+    }
+
+    fn browse(&self, _request: &BrowseRequest) -> ProviderFuture<'_, ProviderPage> {
+        // The same refusal `rail` makes, for the same reason: a capability the descriptor does not
+        // declare is one the provider has said it cannot serve. `browse` is gated on `trending`,
+        // exactly as the port documents.
+        if !self.descriptor.can(Capability::Trending) {
+            let refusal = ProviderError::Unsupported {
+                provider: self.descriptor.provider(),
+                capability: Capability::Trending.as_str(),
+            };
+            return Box::pin(async move { Err(refusal) });
+        }
+        let answer = self.browse_answer.clone();
+        Box::pin(async move { answer })
+    }
+
+    fn genres(&self, _kind: TitleKind) -> ProviderFuture<'_, Vec<GenreRef>> {
+        if !self.descriptor.can(Capability::Trending) {
+            let refusal = ProviderError::Unsupported {
+                provider: self.descriptor.provider(),
+                capability: Capability::Trending.as_str(),
+            };
+            return Box::pin(async move { Err(refusal) });
+        }
+        let answer = self.genres_answer.clone();
+        Box::pin(async move { answer })
+    }
+
+    fn similar(
+        &self,
+        _id: &ExternalId,
+        _kind: TitleKind,
+    ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+        // Gated on `trending` beside `browse` and `genres`, exactly as the port documents: a
+        // provider with no queried list has none to answer a "like this" question with.
+        if !self.descriptor.can(Capability::Trending) {
+            let refusal = ProviderError::Unsupported {
+                provider: self.descriptor.provider(),
+                capability: Capability::Trending.as_str(),
+            };
+            return Box::pin(async move { Err(refusal) });
+        }
+        let answer = self.similar_answer.clone();
         Box::pin(async move { answer })
     }
 }

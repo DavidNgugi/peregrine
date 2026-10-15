@@ -249,6 +249,16 @@ pub(crate) async fn search(
     query: &str,
     request: PageRequest,
 ) -> Result<Vec<TitleIdentity>, StorageError> {
+    search_kind(pool, scope, query, request, None).await
+}
+
+pub(crate) async fn search_kind(
+    pool: &SqlitePool,
+    scope: AccountScope,
+    query: &str,
+    request: PageRequest,
+    kind: Option<crate::catalogue::TitleKind>,
+) -> Result<Vec<TitleIdentity>, StorageError> {
     let Some(expression) = match_expression(query) else {
         return Ok(Vec::new());
     };
@@ -258,12 +268,14 @@ pub(crate) async fn search(
          WHERE title_fts MATCH ?1 \
            AND (?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
            AND (?3 IS NULL OR f.rowid < ?3) \
+           AND (?5 IS NULL OR t.kind = ?5) \
          ORDER BY f.rowid DESC LIMIT ?4",
     )
     .bind(expression)
     .bind(hidden_by_scope(scope))
     .bind(request.bindable_cursor())
     .bind(request.bindable_limit())
+    .bind(kind.map(crate::catalogue::TitleKind::as_str))
     .fetch_all(pool)
     .await
     .map_err(StorageError::from_sqlx)?;
@@ -983,5 +995,88 @@ mod tests {
         // A rebuild is what reconciles it.
         assert_eq!(rebuild(&mut connection).await.unwrap(), 0);
         assert_eq!(index_size(&readers).await, 0);
+    }
+    #[tokio::test]
+    async fn title_kind_filter_precedes_limit_and_preserves_account_scope() {
+        let directory = TempDir::new().unwrap();
+        let (mut connection, readers) = fixture(&directory).await;
+        let movie = rated(&mut connection, "Alien movie", 0, Some("PG")).await;
+        let show = rated(&mut connection, "Alien series", 0, Some("PG")).await;
+        sqlx::query("UPDATE title SET kind = 'show' WHERE id = ?1")
+            .bind(show)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        let hidden = rated(&mut connection, "Alien hidden", 1, Some("PG")).await;
+        assert_eq!(
+            ids_of(
+                &search_kind(
+                    &readers,
+                    restricted(),
+                    "Alien",
+                    PageRequest::first(1),
+                    Some(TitleKind::Movie)
+                )
+                .await
+                .unwrap()
+            ),
+            vec![movie]
+        );
+        assert_eq!(
+            ids_of(
+                &search_kind(
+                    &readers,
+                    any_account(),
+                    "Alien",
+                    PageRequest::first(1),
+                    Some(TitleKind::Movie)
+                )
+                .await
+                .unwrap()
+            ),
+            vec![hidden]
+        );
+        assert_eq!(
+            ids_of(
+                &search_kind(
+                    &readers,
+                    restricted(),
+                    "Alien",
+                    PageRequest::first(1),
+                    Some(TitleKind::Show)
+                )
+                .await
+                .unwrap()
+            ),
+            vec![show]
+        );
+        // The two empty answers the filter must not turn into a query with nothing to match: a
+        // query FTS has no term for, and an empty one, which is not a search at all.
+        let unmatched = search_kind(
+            &readers,
+            restricted(),
+            "missing",
+            PageRequest::first(1),
+            Some(TitleKind::Show),
+        )
+        .await
+        .unwrap();
+        assert!(
+            unmatched.is_empty(),
+            "a term no title holds is an empty page: {unmatched:?}"
+        );
+        let blank = search_kind(
+            &readers,
+            restricted(),
+            "",
+            PageRequest::first(1),
+            Some(TitleKind::Movie),
+        )
+        .await
+        .unwrap();
+        assert!(
+            blank.is_empty(),
+            "an empty query is not a search: {blank:?}"
+        );
     }
 }

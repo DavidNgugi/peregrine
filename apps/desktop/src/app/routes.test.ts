@@ -3,11 +3,17 @@ import { HOME, parseRoute, routePath, ROUTE_FOR_ACTION, type Route } from "./rou
 
 const ROUTES: readonly Route[] = [
   { kind: "discover" },
+  { kind: "discover", titleKind: "movie" },
+  { kind: "discover", titleKind: "show" },
+  { kind: "browse" },
+  { kind: "browse", titleKind: "movie" },
+  { kind: "browse", titleKind: "show" },
   { kind: "library" },
   { kind: "diagnostics" },
   { kind: "settings" },
   { kind: "title", titleKind: "movie", id: 7 },
   { kind: "title", titleKind: "show", id: 12_345 },
+  { kind: "player", id: 7 },
 ];
 
 describe("parseRoute", () => {
@@ -17,6 +23,25 @@ describe("parseRoute", () => {
     for (const route of ROUTES) {
       expect(parseRoute(routePath(route))).toEqual(route);
     }
+  });
+
+  it("reads the player's title id, and refuses one it cannot act on", () => {
+    // The player is a place rather than a state: a route is what makes Back mean what it says, and an
+    // id this build cannot act on is a path it does not open — the same rule the title route follows,
+    // so the screen never opens and then fails.
+    expect(parseRoute("/player/7")).toEqual({ kind: "player", id: 7 });
+    expect(routePath({ kind: "player", id: 7 })).toBe("/player/7");
+
+    for (const path of ["/player/", "/player/0", "/player/-1", "/player/7.5", "/player/abc", "/player"]) {
+      expect(parseRoute(path)).toBeNull();
+    }
+  });
+
+  it("reads only supported Discover type filters", () => {
+    expect(parseRoute("/?type=show#top")).toEqual({ kind: "discover", titleKind: "show" });
+    expect(parseRoute("/?type=movie")).toEqual({ kind: "discover", titleKind: "movie" });
+    expect(parseRoute("/?type=book")).toEqual(HOME);
+    expect(parseRoute("/?type=")).toEqual(HOME);
   });
 
   it("opens the home screen for the root path", () => {
@@ -47,6 +72,18 @@ describe("parseRoute", () => {
     });
   });
 
+  it("reads a browse category out of its path, and refuses one it does not have", () => {
+    // The map's `/browse/:type?`. The optional half is the *default* kind rather than All, because a
+    // provider's queried list is one kind — there is no endpoint that answers a mixed page — so a
+    // bare `/browse` is a real route and `book` is not a category this build can draw.
+    expect(parseRoute("/browse")).toEqual({ kind: "browse" });
+    expect(parseRoute("/browse/movie")).toEqual({ kind: "browse", titleKind: "movie" });
+    expect(parseRoute("/browse/show/")).toEqual({ kind: "browse", titleKind: "show" });
+    for (const bad of ["/browse/book", "/browse/movie/7", "/browse/movie/extra"]) {
+      expect(parseRoute(bad), bad).toBeNull();
+    }
+  });
+
   it("refuses a title path whose kind or id this build cannot use", () => {
     for (const bad of [
       "/title/book/7",
@@ -63,12 +100,12 @@ describe("parseRoute", () => {
   });
 
   it("answers nothing for a path this build has no screen for", () => {
-    // The map's other rows are not guessed at: `/browse` is a real route in ARCHITECTURE and no
-    // screen here can open it, and answering with the home route would make a link to it look like
-    // a link home.
-    // `/title/movie/1` used to be in this list: the route existed in the map and no screen could open
-    // it, which is exactly what this loop is for. It has one now, so it moved to the cases above.
-    for (const unknown of ["/browse", "/search", "/library/../settings", "", "/LIBRARY"]) {
+    // The map's other rows are not guessed at: `/search` is a real route in ARCHITECTURE and no
+    // screen here can open it, and answering with the home route would make a link to it look like a
+    // link home.
+    // `/browse` used to be in this list, for the reason the comment in this test used to give; it has
+    // a screen now, so it moved to the cases above — the same move `/title/movie/1` made.
+    for (const unknown of ["/search", "/library/../settings", "", "/LIBRARY"]) {
       expect(parseRoute(unknown)).toBeNull();
     }
   });

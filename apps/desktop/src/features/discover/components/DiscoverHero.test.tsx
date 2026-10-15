@@ -31,7 +31,6 @@ function slide(overrides: Partial<HeroSlide> = {}): HeroSlide {
     overview: null,
     score: null,
     scoreLabel: null,
-    votesLabel: null,
     playable: false,
     ...overrides,
   };
@@ -56,13 +55,28 @@ function playButton(markup: string): string {
 }
 
 describe("DiscoverHero", () => {
+  it("keeps the toolbar over the artwork and reserves room above the copy", () => {
+    const markup = hero([slide()], { toolbar: <form aria-label="Search overlay" /> });
+    expect(markup).toContain("absolute inset-x-0 top-0 z-20 p-4");
+    expect(markup).toContain("pt-28 sm:pt-20");
+    expect(markup).toContain("Search overlay");
+  });
+
+  it("reserves the hero height and separates the trailing strip from the copy", () => {
+    const markup = hero([slide(), slide({ id: 2 })]);
+    expect(markup).toContain("shrink-0");
+    expect(markup).toContain("min-h-[28rem]");
+    expect(markup).toContain("bg-linear-to-r");
+    expect(markup).toContain("lg:justify-between");
+    expect(markup).toContain("grid-cols-5 gap-2 lg:w-[42%]");
+  });
+
   it("draws the active slide's copy and the actions that go with it", () => {
     const markup = hero([
       slide({
         overview: "A hacker learns the truth.",
         score: "8.2",
         scoreLabel: "rated 8.2 out of 10",
-        votesLabel: "24,000 votes",
       }),
       slide({ id: 2, name: "Inception", href: "/title/movie/2" }),
     ]);
@@ -72,20 +86,21 @@ describe("DiscoverHero", () => {
     expect(markup).toContain("1999 · Film");
     expect(markup).toContain("8.2");
     expect(markup).toContain("rated 8.2 out of 10");
-    expect(markup).toContain("24,000 votes");
     expect(markup).toContain("A hacker learns the truth.");
+    // "Play" is the control's name, not its label: the hero draws the mark alone and the word lives in
+    // `aria-label` and the tooltip, which is what this assertion is reading.
     expect(markup).toContain("Play");
-    expect(markup).toContain("Details");
+    expect(markup).toContain("View More");
     expect(markup).toContain('href="/title/movie/1"');
   });
 
   it("carries no chip the core cannot honestly fill", () => {
     // TMDB's list answers send no runtime and no genre, so the hero draws neither: the meta line is
-    // exactly the caller's, and the only numbers are the score and the count.
-    const markup = hero([slide({ meta: "Series", score: null, votesLabel: null })]);
+    // exactly the caller's, and the only number on it is the score.
+    const markup = hero([slide({ meta: "Series", score: null })]);
 
     expect(markup).toContain("Series");
-    expect(markup).not.toContain("min");
+    expect(markup.replace(/<[^>]*>/gu, "")).not.toMatch(/\d+\s*min/gu);
     expect(markup).not.toContain("Genre");
   });
 

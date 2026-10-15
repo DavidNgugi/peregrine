@@ -1,6 +1,8 @@
 export { LibraryScreen } from "./components/LibraryScreen.js";
 export { TitlePicker } from "./components/TitlePicker.js";
 export { useLibraryTitles } from "./hooks/useLibraryTitles.js";
+export { useLibraryView } from "./hooks/useLibraryView.js";
+export type { LibraryView } from "./hooks/useLibraryView.js";
 export { useScan } from "./hooks/useScan.js";
 export { useMatchRules } from "./hooks/useMatchRules.js";
 export type { MatchRules } from "./hooks/useMatchRules.js";

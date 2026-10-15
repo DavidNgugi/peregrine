@@ -196,10 +196,36 @@ describe("TitleCard accessible name", () => {
     expect(markup).toContain('aria-hidden="true"');
   });
 
-  it("draws the title nowhere the eye can see it", () => {
+  it("draws the title nowhere the eye can see it unless the caller asks for it", () => {
     // PG-E7-05 owns the hover metadata panel; a caption here would be a second copy of the name and
     // would change the tile's geometry, which is the one thing this component exists to hold still.
+    // **And `showTitle` is the one caller that needs the name visible**: a rail's poster identifies its
+    // title and a captured frame does not, so a library tiled with frames is a wall a reader cannot read.
     expect(card({ meta: "1979 · Film" }).match(/Alien/gu)).toHaveLength(1);
+    // Asked for or not, the *resting* tile is identical: the name lives in the panel, and the panel exists
+    // only once the interaction has fired — which this renderer never does, and which is why the panel is
+    // asserted directly below rather than through a hover.
+    expect(card({ showTitle: true })).toBe(card({ showTitle: false }));
+  });
+
+  it("names the title in the panel, in one clamped line, when the caller asks for it", () => {
+    // **The half a static render can reach.** `TitlePreviewPanel` is rendered on its own because the tile
+    // never draws it without a pointer — and a library tile needs the name: a captured frame identifies
+    // nothing, and the meta line beside it is long enough to wrap and push the action out of the panel on
+    // its own. Both lines are `truncate` for that reason, and this is the assertion that they are.
+    const named = renderToStaticMarkup(
+      <TitlePreviewPanel detailsLabel="View More" meta="Film · 3 GB · No metadata yet" name="Alien" />,
+    );
+    const unnamed = renderToStaticMarkup(
+      <TitlePreviewPanel detailsLabel="View More" meta="Film · 3 GB · No metadata yet" />,
+    );
+
+    expect(named).toContain("Alien");
+    expect(unnamed).not.toContain("Alien");
+    expect(named.match(/truncate/gu)?.length).toBe(2);
+    // The action still fits: the panel is a fixed-width box and both text lines are clamped, so nothing
+    // is pushed past its edge — the failure a screenshot of a fresh library showed.
+    expect(named).toContain("View More");
   });
 
   it("leaves out the parts the caller did not supply", () => {
@@ -234,7 +260,6 @@ describe("TitleCard hover preview", () => {
       detailsLabel: "Details",
       meta: "1979 · Film",
       overview: "A crew answers a distress call.",
-      votesLabel: "24,000 votes",
     });
 
     expect(markup).not.toContain("data-preview-panel");
@@ -324,22 +349,28 @@ describe("TitlePreviewPanel", () => {
     return renderToStaticMarkup(<TitlePreviewPanel {...overrides} />);
   }
 
-  it("draws the score with its mark, the count, the meta line, the prose, and the Details verb", () => {
+  it("draws the score with its mark, the meta line, the prose, and the Details verb", () => {
     const markup = panel({
       detailsLabel: "Details",
       meta: "1999 · Film",
       overview: "A hacker learns the truth.",
       rating: 8.2,
-      votesLabel: "24,000 votes",
     });
 
     expect(markup).toContain('data-preview-panel=""');
     expect(markup).toContain('<svg aria-hidden="true"');
     expect(markup).toContain("8.2");
-    expect(markup).toContain("24,000 votes");
     expect(markup).toContain("1999 · Film");
     expect(markup).toContain("A hacker learns the truth.");
     expect(markup).toContain("Details");
+  });
+
+  it("keeps the upper poster visible and reserves a separate metadata surface", () => {
+    const markup = panel({ overview: "Prose", detailsLabel: "Details" });
+    expect(markup).toContain("bottom-0");
+    expect(markup).toContain("max-h-full");
+    expect(markup).toContain("from-transparent");
+    expect(markup).toContain("w-full items-center justify-center");
   });
 
   it("hides itself from assistive technology rather than naming the tile twice", () => {
@@ -368,14 +399,13 @@ describe("TitlePreviewPanel", () => {
     expect(empty).toContain('data-preview-panel=""');
   });
 
-  it("takes a count without a score, and a score without a count", () => {
-    const votesOnly = panel({ votesLabel: "12 votes" });
-    expect(votesOnly).toContain("12 votes");
-    expect(votesOnly).not.toContain("<svg");
-
+  it("draws a score on its own, and never a count", () => {
+    // `votes` is not a prop any more: a tile is judged by its artwork and its score, and the count was
+    // the longest string the panel drew. Asserted as an absence so a reintroduction is a failure.
     const scoreOnly = panel({ rating: 7 });
     expect(scoreOnly).toContain("7.0");
     expect(scoreOnly).not.toContain("votes");
+    expect(panel({})).not.toContain("votes");
   });
 
   it("clamps the prose to three lines and never cuts a word out of it", () => {

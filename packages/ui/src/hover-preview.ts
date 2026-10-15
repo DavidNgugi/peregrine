@@ -17,7 +17,7 @@
  *   going hidden, and dropping below {@link MIN_VISIBLE_RATIO} of visibility all cancel — the last
  *   two because the card is no longer what the pointer is over even though the pointer never moved.
  * - **The scale is capped.** {@link REVEAL_SCALE_CAP} is the hard ceiling, because a tile that grows
- *   past it collides with its neighbour in a rail or a grid.
+ *   past it obscures too much of its neighbours.
  * - **Focus is not a preview.** A focused card shows the metadata panel and nothing else, which is
  *   why {@link panelVisible} takes the focus separately and {@link previewScale} does not.
  */
@@ -26,10 +26,10 @@
 export const DWELL_MS = 450;
 
 /** §5's reveal: how much the tile grows once the dwell has elapsed. */
-export const REVEAL_SCALE = 1.06;
+export const REVEAL_SCALE = 1.3;
 
-/** §5's hard cap, past which adjacent tiles collide. */
-export const REVEAL_SCALE_CAP = 1.12;
+/** §5's hard cap, which limits the overlap with adjacent tiles. */
+export const REVEAL_SCALE_CAP = 1.3;
 
 /** §5's visibility floor: below 60% of the tile on screen, the preview is cancelled. */
 export const MIN_VISIBLE_RATIO = 0.6;
@@ -93,7 +93,7 @@ export function revealRoom(
   const grownX = (width * grown) / 2;
   const grownY = (height * grown) / 2;
   return {
-    sides: Math.ceil(grownX + FOCUS_RING_OUTSET_PX),
+    sides: Math.ceil(grownX + RAMP_BLUR_PX + FOCUS_RING_OUTSET_PX),
     top: Math.ceil(grownY + RAMP_BLUR_PX - RAMP_OFFSET_Y_PX + FOCUS_RING_OUTSET_PX),
     bottom: Math.ceil(grownY + RAMP_OFFSET_Y_PX + RAMP_BLUR_PX + FOCUS_RING_OUTSET_PX),
   };
@@ -183,9 +183,21 @@ function cancelled(state: PreviewState): PreviewState {
  * §5's reveal scale, clamped so that a caller which asks for more than
  * {@link REVEAL_SCALE_CAP} — a future size variant, say — cannot put two tiles through each other,
  * and never scaled below 1: a card that shrank on hover would be a different interaction.
+ *
+ * **`lift` is whether the container reserved room for the enlargement, and `false` means it did not.**
+ * A scroller clips on both axes — `overflow-y: auto` computes `overflow-x` to `auto` too — so an
+ * enlarged tile is cut by whatever contains it unless that container left space for it. A rail does,
+ * through {@link revealRoom}, and that is the whole reason the function exists. A **grid** cannot: its
+ * column count is derived to fit the measured width, so room for a 30 % overhang on every tile is room
+ * the grid would have to take out of its own columns. So a grid passes `false` and the panel reveals
+ * *inside* the tile, which is what `truncate` on the panel's lines is for. Found from a screenshot: the
+ * leftmost tile of a fresh library was drawn with its title and its action cut off at both sides.
  */
-export function previewScale(state: PreviewState): number {
-  return state.phase === "revealed" ? revealScale(REVEAL_SCALE) : 1;
+export function previewScale(state: PreviewState, lift = true): number {
+  if (!lift || state.phase !== "revealed") {
+    return 1;
+  }
+  return revealScale(REVEAL_SCALE);
 }
 
 /** The cap, applied. Exported for the test that would fail if the number moved. */
@@ -240,7 +252,7 @@ export interface PreviewMotion {
 }
 
 /**
- * §5's enter: 180 ms to scale 1.06, decelerating into the stop.
+ * §5's enter: 180 ms to scale 1.30, decelerating into the stop.
  *
  * The values name the `--dur-*`/`--ease-*` tokens PG-E21-07 has not landed yet, with §5's own numbers
  * as the fallback — so the ladder is right today and picks the token up, reduced-motion collapse

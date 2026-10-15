@@ -29,16 +29,12 @@ use std::sync::{Arc, RwLock};
 
 use peregrine_domain::Clock;
 use peregrine_domain::catalogue::{ImageKind, TitleKind};
-use peregrine_domain::matching::{Candidate, MatchDecision, match_candidate, sort_name};
-use peregrine_domain::text::NonEmptyText;
 use peregrine_providers::error::ProviderError;
 use peregrine_providers::provider::{MetadataProvider, RailKind, SearchCandidate};
-use peregrine_storage::{
-    ArtworkPath, Database, JobChange, JobPhase, ProviderTitle, StorageError, TitleExternalId,
-};
+use peregrine_storage::{ArtworkPath, Database, JobChange, JobPhase};
 use peregrine_sync::{Job, JobContext, JobError, JobFuture, JobOutput};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::events::{Event, EventBus, JOB_PROGRESS, JOB_STATE};
 use crate::providers::ProviderRegistry;
@@ -121,15 +117,17 @@ const HERO_BACKDROP_LIMIT: usize = 8;
 
 /// What the Discover screen reads: every rail, as the catalogue and the cache last answered.
 ///
-/// **A `RwLock` in the runtime rather than a table, and the cost is stated plainly: a cold start
-/// shows every rail empty until the first fetch lands.** What that buys is a read that cannot fail,
-/// cannot block, and cannot touch the network — which is what `FLOWS F2` requires of the first
-/// paint — and a rail that is *known* to exist even when its membership is not, so the screen's
-/// geometry is defined from the first frame (`DESIGN_SYSTEM §11` rule 2: no spinner, ever).
+/// **A `RwLock` in the runtime, filled from the database at startup and written through on every
+/// publish.** The lock is what a read needs: it cannot fail, cannot block, and cannot touch the
+/// network, which is what `FLOWS F2` requires of the first paint, and a rail that is *known* to
+/// exist even when its membership is not is what defines the screen's geometry from the first
+/// frame (`DESIGN_SYSTEM §11` rule 2: no spinner, ever).
 ///
-/// The follow-up is a persisted manifest: a `discover_rail` table keyed by rail and position, an
-/// append-only numbered migration, and a repository with its own round-trip and scope tests. That
-/// is a slice of its own — nothing here pretends to have done it halfway.
+/// The membership outlives the process in `discover_rail` (`crate::discover_rail_row`), and
+/// [`runtime::Runtime::start`](crate::runtime::Runtime::start) hydrates this map from it: a
+/// launch draws the rails the last fetch published, and starts no fetch of its own, because
+/// seven lists a provider publishes change on the provider's clock and not on the user's. The
+/// map is still the thing a read touches; the table is what makes it survive.
 #[derive(Debug, Default)]
 pub struct HomeRails {
     /// The rails as last published. A `BTreeMap` keyed by the enum, so the read order is the
@@ -175,6 +173,113 @@ impl HomeRails {
     /// Panics when the lock is poisoned, for the reason [`HomeRails::read`] does.
     fn publish(&self, rails: &BTreeMap<RailKind, Vec<RailItem>>) {
         *self.rails.write().expect("the lock is not poisoned") = rails.clone();
+    }
+
+    /// Fills the map from the persisted manifest, which is what a launch reads.
+    ///
+    /// The same whole-map write [`HomeRails::publish`] does, and for the same reason. It is a
+    /// separate door rather than the same one because the two are different facts: a run
+    /// publishes what it just fetched, and this is what a previous run left behind.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the lock is poisoned, for the reason [`HomeRails::read`] does.
+    pub(crate) fn hydrate(&self, rails: &BTreeMap<RailKind, Vec<RailItem>>) {
+        self.publish(rails);
+    }
+}
+
+pub(crate) fn rails_of_kind(
+    rails: Vec<(RailKind, Vec<RailItem>)>,
+    kind: Option<TitleKind>,
+) -> Vec<(RailKind, Vec<RailItem>)> {
+    rails
+        .into_iter()
+        .filter(|(rail, _)| {
+            kind.is_none_or(|selected| rail.kind().is_none_or(|own| own == selected))
+        })
+        .map(|(rail, mut items)| {
+            items.retain(|item| kind.is_none_or(|selected| item.kind == selected));
+            (rail, items)
+        })
+        .collect()
+}
+
+/// The manifest one publish leaves behind: which titles each rail held, in that rail's own order.
+///
+/// **Deduplicated, because a rail lists a title once and the database says so.** A provider that
+/// repeats a title inside one page would otherwise fail the write that records a whole run, and
+/// the place a title holds first is the one a screen draws first.
+fn manifest(rails: &BTreeMap<RailKind, Vec<RailItem>>) -> Vec<(String, Vec<i64>)> {
+    rails
+        .iter()
+        .map(|(rail, items)| {
+            let mut seen = BTreeSet::new();
+            let titles = items
+                .iter()
+                .filter(|item| seen.insert(item.title_id))
+                .map(|item| item.title_id)
+                .collect();
+            (rail.as_str().to_owned(), titles)
+        })
+        .collect()
+}
+
+/// The rails the persisted manifest rebuilds, with the artwork the cache already holds.
+///
+/// **Nothing here is fetched.** Hydration runs on the launch path, where `FLOWS F2` says the first
+/// paint touches neither the network nor a provider: a blob the cache no longer holds stays
+/// `None`, which is the reserved box a rail draws anyway for an image that did not arrive, and the
+/// next fetch puts it back.
+pub(crate) fn manifest_rails(
+    rows: Vec<peregrine_storage::DiscoverRailRow>,
+    artwork: &peregrine_sync::ImageCache,
+) -> BTreeMap<RailKind, Vec<RailItem>> {
+    let mut rails: BTreeMap<RailKind, Vec<RailItem>> = BTreeMap::new();
+    for row in rows {
+        let Some(rail) = RailKind::parse(&row.rail) else {
+            // A rail a later build added, read by this one. Reported rather than drawn as a
+            // heading with no name and no copy of its own.
+            warn!(
+                rail = %row.rail,
+                "the manifest names a rail this build does not know"
+            );
+            continue;
+        };
+        rails
+            .entry(rail)
+            .or_default()
+            .push(item_from_manifest(row, artwork));
+    }
+    rails
+}
+
+/// One manifest row as a screen draws it.
+fn item_from_manifest(
+    row: peregrine_storage::DiscoverRailRow,
+    artwork: &peregrine_sync::ImageCache,
+) -> RailItem {
+    let cached = |source: Option<&peregrine_storage::ArtworkPath>, kind: ImageKind| {
+        source.and_then(|source| {
+            crate::artwork::cached_image(artwork, source.provider, &source.path, kind)
+        })
+    };
+    RailItem {
+        title_id: row.title_id,
+        kind: row.kind,
+        name: row.name,
+        year: row.released.map(|date| i32::from(date.year())),
+        poster: cached(row.poster.as_ref(), ImageKind::Poster),
+        // Kept rather than dropped because a rail item without its source is a half-built item;
+        // nothing re-fetches from a hydrated map, and this is what the fetch would need if one did.
+        backdrop_source: row.backdrop.clone(),
+        backdrop: cached(row.backdrop.as_ref(), ImageKind::Backdrop),
+        // The library's answer, which is what every other path decides Play from: a file that is
+        // not known to be missing.
+        playable: row.files > row.missing_files,
+        rating: row.rating,
+        overview: row.overview,
+        votes: row.votes,
     }
 }
 
@@ -253,11 +358,45 @@ impl DiscoverRailsJob {
         attempt: u32,
         cancellation: CancellationToken,
     ) -> peregrine_sync::JobResult {
-        let adapters = self.providers.adapters();
+        let adapters = self.configured(&cancellation).await;
         if adapters.is_empty() {
             return Err(JobError::failed("no provider is configured"));
         }
         self.run(job, attempt, &adapters, cancellation).await
+    }
+
+    /// The adapters to fetch with, waiting for the credential read the runtime started.
+    ///
+    /// **A launch with an empty catalogue asks for the rails before it can know whether there is
+    /// anything to ask with.** The credential read is blocking — a keychain can raise an OS prompt —
+    /// so it runs off the startup path, and the read that starts this fetch arrives while it is
+    /// still in the air. Looking once and giving up there is what made the user press Refresh: the
+    /// run failed with "no provider is configured" against a provider the store was about to hand
+    /// over, and nothing re-ran it.
+    ///
+    /// Waiting costs nothing that matters — a job is off the command path, and the wait is bounded
+    /// so a machine with no keychain reaches the honest failure rather than a hang. The budget is
+    /// generous because the thing being waited for is a human answering a prompt, and the measured
+    /// cost of that in this repository is eleven seconds.
+    async fn configured(&self, cancellation: &CancellationToken) -> Vec<Arc<dyn MetadataProvider>> {
+        const BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+        const POLL: std::time::Duration = std::time::Duration::from_millis(25);
+        let deadline = std::time::Instant::now() + BUDGET;
+        loop {
+            let adapters = self.providers.adapters();
+            // A provider is here, or the read has finished and there is none, or the budget is
+            // spent: all three are answers rather than reasons to wait again.
+            if !adapters.is_empty()
+                || self.providers.refreshed()
+                || std::time::Instant::now() >= deadline
+            {
+                return adapters;
+            }
+            if cancellation.is_cancelled() {
+                return Vec::new();
+            }
+            tokio::time::sleep(POLL).await;
+        }
     }
 
     /// The work over an explicit set of providers.
@@ -340,6 +479,24 @@ impl DiscoverRailsJob {
             return Err(JobError::failed(failures.join("; ")));
         }
 
+        // Written once, at the end of a run that got far enough to publish. A run that failed
+        // outright returned above, and that is what keeps a bad minute at a provider from erasing
+        // the rails the next launch would draw. A run whose providers *refused* every rail — one
+        // that publishes no lists at all — does reach this and does write an empty manifest, which
+        // is the in-memory map it just published: what a launch hydrates is what the last run put
+        // on screen, whether that was rails or nothing.
+        //
+        // A write that fails does not fail the run: the screen already has these rails in memory,
+        // and what the failure costs is the next launch fetching again — the state this manifest
+        // exists to leave.
+        if let Err(error) = self
+            .database
+            .replace_discover_rails(&manifest(&rails))
+            .await
+        {
+            warn!(%error, "the rails manifest could not be written");
+        }
+
         self.succeeded(job, attempt, rails.values().map(Vec::len).sum())
             .await
     }
@@ -390,33 +547,30 @@ impl DiscoverRailsJob {
 
     /// One candidate, in the catalogue, as a rail item — or `None` when it cannot be one.
     ///
-    /// The write is [`peregrine_sync::record_list_answer`] rather than a details read: a list answer
-    /// already carries the poster's path, the score, the synopsis, and the vote count, so the
-    /// catalogue is given all four here and the artwork phase below reads the path back out. That is
-    /// what turns two requests per title into one (`PG-E7-08`), and it is where the hover preview's
-    /// prose comes from without a second request either (`PG-E7-05`). The item the caller draws is
-    /// built from what was written, so the screen and the catalogue cannot disagree about what the
-    /// provider said.
+    /// **The write is the sync's, and this method only draws.** [`peregrine_sync::upsert_list_candidate`]
+    /// is what decides which candidate is a new title, which is one the catalogue already has, and
+    /// what a list answer adds to a row; a list answer already carries the poster's path, the score,
+    /// the synopsis, and the vote count, so the catalogue is given all four there and the artwork
+    /// phase below reads the path back out (`PG-E7-08`). The item is built from what was written, so
+    /// the screen and the catalogue cannot disagree about what the provider said.
     async fn upsert(
         &self,
         candidate: SearchCandidate,
         at: i64,
     ) -> Result<Option<RailItem>, peregrine_sync::SyncError> {
-        let title_id = match self
-            .database
-            .title_for_external_id(candidate.external_id())
-            .await?
-        {
-            Some(id) => id,
-            None => match self.match_or_create(&candidate, at).await? {
-                Some(id) => id,
-                None => return Ok(None),
-            },
+        // **The write is the sync's, not this job's.** Which candidate is a new title, which is one
+        // the catalogue already has, and what a list answer adds to a row are one rule, and the
+        // browse read asks the same question of the same kind of answer (`PG-E7-09`) — so the rule
+        // lives in `peregrine_sync::upsert_list_candidate`, and this job only turns its answer into
+        // the shape a rail draws.
+        let Some(listed) =
+            peregrine_sync::upsert_list_candidate(&self.database, &candidate, at).await?
+        else {
+            return Ok(None);
         };
-        let written =
-            peregrine_sync::record_list_answer(&self.database, title_id, &candidate, at).await?;
+        let written = listed.details;
         Ok(Some(RailItem {
-            title_id,
+            title_id: listed.title_id,
             kind: written.kind,
             name: written.name.as_str().to_owned(),
             // The date a *candidate* carries is what the provider listed it under; a title the
@@ -440,66 +594,6 @@ impl DiscoverRailsJob {
             overview: written.overview,
             votes: written.votes,
         }))
-    }
-
-    /// The matching rule, and the stub it decides to write.
-    async fn match_or_create(
-        &self,
-        candidate: &SearchCandidate,
-        at: i64,
-    ) -> Result<Option<i64>, StorageError> {
-        let Some(name) = NonEmptyText::new(candidate.name().as_str()).ok() else {
-            return Ok(None);
-        };
-        let input = Candidate {
-            external_id: candidate.external_id().clone(),
-            name,
-            kind: candidate.kind(),
-            released: candidate.released(),
-        };
-        let locals = self
-            .database
-            .local_titles_for_sort_name(
-                candidate.kind().as_str(),
-                &sort_name(candidate.name().as_str()),
-            )
-            .await?;
-
-        match match_candidate(&input, &locals) {
-            MatchDecision::Matched { local_id, .. } => match self
-                .database
-                .attach_external_ids(
-                    local_id,
-                    &[TitleExternalId {
-                        id: candidate.external_id().clone(),
-                        is_primary: true,
-                        fetched_at: at,
-                    }],
-                )
-                .await
-            {
-                // A concurrent writer attaching the same id to the same title is the outcome this
-                // call was trying to produce, so it is the same arm and not a silent failure.
-                Ok(()) | Err(StorageError::Conflict { .. }) => Ok(Some(local_id)),
-                Err(error) => Err(error),
-            },
-            MatchDecision::New => self
-                .database
-                .upsert_provider_title(ProviderTitle {
-                    external_id: candidate.external_id().clone(),
-                    kind: candidate.kind(),
-                    subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
-                    name: candidate.name().as_str().to_owned(),
-                    sort_name: sort_name(candidate.name().as_str()),
-                    is_primary: true,
-                    at,
-                })
-                .await
-                .map(Some),
-            // A question, not an answer: a screen cannot draw a guess, so the candidate is left
-            // out of the rail rather than merged into one of two titles.
-            MatchDecision::Ambiguous { .. } => Ok(None),
-        }
     }
 
     /// Fetches every rail title's poster, and the hero's backdrops, into the blob cache.
@@ -566,7 +660,7 @@ impl DiscoverRailsJob {
             }
             // No list answer ever gave this title a poster path, so there is nothing to fetch and a
             // details request would be asking the provider to repeat itself.
-            if let Some(poster) = stored.and_then(|row| row.poster) {
+            if let Some(poster) = stored.and_then(|row| row.library.poster) {
                 found.poster = self
                     .cache_artwork(item.title_id, &poster, adapters, ImageKind::Poster)
                     .await;
@@ -597,11 +691,6 @@ impl DiscoverRailsJob {
         adapters: &[Arc<dyn MetadataProvider>],
         kind: ImageKind,
     ) -> Option<std::path::PathBuf> {
-        if let Some(path) =
-            crate::artwork::cached_image(&self.artwork, source.provider, &source.path, kind)
-        {
-            return Some(path);
-        }
         let Some(provider) = adapters
             .iter()
             .find(|adapter| adapter.descriptor().provider() == source.provider)
@@ -613,14 +702,17 @@ impl DiscoverRailsJob {
             );
             return None;
         };
-        match peregrine_sync::cache_image(provider.as_ref(), &self.artwork, &source.path, kind)
-            .await
+        // The cache check, the fetch, and the store are one rule, shared with the browse read
+        // (`crate::artwork::cached_or_fetched`): whether a blob is here is a `stat` and no request,
+        // and a fetch that fails is a reserved box rather than a failed run.
+        if let Some(path) =
+            crate::artwork::cached_or_fetched(&self.artwork, provider.as_ref(), &source.path, kind)
+                .await
         {
-            Ok(path) => Some(path),
-            Err(error) => {
-                debug!(title, ?kind, %error, "a rail image did not arrive");
-                None
-            }
+            Some(path)
+        } else {
+            debug!(title, ?kind, "a rail image did not arrive");
+            None
         }
     }
 
@@ -902,12 +994,53 @@ mod tests {
             self.inner.title(id, kind)
         }
 
+        /// Delegated, so a season read in a test sees whatever the fake behind this wrapper answers.
+        fn seasons(
+            &self,
+            id: &ExternalId,
+            kind: TitleKind,
+        ) -> ProviderFuture<'_, Vec<peregrine_domain::catalogue::SeasonDetails>> {
+            self.inner.seasons(id, kind)
+        }
+
+        /// Delegated, for the reason [`Self::seasons`] gives.
+        fn season_episodes(
+            &self,
+            id: &ExternalId,
+            kind: TitleKind,
+            season_number: peregrine_domain::catalogue::SeasonNumber,
+        ) -> ProviderFuture<'_, Vec<peregrine_domain::catalogue::EpisodeDetails>> {
+            self.inner.season_episodes(id, kind, season_number)
+        }
+
         fn rail(
             &self,
             rail: RailKind,
             page: NonZeroU32,
         ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
             self.inner.rail(rail, page)
+        }
+
+        fn browse(
+            &self,
+            request: &peregrine_providers::BrowseRequest,
+        ) -> ProviderFuture<'_, peregrine_providers::ProviderPage> {
+            self.inner.browse(request)
+        }
+
+        fn genres(
+            &self,
+            kind: TitleKind,
+        ) -> ProviderFuture<'_, Vec<peregrine_providers::GenreRef>> {
+            self.inner.genres(kind)
+        }
+
+        fn similar(
+            &self,
+            id: &ExternalId,
+            kind: TitleKind,
+        ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            self.inner.similar(id, kind)
         }
 
         fn image(&self, path: &str, kind: ImageKind) -> ProviderFuture<'_, Vec<u8>> {
@@ -960,6 +1093,55 @@ mod tests {
             RailKind::ALL.to_vec(),
             "the read order is the order a home screen shows them"
         );
+    }
+
+    #[test]
+    fn title_kind_filter_keeps_mixed_rails_and_order_without_mutating_the_cache() {
+        let item = |title_id, kind| RailItem {
+            title_id,
+            kind,
+            name: "Title".to_owned(),
+            year: None,
+            poster: None,
+            backdrop_source: None,
+            backdrop: None,
+            playable: false,
+            rating: None,
+            overview: None,
+            votes: None,
+        };
+        let snapshot = vec![
+            (
+                RailKind::TrendingWeek,
+                vec![
+                    item(1, TitleKind::Movie),
+                    item(2, TitleKind::Show),
+                    item(3, TitleKind::Movie),
+                ],
+            ),
+            (RailKind::PopularMovies, vec![item(4, TitleKind::Movie)]),
+            (RailKind::PopularShows, vec![item(5, TitleKind::Show)]),
+        ];
+        let movies = rails_of_kind(snapshot.clone(), Some(TitleKind::Movie));
+        assert_eq!(
+            movies.iter().map(|(rail, _)| *rail).collect::<Vec<_>>(),
+            vec![RailKind::TrendingWeek, RailKind::PopularMovies]
+        );
+        assert_eq!(
+            movies[0]
+                .1
+                .iter()
+                .map(|item| item.title_id)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        let shows = rails_of_kind(snapshot.clone(), Some(TitleKind::Show));
+        assert_eq!(shows[0].1[0].title_id, 2);
+        assert_eq!(shows[1].0, RailKind::PopularShows);
+        assert_eq!(rails_of_kind(snapshot.clone(), None), snapshot);
+        let none = rails_of_kind(Vec::new(), Some(TitleKind::Movie));
+        assert!(none.is_empty(), "nothing fetched is nothing to filter");
+        assert_eq!(snapshot[0].1.len(), 3);
     }
 
     #[test]
@@ -1093,6 +1275,212 @@ mod tests {
         assert_eq!(hero_backdrops(&with_empty_first), heroes);
 
         assert!(hero_backdrops(&BTreeMap::new()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_run_persists_a_manifest_a_later_launch_hydrates() {
+        // The whole point of the table (PG-E7-08): a launch draws what the last run published instead
+        // of seven empty headings and a re-fetch of the same lists. The map here is a new one, which
+        // is what a relaunch has.
+        let fixture = Fixture::new().await;
+        let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("The Matrix", None),
+            b"jpeg".to_vec(),
+            vec![listed("603", "The Matrix", "/poster.jpg", Some(8.2))],
+        );
+        fixture.run(Arc::new(fake)).await.expect("the run succeeds");
+
+        let rows = fixture
+            .database
+            .discover_rails(crate::runtime::installation_scope())
+            .await
+            .expect("the manifest is readable");
+        assert!(
+            rows.iter()
+                .any(|row| row.rail == RailKind::PopularMovies.as_str()),
+            "the run wrote the rails it published: {rows:?}"
+        );
+
+        let fresh = HomeRails::new();
+        fresh.hydrate(&manifest_rails(rows, &fixture.artwork));
+        let rails = fresh.read();
+        let popular = rails
+            .iter()
+            .find(|(rail, _)| *rail == RailKind::PopularMovies)
+            .expect("every rail is reported");
+        assert_eq!(
+            popular.1.len(),
+            1,
+            "the relaunch draws the title the last run listed"
+        );
+        let item = &popular.1[0];
+        assert_eq!(item.name, "The Matrix");
+        assert_eq!(item.year, Some(1999));
+        assert_eq!(item.rating, Some(8.2));
+        let poster = item
+            .poster
+            .as_ref()
+            .expect("the blob the last run fetched is still in the cache");
+        assert!(
+            poster.is_file(),
+            "hydration answers with a path the webview can be served"
+        );
+        assert!(
+            rails.iter().any(|(_, items)| !items.is_empty()),
+            "and the map is no longer empty, which is what stops the launch re-fetching"
+        );
+    }
+
+    #[tokio::test]
+    async fn hydration_does_not_fetch_a_blob_the_cache_no_longer_holds() {
+        // An eviction between two launches: the row still names the artwork and the bytes are gone.
+        // Hydration is on the launch path, where `FLOWS F2` forbids a request, so the item is drawn
+        // with the reserved box the screen already has for an image that did not arrive.
+        let fixture = Fixture::new().await;
+        let fake = FakeMetadataProvider::publishing_rails_and_serving_images(
+            Provider::Tmdb,
+            details("The Matrix", None),
+            b"jpeg".to_vec(),
+            vec![listed("603", "The Matrix", "/poster.jpg", Some(8.2))],
+        );
+        fixture.run(Arc::new(fake)).await.expect("the run succeeds");
+
+        let rows = fixture
+            .database
+            .discover_rails(crate::runtime::installation_scope())
+            .await
+            .expect("the manifest is readable");
+        let evicted = Arc::new(peregrine_sync::ImageCache::new(
+            fixture.directory.path().join("an-evicted-cache"),
+        ));
+
+        let fresh = HomeRails::new();
+        fresh.hydrate(&manifest_rails(rows, &evicted));
+        let item = fresh
+            .read()
+            .into_iter()
+            .flat_map(|(_, items)| items)
+            .next()
+            .expect("the manifest holds a title");
+        assert_eq!(item.name, "The Matrix");
+        assert_eq!(
+            item.poster, None,
+            "the path is not a picture until the bytes are there"
+        );
+    }
+
+    #[test]
+    fn a_manifest_lists_each_rail_in_order_and_drops_a_title_a_page_repeated() {
+        // What the database's `UNIQUE (rail, title_id)` refuses is decided here: a provider that
+        // repeats a title inside one page must not fail a whole run, and the place a title holds
+        // first is the one the screen draws first.
+        let item = |title_id| RailItem {
+            title_id,
+            kind: TitleKind::Movie,
+            name: "Title".to_owned(),
+            year: None,
+            poster: None,
+            backdrop_source: None,
+            backdrop: None,
+            playable: false,
+            rating: None,
+            overview: None,
+            votes: None,
+        };
+        let mut rails = BTreeMap::new();
+        rails.insert(
+            RailKind::TrendingWeek,
+            vec![item(7), item(3), item(7), item(9)],
+        );
+        rails.insert(RailKind::PopularShows, vec![item(4)]);
+
+        assert_eq!(
+            manifest(&rails),
+            vec![
+                ("trending_week".to_owned(), vec![7, 3, 9]),
+                ("popular_shows".to_owned(), vec![4]),
+            ],
+            "the rail's own order is kept and the repeat is dropped"
+        );
+        let nothing = manifest(&BTreeMap::new());
+        assert!(nothing.is_empty(), "no rails published is no manifest");
+    }
+
+    #[test]
+    fn a_rail_this_build_does_not_know_is_skipped_rather_than_drawn() {
+        // A manifest written by a build with one more rail than this one. The row is skipped: a
+        // heading with no name and no copy of its own is worse than a rail that is absent.
+        let row = |rail: &str, title_id: i64, name: &str| peregrine_storage::DiscoverRailRow {
+            rail: rail.to_owned(),
+            title_id,
+            kind: TitleKind::Movie,
+            name: name.to_owned(),
+            released: None,
+            rating: None,
+            votes: None,
+            overview: None,
+            poster: None,
+            backdrop: None,
+            files: 0,
+            missing_files: 0,
+        };
+        let cache = peregrine_sync::ImageCache::new(std::env::temp_dir().join("pg-rail-skip"));
+
+        let rails = manifest_rails(
+            vec![
+                row("trending_day", 1, "Tomorrow"),
+                row("popular_movies", 2, "Alien"),
+            ],
+            &cache,
+        );
+        assert_eq!(rails.len(), 1);
+        assert_eq!(
+            rails
+                .get(&RailKind::PopularMovies)
+                .expect("the rail this build knows")
+                .len(),
+            1
+        );
+        assert!(!rails.contains_key(&RailKind::TrendingWeek));
+    }
+
+    #[tokio::test]
+    async fn a_run_waits_for_the_credential_read_rather_than_answering_that_none_is_configured() {
+        // The launch path asks for the rails while the keychain is still being read, because the
+        // read is blocking and a keychain can raise a prompt. A job that looked once would fail
+        // against a provider that *is* configured, and nothing re-runs it: the user's only way to
+        // the rails was to press Refresh once the prompt had been answered.
+        let fixture = Fixture::new().await;
+        let registry = Arc::new(ProviderRegistry::new());
+        assert!(!registry.refreshed(), "nothing has looked yet");
+        let job = DiscoverRailsJob::new(
+            Arc::clone(&fixture.database),
+            Arc::clone(&fixture.bus),
+            clock(),
+            Arc::clone(&registry),
+            Arc::clone(&fixture.artwork),
+            Arc::clone(&fixture.rails),
+            fixture.journal_id,
+        );
+        let cancellation = CancellationToken::new();
+
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                job.configured(&cancellation)
+            )
+            .await
+            .is_err(),
+            "a read still in the air is not a provider that is absent"
+        );
+
+        // And when the read lands — here finding nothing — the wait ends and the job has its honest
+        // answer rather than waiting for the whole budget.
+        registry
+            .refresh(&peregrine_testkit::MemorySecretStore::new())
+            .expect("the store answers");
+        assert!(job.configured(&cancellation).await.is_empty());
     }
 
     /// One run of the job over a scripted provider, against a real database and a real cache.
@@ -1243,7 +1631,11 @@ mod tests {
             .expect("the title is readable")
             .expect("the title exists");
         assert_eq!(
-            stored.poster.as_ref().map(|artwork| artwork.path.as_str()),
+            stored
+                .library
+                .poster
+                .as_ref()
+                .map(|artwork| artwork.path.as_str()),
             Some("/poster.jpg"),
             "the list answer's path is what the catalogue keeps"
         );
@@ -1604,7 +1996,7 @@ mod tests {
                 .expect("the title is readable")
                 .expect("the title exists");
             assert!(
-                stored.poster.is_some(),
+                stored.library.poster.is_some(),
                 "every written title keeps the path the list answer gave it"
             );
         }

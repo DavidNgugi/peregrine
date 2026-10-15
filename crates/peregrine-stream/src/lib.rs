@@ -5,3 +5,20 @@
 //!
 //! Loopback and LAN listeners are separate bind addresses with separate token
 //! scopes, and the LAN listener exists only while casting.
+//!
+//! **What exists today is the loopback half, for one local file.** [`MediaServer`] binds `127.0.0.1`
+//! on an ephemeral port, serves exactly the file it was opened for, and stops when its session does —
+//! which is what lets a webview `<video>` element play a library file without the asset protocol
+//! exposing the library root (ADR [0023](../../../docs/adr/0023-in-app-video-surface.md), SECURITY.md
+//! T10).
+//!
+//! Still owed here: the LAN listener and its separate token scope (`PG-E19`), cast streams (`PG-E18`),
+//! subtitle sidecars (`PG-E17`), and bandwidth accounting (`PG-E10-16`).
+
+mod error;
+mod server;
+mod thumbnail;
+
+pub use error::StreamError;
+pub use server::{Capture, MediaServer};
+pub use thumbnail::{ThumbnailError, ThumbnailSink};

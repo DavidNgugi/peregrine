@@ -73,25 +73,25 @@ Every colour is authored in **OKLCH** so lightness is perceptually uniform and a
 }
 
 [data-theme="light"] {
-  --surface-0: oklch(0.99 0.002 var(--hue-brand));
-  --surface-1: oklch(0.97 0.004 var(--hue-brand));
-  --surface-2: oklch(0.94 0.006 var(--hue-brand));
+  --surface-0: oklch(0.96 0.004 var(--hue-brand));
+  --surface-1: oklch(0.93 0.006 var(--hue-brand));
+  --surface-2: oklch(0.89 0.008 var(--hue-brand));
   --surface-scrim: oklch(0.30 0.010 var(--hue-brand) / 0.45);
 
-  --text-primary:   oklch(0.20 0.010 var(--hue-brand));
-  --text-secondary: oklch(0.45 0.010 var(--hue-brand));
-  --text-tertiary:  oklch(0.52 0.010 var(--hue-brand));
+  --text-primary:   oklch(0.18 0.010 var(--hue-brand));
+  --text-secondary: oklch(0.40 0.010 var(--hue-brand));
+  --text-tertiary:  oklch(0.45 0.010 var(--hue-brand));
   --text-on-accent: oklch(0.99 0 0);
 
-  --border-subtle:  oklch(0.90 0.006 var(--hue-brand));
-  --border-strong:  oklch(0.615 0.010 var(--hue-brand));
+  --border-subtle:  oklch(0.86 0.008 var(--hue-brand));
+  --border-strong:  oklch(0.56 0.010 var(--hue-brand));
 
   --accent:         oklch(0.55 0.18 var(--hue-brand));
   --accent-hover:   oklch(0.50 0.18 var(--hue-brand));
   --accent-muted:   oklch(0.92 0.04 var(--hue-brand));
 
   --state-ok:       oklch(0.55 0.14 150);
-  --state-warn:     oklch(0.62 0.14 75);
+  --state-warn:     oklch(0.56 0.14 75);
   --state-danger:   oklch(0.55 0.19 25);
   --state-info:     oklch(0.55 0.14 240);
 }
@@ -204,18 +204,30 @@ The same numbers are exported as a TypeScript object so imperative animation and
 4. Motion explains a spatial relationship or it does not happen. No decorative motion, no bouncing, no spring on a hover.
 5. `prefers-reduced-motion` removes non-essential motion and collapses durations to 1 ms; essential state changes become instant rather than absent.
 
+### The loading sweep, and why rule 4 allows it
+
+A skeleton's band is the one continuous animation this system ships, and rule 4 is not bent by it: a
+placeholder that sits perfectly still is indistinguishable from a surface that has finished loading and
+is empty, so the sweep carries information — *this is on its way* — rather than decorating a spatial
+change. It obeys the rest of this section: a `transform` on a pseudo-element and never a repainted
+surface (rule 2), never a response to an interaction, one band per shape rather than a highlight
+travelling across a screen, and under `prefers-reduced-motion` the movement is removed while the
+placeholder stays (rule 5, `Skeleton`'s `motion-reduce:animate-none`). The shape is always the
+caller's, because §11 rule 2's "skeleton with real geometry" means the placeholder *is* what is
+coming: a rail's placeholders are the size and ratio of the tiles that replace them.
+
 ### The hover-preview ladder
 
 The Netflix-style preview is the most-scrutinized interaction in the app, so it is specified exactly:
 
 | Step | Behaviour |
 | --- | --- |
-| Enter | Scale to 1.06 over `--dur-3` (180 ms) with `--ease-decelerate`; scale is hard-capped at 1.12 or adjacent cards collide. The shadow ramp rides a pseudo-element's opacity over `--dur-3`, never an animated `box-shadow` |
+| Enter after dwell | Scale to 1.30 over `--dur-3` (180 ms) with `--ease-decelerate`; scale is capped at 1.30; the lifted tile overlaps its neighbours without moving them. The shadow ramp rides a pseudo-element's opacity over `--dur-3`, never an animated `box-shadow` |
 | 450 ms dwell | Cleared by pointer leave, scroll, `visibilitychange`, or the card dropping below 60% visibility (`IntersectionObserver` threshold 0.6). Only then does the preview start |
 | Preview | Media fades in over `--dur-4` (240 ms) at opacity only. If the trailer is not buffered, play a pre-generated 6–10 s silent loop — never block the zoom on the network. Metadata sits inside the scaled layer so it moves with the card |
 | Exit | 120 ms `--ease-accelerate` back to scale 1, then clear the video (`src = ''` followed by `load()`) so decoders do not accumulate across a long browse session |
 | Keyboard parity | Focus reveals the metadata panel only. Preview is pointer-only and must never trigger on focus |
-| Budget | No layout thrash: the card keeps its geometry, the preview is an absolutely positioned layer inside fixed bounds, and `will-change` is applied on enter and removed on `transitionend` |
+| Budget | No layout thrash: the card keeps its geometry, the preview is an absolutely positioned layer with fixed bounds, at the foot of the enlarged poster; rails reserve its full painted extent, and `will-change` is applied on enter and removed on `transitionend` |
 
 ### Shared-element transitions
 

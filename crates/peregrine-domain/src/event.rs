@@ -282,7 +282,10 @@ impl Event {
             (Downloading, Seeding) => Self::DownloadSeeding { job_id },
             (Seeding, Completed) => Self::DownloadCompleted { job_id },
             (Metadata | Downloading, Failed) => Self::DownloadFailed { job_id },
-            (Blocked | Downloading | Paused, Removed) => Self::DownloadRemoved { job_id },
+            (
+                Blocked | Downloading | Inspecting | Metadata | Paused | Queued | Seeding,
+                Removed,
+            ) => Self::DownloadRemoved { job_id },
             _ => return None,
         })
     }
@@ -555,8 +558,13 @@ pub(crate) mod tests {
         );
         assert_eq!(
             Event::download_edge(1, DownloadState::Queued, DownloadState::Removed),
+            Some(Event::DownloadRemoved { job_id: 1 }),
+            "a queued job the user cancels is a removal SM1 draws"
+        );
+        assert_eq!(
+            Event::download_edge(1, DownloadState::Queued, DownloadState::Metadata),
             None,
-            "SM1 does not have this edge yet"
+            "SM1 has no jump from the queue to metadata"
         );
         assert_eq!(
             Event::download_edge(7, DownloadState::Downloading, DownloadState::Failed),

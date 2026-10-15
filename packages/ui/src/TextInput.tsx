@@ -28,6 +28,16 @@ export interface TextInputProps extends Omit<
   readonly invalid?: boolean;
   /** Hides the label visually while keeping it for assistive technology. */
   readonly labelHidden?: boolean;
+  /**
+   * Which surface draws the focus affordance.
+   *
+   * `"field"` is the default and draws it on the input itself — the token ring, not the browser's
+   * default outline. `"none"` says the *caller* owns it, for a field restyled into part of a composite
+   * control: Discover's search box is an input inside a pill, and with the default the input kept its
+   * own rounded outline inside that pill, so focusing it drew **two concentric pills**. A caller that
+   * passes `"none"` must put the ring on the element a reader sees as the field.
+   */
+  readonly focusRing?: "field" | "none";
   readonly className?: string;
 }
 
@@ -36,6 +46,7 @@ export function TextInput({
   message,
   invalid = false,
   labelHidden = false,
+  focusRing = "field",
   className,
   ...rest
 }: TextInputProps): ReactElement {
@@ -55,8 +66,12 @@ export function TextInput({
         className={clsx(
           "h-9 rounded-sm border bg-surface-2 px-2 text-body text-text-primary",
           // The focus ring is the token, so it matches every other control on the platform rather
-          // than the browser's default outline.
-          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring",
+          // than the browser's default outline — and it is *only* drawn when this component owns the
+          // affordance, because a caller that has built a larger control around the field draws it
+          // there instead.
+          focusRing === "field"
+            ? "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
+            : "focus-visible:outline-none",
           invalid ? "border-state-danger" : "border-border-subtle",
         )}
         id={id}

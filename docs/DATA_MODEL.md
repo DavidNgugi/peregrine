@@ -152,8 +152,12 @@ CREATE TABLE title (
   trailer_language    TEXT,
   trailer_published_at TEXT,
   homepage            TEXT,
+  -- `listed` is a list answer's state — a rail or a search page, which carries a name, a date,
+  -- a poster, a score, and a synopsis and nothing else. A runtime, a genre, and a cast are what
+  -- only a details read returns, and `last_synced_at` cannot tell the two apart because a list
+  -- answer is also a provider answering. Migration 0014.
   metadata_state      TEXT    NOT NULL DEFAULT 'stub'
-                              CHECK (metadata_state IN ('stub','partial','complete','stale','failed')),
+                              CHECK (metadata_state IN ('stub','listed','partial','complete','stale','failed')),
   last_synced_at      INTEGER,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
@@ -672,6 +676,18 @@ CREATE TABLE image_ref (
   UNIQUE (owner_kind, owner_id, role, provider, path, language)
 );
 
+-- Migration 0015: which titles each Discover rail holds, and in what order. Membership only — the
+-- name, year, score, synopsis, and artwork paths a rail draws are columns on `title`, and the cached
+-- blob's path is a `stat`. Written whole on every rails fetch, and a row goes with its title.
+CREATE TABLE discover_rail (
+  rail     TEXT    NOT NULL,   -- a RailKind spelling: trending_week, popular_movies, ...
+  position INTEGER NOT NULL,   -- the place in the rail, from zero
+  title_id INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
+  PRIMARY KEY (rail, position),
+  UNIQUE (rail, title_id)
+);
+CREATE INDEX discover_rail_title_idx ON discover_rail (title_id);
+
 CREATE TABLE job (
   id            INTEGER PRIMARY KEY,
   kind          TEXT NOT NULL,        -- metadata.refresh, imdb.sync, library.scan, probe, image.prefetch ...
@@ -1078,7 +1094,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I4 | Every non-terminal `download_job` has a `safety_report_json` before `state` advances past `inspecting`. | `download::transition` in the domain makes it a type: the only events that reach `metadata` carry a `SafetyReport`, which only `TorrentInspector::inspect` or the persisted JSON can produce. The repository calls that guard rather than re-deciding (PG-E4-11) |
 | I5 | No `download_file.path` may be absolute, contain `..`, or escape the job's `save_path`. | Validated at insert; re-validated on read of the persisted report |
 | I6 | `watch_progress.percent = position_ms / duration_ms`, and `watched = 1` implies `percent ≥ 0.92` unless set manually. **This is a floor, not the playback threshold:** [FLOWS](./FLOWS.md) F10 marks a title watched at ≥ 0.95 or at the credits, and the lower bound here exists so that a manual or imported mark between the two is representable. | Domain function is the only writer |
-| I7 | `episode.season_number`/`episode_number` are unique within a title. | `UNIQUE (title_id, season_number, episode_number)` |
+| I7 | `episode.season_number`/`episode_number` are unique within a title. | `UNIQUE (title_id, season_number, episode_number)`. The enrichment upsert matches on that key and **never writes the numbers**, which is §2.3's rule made mechanical: `enrichment_never_rewrites_the_canonical_numbering` in `peregrine-storage`'s `catalogue` module feeds a provider's answer out of order and with a gap, so a positional write — renumbering from the order an answer happened to list — fails it, and the `episode_ordering` overlay beside the row is asserted untouched |
 | I8 | A `secret_ref` never coexists with a plaintext secret in `settings`. | Test that serializes all settings and greps for key-shaped values |
 | I9 | `provider_cache` and `image_cache` rows are always droppable without loss of user data. | Rebuild test: wipe both, assert the app still renders from the catalogue |
 | I10 | Deleting a `title` cascades to seasons, episodes, credits, and library rows, but never to files on disk. | Repository deletes only the row, and the media-file deletion path is a separate explicit call |

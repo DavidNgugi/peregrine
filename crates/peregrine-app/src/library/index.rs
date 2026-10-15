@@ -965,6 +965,7 @@ mod tests {
                 .list_title_episodes(
                     AccountScope::unrestricted(AccountId::new(1).expect("account one")),
                     self.only_title().await,
+                    None,
                     50,
                 )
                 .await

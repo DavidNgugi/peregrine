@@ -44,9 +44,9 @@ use crate::json::{decode_string_array, encode_string_array};
 use crate::page::PageRequest;
 use jiff::Timestamp;
 use peregrine_domain::{
-    AccountScope, EpisodeNumber, HdrFormat, LibraryRoot, LibraryRootKind, MediaFile, MediaItem,
-    MediaItemState, MediaOrigin, NonEmptyText, Provider, ScanMode, SeasonNumber, SubtitleFormat,
-    SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile,
+    AccountScope, EpisodeNumber, HdrFormat, ItemJob, LibraryRoot, LibraryRootKind, MediaFile,
+    MediaItem, MediaItemState, MediaOrigin, NonEmptyText, Provider, ScanMode, SeasonNumber,
+    SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack, UnmatchedFile,
 };
 use sqlx::Connection as _;
 use tracing::warn;
@@ -579,6 +579,14 @@ pub(crate) async fn item(
 /// the screen can say about it without reading any file row. `missing_files` is the one count that
 /// is not a size: a title whose only copy is on an unplugged drive is *held* and not *available*,
 /// and a screen that showed it as either alone would be wrong about the other.
+///
+/// **The primary artwork reference travels with the row, and that is a change of shape rather than a
+/// widening.** The first version carried no artwork, on the argument that a long list should not bear
+/// a reference it never draws; the library screen then grew a grid of tiles, and a tile that draws no
+/// poster is a tile that cannot answer the one question a grid exists to answer. It is two nullable
+/// columns of `title` in a statement that already reads that table, so the list stays one query and
+/// the reference stays in one place — [`TitleDetailRow`] used to hold its own copy of the same pair,
+/// which is two places for one fact to drift apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryTitleRow {
     /// The title's identity, which a scoped read may only return when the scope may see it.
@@ -591,6 +599,11 @@ pub struct LibraryTitleRow {
     pub bytes: i64,
     /// How many of them are marked missing.
     pub missing_files: i64,
+    /// The primary poster the last provider fill recorded, when one ever did.
+    ///
+    /// A *reference* rather than a path on disk: turning it into one is the cache's answer, which
+    /// needs the hash the cache keys by, so it belongs to whoever holds the cache (AGENTS R7).
+    pub poster: Option<ArtworkPath>,
 }
 
 /// A provider's own path to one of a title's pictures.
@@ -610,19 +623,36 @@ pub struct ArtworkPath {
 ///
 /// Separate from [`LibraryTitleRow`] rather than a wider version of it because the two answer
 /// different questions: the list asks what the library has, and this asks whether opening the page
-/// should leave the machine. Keeping the list row narrow is what stops a hundred-row page from
-/// carrying artwork it never shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// should leave the machine. The list row's own fields — the counts, the identity, and the primary
+/// poster reference — are exactly what this page draws too, so it holds one of those rather than a
+/// second copy of any of them.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TitleDetailRow {
     /// The counts the list shows, which is the whole of what the library knows.
     pub library: LibraryTitleRow,
-    /// The primary poster the last provider fill recorded, when one ever did.
-    pub poster: Option<ArtworkPath>,
-    /// Whether any provider has ever filled this title in (`title.last_synced_at` is set).
+    /// The primary backdrop the last provider fill recorded, when one ever did.
+    ///
+    /// The wide picture a hero draws behind the title, and deliberately *not* on [`LibraryTitleRow`]:
+    /// no list draws one, and a hero is the only surface that does.
+    pub backdrop: Option<ArtworkPath>,
+    /// The provider's synopsis, when one has been written.
+    pub overview: Option<String>,
+    /// The provider's score, when it has one.
+    pub rating: Option<f64>,
+    /// When it came out, from whichever of the two date columns its kind uses.
+    ///
+    /// One field rather than two, because which column holds it is decided by the *kind* — a film's is
+    /// `release_date` and a series' is `first_air_date` — and that is a rule about the schema rather
+    /// than about a screen, so it is folded here where the SQL can express it (`COALESCE`) instead of
+    /// being re-decided by every reader.
+    pub released: Option<jiff::civil::Date>,
+    /// Whether a *details* read has filled this title in (`title.metadata_state`).
     ///
     /// The one fact that distinguishes "the provider had nothing" from "nobody has asked", which
-    /// is what decides whether asking again is worth a request.
-    pub synced: bool,
+    /// is what decides whether asking again is worth a request. It is deliberately not
+    /// `last_synced_at`: a list answer sets that column, because a provider did answer about the
+    /// title, and a rail listing is exactly the case where a details read has *not* happened.
+    pub detailed: bool,
 }
 
 /// A page of the titles the library holds, newest first.
@@ -630,6 +660,9 @@ pub struct TitleDetailRow {
 /// The join starts from `title` and reaches `media_file` only through `media_item`, so an item with
 /// no file yet still counts as an item and contributes no bytes; the `LEFT JOIN` is what makes a
 /// film whose scan found the directory but not the file visible as an item rather than invisible.
+/// The two artwork columns ride along for the reason [`LibraryTitleRow`] states: they are columns of
+/// the row this statement already reads, and resolving them to a path is the cache's answer rather
+/// than this layer's.
 ///
 /// # Cost
 ///
@@ -638,7 +671,10 @@ pub struct TitleDetailRow {
 /// whose `sort_name` and primary-key indices carry them. The `GROUP BY t.id` sorts by the index
 /// `media_item_movie_uq` already provides for films and by the join key for episodes, and the page
 /// limit is applied after the grouping, so the work is proportional to the page plus the groups it
-/// scans past — which is the same shape `DATA_MODEL` §4's usage aggregate has.
+/// scans past — which is the same shape `DATA_MODEL` §4's usage aggregate has. The two artwork
+/// columns add no work to the statement: they are on the row the grouping already reads. What they
+/// add is one `stat` per returned row at the layer that resolves them, which is the price of a grid
+/// that draws a picture per tile and is why the page's limit bounds it.
 pub(crate) async fn list_library_titles(
     pool: &sqlx::SqlitePool,
     scope: AccountScope,
@@ -646,6 +682,7 @@ pub(crate) async fn list_library_titles(
 ) -> Result<Vec<LibraryTitleRow>, StorageError> {
     let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
+                t.poster_provider, t.poster_path, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
@@ -666,8 +703,19 @@ pub(crate) async fn list_library_titles(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
-/// One episode of a title, with what the library holds of it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One episode of a title: what a provider said about it, and what the library holds of it.
+///
+/// **Widened from the counts a totals table needed to what a card draws.** The first shape carried
+/// only the season, the number, the name, and four counts, because the only thing in front of it was a
+/// table of totals; a card shows a still, an air date, a runtime and a score, and a screen cannot read
+/// a column the read never selected.
+///
+/// **The provider fields are `Option` because an episode the library holds and no provider has
+/// described is the normal state of a fresh scan**, and a card that invented a runtime or an air date
+/// for one would be stating something nobody said. The counts stay `i64` at zero for the same reason in
+/// the other direction: zero items is a fact about the library rather than a missing value, and it is
+/// what the availability chip reads.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TitleEpisodeRow {
     /// The season it sits in, which zero is for a show's specials.
     pub season_number: SeasonNumber,
@@ -675,6 +723,19 @@ pub struct TitleEpisodeRow {
     pub episode_number: EpisodeNumber,
     /// Its name, when a provider sync has filled one in.
     pub name: Option<String>,
+    /// The provider's synopsis, when it sent one.
+    pub overview: Option<String>,
+    /// When it first aired, when the column holds a date this build can read.
+    pub air_date: Option<jiff::civil::Date>,
+    /// How long it runs, when the provider stated one.
+    ///
+    /// An unsigned count of minutes rather than a duration type: it is what the column stores and what
+    /// a card prints, and a conversion into a span here would be work the screen undoes.
+    pub runtime_minutes: Option<u32>,
+    /// The provider's score for this episode alone, when it has one.
+    pub rating: Option<f64>,
+    /// The primary still the last provider fill recorded, when one ever did.
+    pub still: Option<ArtworkPath>,
     /// How many items the library holds for it.
     pub items: i64,
     /// How many files those items have.
@@ -685,16 +746,41 @@ pub struct TitleEpisodeRow {
     pub missing_files: i64,
 }
 
+/// One season of a title, with what a switcher draws.
+///
+/// Separate from [`TitleEpisodeRow`] because a switcher asks a different question from a card: it needs
+/// one row per season with a name and a count, and reading every episode to count them would be the
+/// work this row exists to avoid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleSeasonRow {
+    /// Its number, which zero is for a show's specials.
+    pub season_number: SeasonNumber,
+    /// Its name, when a provider sync has filled one in.
+    pub name: Option<String>,
+    /// How many episodes the provider says it has, when it said.
+    ///
+    /// The provider's count rather than a count of rows this build holds: a season whose episodes
+    /// nobody has fetched yet has a number, and a switcher that read `0` for it would offer a season
+    /// that appears to be empty when it simply has not been read.
+    pub episode_count: Option<u32>,
+    /// When it first aired, when the column holds a date this build can read.
+    pub air_date: Option<jiff::civil::Date>,
+    /// The primary poster the last provider fill recorded, when one ever did.
+    pub poster: Option<ArtworkPath>,
+}
+
 /// One title, with the counts the library screen shows, or `None` when `scope` may not see it.
 ///
 /// The same aggregate as [`list_library_titles`] for one row, and the same reason it aggregates: a
 /// screen showing a title's size has to add up its files, and doing it in the statement keeps the
 /// documents off the wire.
 ///
-/// Three columns more than the list reads: the provider and path of the primary poster the last fill
-/// recorded, and the instant it was recorded. They are here rather than in a second statement because the scope
-/// predicate is in this one — two reads of the same row could disagree about whether the account may
-/// see it, and the answer the screen gets must be one answer (AGENTS R34).
+/// Two columns more than the list reads: the provider and path of the primary poster the last fill
+/// recorded. They are here rather than in a second statement because the scope predicate is in this
+/// one — two reads of the same row could disagree about whether the account may see it, and the
+/// answer the screen gets must be one answer (AGENTS R34). Whether a details read has happened is
+/// the third difference and it is not a column: it is read off `metadata_state`, which this
+/// statement already selects for the identity it returns.
 pub(crate) async fn library_title(
     pool: &sqlx::SqlitePool,
     scope: AccountScope,
@@ -706,7 +792,8 @@ pub(crate) async fn library_title(
         // page read above stays an inner join for the same reason in reverse — its question is what
         // the library *has*.
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
-                t.poster_provider, t.poster_path, t.last_synced_at, \
+                t.poster_provider, t.poster_path, t.backdrop_provider, t.backdrop_path, \
+                t.overview, t.tmdb_rating, COALESCE(t.release_date, t.first_air_date) AS released, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
@@ -735,20 +822,67 @@ pub(crate) async fn list_title_episodes(
     pool: &sqlx::SqlitePool,
     scope: AccountScope,
     title_id: i64,
+    season_number: Option<u32>,
     limit: u32,
 ) -> Result<Vec<TitleEpisodeRow>, StorageError> {
     let rows = sqlx::query_as::<_, TitleEpisodeQueryRow>(
-        "SELECT e.season_number, e.episode_number, e.name, \
+        // **A left join to `media_item`, against this read's own first shape.** An episode the library
+        // holds nothing of is still an episode of the season — it is what a season looks like before a
+        // scan has run, and what an announced-but-not-acquired episode looks like after one — and an
+        // inner join silently answered a full season as a shorter one, which reads as a season that is
+        // missing episodes rather than as one nobody has fetched.
+        //
+        // `(?3 IS NULL OR e.season_number = ?3)` is the switcher's filter: one statement rather than
+        // two, because the two differ only in a predicate and a second copy of the aggregate would be
+        // the copy that drifts.
+        //
+        // **The index is `episode`'s own `UNIQUE (title_id, season_number, episode_number)`**, which
+        // serves the equality on `title_id`, the equality on `season_number` when the switcher supplies
+        // one, and the ordering on both numbers without a sort. `episode_air_date_idx` is not the index
+        // for this read: it is keyed `(title_id, air_date)` and this asks nothing about a date.
+        "SELECT e.season_number, e.episode_number, e.name, e.overview, e.air_date, \
+                e.runtime_minutes, e.vote_average, e.still_provider, e.still_path, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
            FROM episode e \
            JOIN title t ON t.id = e.title_id \
-           JOIN media_item m ON m.episode_id = e.id \
+           LEFT JOIN media_item m ON m.episode_id = e.id \
            LEFT JOIN media_file f ON f.media_item_id = m.id \
           WHERE e.title_id = ?2 AND (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+            AND (?3 IS NULL OR e.season_number = ?3) \
           GROUP BY e.id \
-          ORDER BY e.season_number ASC, e.episode_number ASC LIMIT ?3",
+          ORDER BY e.season_number ASC, e.episode_number ASC LIMIT ?4",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(title_id)
+    .bind(season_number.map(i64::from))
+    .bind(i64::from(limit))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// A title's seasons, in the order a switcher lists them, when `scope` may see the title.
+///
+/// **Bounded by a limit rather than paged, and the index is why.** The read is served by `season`'s own
+/// `UNIQUE (title_id, season_number)`, so the equality and the ordering are one index walk; a show with
+/// more seasons than the bound is a show nobody has, and the caller states the bound as this read's
+/// sibling does (`check-offset` allows a limit without an offset).
+pub(crate) async fn list_title_seasons(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    title_id: i64,
+    limit: u32,
+) -> Result<Vec<TitleSeasonRow>, StorageError> {
+    let rows = sqlx::query_as::<_, TitleSeasonQueryRow>(
+        "SELECT s.season_number, s.name, s.episode_count, s.air_date, \
+                s.poster_provider, s.poster_path \
+           FROM season s \
+           JOIN title t ON t.id = s.title_id \
+          WHERE s.title_id = ?2 AND (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+          ORDER BY s.season_number ASC LIMIT ?3",
     )
     .bind(hidden_by_scope(scope))
     .bind(title_id)
@@ -773,6 +907,12 @@ struct TitleEpisodeQueryRow {
     season_number: i64,
     episode_number: i64,
     name: Option<String>,
+    overview: Option<String>,
+    air_date: Option<String>,
+    runtime_minutes: Option<i64>,
+    vote_average: Option<f64>,
+    still_provider: Option<String>,
+    still_path: Option<String>,
     items: i64,
     files: i64,
     bytes: i64,
@@ -782,7 +922,13 @@ struct TitleEpisodeQueryRow {
 impl TryFrom<TitleEpisodeQueryRow> for TitleEpisodeRow {
     type Error = StorageError;
 
-    fn try_from(row: TitleEpisodeQueryRow) -> Result<Self, Self::Error> {
+    fn try_from(mut row: TitleEpisodeQueryRow) -> Result<Self, Self::Error> {
+        // Taken before the row is consumed below, which is where the numbers are parsed.
+        let still = artwork_path(
+            "episode.still_provider",
+            row.still_provider.take(),
+            row.still_path.take(),
+        );
         Ok(Self {
             // The schema stores both as integers with no check on their sign, so a negative is a
             // claim about the database's contents rather than about a caller: it is refused rather
@@ -793,11 +939,77 @@ impl TryFrom<TitleEpisodeQueryRow> for TitleEpisodeRow {
                 "episode.episode_number",
             )?),
             name: row.name,
+            overview: row.overview,
+            air_date: stored_date("episode.air_date", row.air_date),
+            // A negative runtime is refused the same way a negative number is, but it is a *missing*
+            // runtime rather than a failed read: the column is decoration on a card, and refusing the
+            // whole episode over it would lose the still, the name, and the counts with it.
+            runtime_minutes: row
+                .runtime_minutes
+                .and_then(|minutes| u32::try_from(minutes).ok()),
+            rating: row.vote_average,
+            still,
             items: row.items,
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
         })
+    }
+}
+
+/// The columns [`TitleSeasonRow`] is built from.
+#[derive(sqlx::FromRow)]
+struct TitleSeasonQueryRow {
+    season_number: i64,
+    name: Option<String>,
+    episode_count: Option<i64>,
+    air_date: Option<String>,
+    poster_provider: Option<String>,
+    poster_path: Option<String>,
+}
+
+impl TryFrom<TitleSeasonQueryRow> for TitleSeasonRow {
+    type Error = StorageError;
+
+    fn try_from(mut row: TitleSeasonQueryRow) -> Result<Self, Self::Error> {
+        let poster = artwork_path(
+            "season.poster_provider",
+            row.poster_provider.take(),
+            row.poster_path.take(),
+        );
+        Ok(Self {
+            season_number: SeasonNumber::new(u32_of(row.season_number, "season.season_number")?),
+            name: row.name,
+            episode_count: row
+                .episode_count
+                .and_then(|count| u32::try_from(count).ok()),
+            air_date: stored_date("season.air_date", row.air_date),
+            poster,
+        })
+    }
+}
+
+/// The date a stored TEXT column holds, when it holds one this build can read.
+///
+/// A row whose date cannot be parsed is an episode or a season without a date rather than an unreadable
+/// one: the date is decoration, and the write path only ever stores `jiff`'s own rendering of a date,
+/// so a value this refuses came from outside this application. The same rule and the same reason as
+/// `discover_rail`'s `listed_date`, which reads the *title*'s date columns the same way.
+fn stored_date(column: &'static str, text: Option<String>) -> Option<jiff::civil::Date> {
+    let text = text?;
+    match text.parse::<jiff::civil::Date>() {
+        Ok(date) => Some(date),
+        Err(error) => {
+            // A date column is not a path and not a secret, so the value is safe to record
+            // (SECURITY.md T13).
+            tracing::warn!(
+                column,
+                value = %text,
+                %error,
+                "a row records a date this build cannot read"
+            );
+            None
+        }
     }
 }
 
@@ -811,13 +1023,19 @@ struct LibraryTitleQueryRow {
     sort_name: String,
     metadata_state: String,
     adult: i64,
+    poster_provider: Option<String>,
+    poster_path: Option<String>,
     items: i64,
     files: i64,
     bytes: i64,
     missing_files: i64,
 }
 
-/// The columns [`TitleDetailRow`] is built from: the same ones, and the artwork the page shows.
+/// The columns [`TitleDetailRow`] is built from: a superset of the list's, and no duplicate of them.
+///
+/// A wider row rather than a second struct because the identity, the counts, and the poster reference
+/// are the same columns in both reads, and this is the one place they are named: the list's struct is
+/// built *from* this one, so a column added here reaches both without a second edit.
 #[derive(sqlx::FromRow)]
 struct TitleDetailQueryRow {
     id: i64,
@@ -829,7 +1047,11 @@ struct TitleDetailQueryRow {
     adult: i64,
     poster_provider: Option<String>,
     poster_path: Option<String>,
-    last_synced_at: Option<i64>,
+    backdrop_provider: Option<String>,
+    backdrop_path: Option<String>,
+    overview: Option<String>,
+    tmdb_rating: Option<f64>,
+    released: Option<String>,
     items: i64,
     files: i64,
     bytes: i64,
@@ -846,6 +1068,8 @@ impl From<TitleDetailQueryRow> for LibraryTitleQueryRow {
             sort_name: row.sort_name,
             metadata_state: row.metadata_state,
             adult: row.adult,
+            poster_provider: row.poster_provider,
+            poster_path: row.poster_path,
             items: row.items,
             files: row.files,
             bytes: row.bytes,
@@ -854,15 +1078,23 @@ impl From<TitleDetailQueryRow> for LibraryTitleQueryRow {
     }
 }
 
-/// The primary poster one title row records, when it records a usable one.
+/// One of a title row's artwork pairs — a poster, a backdrop — when the row records a usable one.
+///
+/// `column` names the provider column the pair came from, for the log line and nothing else: the
+/// two pairs are read through one function, and an anomaly reported against the wrong column
+/// would send a maintainer to the wrong row.
 ///
 /// Two things are no artwork rather than errors. A provider without a path, or a path without a
 /// provider, is half of the pair the cache key is built from, so it names nothing on disk. And a
-/// provider string this build does not know — a row written by a build that knew a provider this one
-/// does not, or a restored database — is *reported and skipped*: the poster is decoration, and a
-/// title whose page refused to open because of it would trade a working screen for nothing. The
-/// anomaly is a maintainer's problem, so it goes to the log while the title renders.
-fn artwork_path(provider: Option<String>, path: Option<String>) -> Option<ArtworkPath> {
+/// provider string this build does not know — a row written by a build that knew a provider this
+/// one does not, or a restored database — is *reported and skipped*: the artwork is decoration,
+/// and a title whose page refused to open because of it would trade a working screen for nothing.
+/// The anomaly is a maintainer's problem, so it goes to the log while the title renders.
+pub(crate) fn artwork_path(
+    column: &'static str,
+    provider: Option<String>,
+    path: Option<String>,
+) -> Option<ArtworkPath> {
     let (Some(provider), Some(path)) = (provider, path) else {
         return None;
     };
@@ -872,10 +1104,10 @@ fn artwork_path(provider: Option<String>, path: Option<String>) -> Option<Artwor
             // The value is a provider name and the column is a column: neither is a path or a
             // secret, so both are safe to record (SECURITY.md T13).
             warn!(
-                column = "title.poster_provider",
+                column,
                 value = %provider,
                 %error,
-                "a title records a poster from a provider this build does not know"
+                "a title records artwork from a provider this build does not know"
             );
             None
         }
@@ -886,14 +1118,28 @@ impl TryFrom<TitleDetailQueryRow> for TitleDetailRow {
     type Error = StorageError;
 
     fn try_from(mut row: TitleDetailQueryRow) -> Result<Self, Self::Error> {
-        // Taken before the row is consumed by the conversion below, which is the one place the
-        // identity columns are parsed: a column added to both reads is converted once.
-        let synced = row.last_synced_at.is_some();
-        let poster = artwork_path(row.poster_provider.take(), row.poster_path.take());
+        // Taken before the conversion below consumes the row, which is where the identity, the counts
+        // and the poster reference are parsed once — this page's own columns are the only ones left.
+        let backdrop = artwork_path(
+            "title.backdrop_provider",
+            row.backdrop_provider.take(),
+            row.backdrop_path.take(),
+        );
+        let overview = row.overview.take();
+        let rating = row.tmdb_rating;
+        let released = stored_date("title.release_date", row.released.take());
+        let library = LibraryTitleRow::try_from(LibraryTitleQueryRow::from(row))?;
+        // Read back off the parsed identity rather than off the raw column, so the state is
+        // parsed once and a value this build does not know is refused by the conversion rather
+        // than answered around here.
+        let detailed = library.title.metadata_state.has_details();
         Ok(Self {
-            library: LibraryTitleRow::try_from(LibraryTitleQueryRow::from(row))?,
-            poster,
-            synced,
+            library,
+            backdrop,
+            overview,
+            rating,
+            released,
+            detailed,
         })
     }
 }
@@ -901,7 +1147,7 @@ impl TryFrom<TitleDetailQueryRow> for TitleDetailRow {
 impl TryFrom<LibraryTitleQueryRow> for LibraryTitleRow {
     type Error = StorageError;
 
-    fn try_from(row: LibraryTitleQueryRow) -> Result<Self, Self::Error> {
+    fn try_from(mut row: LibraryTitleQueryRow) -> Result<Self, Self::Error> {
         let identity = crate::catalogue::TitleIdentity {
             id: row.id,
             kind: TitleKind::parse(&row.kind).ok_or_else(|| StorageError::UnexpectedValue {
@@ -924,12 +1170,18 @@ impl TryFrom<LibraryTitleQueryRow> for LibraryTitleRow {
             })?,
             adult: row.adult != 0,
         };
+        let poster = artwork_path(
+            "title.poster_provider",
+            row.poster_provider.take(),
+            row.poster_path.take(),
+        );
         Ok(Self {
             title: identity,
             items: row.items,
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
+            poster,
         })
     }
 }
@@ -1186,6 +1438,114 @@ pub(crate) async fn list_files_for_item(
             Ok(MediaFileRow { id: file.id, file })
         })
         .collect()
+}
+
+/// One item of one title with the file and job evidence its availability is derived from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemEvidence {
+    /// The item row.
+    pub item: MediaItem,
+    /// Every copy the library records of it, present or missing — I11 keeps a missing row, which is
+    /// why this is the file set rather than the present subset.
+    pub files: Vec<MediaFile>,
+    /// The jobs attributed to this item. Their order carries no meaning: the derivation takes the
+    /// newest by `(added_at, id)` and asks whether any of them is live.
+    pub jobs: Vec<ItemJob>,
+}
+
+/// Everything one title's availability and offer are derived from, in one read.
+///
+/// Three statements rather than one per item: a title page is opened constantly and a series has an
+/// item per episode, so a read that asked per item would be a query per episode of every show a user
+/// looked at. The join carries the scope on `title` for all three, so a restricted account sees
+/// neither an item, nor a file, nor a job of a title it may not see (`AGENTS R34`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TitleEvidence {
+    /// Every item of the title. A title in the catalogue with none is `TitleEvidence::default()`:
+    /// nothing is held and nothing has arrived, which is what its page offers for.
+    pub items: Vec<ItemEvidence>,
+    /// Every job the title carries, **including the ones that name no item**.
+    ///
+    /// Acquisition is requested before the import creates the item (`PG-E14-19`), so a transfer can
+    /// be running for a title the library holds no item of; a page that read only the items would
+    /// offer that title for download while it downloaded.
+    pub jobs: Vec<ItemJob>,
+}
+
+/// Reads one title's items, their files, and their jobs, when `scope` may see the title.
+///
+/// The evidence [`peregrine_domain::availability`] and [`peregrine_domain::TitleOffer`] read, in one
+/// call: a caller that assembled it from the paged reads would either truncate a long series or issue
+/// two queries per episode.
+pub(crate) async fn title_evidence(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    title_id: i64,
+) -> Result<TitleEvidence, StorageError> {
+    let item_rows = sqlx::query_as::<_, ItemRow>(
+        "SELECT m.id, m.title_id, m.episode_id, m.state, m.origin, m.preferred_file_id, \
+         m.quality_label, m.created_at, m.updated_at FROM media_item m \
+         JOIN title t ON t.id = m.title_id \
+         WHERE m.title_id = ?1 \
+           AND (?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+         ORDER BY m.id",
+    )
+    .bind(title_id)
+    .bind(hidden_by_scope(scope))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    let file_rows = sqlx::query_as::<_, FileRow>(
+        "SELECT f.id, f.media_item_id, f.path, f.root_id, f.size_bytes, f.mtime_ms, f.added_at, \
+         f.missing_since, f.container, f.duration_ms, f.video_codec, f.video_profile, f.width, \
+         f.height, f.bit_depth, f.hdr_format, f.frame_rate, f.bitrate_kbps, f.audio_codec, \
+         f.audio_channels, f.audio_layout, f.audio_languages, f.subtitle_format, \
+         f.probe_version, f.probe_json, f.quality_label, f.updated_at FROM media_file f \
+         JOIN media_item m ON m.id = f.media_item_id \
+         JOIN title t ON t.id = m.title_id \
+         WHERE m.title_id = ?1 \
+           AND (?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+         ORDER BY f.id",
+    )
+    .bind(title_id)
+    .bind(hidden_by_scope(scope))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    let jobs = crate::download::title_jobs(pool, scope, title_id).await?;
+
+    let items: Vec<MediaItem> = item_rows
+        .into_iter()
+        .map(MediaItem::try_from)
+        .collect::<Result<_, _>>()?;
+    let files: Vec<MediaFile> = file_rows
+        .into_iter()
+        .map(MediaFile::try_from)
+        .collect::<Result<_, _>>()?;
+
+    let evidence: Vec<ItemEvidence> = items
+        .into_iter()
+        .map(|item| ItemEvidence {
+            files: files
+                .iter()
+                .filter(|file| file.media_item_id == item.id)
+                .cloned()
+                .collect(),
+            jobs: jobs
+                .iter()
+                .filter(|job| job.media_item_id == Some(item.id))
+                .map(|job| job.job)
+                .collect(),
+            item,
+        })
+        .collect();
+
+    Ok(TitleEvidence {
+        items: evidence,
+        jobs: jobs.into_iter().map(|job| job.job).collect(),
+    })
 }
 
 /// Reads one unmatched file, when `scope` may be offered its suggestion.
@@ -1861,10 +2221,62 @@ mod tests {
         }
     }
 
+    // One fill, three times over: the poster path and the metadata state are the only things that
+    // differ, and repeating two eight-line argument lists is what pushed this test past the line budget
+    // the lint enforces.
+    async fn fill(database: &Database, title: i64, poster: Option<&str>, state: MetadataState) {
+        database
+            .update_title_metadata(
+                title,
+                details("Alien", poster),
+                "alien".to_owned(),
+                state,
+                "tmdb".to_owned(),
+                NOW,
+            )
+            .await
+            .unwrap();
+    }
+
     /// Inserts the item and the file that backs it, returning both ids.
     async fn item_with_file(database: &Database, title_id: i64, path: &str) -> (i64, i64) {
         let item_id = database
             .insert_media_item(item(title_id, None))
+            .await
+            .unwrap();
+        let file_id = database
+            .insert_media_file(file(item_id, path))
+            .await
+            .unwrap();
+        (item_id, file_id)
+    }
+
+    /// An episode of `title` with one file, and the item and file ids.
+    ///
+    /// The season and the episode exist first because an episode item names one — which is what makes a
+    /// second item of one title legal at all, since `media_item_movie_uq` allows a title only one *film*
+    /// item. Two tests need this shape, and the four inserts it hides are the same four in both.
+    async fn episode_with_file(database: &Database, title_id: i64, path: &str) -> (i64, i64) {
+        let season = database
+            .insert_stub_season(crate::catalogue::StubSeason {
+                title_id,
+                season_number: 1,
+                at: 0,
+            })
+            .await
+            .unwrap();
+        let episode = database
+            .insert_stub_episode(crate::catalogue::StubEpisode {
+                title_id,
+                season_id: season,
+                season_number: 1,
+                episode_number: 1,
+                at: 0,
+            })
+            .await
+            .unwrap();
+        let item_id = database
+            .insert_media_item(item(title_id, Some(episode)))
             .await
             .unwrap();
         let file_id = database
@@ -2669,6 +3081,139 @@ mod tests {
         );
     }
 
+    /// The evidence one title's availability and offer are derived from, in the shape the domain
+    /// reads: every item, each with its own files and its own jobs, plus the title's whole job set.
+    ///
+    /// **The grouping is the wiring, and it is what a mistake here would hide.** The derivation
+    /// answers per item, so a file attributed to the wrong item turns `available` into `missing` for
+    /// one episode and the reverse for its neighbour — a wrong badge, not an error. And the title's
+    /// own job set is the half that cannot be gathered from the items at all: a job that names no
+    /// item is the state acquisition passes through before the import creates one, and a page that
+    /// could not see it would offer a title for download while it downloaded.
+    #[tokio::test]
+    async fn the_evidence_gathers_each_item_with_its_files_and_the_titles_jobs() {
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let (database, certified, adult) = populated(&directory).await;
+
+        // A film item and an episode item, each with one file, so the grouping has something to get
+        // wrong. One title cannot hold two film items (`media_item_movie_uq`), so the second item is
+        // an episode's — which is also the ordinary shape of a series.
+        let (film, film_file) = item_with_file(&database, certified, "/media/Alien.1979.mkv").await;
+        let (episode_item, episode_file) =
+            episode_with_file(&database, certified, "/media/Alien.S01E01.mkv").await;
+
+        // One job attributed to the film item, and one that names no item at all.
+        let attached = execute(
+            &path,
+            &format!(
+                "INSERT INTO download_job (title_id, media_item_id, state, release_title, save_path, added_at) \
+                 VALUES ({certified}, {film}, 'downloading', 'Alien.1979.1080p-GROUP', '/tmp/downloads', {NOW})"
+            ),
+        )
+        .await;
+        execute(
+            &path,
+            &format!(
+                "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
+                 VALUES ({certified}, 'queued', 'Alien.2000.1080p-GROUP', '/tmp/downloads', {NOW})"
+            ),
+        )
+        .await;
+        // A job for another title, which is not this title's evidence.
+        execute(
+            &path,
+            &format!(
+                "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
+                 VALUES ({adult}, 'downloading', 'Another.1080p-GROUP', '/tmp/downloads', {NOW})"
+            ),
+        )
+        .await;
+
+        let evidence = database
+            .title_evidence(any_account(), certified)
+            .await
+            .unwrap();
+
+        assert_eq!(evidence.items.len(), 2, "every item of the title");
+        assert_eq!(evidence.items[0].item.id, film);
+        assert_eq!(evidence.items[1].item.id, episode_item);
+        assert_eq!(
+            evidence.items[0]
+                .files
+                .iter()
+                .map(|file| file.id)
+                .collect::<Vec<_>>(),
+            vec![film_file],
+            "a file belongs to the item it names"
+        );
+        assert_eq!(
+            evidence.items[1]
+                .files
+                .iter()
+                .map(|file| file.id)
+                .collect::<Vec<_>>(),
+            vec![episode_file],
+            "and not to its neighbour"
+        );
+        assert_eq!(
+            evidence.items[0]
+                .jobs
+                .iter()
+                .map(|job| job.id)
+                .collect::<Vec<_>>(),
+            vec![attached],
+            "a job attributed to an item is that item's evidence"
+        );
+        assert!(
+            evidence.items[1].jobs.is_empty(),
+            "the item no job names has no jobs, however many the title carries"
+        );
+        assert_eq!(
+            evidence.jobs.len(),
+            2,
+            "the title's own set holds both of its jobs, including the one that names no item"
+        );
+
+        // The scope is applied to all three queries, so a restricted account learns nothing about
+        // the adult title's items, files, or jobs (I37, AGENTS R34).
+        let hidden = database.title_evidence(restricted(), adult).await.unwrap();
+        assert_eq!(hidden, TitleEvidence::default());
+        assert!(
+            !database
+                .title_evidence(any_account(), adult)
+                .await
+                .unwrap()
+                .jobs
+                .is_empty(),
+            "the rows exist; the scope is what hides them"
+        );
+    }
+
+    /// A title in the catalogue with nothing in the library is evidence of nothing rather than a
+    /// missing answer: its page offers acquisition, which is what an empty set decides.
+    #[tokio::test]
+    async fn a_title_the_library_holds_nothing_of_has_empty_evidence() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _adult) = populated(&directory).await;
+
+        assert_eq!(
+            database
+                .title_evidence(any_account(), certified)
+                .await
+                .unwrap(),
+            TitleEvidence::default()
+        );
+        assert_eq!(
+            database
+                .title_evidence(any_account(), i64::MAX)
+                .await
+                .unwrap(),
+            TitleEvidence::default(),
+            "an id that names no title is evidence of nothing rather than an error"
+        );
+    }
+
     /// An unmatched file is visible to a restricted scope, but the title the scanner
     /// *suggests* for it is content and is withheld when the scope may not see it.
     #[tokio::test]
@@ -2731,7 +3276,7 @@ mod tests {
         assert_eq!(title.library.files, 3, "and a file each: {title:?}");
 
         let episodes = database
-            .list_title_episodes(scope, certified, 50)
+            .list_title_episodes(scope, certified, None, 50)
             .await
             .unwrap();
         assert_eq!(episodes.len(), 2, "the film is not an episode");
@@ -2743,6 +3288,133 @@ mod tests {
         let mut sorted = order.clone();
         sorted.sort_unstable();
         assert_eq!(order, sorted, "season and number, ascending");
+    }
+
+    /// One season's episodes, and that a season with nothing held still lists its episodes.
+    ///
+    /// The two rules this read exists for, and both were wrong in its first shape: a switcher asks for
+    /// one season rather than all of them, and an episode the library holds nothing of is still an
+    /// episode of the season — the inner join this read used to have answered a full season as a
+    /// shorter one, which reads as a season missing episodes rather than as one nobody has fetched.
+    #[tokio::test]
+    async fn a_season_lists_its_episodes_and_keeps_the_ones_with_nothing_held() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _adult) = populated(&directory).await;
+        let scope = any_account();
+        place_two_episodes(&database, certified).await;
+
+        let all = database
+            .list_title_episodes(scope, certified, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2, "the fixture places two episodes");
+
+        let first = database
+            .list_title_episodes(scope, certified, Some(1), 50)
+            .await
+            .unwrap();
+        assert_eq!(first.len(), all.len(), "both episodes are in season one");
+
+        // A season nobody has: an answer of nothing rather than every season's episodes.
+        assert_eq!(
+            database
+                .list_title_episodes(scope, certified, Some(9), 50)
+                .await
+                .unwrap(),
+            Vec::new()
+        );
+
+        // An episode with no media item is still an episode of its season, listed with a count of zero.
+        // Dropping every item is what a season whose files have gone looks like, and it is the case the
+        // inner join this read used to have got wrong.
+        assert_eq!(
+            all.iter().filter(|row| row.items > 0).count(),
+            1,
+            "the fixture puts an item on one episode: {all:?}"
+        );
+        sqlx::query("DELETE FROM media_item")
+            .execute(database.readers())
+            .await
+            .unwrap();
+        let after = database
+            .list_title_episodes(scope, certified, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            after.len(),
+            2,
+            "an episode the library holds nothing of is still an episode of its season"
+        );
+        assert!(
+            after.iter().all(|row| row.items == 0),
+            "and it is listed with a count of zero rather than dropping out: {after:?}"
+        );
+    }
+
+    /// A title's seasons, in the order a switcher lists them.
+    #[tokio::test]
+    async fn a_title_lists_its_seasons_in_number_order() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, adult) = populated(&directory).await;
+        let scope = any_account();
+        place_two_episodes(&database, certified).await;
+
+        let seasons = database
+            .list_title_seasons(scope, certified, 100)
+            .await
+            .unwrap();
+        let order: Vec<u32> = seasons.iter().map(|row| row.season_number.get()).collect();
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(order, sorted, "season number, ascending");
+        assert!(!seasons.is_empty(), "the fixture places a season");
+
+        // The scope gate is the same predicate the episode read uses, so a hidden title's seasons are
+        // answered as an empty list rather than refused (AGENTS R34, I37).
+        assert_eq!(
+            database
+                .list_title_seasons(restricted(), adult, 100)
+                .await
+                .unwrap(),
+            Vec::new()
+        );
+    }
+
+    /// One season of `title_id` with two episodes, the first of which has a file.
+    ///
+    /// A show rather than a film, because the two reads under test are about seasons and episodes and
+    /// `populated` builds neither.
+    async fn place_two_episodes(database: &Database, title_id: i64) {
+        let season = database
+            .insert_stub_season(crate::catalogue::StubSeason {
+                title_id,
+                season_number: 1,
+                at: 0,
+            })
+            .await
+            .unwrap();
+        for number in [2, 1] {
+            let episode_id = database
+                .insert_stub_episode(crate::catalogue::StubEpisode {
+                    title_id,
+                    season_id: season,
+                    season_number: 1,
+                    episode_number: number,
+                    at: 0,
+                })
+                .await
+                .unwrap();
+            if number == 1 {
+                let item_id = database
+                    .insert_media_item(item(title_id, Some(episode_id)))
+                    .await
+                    .unwrap();
+                database
+                    .insert_media_file(file(item_id, "/media/e1.mkv"))
+                    .await
+                    .unwrap();
+            }
+        }
     }
 
     /// What a provider answered for a title, with only the fields a test is about set.
@@ -2777,50 +3449,134 @@ mod tests {
     /// "the provider had nothing" from "nobody has asked".
     ///
     /// Those two are the whole input to whether opening the screen should spend a request, and only
-    /// the storage layer can tell them apart: the poster path is a column and the last fill is a
-    /// column, and neither is derivable from the other.
+    /// the storage layer can tell them apart: the poster path is one column and the state that
+    /// records what kind of read filled the title is another, and neither is derivable from the
+    /// other.
     #[tokio::test]
-    async fn a_title_read_reports_its_primary_poster_and_whether_a_provider_ever_filled_it() {
+    async fn a_title_read_reports_its_poster_and_whether_a_details_read_filled_it() {
         let directory = TempDir::new().unwrap();
         let (database, certified, _adult) = populated(&directory).await;
         let scope = any_account();
 
-        // A title the fixtures inserted directly has never been filled: a poster nobody recorded and
-        // a fill that never happened are both `None`/false, and the screen asks.
+        // A title nobody has read is not filled, and it is the state that has to say so: the fixture
+        // helper writes every title it inserts as `complete`, which is a fill, so this row is put
+        // back to `stub` — what the catalogue holds for a title it has only heard of. A poster nobody
+        // recorded and a details read that never happened are both `None`/false, and the screen asks.
+        let _ = execute(
+            &path_of(&directory),
+            &format!("UPDATE title SET metadata_state = 'stub' WHERE id = {certified}"),
+        )
+        .await;
+
         let fresh = database
             .library_title(scope, certified)
             .await
             .unwrap()
             .expect("the fixture's title");
-        assert_eq!(fresh.poster, None);
-        assert!(!fresh.synced, "nothing has filled this title in");
+        assert_eq!(fresh.library.poster, None);
+        assert!(!fresh.detailed, "no details read has filled this title in");
 
-        // A provider that answered with no artwork at all is the other half: the title *has* been
-        // filled, so asking again would spend a request to be told the same thing.
-        database
-            .update_title_metadata(
-                certified,
-                details("Alien", None),
-                "alien".to_owned(),
-                MetadataState::Partial,
-                "tmdb".to_owned(),
-                NOW,
-            )
+        // A *list* answer is the case this flag exists to keep apart from a fill, and the two
+        // columns disagree about it on purpose: the provider did answer, so `last_synced_at` is
+        // set, and what it answered was a listing, so no details read has happened. Reading the
+        // timestamp instead is what made every rail title look filled in.
+        fill(
+            &database,
+            certified,
+            Some("/listed.jpg"),
+            MetadataState::Listed,
+        )
+        .await;
+        let listed = database
+            .library_title(scope, certified)
             .await
-            .unwrap();
+            .unwrap()
+            .expect("the fixture's title");
+        assert_eq!(
+            listed.library.poster,
+            Some(ArtworkPath {
+                provider: Provider::Tmdb,
+                path: "/listed.jpg".to_owned(),
+            }),
+            "a list answer still records the artwork it carried"
+        );
+        assert!(
+            !listed.detailed,
+            "a list answer is still not a details read"
+        );
+
+        // A details fill that answered with no artwork at all is the other half: the title *has*
+        // been filled, so asking again would spend a request to be told the same thing. The artwork
+        // the list answer recorded is still there — a fill that omitted the field must not erase
+        // what is stored, which is what the write's `COALESCE` is for — so the state and the poster
+        // answer different questions and this is the case where they disagree.
+        fill(&database, certified, None, MetadataState::Partial).await;
         let no_artwork = database
             .library_title(scope, certified)
             .await
             .unwrap()
             .expect("the fixture's title");
-        assert_eq!(no_artwork.poster, None);
+        assert_eq!(
+            no_artwork.library.poster,
+            Some(ArtworkPath {
+                provider: Provider::Tmdb,
+                path: "/listed.jpg".to_owned(),
+            }),
+            "a fill that answered with no artwork leaves the one the list answer recorded"
+        );
         assert!(
-            no_artwork.synced,
-            "a fill that recorded no poster is a fill"
+            no_artwork.detailed,
+            "a details fill that recorded no poster is a details fill"
         );
 
         // And a fill that *did* record one: the pair is what the cache key is built from, so the
         // provider is parsed rather than passed through as whatever text the column held.
+        fill(
+            &database,
+            certified,
+            Some("/poster.jpg"),
+            MetadataState::Partial,
+        )
+        .await;
+        let with_artwork = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert_eq!(
+            with_artwork.library.poster,
+            Some(ArtworkPath {
+                provider: Provider::Tmdb,
+                path: "/poster.jpg".to_owned(),
+            })
+        );
+        // **The claim is about the counts, so the poster comes off before they are compared.** The
+        // reference now lives on the list row, which makes it the one field this fill is *for*:
+        // comparing the rows whole would decide the assertion on the field the test just checked, and
+        // a fill that had also moved a count would slip through behind it.
+        let counts = |row: LibraryTitleRow| LibraryTitleRow {
+            poster: None,
+            ..row
+        };
+        assert_eq!(
+            counts(with_artwork.library),
+            counts(no_artwork.library),
+            "an artwork fill changes no count"
+        );
+    }
+
+    /// The title a *details* read has filled is not lowered by a later version of the same rail.
+    ///
+    /// PG-E7-08's rails re-list every title they draw, so this is the ordinary case rather than a
+    /// corner: a bare assignment of the list answer's state would put a filled title back to
+    /// `listed` on the next fetch, which makes the screen ask its provider for the runtime and the
+    /// cast it has already given — once per visit, for ever.
+    #[tokio::test]
+    async fn a_later_list_answer_does_not_lower_a_details_filled_title() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _adult) = populated(&directory).await;
+        let scope = any_account();
+
         database
             .update_title_metadata(
                 certified,
@@ -2832,21 +3588,34 @@ mod tests {
             )
             .await
             .unwrap();
-        let with_artwork = database
+        database
+            .update_title_metadata(
+                certified,
+                details("Alien", Some("/listed-again.jpg")),
+                "alien".to_owned(),
+                MetadataState::Listed,
+                "tmdb".to_owned(),
+                NOW,
+            )
+            .await
+            .unwrap();
+
+        let relisted = database
             .library_title(scope, certified)
             .await
             .unwrap()
             .expect("the fixture's title");
-        assert_eq!(
-            with_artwork.poster,
-            Some(ArtworkPath {
-                provider: Provider::Tmdb,
-                path: "/poster.jpg".to_owned(),
-            })
+        assert!(
+            relisted.detailed,
+            "re-listing a detailed title must not lower its state"
         );
         assert_eq!(
-            with_artwork.library, no_artwork.library,
-            "an artwork fill changes no count"
+            relisted.library.poster,
+            Some(ArtworkPath {
+                provider: Provider::Tmdb,
+                path: "/listed-again.jpg".to_owned(),
+            }),
+            "and it still writes the artwork the new answer carried"
         );
     }
 
@@ -2865,7 +3634,7 @@ mod tests {
             &path,
             &format!(
                 "UPDATE title SET poster_provider = 'tmdb', poster_path = NULL, \
-                 last_synced_at = {NOW} WHERE id = {adult}"
+                 metadata_state = 'partial', last_synced_at = {NOW} WHERE id = {adult}"
             ),
         )
         .await;
@@ -2874,8 +3643,11 @@ mod tests {
             .await
             .unwrap()
             .expect("the fixture's title");
-        assert_eq!(half.poster, None, "a path without a provider is no artwork");
-        assert!(half.synced);
+        assert_eq!(
+            half.library.poster, None,
+            "a path without a provider is no artwork"
+        );
+        assert!(half.detailed);
 
         let _ = execute(
             &path,
@@ -2891,11 +3663,11 @@ mod tests {
             .expect("a provider this build does not know must not make the title unreadable")
             .expect("the fixture's title");
         assert_eq!(
-            unknown.poster, None,
+            unknown.library.poster, None,
             "a poster from a provider this build cannot hash is no poster"
         );
         assert!(
-            unknown.synced,
+            unknown.detailed,
             "and the title is otherwise exactly what the row says"
         );
     }
@@ -2918,7 +3690,7 @@ mod tests {
         // "the list is not empty" is not a diagnosis).
         assert_eq!(
             database
-                .list_title_episodes(scope, adult, 50)
+                .list_title_episodes(scope, adult, None, 50)
                 .await
                 .unwrap(),
             Vec::new()

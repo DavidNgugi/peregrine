@@ -5,10 +5,12 @@
 //!
 //! This is the only place where multiple ports are combined.
 
+pub mod acquisition;
 pub mod artwork;
 pub mod events;
 pub mod jobs;
 pub mod library;
+mod local_posters;
 pub mod notify;
 mod observability;
 pub mod providers;
@@ -32,8 +34,10 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
 pub use runtime::{
-    CredentialRequest, Health, HomeRail, LibraryTitleDetail, RailsState, Runtime, RuntimeConfig,
-    RuntimeError, ShellStatus, StartedJob,
+    BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,
+    RailsState, Recommendations, Runtime, RuntimeConfig, RuntimeError, SessionId, ShellStatus,
+    StartedCapture, StartedJob, StartedPlayback, TitleEpisodeDetail, TitlePlayback,
+    TitleSeasonDetail,
 };
 // What one rail holds, for the reason the block above gives: the command surface answers a DTO
 // built from a `RailItem`, and it may not reach into `peregrine-app`'s job module to name it.
@@ -42,16 +46,24 @@ pub use jobs::discover_rails::RailItem;
 // hold belongs to the secrets crate: re-exported for the reason above, so the command surface can
 // name what it passes without a second dependency edge (AGENTS R6, SECURITY.md T13).
 pub use peregrine_secrets::Secret;
+// The store port travels with it, for the same reason and one more: a command test that starts a
+// real runtime has to hand it a store, and the alternative is a test reading the developer's own
+// keychain — which `AGENTS R14` forbids and which measured as a stalled read on macOS the first
+// time a rebuilt binary asked (PG-E5-12).
+pub use peregrine_secrets::{SecretKey, SecretStore, SecretStoreError};
 // The command surface speaks these too, and `peregrine-ipc` may depend on this crate and not
 // on `peregrine-domain` (AGENTS R6): re-exported rather than duplicated so a kind added to the
 // domain cannot reach the wire in a form the domain does not have. `TitleSubtype` is here for the
 // same completeness rather than for a command field: it is a public field of `TitleIdentity`, which
 // this block already exports, so a caller that must build or destructure the row a command answers
 // with would otherwise have a type it cannot name.
-pub use peregrine_domain::{EpisodeNumber, LibraryRoot, LibraryRootKind, ScanMode, SeasonNumber};
+pub use peregrine_domain::{
+    EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, Provider, ScanMode, SeasonNumber,
+    TitleOffer,
+};
 pub use peregrine_storage::{
-    LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity, TitleKind,
-    TitleSubtype, UnmatchedFileRow,
+    ArtworkPath, LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity,
+    TitleKind, TitleSeasonRow, TitleSubtype, UnmatchedFileRow,
 };
 // And the instant a root's fields carry, for the same reason: the command surface has to name
 // the type it converts, and `jiff` is not a dependency it may take (AGENTS R6).
@@ -62,3 +74,7 @@ pub use peregrine_providers::error::ProviderError;
 // is one of these, and a caller that had to reach for `peregrine-providers` to name it would be a
 // second dependency edge for a string (AGENTS R6).
 pub use peregrine_providers::provider::RailKind;
+// The browse vocabulary, for the reason the rail one gives and one more: a browse *request* is
+// built by the command surface out of a screen's filters, so the command has to name the same type
+// the runtime takes rather than a second copy of it that could drift.
+pub use peregrine_providers::provider::{BrowseRequest, BrowseSort, GenreRef, ProviderPage};

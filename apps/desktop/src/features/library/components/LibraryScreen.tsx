@@ -5,14 +5,18 @@
  * walking the folders the user configured — which is why it is a screen of its own beside Discover
  * rather than a filter on it. Discover is what could be acquired; this is what is here.
  *
- * Every element is the kit's, so this file holds structure and copy and no visual classes at all:
- * `Screen` owns the page, `Section` the heading, `Table` the columns, and the two state blocks the
- * empty and failed cases.
+ * **One read, two drawings.** The core answers each title with its counts *and* the cached poster the
+ * grid needs, and this screen draws that answer as a table or as a wall of tiles — the choice is
+ * `useLibraryView`'s, owned by the shell and handed in as a prop, and it never reaches the core,
+ * because both drawings show the same titles in the same order. Every element is the kit's, so this
+ * file holds structure and copy and no visual classes at all: `Screen` owns the page, `Section` the
+ * heading, `Table` the columns, `Grid` the windowed tiles, and the two state blocks the empty and
+ * failed cases.
  *
  * A **stub** is a title the library inferred from a filename and no provider has described yet
- * (PG-E5-06). The table says so on the row rather than hiding it, because it is the honest answer to
- * "why is there no poster": the metadata road is a later slice, and a screen that drew these rows
- * like any other would promise artwork that is not coming yet.
+ * (PG-E5-06). Both drawings say so rather than hiding it, because it is the honest answer to "why is
+ * there no poster": the metadata road is a later slice, and a row — or a tile — drawn like any other
+ * would promise artwork that is not coming yet.
  */
 
 import {
@@ -20,11 +24,13 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Grid,
   Link,
   Progress,
   Screen,
   Section,
   Table,
+  TitleCard,
 } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
 import type {
@@ -37,12 +43,27 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
+import { imageUrl } from "../../../lib/media.js";
+import { usePosterBackfill } from "../../player/index.js";
 import { routePath, type Route } from "../../../app/routes.js";
 import { TitlePicker } from "./TitlePicker.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
 import type { UnmatchedQueue } from "../hooks/useUnmatchedFiles.js";
 import type { ScanControl } from "../hooks/useScan.js";
+import type { LibraryView } from "../hooks/useLibraryView.js";
+
+/**
+ * A `lg` tile's width from §4's ladder, and the row height that goes with it.
+ *
+ * A row is the poster's height plus the gap, and the poster's height is the width over the 2:3 aspect
+ * every card keeps. Fixed numbers rather than a measurement, because that is what makes the grid's
+ * window arithmetic possible (`packages/ui`'s `Grid`); they are Browse's, so one title seen on both
+ * screens is the same size.
+ */
+const TILE_WIDTH = 176;
+const TILE_POSTER_HEIGHT = TILE_WIDTH * 1.5;
+const TILE_ROW_HEIGHT = TILE_POSTER_HEIGHT + 12;
 
 interface LibraryScreenProps {
   /** The titles as the shell read them. */
@@ -78,6 +99,16 @@ interface LibraryScreenProps {
    * placing files in silence.
    */
   readonly rules: MatchRules;
+  /**
+   * Which of the two drawings is on screen.
+   *
+   * Passed in for the reason the read is: the choice outlives this screen, because `AppShell` renders
+   * one screen at a time and unmounts this one whenever the route moves — so a `useState` here would
+   * reset the drawing on every visit. `useLibraryView` is that state, and the shell is what owns it.
+   */
+  readonly view: LibraryView;
+  /** Changes which drawing is on screen. */
+  readonly onView: (view: LibraryView) => void;
 }
 
 /** What `useTranslation` hands a component, so the column builder can take it by name. */
@@ -97,6 +128,27 @@ function sizeLabel(bytes: number, t: Translate): string {
   }
   const rounded = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
   return t("library.size.value", { value: rounded, unit: units[unit] ?? "B" });
+}
+
+/**
+ * A tile's one line: what it is, what it weighs, and whether anything is missing.
+ *
+ * **Every piece of it is a count the core answered, and the omissions are deliberate.** The kind is
+ * the title's own; the size is the files behind it; the missing count is the scan's. What is *not*
+ * here is an availability chip, and that is `AGENTS R7` rather than an oversight: which of the nine
+ * availability states a title is in is `peregrine_domain::availability`'s rule, and the library read
+ * does not carry it — computing one from two counts in TypeScript would be exactly the derivation the
+ * rule forbids. The list states both counts in their own columns, so the grid hides nothing the table
+ * shows; it draws fewer of them, which is what a cover is for.
+ */
+function tileMeta(row: LibraryTitleDto, t: Translate): string {
+  const parts = [
+    row.kind === "movies" ? t("library.kind.films") : t("library.kind.series"),
+    sizeLabel(row.bytes, t),
+    row.missingFiles === 0 ? null : t("library.tile.missing", { count: row.missingFiles }),
+    row.stub ? t("library.stub") : null,
+  ].filter((part): part is string => part !== null);
+  return parts.join(" · ");
 }
 
 /**
@@ -327,10 +379,20 @@ export function LibraryScreen({
   scan,
   unmatched,
   rules,
+  view,
+  onView,
 }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
   const columns = useMemo(() => columnsOf(t, onNavigate), [t, onNavigate]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
+  // **The library is where the wall of placeholders is, so it is where the frames are asked for.** A
+  // title with no poster gets one captured from its own file, one at a time, and the grid redraws when a
+  // batch finishes rather than per poster — a read per captured frame would be a hundred reads.
+  const wanting = useMemo(
+    () => titles.titles.filter((row) => row.needsPoster).map((row) => row.id),
+    [titles.titles],
+  );
+  const backfill = usePosterBackfill(wanting);
   // A rule that keeps acting is worth one question before it is withdrawn: the files it placed stay,
   // but the answer it remembers stops applying, and a mis-click that changed how the library behaves
   // from then on would be a change nobody asked for (AGENTS R22).
@@ -351,7 +413,7 @@ export function LibraryScreen({
     <Screen title={t("library.title")}>
       <Section description={t("library.description")} title={t("library.section")}>
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             {scan.running ? (
               <Progress label={t("library.scan.running")} value={scan.permille} />
             ) : (
@@ -365,16 +427,55 @@ export function LibraryScreen({
                       : t("library.scan.idle")}
               </span>
             )}
-            <Button
-              disabled={scan.starting || scan.running}
-              onClick={() => {
-                void scan.start();
-              }}
-              size="sm"
-              variant="secondary"
-            >
-              {scan.running ? t("library.scan.working") : t("library.scan.action")}
-            </Button>
+            <div className="flex items-center gap-3">
+              {/* Poster progress, said in words because a capture takes seconds and a screen that showed
+                  nothing would look stuck. It disappears when the work does. */}
+              {backfill.captured === 0 && !backfill.running ? null : (
+                <span className="text-caption text-text-tertiary" role="status">
+                  {backfill.running
+                    ? t("library.posters.working", { count: backfill.captured })
+                    : t("library.posters.done", { count: backfill.captured })}
+                </span>
+              )}
+              {/* The two drawings of one read, and it is deliberately *not* part of the rows below: it
+                  changes nothing about what is read, only how it is drawn, so it belongs with the
+                  screen's own controls rather than with the answer. Drawn only once there is something
+                  to draw — a toggle over an empty library would be a control for a choice nobody can
+                  see. */}
+              {titles.loading || titles.failed || titles.titles.length === 0 ? null : (
+                <div
+                  aria-label={t("library.view.label")}
+                  className="flex items-center gap-1 rounded-full border border-border-subtle bg-surface-0/70 p-1"
+                  data-library-view=""
+                  role="group"
+                >
+                  {(["list", "grid"] as const).map((option) => (
+                    <Button
+                      aria-pressed={view === option}
+                      className="rounded-full"
+                      key={option}
+                      onClick={() => {
+                        onView(option);
+                      }}
+                      size="sm"
+                      variant={view === option ? "primary" : "ghost"}
+                    >
+                      {t(option === "list" ? "library.view.list" : "library.view.grid")}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <Button
+                disabled={scan.starting || scan.running}
+                onClick={() => {
+                  void scan.start();
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                {scan.running ? t("library.scan.working") : t("library.scan.action")}
+              </Button>
+            </div>
           </div>
           {scan.error === null ? null : (
             <ErrorState body={messageOf(scan.error)} title={t("library.scan.refused")} />
@@ -385,6 +486,44 @@ export function LibraryScreen({
           <ErrorState body={t("library.unavailable.body")} title={t("library.unavailable.title")} />
         ) : titles.titles.length === 0 ? (
           <EmptyState body={t("library.empty.body")} size="page" title={t("library.empty.title")} />
+        ) : view === "grid" ? (
+          /* **The height is load-bearing rather than cosmetic.** `Grid` scrolls itself, and a scroller
+             with no height constraint grows to its content — which makes the "viewport" the whole grid
+             and draws every tile, the failure `packages/ui`'s `Grid` exists to prevent. A
+             window-relative bound keeps a wall of posters readable on a short window without letting it
+             swallow the queue and the rule list below it on a tall one. */
+          <div className="h-[min(60vh,40rem)] min-h-0" data-library-grid="">
+            <Grid
+              itemKey={(row) => row.id}
+              items={titles.titles}
+              label={t("library.grid.label")}
+              renderItem={(row) => (
+                <TitleCard
+                  detailsLabel={t("card.details")}
+                  href={routePath(routeFor(row))}
+                  meta={tileMeta(row, t)}
+                  onNavigate={() => {
+                    onNavigate(routeFor(row));
+                  }}
+                  // The core resolved this against the cache for every row, which is the whole reason
+                  // the poster travels on the list read (AGENTS R7): a tile cannot hash a cache key.
+                  poster={imageUrl(row.poster)}
+                  // **Not lifted, and that is the grid's geometry rather than a preference.** A grid's
+                  // columns are derived to fit the measured width, so it has no room to reserve for a 30 %
+                  // enlargement — and a scroller clips on both axes, so scaling anyway cut the outer tiles
+                  // off at both sides. The panel reveals inside the tile instead.
+                  lift={false}
+                  // **Named, unlike a rail's tile.** A provider's poster identifies its title and a captured
+                  // frame does not — and a library of frames is exactly the wall a reader cannot read.
+                  showTitle
+                  size="lg"
+                  title={row.name}
+                />
+              )}
+              rowHeight={TILE_ROW_HEIGHT}
+              tileWidth={TILE_WIDTH}
+            />
+          </div>
         ) : (
           <Table columns={columns} rowKey={(row) => row.id} rows={titles.titles} />
         )}

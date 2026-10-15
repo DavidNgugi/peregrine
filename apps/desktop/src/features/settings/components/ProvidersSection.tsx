@@ -24,10 +24,11 @@ import {
   SettingsSection,
   TextInput,
 } from "@peregrine/ui";
-import type { ProviderDto } from "@peregrine/ipc-client";
+import type { CredentialStoreDto, ProviderDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { providerStateKey, storeNoticeKey } from "../provider-outcome.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 
 interface ProvidersSectionProps {
@@ -43,13 +44,26 @@ function describe(entry: ProviderDto, state: string): string {
 interface ProviderRowProps {
   readonly busy: boolean;
   readonly entry: ProviderDto;
+  /**
+   * What the last read of the keychain answered.
+   *
+   * The row needs it to avoid claiming "No key stored" when the truth is that nobody could look.
+   */
+  readonly store: CredentialStoreDto;
   readonly onRemove: (provider: string) => Promise<void>;
   readonly onSave: (provider: string, key: string) => Promise<void>;
   readonly onTest: (provider: string) => Promise<void>;
 }
 
 /** One provider's facts, its key field, and the actions that make sense for its state. */
-function ProviderRow({ busy, entry, onRemove, onSave, onTest }: ProviderRowProps): ReactElement {
+function ProviderRow({
+  busy,
+  entry,
+  onRemove,
+  onSave,
+  onTest,
+  store,
+}: ProviderRowProps): ReactElement {
   const { t } = useTranslation();
   const [key, setKey] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -57,12 +71,7 @@ function ProviderRow({ busy, entry, onRemove, onSave, onTest }: ProviderRowProps
   return (
     <>
       <SettingsRow
-        description={describe(
-          entry,
-          t(
-            entry.configured ? "settings.providers.configured" : "settings.providers.notConfigured",
-          ),
-        )}
+        description={describe(entry, t(providerStateKey(entry.configured, store)))}
         label={entry.displayName}
       >
         {entry.configured ? (
@@ -170,6 +179,7 @@ export function ProvidersSection({ providers }: ProvidersSectionProps): ReactEle
     outcome === null
       ? null
       : providers.providers.find((entry) => entry.provider === outcome.provider);
+  const notice = storeNoticeKey(providers.store);
 
   return (
     <SettingsSection
@@ -184,6 +194,32 @@ export function ProvidersSection({ providers }: ProvidersSectionProps): ReactEle
       ) : null}
 
       {providers.error !== null ? <ErrorState title={providers.error} /> : null}
+
+      {/* One sentence about the keychain itself, when it did not simply answer. It is what stops the
+          rows below saying "No key stored" to someone whose key is still in their keychain — the
+          reading a reinstall deleted it. */}
+      {notice === null ? null : (
+        <div className="flex flex-col gap-2 px-3 py-2">
+          <p className="text-body text-text-secondary" role="status">
+            {t(notice)}
+          </p>
+          {/* Offered whenever the keychain has not answered, including after the bounded poll has
+              stopped: a person who has just allowed the request needs a way to ask again without
+              reopening the app. */}
+          <div>
+            <Button
+              disabled={providers.busy}
+              onClick={() => {
+                providers.reload();
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              {t("settings.providers.retry")}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {providers.busy && outcome === null ? (
         <p className="px-3 py-2 text-body text-text-secondary" role="status">
@@ -211,6 +247,7 @@ export function ProvidersSection({ providers }: ProvidersSectionProps): ReactEle
           onRemove={providers.removeKey}
           onSave={providers.saveKey}
           onTest={providers.testConnection}
+          store={providers.store}
         />
       ))}
 

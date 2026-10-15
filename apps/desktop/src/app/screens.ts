@@ -8,7 +8,7 @@ import type { Route } from "./routes.js";
  *
  * A screen appears here only once it exists. The sidebar is the app's navigation and the
  * shell's only way of reaching a screen, so an entry that opens nothing would be a control
- * that lies; Browse, Search, Title detail, Downloads, Player, and Cast join the list with the
+ * that lies; Search, Title detail, Downloads, Player, and Cast join the list with the
  * tasks that build them (PG-E7, PG-E13, PG-E16). Diagnostics is here rather
  * than in Settings because `crate::menu` and the shell both reach it directly today.
  */
@@ -22,8 +22,12 @@ export interface ScreenEntry {
 
 export const SCREENS: readonly ScreenEntry[] = [
   { route: { kind: "discover" }, labelKey: "discover.title", icon: "compass" },
-  // Second, because it is the one screen that works without a provider: what is on this machine is
-  // known as soon as a scan has run, while Discover waits on the metadata road.
+  // Second, because it is the screen Discover cannot be: a rail is a fixed list a provider
+  // publishes, and this is the queried grid a person narrows — by kind, genre, score, and order.
+  { route: { kind: "browse" }, labelKey: "browse.title", icon: "grid" },
+  // After the two catalogue reads, because it is the one screen that works without a provider: what
+  // is on this machine is known as soon as a scan has run, while the two above wait on the metadata
+  // road.
   { route: { kind: "library" }, labelKey: "library.title", icon: "library" },
   { route: { kind: "diagnostics" }, labelKey: "jobs.title", icon: "pulse" },
   { route: { kind: "settings" }, labelKey: "settings.title", icon: "tune" },

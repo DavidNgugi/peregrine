@@ -63,25 +63,42 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --surface-0: oklch(0.99 0.002 var(--hue-brand));
-  --surface-1: oklch(0.97 0.004 var(--hue-brand));
-  --surface-2: oklch(0.94 0.006 var(--hue-brand));
+  --surface-0: oklch(0.96 0.004 var(--hue-brand));
+  --surface-1: oklch(0.93 0.006 var(--hue-brand));
+  --surface-2: oklch(0.89 0.008 var(--hue-brand));
   --surface-scrim: oklch(0.3 0.01 var(--hue-brand) / 0.45);
 
-  --text-primary: oklch(0.2 0.01 var(--hue-brand));
-  --text-secondary: oklch(0.45 0.01 var(--hue-brand));
-  --text-tertiary: oklch(0.52 0.01 var(--hue-brand));
+  --text-primary: oklch(0.18 0.01 var(--hue-brand));
+  --text-secondary: oklch(0.4 0.01 var(--hue-brand));
+  --text-tertiary: oklch(0.45 0.01 var(--hue-brand));
   --text-on-accent: oklch(0.99 0 0);
 
-  --border-subtle: oklch(0.9 0.006 var(--hue-brand));
-  --border-strong: oklch(0.615 0.01 var(--hue-brand));
+  --border-subtle: oklch(0.86 0.008 var(--hue-brand));
+  --border-strong: oklch(0.56 0.01 var(--hue-brand));
 
   --accent: oklch(0.55 0.18 var(--hue-brand));
   --accent-hover: oklch(0.5 0.18 var(--hue-brand));
   --accent-muted: oklch(0.92 0.04 var(--hue-brand));
 
   --state-ok: oklch(0.55 0.14 150);
-  --state-warn: oklch(0.62 0.14 75);
+  --state-warn: oklch(0.56 0.14 75);
   --state-danger: oklch(0.55 0.19 25);
   --state-info: oklch(0.55 0.14 240);
+}
+
+/* The one keyframe the design system ships: the skeleton's sweep
+   (`packages/ui/src/Skeleton.tsx`, §11 rule 2's "skeleton with real geometry").
+
+   `transform` only, because §5 rule 2 allows `transform` and `opacity` and nothing else in an
+   animation — a background-position sweep would repaint the surface on every frame. The duration is
+   stated in the component as Tailwind's arbitrary animation value rather than as a `--dur-*` token,
+   because those tokens are PG-E21-07's and do not exist yet; when they land, this is one of the
+   places that should name them. */
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }

@@ -1,9 +1,10 @@
 import { createI18n } from "@peregrine/i18n";
-import type { EpisodeDto, LibraryTitleDto } from "@peregrine/ipc-client";
+import type { EpisodeDto, LibraryTitleDto, RailItemDto, SeasonDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TitleDetail } from "../hooks/useTitle.js";
+import type { TitleSeasons } from "../hooks/useSeasons.js";
 import { TitleScreen } from "./TitleScreen.js";
 
 // The poster is loaded through Tauri's own bridge, which a Node test does not have. The factory is
@@ -38,6 +39,8 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
     files: 3,
     bytes: 12 * 1024 * 1024 * 1024,
     missingFiles: 1,
+    poster: null,
+    needsPoster: false,
     ...overrides,
   };
 }
@@ -47,6 +50,11 @@ function episode(overrides: Partial<EpisodeDto> = {}): EpisodeDto {
     seasonNumber: 1,
     episodeNumber: 2,
     name: null,
+    overview: null,
+    airDate: null,
+    runtimeMinutes: null,
+    rating: null,
+    still: null,
     items: 1,
     files: 1,
     bytes: 2 * 1024 * 1024 * 1024,
@@ -55,11 +63,45 @@ function episode(overrides: Partial<EpisodeDto> = {}): EpisodeDto {
   };
 }
 
+/** One season, as the switcher reads them. */
+function season(overrides: Partial<SeasonDto> = {}): SeasonDto {
+  return {
+    seasonNumber: 1,
+    name: null,
+    episodeCount: null,
+    airDate: null,
+    poster: null,
+    ...overrides,
+  };
+}
+
+/** The season section's own state, which the screen draws separately from the title's. */
+function seasons(state: Partial<TitleSeasons> = {}): TitleSeasons {
+  return {
+    seasons: [season()],
+    season: season(),
+    episodes: [],
+    loading: false,
+    failed: null,
+    choose: () => undefined,
+    ...state,
+  };
+}
+
 function detail(state: Partial<TitleDetail> = {}): TitleDetail {
   return {
     title: title(),
-    episodes: [],
+    // Unknown rather than absent: this fixture is about what the page draws, and a null container is
+    // the state a screen cannot reach from a successful read of a title the library holds.
+    playSupport: "webview",
     poster: null,
+    backdrop: null,
+    overview: null,
+    rating: null,
+    released: null,
+    // Playable, and the reason is the fixture's own counts: three files, one of them missing, is a
+    // copy on disk. The offer is the core's answer rather than the counts' — see `lib/play-action.ts`.
+    offer: "play",
     loading: false,
     missing: false,
     failed: false,
@@ -68,13 +110,47 @@ function detail(state: Partial<TitleDetail> = {}): TitleDetail {
   };
 }
 
-/** The screen as markup, which is what its two reads produce. */
-function markup(state: TitleDetail = detail(), kind: "movie" | "show" = "show"): string {
+/** The screen as markup, which is what its reads produce. */
+function markup(
+  state: TitleDetail = detail(),
+  kind: "movie" | "show" = "show",
+  similar: readonly RailItemDto[] = [],
+  seasonState: TitleSeasons = seasons(),
+): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <TitleScreen detail={state} kind={kind} />
+      <TitleScreen
+        detail={state}
+        feed={{
+          items: similar,
+          loading: false,
+          failed: null,
+          exhausted: true,
+          loadMore: () => undefined,
+        }}
+        kind={kind}
+        onNavigate={() => undefined}
+        seasons={seasonState}
+      />
     </I18nextProvider>,
   );
+}
+
+/** One recommendation tile, which is the shape a rail item is. */
+function recommendation(overrides: Partial<RailItemDto> = {}): RailItemDto {
+  return {
+    titleId: 12,
+    kind: "movie",
+    name: "The Matrix",
+    year: 1999,
+    poster: null,
+    backdrop: null,
+    playable: false,
+    rating: null,
+    overview: null,
+    votes: null,
+    ...overrides,
+  };
 }
 
 describe("TitleScreen", () => {
@@ -138,11 +214,136 @@ describe("TitleScreen", () => {
     expect(html).not.toContain("<img");
   });
 
-  it("lists a series' episodes in watch order, with the ones nobody named yet", () => {
-    // An episode with no provider metadata is the normal state of a fresh scan, and saying so is
-    // better than an empty cell: the row exists and the name is what is missing.
+  it("draws the hero: the backdrop behind the poster, the facts, the score and the synopsis", () => {
+    bridge.inTauri = true;
     const html = markup(
       detail({
+        poster: "/cache/images/poster.webp",
+        backdrop: "/cache/images/backdrop.webp",
+        released: "2021-04-30",
+        rating: 8.1,
+        overview: "Two men are pulled into a photograph.",
+      }),
+      "show",
+      [],
+      seasons({
+        seasons: [season({ seasonNumber: 1 }), season({ seasonNumber: 2 })],
+        episodes: [episode()],
+      }),
+    );
+
+    // Both pictures, each through the asset protocol and encoded: the backdrop is the wide one behind
+    // the name and the poster is the portrait beside it, and neither is bytes on the wire (R11).
+    expect(html).toContain("asset://localhost/%2Fcache%2Fimages%2Fbackdrop.webp");
+    expect(html).toContain("asset://localhost/%2Fcache%2Fimages%2Fposter.webp");
+    // The scrim is what makes the name legible over an arbitrary photograph, so its absence is a
+    // contrast bug rather than a cosmetic one.
+    expect(html).toContain("bg-gradient-to-b");
+    expect(html).toContain("8.1");
+    expect(html).toContain("2021-04-30");
+    expect(html).toContain("2 seasons");
+    expect(html).toContain("Two men are pulled into a photograph.");
+  });
+
+  it("omits every hero fact nobody stated rather than drawing an empty one", () => {
+    // A title no provider has filled in is the ordinary state of a fresh scan, and a row of dashes for
+    // facts nobody stated is noise on every such page.
+    const html = markup(
+      detail({ title: title({ kind: "movies", items: 0 }) }),
+      "movie",
+      [],
+      // A film asks for no seasons at all, which is the state the hook short-circuits to.
+      seasons({ seasons: [], season: null }),
+    );
+
+    expect(html).toContain("Play");
+    // No counts, because there are none to state: a film has no seasons, and the library holds nothing.
+    expect(html).not.toContain("1 season");
+    expect(html).not.toContain("episode</span>");
+    // The score badge is absent rather than zero: a `0.0` would be a claim the provider never made.
+    expect(html).not.toContain("0.0");
+  });
+
+  it("offers a working Play with no Download control at all for a title the library holds", () => {
+    // **The report this test exists for.** A copy is on disk, so Play is the action and Download is not
+    // drawn in either state: a disabled Download beside a working Play still reads as an offer to fetch
+    // what the user already has.
+    //
+    // **And Play works now.** The reason sentence is gone and the control is live, because the surface
+    // ADR 0023 decides exists — the page hands the hero a handler and the core classified the container
+    // as one this build reads.
+    //
+    // **`disabled=""` and not the word `disabled`.** Every button in the kit carries
+    // `disabled:pointer-events-none` in its class list, so a search for the bare word counts buttons
+    // rather than inert ones — which is how the first version of this assertion passed while measuring
+    // nothing. The attribute is what React renders when the prop is true.
+    const held = markup(detail({ offer: "play" }), "show");
+
+    expect(held).toContain("Play");
+    expect(held).not.toContain("no player yet");
+    expect(held).not.toContain("Download");
+    expect(held).not.toContain("Acquiring is not built yet");
+    expect(held).not.toContain(`disabled=""`);
+  });
+
+  it("refuses Play for a container this build cannot read, and says which reader is missing", () => {
+    // The tenth file in this project's own library is HEVC inside Matroska, which a WebKit `<video>`
+    // cannot demux. Pressing Play would buy a black rectangle and a decoder error, so the container is
+    // answered before the press — and the sentence names what is missing rather than what failed.
+    const mkv = markup(detail({ offer: "play", playSupport: "externalPlayer" }), "show");
+
+    expect(mkv).toContain("cannot read that file&#x27;s format");
+    expect(mkv).toContain(`disabled=""`);
+    expect(mkv).not.toContain("Download");
+  });
+
+  it("plays a container it cannot name, and says so rather than promising it", () => {
+    const odd = markup(detail({ offer: "play", playSupport: "unknown" }), "show");
+
+    expect(odd).toContain("does not recognise this file&#x27;s format");
+    expect(odd).not.toContain("cannot read that file&#x27;s format");
+  });
+
+  it("offers acquisition, and only acquisition, for a title the library holds nothing of", () => {
+    // `PG-E1-07`: a control this build cannot honour is disabled with the reason it is. Acquisition is
+    // unbuilt (`PG-E13`), so the control is drawn disabled — and it is drawn only here, where the core
+    // says there is nothing to play and nothing arriving.
+    const absent = markup(detail({ offer: "acquire", title: title({ items: 0 }) }), "show");
+
+    expect(absent).toContain("holds no file");
+    expect(absent).toContain("Download");
+    expect(absent).toContain("Acquiring is not built yet");
+    expect(absent.match(/<button[^>]*disabled/gu)?.length).toBe(2);
+  });
+
+  it("says a recorded file is not on disk rather than claiming the library never had one", () => {
+    // `absent` is a title with a row and no bytes the library can see — an unplugged drive, a file
+    // moved behind the app. The sentence a reader needs is about that file, not about a title nobody
+    // has, and acquisition is not offered: asking again would record a second copy of a file the
+    // library already knows about.
+    const gone = markup(detail({ offer: "absent" }), "show");
+
+    expect(gone).toContain("not on disk right now");
+    expect(gone).not.toContain("holds no file");
+    expect(gone).not.toContain("Download");
+  });
+
+  it("says a transfer is running rather than offering a second one", () => {
+    const arriving = markup(detail({ offer: "arriving" }), "show");
+
+    expect(arriving).toContain("in flight");
+    expect(arriving).not.toContain("Download");
+    expect(arriving.match(/<button[^>]*disabled/gu)?.length).toBe(1);
+  });
+
+  it("draws one card per episode of the chosen season, each with its number and name", () => {
+    // A card rather than a row: what a reader scans is a still, a number, and a name, and an episode
+    // nobody has named yet says so rather than drawing an empty cell.
+    const html = markup(
+      detail(),
+      "show",
+      [],
+      seasons({
         episodes: [
           episode({ seasonNumber: 1, episodeNumber: 1 }),
           episode({ name: "Cat's in the Bag" }),
@@ -152,16 +353,127 @@ describe("TitleScreen", () => {
 
     expect(html).toContain("Episodes");
     expect(html).toContain("1×01");
+    expect(html).toContain("1×02");
     expect(html).toContain("Not named yet");
     expect(html).toContain("Cat&#x27;s in the Bag");
+    // One card each, and the card is the only thing an episode draws: two `<article>`s for two
+    // episodes is the count a reader sees, and it is what a table of rows used to be.
+    expect(html.match(/<article/g)).toHaveLength(2);
   });
 
-  it("asks a film for no episodes at all", () => {
-    // A film has no episodes, so the section is not drawn — an empty "Episodes" heading under a film
+  it("gives every episode card one size, whatever each episode's metadata holds", () => {
+    // A provider dates and describes some episodes and not others, so two cards in one row carry
+    // different numbers of facts — and a grid whose rows size themselves to their own content staggers,
+    // which reads as a broken grid rather than as missing metadata. Three things together are what make
+    // the cards one size, and class assertions are the most a markup test can make of them:
+    // `auto-rows-fr` on the grid, `h-full` on every card, and a clamp on the synopsis so a paragraph
+    // cannot set the height of every card in the season on its own.
+    const html = markup(
+      detail(),
+      "show",
+      [],
+      seasons({
+        episodes: [
+          episode({
+            seasonNumber: 1,
+            episodeNumber: 1,
+            airDate: "2008-01-20",
+            runtimeMinutes: 58,
+            overview: "A chemistry teacher gets a diagnosis.",
+          }),
+          // The other extreme: every optional fact absent, which is the shape that used to draw a
+          // visibly shorter card beside the first.
+          episode({
+            seasonNumber: 1,
+            episodeNumber: 2,
+            airDate: null,
+            runtimeMinutes: null,
+            overview: null,
+          }),
+        ],
+      }),
+    );
+
+    expect(html).toMatch(/<ul[^>]*class="[^"]*auto-rows-fr/u);
+    // Both cards, not just the one that happens to be tall: one `h-full` would let the other collapse,
+    // which is the failure this test exists to catch.
+    expect(html.match(/<article[^>]*class="[^"]*\bh-full\b/gu)).toHaveLength(2);
+    expect(html).toMatch(/<p class="[^"]*line-clamp-3[^"]*">A chemistry teacher/u);
+  });
+
+  it("lists the seasons in order and marks the one on screen as pressed", () => {
+    const html = markup(
+      detail(),
+      "show",
+      [],
+      seasons({
+        seasons: [
+          season({ seasonNumber: 1 }),
+          season({ seasonNumber: 2 }),
+          season({ seasonNumber: 0, name: "Specials" }),
+        ],
+        season: season({ seasonNumber: 2 }),
+        episodes: [episode({ seasonNumber: 2, episodeNumber: 1 })],
+      }),
+    );
+
+    const chips = [...html.matchAll(/aria-pressed="(true|false)"[^>]*>([^<]+)</gu)].map((m) => [
+      m[2],
+      m[1],
+    ]);
+    expect(chips).toEqual([
+      ["Season 1", "false"],
+      ["Season 2", "true"],
+      ["Specials", "false"],
+    ]);
+  });
+
+  it("draws the reserved box for an episode with no still, and never a broken image", () => {
+    // The still is asked for through the asset protocol, which is absent outside the shell and refuses
+    // a path it does not hold: both land on the placeholder rather than on a broken-image glyph.
+    const html = markup(
+      detail(),
+      "show",
+      [],
+      seasons({
+        episodes: [episode({ still: null })],
+      }),
+    );
+
+    expect(html).toContain("No still yet");
+    expect(html).not.toContain("<img");
+
+    // And when the shell is there, the path the core named is what the card loads — through the asset
+    // protocol and encoded, rather than as a raw path the webview would resolve against its own
+    // document. `AGENTS R11`: the path is the whole of what crosses IPC.
+    bridge.inTauri = true;
+    const withStill = markup(
+      detail(),
+      "show",
+      [],
+      seasons({
+        episodes: [episode({ still: "/cache/images/still.webp" })],
+      }),
+    );
+
+    expect(withStill).not.toContain("No still yet");
+    expect(withStill).toContain("asset://localhost/%2Fcache%2Fimages%2Fstill.webp");
+  });
+
+  it("asks a film for no seasons at all", () => {
+    // A film has no seasons, so the section is not drawn — an empty "Episodes" heading under a film
     // would be a question the screen already knows the answer to.
     const html = markup(detail({ title: title({ kind: "movies", name: "Alien" }) }), "movie");
 
     expect(html).toContain("Alien");
+    expect(html).not.toContain("Episodes");
+  });
+
+  it("draws no season section for a show whose provider named no seasons", () => {
+    // A heading over an empty switcher is a promise nobody made, and it is the state a show nobody has
+    // fetched arrives in rather than an error.
+    const html = markup(detail(), "show", [], seasons({ seasons: [], season: null }));
+
     expect(html).not.toContain("Episodes");
   });
 
@@ -179,5 +491,61 @@ describe("TitleScreen", () => {
 
     expect(failed).toContain("could not be read");
     expect(failed).not.toContain("This title is not here.");
+  });
+
+  it("draws the provider's recommendations under the episodes, each linked to its own page", () => {
+    const html = markup(detail(), "movie", [
+      recommendation({ titleId: 12, name: "The Matrix Reloaded", year: 2003 }),
+      recommendation({ titleId: 13, kind: "show", name: "The Matrix Revolutions", year: null }),
+    ]);
+
+    expect(html).toContain("More like this");
+    expect(html).toContain("/title/movie/12");
+    expect(html).toContain("/title/show/13");
+    // The kind and year come from each recommendation rather than from the page's own title, which
+    // is the whole reason the rail builds its own meta line.
+    expect(html).toContain("The Matrix Reloaded, 2003 · Film");
+    expect(html).toContain("The Matrix Revolutions, Series");
+  });
+
+  it("draws no rail when the provider recommended nothing", () => {
+    // Empty is both "nothing found" and "nobody to ask", and a heading over an empty strip would be a
+    // promise the provider did not make.
+    const html = markup(detail(), "movie");
+
+    expect(html).not.toContain("More like this");
+  });
+
+  it("draws the rail's heading once", () => {
+    // A `Section` wrapped around the rail printed "More like this" twice: once as the section's
+    // heading and once as the rail's own, which the rail needs because it is also the accessible name
+    // of its region. Two identical headings stacked is what the screenshot of this screen showed.
+    const html = markup(detail(), "movie", [recommendation()]);
+
+    expect(html.match(/More like this/gu) ?? []).toHaveLength(1);
+  });
+});
+
+describe("an episode's still", () => {
+  const STILL = "/Users/someone/Library/Caches/app.peregrine.desktop/images/still.webp";
+  const asset = (path: string): string => `asset://localhost/${encodeURIComponent(path)}`;
+
+  it("draws the still as an image the webview can load, rather than the reserved box", () => {
+    // **The one artwork path nothing asserted.** The poster's asset URL has a test above, the hero's
+    // backdrop has one, and an episode with *no* still has one — but an episode that *has* a still was
+    // never rendered, so the card could have stopped passing it through entirely and this suite would
+    // have stayed green.
+    //
+    // That is not hypothetical, and it is why this test is worth more than its three lines. On the
+    // running app the poster, the backdrop and every still drew their placeholders — and every test
+    // here passed — because the placeholder is the *designed* answer for a picture that is missing, so
+    // a broken chain and a title with no artwork are indistinguishable by eye. The cause turned out to
+    // be the harness rather than the product (an `asset://` URL cannot be loaded by a browser, so the
+    // component's own on-error fallback did its job), but the suite's silence about a still that exists
+    // is a real gap that would have hidden the same symptom for a real reason.
+    const html = markup(detail(), "show", [], seasons({ episodes: [episode({ still: STILL })] }));
+
+    expect(html).toContain(`src="${asset(STILL)}"`);
+    expect(bridge.convertFileSrc).toHaveBeenCalledWith(STILL);
   });
 });

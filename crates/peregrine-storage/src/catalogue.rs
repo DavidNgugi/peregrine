@@ -20,7 +20,7 @@
 //! filtered in Rust would still have loaded the row, and the next read to forget the filter
 //! would return it.
 
-use peregrine_domain::catalogue::TitleDetails;
+use peregrine_domain::catalogue::{EpisodeDetails, SeasonDetails, TitleDetails};
 use peregrine_domain::library::TitleCandidate;
 use peregrine_domain::matching::LocalTitle;
 use peregrine_domain::text::NonEmptyText;
@@ -97,6 +97,180 @@ pub(crate) async fn insert_episode(
     .await
     .map_err(StorageError::from_sqlx)?;
     Ok(result.last_insert_rowid())
+}
+
+/// Writes what a provider said about one season, and answers its row id with whether anything moved.
+///
+/// **An upsert on `UNIQUE (title_id, season_number)`, so enrichment is idempotent.** A season the
+/// library created as a stub — a row that exists so `episode.season_id` has somewhere to point — is
+/// filled by the first provider that describes it, and a later run over the same answer adds no second
+/// row: the unique index is the identity `DATA_MODEL` §2.3 gives a season, and a second row numbered
+/// one would be two seasons a read cannot choose between.
+///
+/// **Every descriptive column is written with `COALESCE`, so an absent field leaves what is stored
+/// alone**, for the reason [`update_title_metadata`] gives: a provider drops fields between releases,
+/// and treating an omission as a value would erase a synopsis a user can already see.
+///
+/// **The number is the key and never a column this statement writes**, which is the ordering rule
+/// `DATA_MODEL` §2.3 states: canonical numbering is the aired order the primary provider published, and
+/// a provider whose own scheme disagrees is an `episode_ordering` row rather than a renumbering,
+/// because rewriting the numbers breaks every already-matched file. `is_specials` is not written here
+/// either: it is a function of the number, which is the conflict key, so an existing row can never need
+/// it corrected.
+///
+/// The row id comes back because the caller writes that season's episodes against it, and `changed`
+/// because a re-run that moved nothing must be able to say so — the `WHERE` on the update is what makes
+/// that observable, since `SQLite` counts an update that stores the value already there.
+pub(crate) async fn upsert_season_details(
+    connection: &mut sqlx::SqliteConnection,
+    title_id: i64,
+    details: &SeasonDetails,
+    provider: &str,
+    at: i64,
+) -> Result<(i64, bool), StorageError> {
+    let number = i64::from(details.season_number.get());
+    // The provider is bound only when this answer carried a path. A row recording a path without the
+    // provider that serves it — or a provider with another provider's path — produces an artwork key
+    // that names a picture nobody ever fetched, which renders as a poster that is silently absent.
+    let provider = details.poster_path.as_ref().map(|_| provider);
+    let air_date = details.air_date.map(|date| date.to_string());
+
+    let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+    let changed = sqlx::query(
+        "INSERT INTO season (title_id, season_number, name, overview, air_date, poster_provider, \
+         poster_path, episode_count, is_specials, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+         ON CONFLICT (title_id, season_number) DO UPDATE SET \
+             name = COALESCE(excluded.name, season.name), \
+             overview = COALESCE(excluded.overview, season.overview), \
+             air_date = COALESCE(excluded.air_date, season.air_date), \
+             poster_provider = COALESCE(excluded.poster_provider, season.poster_provider), \
+             poster_path = COALESCE(excluded.poster_path, season.poster_path), \
+             episode_count = COALESCE(excluded.episode_count, season.episode_count), \
+             updated_at = excluded.updated_at \
+         WHERE COALESCE(excluded.name, season.name) IS NOT season.name \
+            OR COALESCE(excluded.overview, season.overview) IS NOT season.overview \
+            OR COALESCE(excluded.air_date, season.air_date) IS NOT season.air_date \
+            OR COALESCE(excluded.poster_provider, season.poster_provider) \
+                 IS NOT season.poster_provider \
+            OR COALESCE(excluded.poster_path, season.poster_path) IS NOT season.poster_path \
+            OR COALESCE(excluded.episode_count, season.episode_count) IS NOT season.episode_count",
+    )
+    .bind(title_id)
+    .bind(number)
+    .bind(details.name.as_deref())
+    .bind(details.overview.as_deref())
+    .bind(air_date)
+    .bind(provider)
+    .bind(details.poster_path.as_deref())
+    .bind(details.episode_count.map(i64::from))
+    // Season zero is where a show's specials live, and the schema stores the flag so a read does not
+    // have to know the convention.
+    .bind(i64::from(details.season_number.get() == 0))
+    .bind(at)
+    .execute(&mut *transaction)
+    .await
+    .map_err(StorageError::from_sqlx)?
+    .rows_affected()
+        > 0;
+
+    // The row's id either way, because an upsert's `last_insert_rowid` is the *previous* row's when the
+    // conflict branch ran. The lookup is the unique index this statement just matched on.
+    let (id,): (i64,) =
+        sqlx::query_as("SELECT id FROM season WHERE title_id = ?1 AND season_number = ?2")
+            .bind(title_id)
+            .bind(number)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok((id, changed))
+}
+
+/// Writes what a provider said about one episode, and answers whether anything moved.
+///
+/// **An upsert on `UNIQUE (title_id, season_number, episode_number)`, and the numbers are the only
+/// identity it matches on.** That is the ordering rule the module exists to protect: the canonical
+/// columns hold the aired order the primary provider published, an alternate scheme is an
+/// `episode_ordering` row, and enrichment therefore writes *descriptive columns only*. `season_id` is
+/// assigned by the row's first writer and is not a column this statement updates either — an episode
+/// does not move between seasons because a later answer was read.
+///
+/// **A gap in the provider's answer leaves the missing episode alone.** An upsert keyed on the published
+/// numbers cannot renumber a season from the order an answer happened to list, which is what a
+/// positional write would do; an episode the provider no longer mentions simply is not visited.
+///
+/// Everything else follows [`upsert_season_details`]: `COALESCE` so an absent field never clears a
+/// stored one, the provider bound only when a path came with it, and `changed` reported as whether the
+/// statement moved a value.
+pub(crate) async fn upsert_episode_details(
+    connection: &mut sqlx::SqliteConnection,
+    title_id: i64,
+    season_id: i64,
+    details: &EpisodeDetails,
+    provider: &str,
+    at: i64,
+) -> Result<bool, StorageError> {
+    let provider = details.still_path.as_ref().map(|_| provider);
+    let air_date = details.air_date.map(|date| date.to_string());
+
+    let changed = sqlx::query(
+        "INSERT INTO episode (title_id, season_id, season_number, episode_number, name, overview, \
+         air_date, runtime_minutes, still_provider, still_path, vote_average, vote_count, \
+         episode_type, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+         ON CONFLICT (title_id, season_number, episode_number) DO UPDATE SET \
+             name = COALESCE(excluded.name, episode.name), \
+             overview = COALESCE(excluded.overview, episode.overview), \
+             air_date = COALESCE(excluded.air_date, episode.air_date), \
+             runtime_minutes = COALESCE(excluded.runtime_minutes, episode.runtime_minutes), \
+             still_provider = COALESCE(excluded.still_provider, episode.still_provider), \
+             still_path = COALESCE(excluded.still_path, episode.still_path), \
+             vote_average = COALESCE(excluded.vote_average, episode.vote_average), \
+             vote_count = COALESCE(excluded.vote_count, episode.vote_count), \
+             episode_type = COALESCE(excluded.episode_type, episode.episode_type), \
+             updated_at = excluded.updated_at \
+         WHERE COALESCE(excluded.name, episode.name) IS NOT episode.name \
+            OR COALESCE(excluded.overview, episode.overview) IS NOT episode.overview \
+            OR COALESCE(excluded.air_date, episode.air_date) IS NOT episode.air_date \
+            OR COALESCE(excluded.runtime_minutes, episode.runtime_minutes) \
+                 IS NOT episode.runtime_minutes \
+            OR COALESCE(excluded.still_provider, episode.still_provider) \
+                 IS NOT episode.still_provider \
+            OR COALESCE(excluded.still_path, episode.still_path) IS NOT episode.still_path \
+            OR COALESCE(excluded.vote_average, episode.vote_average) IS NOT episode.vote_average \
+            OR COALESCE(excluded.vote_count, episode.vote_count) IS NOT episode.vote_count \
+            OR COALESCE(excluded.episode_type, episode.episode_type) IS NOT episode.episode_type",
+    )
+    .bind(title_id)
+    .bind(season_id)
+    .bind(i64::from(details.season_number.get()))
+    .bind(i64::from(details.episode_number.get()))
+    .bind(details.name.as_deref())
+    .bind(details.overview.as_deref())
+    .bind(air_date)
+    .bind(details.runtime_minutes.map(i64::from))
+    .bind(provider)
+    .bind(details.still_path.as_deref())
+    .bind(details.rating)
+    .bind(details.votes.and_then(|votes| i64::try_from(votes).ok()))
+    .bind(
+        details
+            .episode_type
+            .map(peregrine_domain::EpisodeType::as_str),
+    )
+    .bind(at)
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?
+    .rows_affected()
+        > 0;
+
+    Ok(changed)
 }
 
 /// A match rule as a caller writes one, before the database assigns it an id.
@@ -603,6 +777,15 @@ pub(crate) async fn upsert_provider_title(
 /// The search index is rewritten in the same transaction, because `title`'s own columns feed it and no
 /// trigger watches the table (`fts` module doc). A title whose name changed without an index rewrite is
 /// a title search cannot find by its new name.
+///
+/// **`Listed` is a floor rather than an assignment, and that is why the state is written by a
+/// `CASE`.** The two callers are a details fill and a list answer, and the same title is both:
+/// every rails run re-lists the titles it drew, so a bare assignment would rewrite a title that a
+/// details read had filled back to `Listed` on the next fetch — which makes
+/// `peregrine_app::artwork::refresh_due` true again, and asks the provider for details it has
+/// already given once per visit, for ever. A list answer therefore raises `stub` to `listed` and
+/// leaves every state that already means a details read happened exactly as it was; a details fill
+/// still writes what it was told to write.
 pub(crate) async fn update_title_metadata(
     connection: &mut sqlx::SqliteConnection,
     id: i64,
@@ -647,7 +830,11 @@ pub(crate) async fn update_title_metadata(
             poster_path = COALESCE(?21, poster_path), \
             backdrop_provider = COALESCE(?20, backdrop_provider), \
             backdrop_path = COALESCE(?22, backdrop_path), \
-            metadata_state = ?23, last_synced_at = ?24, updated_at = ?24 \
+            metadata_state = CASE \
+                WHEN ?23 = 'listed' AND metadata_state <> 'stub' THEN metadata_state \
+                ELSE ?23 \
+              END, \
+            last_synced_at = ?24, updated_at = ?24 \
          WHERE id = ?1",
     )
     .bind(id)
@@ -847,8 +1034,10 @@ impl TryFrom<IdentityRow> for TitleIdentity {
 mod episode_tests {
     use tempfile::TempDir;
 
-    use peregrine_domain::{AccountId, AccountScope};
+    use peregrine_domain::catalogue::{EpisodeDetails, EpisodeType, SeasonDetails};
+    use peregrine_domain::{AccountId, AccountScope, EpisodeNumber, SeasonNumber};
 
+    use crate::test_support::{count, execute, path_of};
     use crate::{
         Database, NewMatchRule, PageRequest, StubSeason, StubTitle, TitleKind, TitleSubtype,
     };
@@ -1119,6 +1308,275 @@ mod episode_tests {
             .unwrap();
 
         assert_eq!(specials, 1);
+    }
+
+    /// The provider's answer for one season, with the fields a season row has.
+    fn season_details(number: u32) -> SeasonDetails {
+        SeasonDetails {
+            season_number: SeasonNumber::new(number),
+            name: Some(format!("Season {number}")),
+            overview: Some("A season of television.".to_owned()),
+            air_date: Some("2008-01-20".parse().expect("a date")),
+            poster_path: Some(format!("/season-{number}.jpg")),
+            episode_count: Some(7),
+        }
+    }
+
+    /// The provider's answer for one episode, with every descriptive column set.
+    fn episode_details(season: u32, episode: u32) -> EpisodeDetails {
+        EpisodeDetails {
+            season_number: SeasonNumber::new(season),
+            episode_number: EpisodeNumber::new(episode),
+            name: Some(format!("Episode {episode}")),
+            overview: Some("An episode.".to_owned()),
+            air_date: Some("2008-01-27".parse().expect("a date")),
+            runtime_minutes: Some(47),
+            still_path: Some(format!("/still-{season}-{episode}.jpg")),
+            rating: Some(8.1),
+            votes: Some(1_200),
+            episode_type: Some(EpisodeType::Standard),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_re_run_over_the_same_answer_reports_that_nothing_changed() {
+        // `RowChanged`/`RowUpserted` are what make a re-run observable, so a second pass over an
+        // unchanged answer must report `false` for every row and add none. A sync that could not tell
+        // "already held" from "wrote it again" has idempotence as an intention rather than a fact —
+        // and the `WHERE` on the upsert is the only thing that makes SQLite's row count mean anything,
+        // since it counts an update that stored the value already there.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+
+        let (season, created) = database
+            .upsert_season_details(title, season_details(1), "tmdb".to_owned(), NOW)
+            .await
+            .unwrap();
+        assert!(created, "the first write creates the season row");
+        assert!(
+            database
+                .upsert_episode_details(
+                    title,
+                    season,
+                    episode_details(1, 1),
+                    "tmdb".to_owned(),
+                    NOW
+                )
+                .await
+                .unwrap(),
+            "and the first write of an episode fills it"
+        );
+
+        let (same, created) = database
+            .upsert_season_details(title, season_details(1), "tmdb".to_owned(), NOW)
+            .await
+            .unwrap();
+        assert_eq!(same, season, "the second write is the same row");
+        assert!(!created, "and it moved nothing");
+        assert!(
+            !database
+                .upsert_episode_details(
+                    title,
+                    season,
+                    episode_details(1, 1),
+                    "tmdb".to_owned(),
+                    NOW
+                )
+                .await
+                .unwrap(),
+            "an episode the catalogue already holds is not written a second time"
+        );
+
+        let path = path_of(&directory);
+        assert_eq!(count(&path, "SELECT COUNT(*) FROM season").await, 1);
+        assert_eq!(count(&path, "SELECT COUNT(*) FROM episode").await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_season_the_provider_announced_with_no_episodes_is_still_a_season() {
+        // The state between the season list and the season read: the switcher draws the season from
+        // `episode_count`, and a read of its episodes answers an empty list. A season that only existed
+        // once an episode referenced it would be a season a screen could not show.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+
+        let (_, created) = database
+            .upsert_season_details(title, season_details(2), "tmdb".to_owned(), NOW)
+            .await
+            .unwrap();
+
+        let path = path_of(&directory);
+        assert!(created);
+        assert_eq!(count(&path, "SELECT COUNT(*) FROM season").await, 1);
+        assert_eq!(count(&path, "SELECT episode_count FROM season").await, 7);
+        assert_eq!(count(&path, "SELECT COUNT(*) FROM episode").await, 0);
+    }
+
+    #[tokio::test]
+    async fn an_episode_with_no_air_date_and_no_still_is_still_written() {
+        // A provider dates and pictures some episodes and not others. An episode missing both is an
+        // episode with a name and a runtime rather than a row the sync skips — and an *absent* field
+        // never clears a stored one, because a provider that dropped a still between releases would
+        // otherwise blank a card that has a picture on disk.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        let (season, _) = database
+            .upsert_season_details(title, season_details(1), "tmdb".to_owned(), NOW)
+            .await
+            .unwrap();
+        let undated = EpisodeDetails {
+            air_date: None,
+            still_path: None,
+            ..episode_details(1, 2)
+        };
+
+        assert!(
+            database
+                .upsert_episode_details(title, season, undated, "tmdb".to_owned(), NOW)
+                .await
+                .unwrap()
+        );
+
+        let path = path_of(&directory);
+        assert_eq!(
+            count(&path, "SELECT COUNT(*) FROM episode WHERE air_date IS NULL").await,
+            1
+        );
+        assert_eq!(
+            count(
+                &path,
+                "SELECT COUNT(*) FROM episode WHERE still_path IS NULL"
+            )
+            .await,
+            1
+        );
+        assert_eq!(
+            count(
+                &path,
+                "SELECT COUNT(*) FROM episode WHERE name = 'Episode 2' AND runtime_minutes = 47"
+            )
+            .await,
+            1,
+            "the fields the answer did carry are written"
+        );
+
+        // The same episode, an answer that no longer mentions its still: the stored path survives and
+        // the write reports that it changed nothing.
+        let still_held = EpisodeDetails {
+            still_path: None,
+            air_date: None,
+            ..episode_details(1, 2)
+        };
+        assert!(
+            !database
+                .upsert_episode_details(title, season, still_held, "tmdb".to_owned(), NOW)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            count(
+                &path,
+                "SELECT COUNT(*) FROM episode WHERE still_path IS NULL"
+            )
+            .await,
+            1,
+            "an absent path did not clear a stored one"
+        );
+    }
+
+    #[tokio::test]
+    async fn enrichment_never_rewrites_the_canonical_numbering() {
+        // `DATA_MODEL` §2.3: canonical `season_number`/`episode_number` are always the aired order the
+        // primary provider published, and any other scheme is an `episode_ordering` row — "canonical
+        // plus overlay, never in-place rewriting, because rewriting breaks every already-matched file".
+        //
+        // The provider's answer is therefore fed in a different order and with a gap, and every
+        // assertion is about a *number keeping the name the provider gave that number*. A positional
+        // write — `episode_number = index + 1`, which is the shape a list-shaped answer invites — would
+        // hand episode 3's name to episode 2 and report success.
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        let (season, _) = database
+            .upsert_season_details(title, season_details(1), "tmdb".to_owned(), NOW)
+            .await
+            .unwrap();
+
+        // Episode two is matched on disk and carries a DVD overlay, which is exactly the row a
+        // renumbering write would damage: it is the one the provider's answer does not mention.
+        let matched = database
+            .insert_stub_episode(StubEpisode {
+                title_id: title,
+                season_id: season,
+                season_number: 1,
+                episode_number: 2,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        execute(
+            &path_of(&directory),
+            &format!(
+                "INSERT INTO episode_ordering (episode_id, scheme, season_number, episode_number) \
+                 VALUES ({matched}, 'dvd', 1, 1)"
+            ),
+        )
+        .await;
+
+        for number in [3, 1] {
+            database
+                .upsert_episode_details(
+                    title,
+                    season,
+                    episode_details(1, number),
+                    "tmdb".to_owned(),
+                    NOW,
+                )
+                .await
+                .unwrap();
+        }
+
+        let path = path_of(&directory);
+        assert_eq!(count(&path, "SELECT COUNT(*) FROM episode").await, 3);
+        for number in [1, 3] {
+            assert_eq!(
+                count(
+                    &path,
+                    &format!(
+                        "SELECT COUNT(*) FROM episode WHERE episode_number = {number} \
+                         AND name = 'Episode {number}'"
+                    )
+                )
+                .await,
+                1,
+                "episode {number} keeps the answer that named it"
+            );
+        }
+        assert_eq!(
+            count(
+                &path,
+                "SELECT COUNT(*) FROM episode WHERE episode_number = 2 AND name IS NULL"
+            )
+            .await,
+            1,
+            "an episode the answer did not mention is left exactly as the library recorded it"
+        );
+        assert_eq!(
+            count(
+                &path,
+                &format!(
+                    "SELECT COUNT(*) FROM episode_ordering WHERE episode_id = {matched} \
+                     AND scheme = 'dvd' AND season_number = 1 AND episode_number = 1"
+                )
+            )
+            .await,
+            1,
+            "the alternate scheme is an overlay row, and enrichment neither reads nor moves it"
+        );
+        // The lookup every already-matched file resolves through still finds the same row.
+        assert_eq!(
+            database.episode_id_for(title, 1, 2).await.unwrap(),
+            Some(matched)
+        );
     }
 }
 

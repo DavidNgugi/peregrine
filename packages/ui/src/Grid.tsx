@@ -118,6 +118,20 @@ export function gridColumns(width: number, tileWidth: number, gap: number): numb
   return Math.max(1, Math.floor((width + gap) / (tileWidth + gap)));
 }
 
+/**
+ * Whether the drawn slice has come within `threshold` items of the end of `itemCount`.
+ *
+ * **A pure function for the reason [`gridWindow`] is one**: the grid's effects cannot be tested in
+ * this repository — the harness renders to static markup in a Node environment and has no DOM — so
+ * every decision the component makes is extracted to arithmetic that a test can call. The boundary
+ * cases are the ones a scroller reaches: an empty list never reaches the end (there is nothing to
+ * load), a slice already at the end always has, and a threshold larger than the list means the first
+ * render is already near enough.
+ */
+export function gridEndReached(itemCount: number, drawn: GridWindow, threshold: number): boolean {
+  return itemCount > 0 && drawn.last >= itemCount - Math.max(threshold, 0);
+}
+
 export interface GridProps<T> {
   /** The region's accessible name, which is what a screen reader announces on entry. */
   readonly label: string;
@@ -138,6 +152,53 @@ export interface GridProps<T> {
    */
   readonly columns?: number;
   readonly overscanRows?: number;
+  /**
+   * Called when the drawn slice comes within [`GridProps::endThreshold`] items of the end.
+   *
+   * **The grid owns the scroll position, so it is the only thing that can say this.** A caller cannot
+   * observe this scroller from outside it, and a sentinel element placed after the tiles would be
+   * virtualized away with them. The callback takes no arguments — what to fetch, and whether there is
+   * anything left to fetch, is the caller's business — and it fires on every render where the
+   * condition holds, so a caller must coalesce for itself (the browse read ignores a request while one
+   * is in flight, which is what stops a slow page from being asked for twice).
+   */
+  readonly onEndReached?: () => void;
+  /** How near the end, in items, the drawn slice must come to call [`GridProps::onEndReached`]. */
+  readonly endThreshold?: number;
+  /**
+   * A value that changes when the caller *replaces* the list rather than appending to it.
+   *
+   * **A replaced list starts at the top.** The scroller's own position survives a change of items —
+   * it is the same element — so a query whose previous answer was scrolled a thousand pixels down
+   * would draw its first page from a thousand pixels down, or (because the browser clamps a scroll
+   * offset past the end while this component's copy of it is stale) from the end of a list nobody has
+   * looked at yet. Changing this value scrolls back to the top, which is the only position a new
+   * answer makes sense from. An append must *not* change it.
+   */
+  readonly resetKey?: string | number;
+  /**
+   * Whether a page after the drawn items is on its way.
+   *
+   * **A grid with more to fetch has to say so**, or a reader who has reached the end of what is
+   * loaded cannot tell "there is nothing more" from "the next page is still coming"
+   * (`DESIGN_SYSTEM §11` rule 2). The placeholders are laid out *inside* the grid's own flow, below
+   * the last real tile, so they sit exactly where the arriving tiles will — which is what keeps the
+   * geometry still when they arrive, the same reason [`GridProps::skeleton`](crate::Rail) reserves a
+   * row.
+   */
+  readonly loading?: boolean;
+  /**
+   * The tile drawn for a cell that is still on its way. Without one, `loading` reserves the space
+   * and draws nothing in it.
+   */
+  readonly placeholder?: ReactNode;
+  /**
+   * How many rows of placeholders to reserve while loading.
+   *
+   * One is the default because a page is usually a couple of rows and one is enough to say "more is
+   * coming"; a caller that knows its page size can reserve exactly that many.
+   */
+  readonly placeholderRows?: number;
   readonly className?: string;
 }
 
@@ -151,6 +212,12 @@ export function Grid<T>({
   gap = 12,
   columns: pinnedColumns,
   overscanRows = 1,
+  onEndReached,
+  endThreshold = 8,
+  resetKey,
+  loading = false,
+  placeholder,
+  placeholderRows = 1,
   className,
 }: GridProps<T>): ReactElement {
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -214,16 +281,86 @@ export function Grid<T>({
   }, [measure]);
 
   const columns = pinnedColumns ?? gridColumns(viewport.width, tileWidth, gap);
+  // The cells the grid lays out: the items, plus the rows reserved for the page on its way. The
+  // reservation is what keeps the scrollbar's height honest while the next page is in the air, and
+  // what puts the placeholders where the arriving tiles are going to be.
+  const reserved = loading ? Math.max(placeholderRows, 0) * columns : 0;
+  const cells = items.length + reserved;
   const window_ = gridWindow({
     columns,
-    itemCount: items.length,
+    itemCount: cells,
     overscanRows,
     rowHeight,
     scrollTop,
     viewportHeight: viewport.height,
   });
-  const totalRows = items.length === 0 ? 0 : Math.ceil(items.length / columns);
-  const slice = items.slice(window_.first, window_.last);
+  const totalRows = cells === 0 ? 0 : Math.ceil(cells / columns);
+
+  // The callback is read through a ref so an inline arrow from the caller does not make the effect
+  // below depend on a new function on every render and fire a request on all of them.
+  const endReachedRef = useRef(onEndReached);
+  endReachedRef.current = onEndReached;
+  // Reaching within `endThreshold` of the end of the **real items**, not of the reserved cells: a
+  // reservation is the grid saying "more is coming", and counting it as content would ask for a page
+  // that is already in the air.
+  const endReached = gridEndReached(items.length, window_, endThreshold);
+  // **The condition is re-evaluated when the content changes, not only when it flips.** An effect
+  // keyed on the boolean alone fires on `false → true` and nothing else, so a grid that was already
+  // at the end when a page landed never asked again — the reader had to scroll away and back to
+  // re-arm it, and a list whose first page did not fill the viewport stopped after one page. What
+  // this effect answers is "is there more to ask for *now*", and the caller's own in-flight guard is
+  // what makes re-asking every time the answer changes a no-op rather than a duplicate request.
+  //
+  // `items.length` and `loading` are the two arrivals that can change the answer without a scroll:
+  // more items (still at the end ⇒ keep filling) and the end of a request (the guard has lifted).
+  useEffect(() => {
+    if (endReached) {
+      endReachedRef.current?.();
+    }
+  }, [endReached, items.length, loading]);
+
+  // A replaced list starts at the top. Declared before the resync below, because on the commit that
+  // both replace a list and move the offset the reset is the truth and the resync should read it.
+  useEffect(() => {
+    const element = scroller.current;
+    if (element === null) {
+      return;
+    }
+    element.scrollTop = 0;
+    setScrollTop(0);
+  }, [resetKey]);
+
+  // **The scroller's position is refetched when the content changes**, because the browser clamps an
+  // offset past the end silently: a list that shrank under this component leaves the element scrolled
+  // to where it could still be while this copy of the offset is the old, larger number. That draws a
+  // slice from the wrong place and can report the end of the list before the reader has seen its
+  // start. Reading it back is one property access and React bails out when the number is unchanged.
+  useEffect(() => {
+    const element = scroller.current;
+    if (element !== null) {
+      setScrollTop(element.scrollTop);
+    }
+  }, [cells]);
+
+  // One cell at a time, because the drawn window runs past the items while a page is reserved — a
+  // slice cannot express "the last rows are placeholders".
+  const drawn: ReactNode[] = [];
+  for (let index = window_.first; index < window_.last; index += 1) {
+    const item = items[index];
+    if (item === undefined) {
+      drawn.push(
+        <div aria-hidden="true" key={`placeholder-${String(index)}`} role="listitem">
+          {placeholder}
+        </div>,
+      );
+      continue;
+    }
+    drawn.push(
+      <div key={itemKey(item)} role="listitem">
+        {renderItem(item)}
+      </div>,
+    );
+  }
 
   return (
     <div
@@ -233,7 +370,16 @@ export function Grid<T>({
       // which is the 180 000 px spacer, so the "viewport" would be the whole grid and every tile would
       // be rendered. The caller sizes the parent (`h-80`, `flex-1 min-h-0`, or a protocol-sized pane)
       // and this fills it.
-      className={twMerge(clsx("h-full overflow-y-auto overscroll-y-contain rounded-md"), className)}
+      //
+      // **`overflow-x-hidden`, because this grid never scrolls sideways.** `overflow-y-auto` computes
+      // `overflow-x` to `auto` as well, so a row one pixel wider than the measured viewport — which a
+      // window resize between two measurements can produce — would give the grid a horizontal
+      // scrollbar and let the whole page pan. The column count is derived to fit; anything left over
+      // is a measurement race and must be clipped rather than scrolled.
+      className={twMerge(
+        clsx("h-full overflow-x-hidden overflow-y-auto overscroll-y-contain rounded-md"),
+        className,
+      )}
       ref={scroller}
       role="list"
       // A scroller that a keyboard cannot reach is a scroller a keyboard cannot scroll (PG-E7-19's
@@ -251,11 +397,7 @@ export function Grid<T>({
             transform: `translateY(${String(window_.offset)}px)`,
           }}
         >
-          {slice.map((item) => (
-            <div key={itemKey(item)} role="listitem">
-              {renderItem(item)}
-            </div>
-          ))}
+          {drawn}
         </div>
       </div>
     </div>

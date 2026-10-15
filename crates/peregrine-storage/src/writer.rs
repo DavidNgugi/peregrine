@@ -44,6 +44,30 @@ pub(crate) enum WriteRequest {
     InsertStubSeason(Box<crate::catalogue::StubSeason>),
     /// Insert one `episode` row.
     InsertStubEpisode(Box<crate::catalogue::StubEpisode>),
+    /// Write what a provider said about one season, creating the row when the library has none.
+    UpsertSeasonDetails {
+        /// The title the season belongs to.
+        title_id: i64,
+        /// What the provider said, whose `season_number` is the conflict key.
+        details: Box<peregrine_domain::catalogue::SeasonDetails>,
+        /// The provider that answered, for the artwork columns.
+        provider: String,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Write what a provider said about one episode, creating the row when the library has none.
+    UpsertEpisodeDetails {
+        /// The title the episode belongs to.
+        title_id: i64,
+        /// The season row it belongs to, which resolves the schema's foreign key.
+        season_id: i64,
+        /// What the provider said, whose numbers are the conflict key.
+        details: Box<peregrine_domain::catalogue::EpisodeDetails>,
+        /// The provider that answered, for the artwork columns.
+        provider: String,
+        /// Unix milliseconds.
+        at: i64,
+    },
     /// Write a provider's answer onto an existing title, and reindex it.
     UpdateTitleMetadata {
         /// The title row.
@@ -149,6 +173,11 @@ pub(crate) enum WriteRequest {
     /// The read-then-write of the dedupe window happens on the writer's own connection,
     /// so two events arriving at once cannot both decide they are the first.
     RecordNotification(Box<NewCentreEntry>),
+    /// Replace the whole Discover rails manifest with what one fetch published.
+    ReplaceDiscoverRails {
+        /// One entry per rail, each in the order that rail lists its titles.
+        rails: Vec<(String, Vec<i64>)>,
+    },
     /// Apply one delivery outcome to a `notification` row.
     MarkNotificationDelivered {
         id: NotificationId,
@@ -187,6 +216,41 @@ pub(crate) enum WriteRequest {
         /// The most rows this statement may remove.
         limit: u64,
     },
+    /// Insert one row into `download_job`, in the state `FLOWS` F6 admits a job in.
+    ///
+    /// Boxed for the same reason [`WriteRequest::InsertJob`] is: the enum is the size of its
+    /// largest variant and a job row is much larger than the alternatives.
+    CreateDownloadJob(Box<crate::download::NewDownloadJob>),
+    /// Apply one event to a `download_job` row, writing the safety report the event carries.
+    TransitionDownloadJob {
+        /// The row.
+        id: i64,
+        /// The event, which the domain judges against the state the row holds.
+        event: Box<peregrine_domain::DownloadEvent>,
+    },
+    /// Write one coalesced statistics tick onto a `download_job` row.
+    RecordDownloadStatistics {
+        /// The row.
+        id: i64,
+        /// The nine figures the tick carries.
+        statistics: Box<crate::download::DownloadStatistics>,
+    },
+    /// Write a job's `download_file` rows from the metadata's list and the engine's selection.
+    SelectDownloadFiles {
+        /// The job.
+        job_id: i64,
+        /// The metadata's file list, which the inspection gate judged.
+        description: Box<peregrine_domain::TorrentDescription>,
+        /// The engine's selection, as indices into that list.
+        selection: Vec<usize>,
+    },
+    /// Persist the engine's own state for a `download_job` row.
+    RecordEngineState {
+        /// The job.
+        id: i64,
+        /// The session's bytes, opaque to this crate.
+        state: Vec<u8>,
+    },
 }
 
 /// The writer's answer to a [`WriteRequest`].
@@ -206,8 +270,11 @@ pub(crate) enum WriteResponse {
     RowInserted { id: i64 },
     /// An `INSERT OR IGNORE` that found the row already there.
     RowIgnored,
-    /// Whether a library row was there to change or remove.
+    /// Whether a row was there to change or remove.
     RowChanged { changed: bool },
+    /// The rowid an upsert wrote, and whether it moved anything: a re-run that stored the values
+    /// already there reports `changed: false` rather than a second row.
+    RowUpserted { id: i64, changed: bool },
     /// How many cached images a removal took out of the table.
     ImagesRemoved { removed: u64 },
     /// Every row of the request was applied, or a statement that either applies or fails with
@@ -231,6 +298,16 @@ pub(crate) enum WriteResponse {
     },
     /// How many rows a retention batch removed.
     RetentionPruned { rows: u64 },
+    /// The `download_job` row the writer inserted, as the database holds it.
+    DownloadJobCreated(Box<crate::download::DownloadJobRow>),
+    /// The state a `download_job` row moved to, or `None` when no such row exists.
+    DownloadJobTransitioned {
+        state: Option<peregrine_domain::DownloadState>,
+    },
+    /// The domain refused the event for the state a `download_job` row holds.
+    DownloadJobRefused {
+        rejection: peregrine_domain::TransitionRejected,
+    },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -553,6 +630,51 @@ async fn apply(
             .await
             .map(|rows| WriteResponse::RetentionPruned { rows })
             .map_err(StorageError::from_sqlx),
+        other => apply_download_write(connection, other).await,
+    }
+}
+
+/// Applies the requests that write acquisition rows.
+///
+/// Split out of the dispatcher it fell into for the length lint, the way the catalogue and library
+/// dispatchers were: one channel carries every request whatever this chain's order is, so the chain
+/// is about reading one match at a time. It falls through to the catalogue dispatcher.
+async fn apply_download_write(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::CreateDownloadJob(job) => crate::download::insert(connection, &job)
+            .await
+            .map(|row| WriteResponse::DownloadJobCreated(Box::new(row))),
+        WriteRequest::TransitionDownloadJob { id, event } => {
+            // A rejection is an outcome rather than an error: the domain refused the event for the
+            // state the row holds, and the caller matches on it instead of reading a message.
+            match crate::download::transition(connection, id, *event).await {
+                Ok(state) => Ok(WriteResponse::DownloadJobTransitioned { state }),
+                Err(crate::download::DownloadTransitionError::Rejected(rejection)) => {
+                    Ok(WriteResponse::DownloadJobRefused { rejection })
+                }
+                Err(crate::download::DownloadTransitionError::Storage(error)) => Err(error),
+            }
+        }
+        WriteRequest::RecordDownloadStatistics { id, statistics } => {
+            crate::download::record_statistics(connection, id, &statistics)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
+        WriteRequest::SelectDownloadFiles {
+            job_id,
+            description,
+            selection,
+        } => crate::download::select_files(connection, job_id, &description, &selection)
+            .await
+            .map(|()| WriteResponse::Applied),
+        WriteRequest::RecordEngineState { id, state } => {
+            crate::download::record_engine_state(connection, id, &state)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
         other => apply_catalogue_write(connection, other).await,
     }
 }
@@ -561,7 +683,8 @@ async fn apply(
 ///
 /// Split out of the library dispatch because that function kept reaching the length lint one arm at a
 /// time, and the reason was structural: it was the *last* dispatcher in the chain, so every new
-/// request landed in it whatever it wrote. The chain is now matter, then catalogue, then library.
+/// request landed in it whatever it wrote. The chain is now matter, then acquisition, then
+/// catalogue, then library.
 async fn apply_catalogue_write(
     connection: &mut sqlx::SqliteConnection,
     request: WriteRequest,
@@ -596,6 +719,11 @@ async fn apply_catalogue_write(
                 .await
                 .map(|id| WriteResponse::TitleInserted { id })
         }
+        WriteRequest::ReplaceDiscoverRails { rails } => {
+            crate::discover_rail::replace(connection, &rails)
+                .await
+                .map(|()| WriteResponse::Applied)
+        }
         WriteRequest::InsertStubTitle(stub) => crate::catalogue::insert_stub(connection, &stub)
             .await
             .map(|id| WriteResponse::TitleInserted { id }),
@@ -605,6 +733,25 @@ async fn apply_catalogue_write(
         WriteRequest::InsertStubEpisode(episode) => {
             insert_row(crate::catalogue::insert_episode(connection, &episode).await)
         }
+        WriteRequest::UpsertSeasonDetails {
+            title_id,
+            details,
+            provider,
+            at,
+        } => crate::catalogue::upsert_season_details(connection, title_id, &details, &provider, at)
+            .await
+            .map(|(id, changed)| WriteResponse::RowUpserted { id, changed }),
+        WriteRequest::UpsertEpisodeDetails {
+            title_id,
+            season_id,
+            details,
+            provider,
+            at,
+        } => crate::catalogue::upsert_episode_details(
+            connection, title_id, season_id, &details, &provider, at,
+        )
+        .await
+        .map(|changed| WriteResponse::RowChanged { changed }),
         other => apply_library_write(connection, other).await,
     }
 }

@@ -24,12 +24,17 @@ jiff = { workspace = true }
 ulid = { workspace = true }
 
 peregrine-secrets = { workspace = true }
+# The torrent engine port, for the same reason as the metadata port above: the conformance suite
+# asserts against the trait, and the trait lives in the crate that will hold its adapters
+# (PG-E10-01).
+peregrine-torrent = { workspace = true }
 
 [dev-dependencies]
-# The metadata provider suite is asynchronous, because the port is: a caller awaits a
-# provider. `futures` brings the executor this crate's own tests drive it with, and it is
-# deliberately not a runtime dependency -- an unpublished crate's runtime dependency is
-# re-exported to its callers, and no adapter should inherit an executor from the testkit.
+# The metadata provider suite and the torrent engine suite are asynchronous, because those ports
+# are: a caller awaits a provider, and an engine operation is a future. `futures` brings the
+# executor this crate's own tests drive them with, and it is deliberately not a runtime dependency
+# -- an unpublished crate's runtime dependency is re-exported to its callers, and no adapter should
+# inherit an executor from the testkit.
 futures = { workspace = true }
 
 [lints]

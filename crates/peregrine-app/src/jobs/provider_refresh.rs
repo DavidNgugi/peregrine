@@ -1,14 +1,17 @@
 //! Filling one title from its provider, and fetching the artwork that comes with it.
 //!
-//! A job rather than a command because it leaves the machine twice — once for the title's details, once
-//! for its poster — and `ARCHITECTURE §7` rule 2 says anything that can take longer than a command's
-//! budget is a job with progress. It is also the first job whose *purpose* is one screen's content
-//! rather than the library as a whole, which is why it carries a title id in its payload.
+//! A job rather than a command because it leaves the machine more than once — the title's details, a
+//! series' season list, one request per season, and one image request per picture — and
+//! `ARCHITECTURE §7` rule 2 says anything that can take longer than a command's budget is a job with
+//! progress. It is also the first job whose *purpose* is one screen's content rather than the library
+//! as a whole, which is why it carries a title id in its payload.
 //!
 //! **Two phases, and the second is not a failure when it does nothing.** A title with no artwork path is
 //! a title whose provider had none, which is a fact about that provider rather than an error — so the
 //! job succeeds with what it has. A poster that cannot be written *is* reported, because a title whose
 //! metadata arrived and whose artwork silently did not is the state that looks like a rendering bug.
+//! The season posters and episode stills are the exception, and the reason is in `refresh`: they are
+//! decoration on a card whose metadata has already been written, and there are a dozen of them.
 
 use std::sync::Arc;
 
@@ -151,7 +154,7 @@ impl ProviderRefreshJob {
         // holds an id for it — a title the library scanned and no search has matched — so there is
         // nothing to fill in and nothing to fetch. A failure here would put a red row in the journal
         // for a library that is simply not matched yet, which is a fact rather than a fault.
-        let Some((provider, details)) = answered else {
+        let Some((provider, refreshed)) = answered else {
             return self.succeeded(job, attempt, None).await;
         };
 
@@ -160,7 +163,7 @@ impl ProviderRefreshJob {
         }
 
         self.phase(job, attempt, 600).await;
-        let poster = match details.poster_path.as_deref() {
+        let poster = match refreshed.details.poster_path.as_deref() {
             None => None,
             Some(path) => Some(
                 peregrine_sync::cache_image(
@@ -173,6 +176,24 @@ impl ProviderRefreshJob {
                 .map_err(|error| JobError::failed(error.to_string()))?,
             ),
         };
+
+        // **The season posters and episode stills are best effort, and the title's own poster is not.**
+        // The metadata write has already happened, so a picture that cannot be fetched leaves a card
+        // drawing its placeholder until the next refresh — where failing the job would put a red row in
+        // the journal for a title whose name, synopsis, air dates, and numbers all arrived. A season
+        // list is a dozen pictures at the image host's own rate, so one transient failure among them is
+        // the normal case rather than the exceptional one.
+        self.phase(job, attempt, 800).await;
+        for (kind, path) in &refreshed.artwork {
+            if cancellation.is_cancelled() {
+                return Err(JobError::Cancelled);
+            }
+            if let Err(error) =
+                peregrine_sync::cache_image(provider.as_ref(), &self.artwork, path, *kind).await
+            {
+                debug!(%error, path, "a season or episode picture could not be fetched");
+            }
+        }
 
         self.succeeded(job, attempt, poster).await
     }

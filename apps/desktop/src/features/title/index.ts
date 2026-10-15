@@ -1,3 +1,9 @@
 export { TitleScreen } from "./components/TitleScreen.js";
 export { useTitle } from "./hooks/useTitle.js";
 export type { TitleDetail } from "./hooks/useTitle.js";
+export { useSeasons } from "./hooks/useSeasons.js";
+export type { TitleSeasons } from "./hooks/useSeasons.js";
+export { useSimilarTitles } from "./hooks/useSimilarTitles.js";
+export type { SimilarTitles } from "./hooks/useSimilarTitles.js";
+export { useTitleFeed } from "./hooks/useTitleFeed.js";
+export type { TitleFeed } from "./hooks/useTitleFeed.js";

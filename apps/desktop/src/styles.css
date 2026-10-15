@@ -87,6 +87,11 @@ textarea,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    /* The iteration count matters as much as the duration, and only for an animation that repeats:
+       `0.01ms` with `infinite` is a flicker rather than a still image. One pass of a 0.01 ms
+       animation is pixel-identical to none, which is the point of the block. Components that carry
+       their own `motion-reduce:animate-none` — the skeleton does — are still the first line. */
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

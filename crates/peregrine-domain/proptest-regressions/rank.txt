@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc f16be64323ae23579d352cf52629b43484dd662f53ac9871894629f0267a5611 # shrinks to parts = Parts { resolution: UltraHd, source: Remux, video_codec: H264, audio: [Eac3], group: Some("dd") }, size = 0, criterion = Audio
+cc cb34a90ae0fa9be4e14f0989fa5287f416165d5942cc5f050ca40795bf048c49 # shrinks to parts = Parts { resolution: UltraHd, source: Remux, video_codec: H264, audio: [Dts], group: Some("Hd") }, size = 0, criterion = Audio

@@ -1,10 +1,10 @@
 import { createI18n } from "@peregrine/i18n";
-import type { HomeRailDto, IpcError, RailItemDto } from "@peregrine/ipc-client";
+import type { HomeRailDto, IpcError, RailItemDto, TitleMatchDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { HomeRailsView } from "../hooks/useHomeRails.js";
-import { DiscoverView, itemMeta } from "./DiscoverScreen.js";
+import { DiscoverView, itemMeta, type DiscoverViewProps } from "./DiscoverScreen.js";
 import { heroSlides } from "./hero-rotation.js";
 
 const i18n = createI18n();
@@ -65,15 +65,29 @@ const NO_SEARCH = {
   searching: false,
   failed: false,
   searched: false,
-  submit: () => undefined,
   query: "",
   setQuery: () => undefined,
+  source: "none",
+  searchNow: () => undefined,
 } as const;
 
 function markup(view: HomeRailsView): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <DiscoverView onNavigate={() => undefined} rails={view} search={{ ...NO_SEARCH }} />
+    </I18nextProvider>,
+  );
+}
+
+/** The same, with the search panel in whatever state a test is about. */
+function searched(overrides: Partial<DiscoverViewProps["search"]>): string {
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <DiscoverView
+        onNavigate={() => undefined}
+        rails={railsView()}
+        search={{ ...NO_SEARCH, ...overrides }}
+      />
     </I18nextProvider>,
   );
 }
@@ -111,11 +125,12 @@ describe("DiscoverView", () => {
     expect(unscored).not.toContain("8.2");
   });
 
-  it("writes a rail item's score and vote count into the tile's own name", () => {
-    // The hover preview's panel waits for a pointer this environment does not have, so the part of
-    // it a static render reaches is the accessible name — which is where "8.2" and the count are
-    // written for a screen reader, and where a caller's mapping from the core's numbers to words
-    // either exists or does not.
+  it("writes a rail item's score into the tile's own name, and no count", () => {
+    // The hover preview's panel waits for a pointer this environment does not have, so the part of it
+    // a static render reaches is the accessible name — which is where "8.2" is written for a screen
+    // reader, and where a caller's mapping from the core's number to words either exists or does not.
+    // The count is asserted out: it is off the tiles and off the hero, and a reintroduction is a
+    // failure rather than a detail.
     const html = markup(
       railsView({
         rails: [
@@ -132,7 +147,9 @@ describe("DiscoverView", () => {
       }),
     );
 
-    expect(html).toContain("The Matrix, 1999 · Film, rated 8.2 out of 10, 24,000 votes");
+    expect(html).toContain("The Matrix, 1999 · Film, rated 8.2 out of 10");
+    expect(html).not.toContain("24,000");
+    expect(html).not.toContain("votes");
   });
 
   it("gives every rail a heading and its own empty state, fetched or not", () => {
@@ -155,17 +172,14 @@ describe("DiscoverView", () => {
           rail({ rail: "trending_week", items: [] }),
           rail({
             rail: "popular_movies",
-            items: [
-              item({ titleId: 9, name: "Dune" }),
-              item({ titleId: 10, name: "Arrival" }),
-            ],
+            items: [item({ titleId: 9, name: "Dune" }), item({ titleId: 10, name: "Arrival" })],
           }),
         ],
       }),
     );
 
     expect(html).toContain("Featured title");
-    expect(html).toContain("Details");
+    expect(html).toContain("View More");
     expect(html).toContain("/title/movie/9");
     expect(html).toContain("Dune");
     expect(html).toContain("1999 · Film");
@@ -176,12 +190,17 @@ describe("DiscoverView", () => {
     expect(html).toContain('aria-label="Show Arrival"');
   });
 
-  it("puts the search box above the hero, with its answers beside it", () => {
+  it("puts search and category controls inside the hero overlay", () => {
     // The reference's order, and the reason it matters: a box at the top whose results appeared
     // below the rails would be a box whose results nobody finds.
     const html = markup(railsView());
 
-    expect(html.indexOf("<form")).toBeLessThan(html.indexOf("Featured title"));
+    expect(html.indexOf("<form")).toBeGreaterThan(html.indexOf("Featured title"));
+    expect(html).toContain("absolute inset-x-0 top-0 z-20");
+    expect(html).toContain("data-discover-toolbar");
+    expect(html).toContain("Movies");
+    expect(html).toContain("TV shows");
+    expect(html).toContain("bg-surface-0/70");
     expect(html.indexOf("<form")).toBeLessThan(html.indexOf("Popular films"));
   });
 
@@ -220,9 +239,51 @@ describe("DiscoverView", () => {
     expect(html).toContain("Fetching the rails from your provider");
     expect(html).not.toContain("Nothing here yet");
     expect(html).not.toContain("add a provider key in Settings");
-    // A sentence in the section's own line, not a spinner over geometry that is already drawn.
+    // A sentence in the section's own line, plus the placeholders below it — never a spinner
+    // (§11 rule 2). The placeholders are the poster tiles' own shape, which is what makes the answer
+    // arriving a fill rather than a re-layout.
+    expect(html.match(/aspect-ratio/gu)?.length ?? 0).toBeGreaterThan(0);
+    expect(html).toContain('aria-busy="true"');
     expect(html).not.toContain("animate-spin");
     expect(html).not.toContain('role="progressbar"');
+  });
+
+  it("claims nothing about the catalogue while a read of a new selection is in flight", () => {
+    // The Movies / TV shows switch re-reads the core, and the hook answers with no rails until it
+    // lands. That is one IPC round trip: too short for placeholders, and long enough that "Nothing
+    // here yet" would be a claim about a catalogue nobody has read yet.
+    const html = markup(railsView({ loading: true, rails: [] }));
+
+    expect(html).not.toContain("Nothing here yet");
+    expect(html).toContain("A film or a series");
+  });
+
+  it("keeps the posters it has while a refresh runs instead of trading them for placeholders", () => {
+    // A rail that already answered keeps drawing what it has: stale posters are more use than
+    // placeholders, and the loading state is for a rail with nothing to show.
+    const html = markup(
+      railsView({
+        rails: [rail({ items: [item({ titleId: 4 })], state: "ready" })],
+        refreshing: true,
+        state: "ready",
+      }),
+    );
+
+    expect(html).toContain("/title/movie/4");
+    expect(html).not.toContain("aspect-ratio");
+  });
+
+  it("draws the hero's band, with the toolbar on it, while the first fetch is in the air", () => {
+    // The band is the hero's own box: without it the toolbar would sit alone and everything below it
+    // would move the moment the first title arrived. With no rails on the way there is no band — the
+    // screen keeps its empty state rather than a placeholder for content nobody is fetching.
+    const fetching = markup(railsView({ rails: [], state: "fetching" }));
+    expect(fetching).toContain("min-h-[28rem]");
+    expect(fetching).toContain("A film or a series");
+
+    const idle = markup(railsView({ rails: [] }));
+    expect(idle).not.toContain("min-h-[28rem]");
+    expect(idle).toContain("A film or a series");
   });
 
   it("draws the rails once the providers have answered", () => {
@@ -279,8 +340,10 @@ describe("the hero's slides and the tile caption", () => {
     expect(heroSlides([rail({ items: [] })])).toEqual([]);
     expect(heroSlides([rail({ items: [item({ titleId: 3 })] })])[0]?.titleId).toBe(3);
     expect(
-      heroSlides([rail({ items: [] }), rail({ items: [item({ titleId: 4 }), item({ titleId: 5 })] })])
-        .map((slide) => slide.titleId),
+      heroSlides([
+        rail({ items: [] }),
+        rail({ items: [item({ titleId: 4 }), item({ titleId: 5 })] }),
+      ]).map((slide) => slide.titleId),
     ).toEqual([4, 5]);
   });
 
@@ -288,5 +351,36 @@ describe("the hero's slides and the tile caption", () => {
     // A tile whose caption invented a year would be a claim the provider never made.
     expect(itemMeta(item({ year: 1999 }), "Film")).toBe("1999 · Film");
     expect(itemMeta(item({ year: null }), "Series")).toBe("Series");
+  });
+});
+
+describe("where a search answer came from", () => {
+  /** One title a search matched, which is what the panel lists. */
+  const hit: TitleMatchDto = { id: 1, name: "The Matrix", kind: "movies" };
+
+  it("says the results are the catalogue's own when the local index answered", () => {
+    // The whole point of searching the catalogue first: a reader who already has a title should be able
+    // to tell that no request was spent, and that this is something they can open right now.
+    const html = searched({ results: [hit], searched: true, source: "catalogue" });
+
+    expect(html).toContain("In your catalogue");
+    expect(html).not.toContain("From your providers");
+    expect(html).toContain("The Matrix");
+  });
+
+  it("says the results came from a provider when the catalogue had nothing", () => {
+    const html = searched({ results: [hit], searched: true, source: "provider" });
+
+    expect(html).toContain("From your providers");
+    expect(html).not.toContain("In your catalogue");
+  });
+
+  it("claims no source at all when there is nothing to have come from", () => {
+    // Neither line belongs on an empty answer: "nothing in your catalogue" is what the empty state says,
+    // and a source label above it would be attributing a result that does not exist.
+    const html = searched({ results: [], searched: true, source: "none" });
+
+    expect(html).not.toContain("In your catalogue");
+    expect(html).not.toContain("From your providers");
   });
 });

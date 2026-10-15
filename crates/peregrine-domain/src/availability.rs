@@ -255,6 +255,88 @@ const fn from_asked(asked: Asked) -> Availability {
     }
 }
 
+/// What a title's own page offers, from what SM2 derives for each of the title's items.
+///
+/// **Four cases, because a page draws one primary action and says one sentence.** [`availability`]
+/// answers per *item* and has nine values, because a badge, a filter, and an agent-facing result each
+/// read a different one of them; a title page reads the whole title at once and can honour four
+/// outcomes. This is deliberately not the title-scoped reduction the watchlist needs
+/// (`PG-E9-05`, whose four words are about a *request* rather than about what a page may do), and it
+/// is not a state a writer caches: it is derived on the read, like everything else here.
+///
+/// **A copy on disk is never offered for acquisition.** That is the whole reason this exists as a
+/// rule rather than as a boolean a screen could derive from a count: whether the library already
+/// holds something is the question a Download control must not get wrong, and a page that offered it
+/// for a title the user owns would be asking them to fetch a second copy of what they have.
+///
+/// The order is read from the top:
+///
+/// * **A present copy wins**, over an arrival and over everything else: an upgrade in flight does not
+///   make a playable title unplayable, which is the edge SM2 deliberately does not draw.
+/// * **Then an arrival.** `jobs` is **every job whose `title_id` is this title**, not only the ones
+///   attributed to an item that exists, and that is deliberate: acquisition is requested before the
+///   import creates the item (`PG-E14-19`), so a live job that names no item is still a transfer
+///   running for this title. Reading the item slice alone would leave that window looking like a
+///   title nobody owns — a Download button over a download.
+/// * **Then a recorded-but-absent file**, which is [`Availability::Missing`]: the library knows of a
+///   copy and cannot see it. That is `Absent` rather than `Acquire` on purpose — asking again would
+///   create a second copy of a file the library already records (the duplicates `PG-E14-12` reports,
+///   and the deletion `PG-E15` owns), and the honest sentence is that the file is not where the
+///   library last saw it.
+/// * **And otherwise acquisition is what is left**, including the empty slice: a title in the
+///   catalogue with no item at all is exactly a title nobody has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleOffer {
+    /// A copy is present, so there is something to play.
+    Play,
+    /// An acquisition for this title is in flight.
+    Arriving,
+    /// File rows exist and no copy of any of them is present.
+    Absent,
+    /// Nothing is held and nothing is arriving, so acquisition is the action left.
+    Acquire,
+}
+
+impl TitleOffer {
+    /// Every value, in the order [`TitleOffer::of`] tests them.
+    pub const ALL: [Self; 4] = [Self::Play, Self::Arriving, Self::Absent, Self::Acquire];
+
+    /// The stable spelling the screen's copy and the tests read.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Arriving => "arriving",
+            Self::Absent => "absent",
+            Self::Acquire => "acquire",
+        }
+    }
+
+    /// What one title offers, from what SM2 says about each of its items and the jobs it carries.
+    ///
+    /// `items` is every item of the title, each derived by [`availability`]: a caller that passes a
+    /// page of them is answering about part of a title, and the one item it omitted is the one that
+    /// is on disk. `jobs` is every download job for the title — see the type's own documentation for
+    /// why it is title-scoped rather than gathered from the items.
+    #[must_use]
+    pub fn of(items: &[Availability], jobs: &[ItemJob]) -> Self {
+        if items
+            .iter()
+            .any(|item| matches!(item, Availability::Available | Availability::Partial))
+        {
+            return Self::Play;
+        }
+        if jobs.iter().any(|job| !job.state.is_terminal()) {
+            return Self::Arriving;
+        }
+        if items.contains(&Availability::Missing) {
+            return Self::Absent;
+        }
+        Self::Acquire
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -986,6 +1068,229 @@ mod tests {
                 case.what
             );
         }
+    }
+
+    /// One row of the offer table: what a title's items and jobs say, and what its page may offer.
+    struct OfferCase {
+        /// What the row pins, so a failure names it.
+        what: &'static str,
+        /// What SM2 derives for each of the title's items.
+        items: &'static [Availability],
+        /// The download jobs the title carries, as `(id, state, added_at)`.
+        jobs: &'static [(i64, DownloadState, i64)],
+        /// The offer the row must derive.
+        expected: TitleOffer,
+    }
+
+    /// The acceptance table for a title's own page.
+    ///
+    /// One row per value of [`Availability`] on its own — which is what makes every SM2 state's
+    /// contribution to the page visible — then the combinations the precedence turns on.
+    const OFFER_CASES: &[OfferCase] = &[
+        OfferCase {
+            what: "a catalogue title the library holds nothing of is offered for acquisition",
+            items: &[],
+            jobs: &[],
+            expected: TitleOffer::Acquire,
+        },
+        OfferCase {
+            what: "a title discovered and never asked for is offered",
+            items: &[Availability::Discovered],
+            jobs: &[],
+            expected: TitleOffer::Acquire,
+        },
+        OfferCase {
+            what: "a watchlisted title is offered",
+            items: &[Availability::Watchlisted],
+            jobs: &[],
+            expected: TitleOffer::Acquire,
+        },
+        OfferCase {
+            what: "a wanted title is offered",
+            items: &[Availability::Wanted],
+            jobs: &[],
+            expected: TitleOffer::Acquire,
+        },
+        OfferCase {
+            what: "a title whose files were deleted is offered again",
+            items: &[Availability::Removed],
+            jobs: &[],
+            expected: TitleOffer::Acquire,
+        },
+        OfferCase {
+            what: "a title whose every attempt failed is offered a retry",
+            items: &[Availability::Unavailable],
+            jobs: &[(1, DownloadState::Failed, 1_000)],
+            expected: TitleOffer::Acquire,
+        },
+        OfferCase {
+            what: "an item with no files and a transfer running is arriving",
+            items: &[Availability::Acquiring],
+            jobs: &[(1, DownloadState::Downloading, 1_000)],
+            expected: TitleOffer::Arriving,
+        },
+        OfferCase {
+            what: "a copy on disk is playable and never offered for acquisition",
+            items: &[Availability::Available],
+            jobs: &[],
+            expected: TitleOffer::Play,
+        },
+        OfferCase {
+            what: "one copy present of several is playable",
+            items: &[Availability::Partial],
+            jobs: &[],
+            expected: TitleOffer::Play,
+        },
+        OfferCase {
+            what: "a recorded file nobody can see is absent rather than fetchable",
+            items: &[Availability::Missing],
+            jobs: &[],
+            expected: TitleOffer::Absent,
+        },
+        // The window acquisition passes through before the import creates an item, which is the
+        // case a rule that read only the item slice would answer with a Download button.
+        OfferCase {
+            what: "a transfer running with no item at all is arriving",
+            items: &[],
+            jobs: &[(1, DownloadState::Queued, 1_000)],
+            expected: TitleOffer::Arriving,
+        },
+        OfferCase {
+            what: "a job held at the safety gate is arriving rather than offered again",
+            items: &[],
+            jobs: &[(1, DownloadState::Blocked, 1_000)],
+            expected: TitleOffer::Arriving,
+        },
+        OfferCase {
+            what: "a job that has only ever failed is not an arrival",
+            items: &[],
+            jobs: &[(1, DownloadState::Failed, 1_000)],
+            expected: TitleOffer::Acquire,
+        },
+        // The precedence, which is the part a table of single values cannot state.
+        OfferCase {
+            what: "a copy on an item nobody asked about outranks everything else",
+            items: &[Availability::Available, Availability::Missing],
+            jobs: &[],
+            expected: TitleOffer::Play,
+        },
+        OfferCase {
+            what: "a copy on disk outranks an upgrade arriving beside it",
+            items: &[Availability::Acquiring, Availability::Available],
+            jobs: &[(1, DownloadState::Downloading, 1_000)],
+            expected: TitleOffer::Play,
+        },
+        OfferCase {
+            what: "a partial copy outranks an arrival",
+            items: &[Availability::Acquiring, Availability::Partial],
+            jobs: &[(1, DownloadState::Downloading, 1_000)],
+            expected: TitleOffer::Play,
+        },
+        OfferCase {
+            what: "an arrival outranks a file that is recorded and absent",
+            items: &[Availability::Missing, Availability::Acquiring],
+            jobs: &[(1, DownloadState::Downloading, 1_000)],
+            expected: TitleOffer::Arriving,
+        },
+        OfferCase {
+            what: "a recorded file outranks a title with nothing",
+            items: &[Availability::Discovered, Availability::Missing],
+            jobs: &[],
+            expected: TitleOffer::Absent,
+        },
+        OfferCase {
+            what: "a retry waiting beside an arrival is still an arrival",
+            items: &[Availability::Unavailable, Availability::Acquiring],
+            jobs: &[
+                (1, DownloadState::Failed, 1_000),
+                (2, DownloadState::Paused, 2_000),
+            ],
+            expected: TitleOffer::Arriving,
+        },
+    ];
+
+    /// One offer case as the rule reads it, with its job fixture built.
+    fn offer(case: &OfferCase) -> TitleOffer {
+        let jobs: Vec<ItemJob> = case
+            .jobs
+            .iter()
+            .map(|(id, state, millis)| job(*id, *state, *millis))
+            .collect();
+        TitleOffer::of(case.items, &jobs)
+    }
+
+    /// The acceptance: every row derives exactly the offer it declares.
+    #[test]
+    fn the_offer_table_derives_every_case_it_declares() {
+        for case in OFFER_CASES {
+            assert_eq!(offer(case), case.expected, "{}", case.what);
+        }
+    }
+
+    /// Every value of the offer is reachable, so none of the four is a state nothing produces.
+    #[test]
+    fn every_offer_is_reachable_from_the_table() {
+        let mut reached: Vec<TitleOffer> = OFFER_CASES.iter().map(offer).collect();
+        reached.sort_by_key(|value| {
+            TitleOffer::ALL
+                .iter()
+                .position(|candidate| candidate == value)
+                .expect("every value is in ALL")
+        });
+        reached.dedup();
+        assert_eq!(reached, TitleOffer::ALL.to_vec());
+    }
+
+    /// The order the items arrive in cannot change the offer: the answer is about the set, and a
+    /// read that walked a title's items backwards must not offer a title for download.
+    #[test]
+    fn the_order_of_a_titles_items_does_not_change_its_offer() {
+        for case in OFFER_CASES {
+            let mut reversed = case.items.to_vec();
+            reversed.reverse();
+            let mut jobs = case.jobs.to_vec();
+            jobs.reverse();
+            let derived: Vec<ItemJob> = jobs
+                .iter()
+                .map(|(id, state, millis)| job(*id, *state, *millis))
+                .collect();
+            assert_eq!(
+                TitleOffer::of(&reversed, &derived),
+                offer(case),
+                "{} changed when its items and jobs were reversed",
+                case.what
+            );
+        }
+    }
+
+    /// The spellings the screen's copy is keyed by, pinned here rather than in the catalogue.
+    #[test]
+    fn the_offer_spellings_are_stable() {
+        assert_eq!(
+            TitleOffer::ALL
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>(),
+            ["play", "arriving", "absent", "acquire"]
+        );
+    }
+
+    /// The stable spelling and the wire spelling are one spelling, as they are for
+    /// [`Availability`].
+    #[test]
+    fn every_offer_round_trips_through_its_wire_spelling() {
+        for value in TitleOffer::ALL {
+            let json = serde_json::to_string(&value).expect("serializes");
+            assert_eq!(json, format!("\"{}\"", value.as_str()));
+            assert_eq!(
+                serde_json::from_str::<TitleOffer>(&json).expect("deserializes"),
+                value
+            );
+        }
+        assert!(
+            serde_json::from_str::<TitleOffer>("\"available\"").is_err(),
+            "an availability spelling is not an offer"
+        );
     }
 
     fn state_strategy() -> impl Strategy<Value = MediaItemState> {

@@ -2,10 +2,13 @@
 
 use std::num::NonZeroU32;
 
-use peregrine_domain::catalogue::{MetadataState, TitleDetails, TitleKind, TitleSubtype};
+use peregrine_domain::catalogue::{
+    ImageKind, MetadataState, TitleDetails, TitleKind, TitleSubtype,
+};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{AccountId, AccountScope, ExternalId, Provider};
 use peregrine_providers::capability::{Capabilities, Capability};
+use peregrine_providers::error::ProviderError;
 use peregrine_providers::provider::{SearchCandidate, SearchQuery};
 use peregrine_storage::{ArtworkPath, Database, StubTitle};
 use peregrine_sync::{SyncOutcome, record_list_answer, refresh_title, sync_search};
@@ -206,7 +209,11 @@ async fn a_stub_is_filled_from_the_provider_that_knows_it() {
         .expect("the refresh runs")
         .expect("the provider serves details");
     // The details come back because the caller needs the artwork paths they carry.
-    assert_eq!(written.poster_path.as_deref(), Some("/poster.jpg"));
+    assert_eq!(written.details.poster_path.as_deref(), Some("/poster.jpg"));
+    assert!(
+        written.artwork.is_empty(),
+        "a film has no season or episode pictures to fetch"
+    );
 
     let scope = peregrine_domain::AccountScope::unrestricted(
         peregrine_domain::AccountId::new(1).expect("an account"),
@@ -245,7 +252,7 @@ async fn a_list_answer_fills_an_empty_title_with_the_artwork_it_carried() {
         .expect("a read")
         .expect("the title");
     assert_eq!(
-        row.poster,
+        row.library.poster,
         Some(ArtworkPath {
             provider: Provider::Tmdb,
             path: "/poster.jpg".to_owned(),
@@ -253,8 +260,18 @@ async fn a_list_answer_fills_an_empty_title_with_the_artwork_it_carried() {
         "the path a list answer carried is what the catalogue keeps"
     );
     assert!(
-        row.synced,
-        "a provider answered about the title, which is what last_synced_at records"
+        !row.detailed,
+        "a list answer is not a details read, however many fields it carried"
+    );
+    let identity = database
+        .title_identity(scope(), id)
+        .await
+        .expect("a read")
+        .expect("the title");
+    assert_eq!(
+        identity.metadata_state,
+        peregrine_domain::catalogue::MetadataState::Listed,
+        "and the state says so, which is what `refresh_due` reads"
     );
 }
 
@@ -285,7 +302,7 @@ async fn a_later_list_answer_that_carries_no_artwork_does_not_clear_the_stored_o
         .expect("a read")
         .expect("the title");
     assert_eq!(
-        row.poster,
+        row.library.poster,
         Some(ArtworkPath {
             provider: Provider::Tmdb,
             path: "/poster.jpg".to_owned(),
@@ -294,8 +311,9 @@ async fn a_later_list_answer_that_carries_no_artwork_does_not_clear_the_stored_o
     );
     assert_eq!(
         row.library.title.metadata_state,
-        MetadataState::Partial,
-        "a list answer is a partial fill, the state a details read records too"
+        MetadataState::Listed,
+        "a list answer records the state that says a list answer is all that has happened, \
+         which is what keeps a details read worth asking for"
     );
 }
 
@@ -459,5 +477,257 @@ async fn a_list_answer_never_clears_a_field_a_details_fill_stored() {
         locals[0].released,
         Some("1999-03-31".parse().expect("a date")),
         "a date a details fill stored must survive a list answer that omits it"
+    );
+}
+
+/// A series the catalogue holds, with a TMDB id attached, and the provider that describes it.
+async fn described_show(
+    database: &Database,
+    details: TitleDetails,
+    seasons: Vec<peregrine_domain::catalogue::SeasonDetails>,
+) -> (i64, FakeMetadataProvider) {
+    let id = database
+        .insert_stub_title(StubTitle {
+            kind: TitleKind::Show,
+            subtype: TitleSubtype::Standard,
+            name: details.name.as_str().to_owned(),
+            original_name: None,
+            sort_name: details.name.as_str().to_lowercase(),
+            at: 1_000,
+        })
+        .await
+        .expect("a stub");
+    database
+        .attach_external_ids(
+            id,
+            &[peregrine_storage::TitleExternalId {
+                id: ExternalId::new(Provider::Tmdb, "1396").expect("an id"),
+                is_primary: true,
+                fetched_at: 1_000,
+            }],
+        )
+        .await
+        .expect("the id attaches");
+    (
+        id,
+        FakeMetadataProvider::describing_episodes(Provider::Tmdb, details, seasons),
+    )
+}
+
+fn show_details() -> TitleDetails {
+    TitleDetails {
+        kind: TitleKind::Show,
+        name: NonEmptyText::new("Breaking Bad").expect("a name"),
+        original_name: None,
+        overview: None,
+        tagline: None,
+        released: Some("2008-01-20".parse().expect("a date")),
+        runtime_minutes: None,
+        original_language: None,
+        origin_country: None,
+        rating: None,
+        votes: None,
+        popularity: None,
+        adult: None,
+        in_production: None,
+        season_count: Some(2),
+        episode_count: Some(9),
+        homepage: None,
+        poster_path: Some("/poster.jpg".to_owned()),
+        backdrop_path: None,
+    }
+}
+
+fn season_details(number: u32, poster: Option<&str>) -> peregrine_domain::catalogue::SeasonDetails {
+    peregrine_domain::catalogue::SeasonDetails {
+        season_number: peregrine_domain::catalogue::SeasonNumber::new(number),
+        name: Some(format!("Season {number}")),
+        overview: None,
+        air_date: Some("2008-01-20".parse().expect("a date")),
+        poster_path: poster.map(str::to_owned),
+        episode_count: Some(2),
+    }
+}
+
+fn episode_details(
+    season: u32,
+    episode: u32,
+    still: Option<&str>,
+) -> peregrine_domain::catalogue::EpisodeDetails {
+    peregrine_domain::catalogue::EpisodeDetails {
+        season_number: peregrine_domain::catalogue::SeasonNumber::new(season),
+        episode_number: peregrine_domain::catalogue::EpisodeNumber::new(episode),
+        name: Some(format!("Episode {episode}")),
+        overview: Some("An episode.".to_owned()),
+        air_date: still.map(|_| "2008-01-27".parse().expect("a date")),
+        runtime_minutes: Some(47),
+        still_path: still.map(str::to_owned),
+        rating: Some(8.1),
+        votes: Some(1_200),
+        episode_type: None,
+    }
+}
+
+#[tokio::test]
+async fn a_series_refresh_writes_its_seasons_and_their_episodes_and_hands_back_the_pictures() {
+    // The write side of the title page: two reads — the season list and one per season — and every
+    // field a switcher and an episode card draw. The pictures come back as provider-relative paths
+    // because the blobs belong in the image cache and this layer has none (`AGENTS R11`).
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let (id, provider) = described_show(
+        &database,
+        show_details(),
+        vec![season_details(1, Some("/s1.jpg")), season_details(2, None)],
+    )
+    .await;
+    let provider = provider
+        .with_episodes(1, vec![episode_details(1, 1, Some("/s1e1.jpg"))])
+        .with_episodes(2, vec![episode_details(2, 1, None)]);
+
+    let written = refresh_title(&provider, &database, id, TitleKind::Show, 2_000)
+        .await
+        .expect("the refresh runs")
+        .expect("the provider serves details");
+
+    assert_eq!(
+        written.artwork,
+        vec![
+            (ImageKind::Poster, "/s1.jpg".to_owned()),
+            (ImageKind::Still, "/s1e1.jpg".to_owned()),
+        ],
+        "a season with no poster and an episode with no still contribute nothing to fetch"
+    );
+    let scope = peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("an account"),
+    );
+    let seasons = database
+        .list_title_seasons(scope, id, 10)
+        .await
+        .expect("the season read");
+    assert_eq!(seasons.len(), 2);
+    assert_eq!(seasons[0].name.as_deref(), Some("Season 1"));
+    assert_eq!(
+        seasons[0]
+            .poster
+            .as_ref()
+            .map(|artwork| artwork.path.as_str()),
+        Some("/s1.jpg")
+    );
+    let episodes = database
+        .list_title_episodes(scope, id, Some(1), 10)
+        .await
+        .expect("the episode read");
+    assert_eq!(episodes.len(), 1);
+    assert_eq!(episodes[0].name.as_deref(), Some("Episode 1"));
+    assert_eq!(
+        episodes[0]
+            .still
+            .as_ref()
+            .map(|artwork| artwork.path.as_str()),
+        Some("/s1e1.jpg")
+    );
+    assert_eq!(
+        episodes[0].air_date,
+        Some("2008-01-27".parse().expect("a date"))
+    );
+}
+
+#[tokio::test]
+async fn a_season_the_provider_does_not_hold_does_not_stop_its_siblings_being_written() {
+    // One season's 404 is that season's problem: a series whose answer is missing one season still has
+    // the others, and failing the whole refresh would discard what did answer. It is also the shape a
+    // title page hits in practice — a specials season TMDB has no episodes for is the common case.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let (id, provider) = described_show(
+        &database,
+        show_details(),
+        vec![
+            season_details(1, None),
+            season_details(2, None),
+            season_details(3, Some("/s3.jpg")),
+        ],
+    )
+    .await;
+    let provider = provider
+        .with_episodes(1, vec![episode_details(1, 1, None)])
+        .with_season_failure(
+            2,
+            ProviderError::NotFound {
+                provider: Provider::Tmdb,
+            },
+        )
+        .with_episodes(3, vec![episode_details(3, 1, None)]);
+
+    let written = refresh_title(&provider, &database, id, TitleKind::Show, 2_000)
+        .await
+        .expect("a missing season is not a failed refresh")
+        .expect("the provider serves details");
+
+    assert_eq!(
+        written.artwork,
+        vec![(ImageKind::Poster, "/s3.jpg".to_owned())],
+        "the seasons that answered still contributed their pictures"
+    );
+    let scope = peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("an account"),
+    );
+    let seasons = database
+        .list_title_seasons(scope, id, 10)
+        .await
+        .expect("the season read");
+    assert_eq!(
+        seasons.len(),
+        3,
+        "the season that 404'd is still a season the list named"
+    );
+    let episodes = database
+        .list_title_episodes(scope, id, None, 10)
+        .await
+        .expect("the episode read");
+    let numbers: Vec<u32> = episodes
+        .iter()
+        .map(|episode| episode.season_number.get())
+        .collect();
+    assert_eq!(
+        numbers,
+        vec![1, 3],
+        "the seasons either side of the missing one were written"
+    );
+}
+
+#[tokio::test]
+async fn a_season_with_no_episodes_is_written_with_an_empty_episode_list() {
+    // The other shape of "nothing": the season list published season zero, and the season read answered
+    // an empty list. A season row is what the switcher draws, so it exists — and the episode read is
+    // empty rather than absent.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let (id, provider) =
+        described_show(&database, show_details(), vec![season_details(0, None)]).await;
+    let provider = provider.with_episodes(0, Vec::new());
+
+    refresh_title(&provider, &database, id, TitleKind::Show, 2_000)
+        .await
+        .expect("the refresh runs")
+        .expect("the provider serves details");
+
+    let scope = peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("an account"),
+    );
+    let seasons = database
+        .list_title_seasons(scope, id, 10)
+        .await
+        .expect("the season read");
+    assert_eq!(seasons.len(), 1);
+    assert_eq!(seasons[0].season_number.get(), 0);
+    assert_eq!(
+        database
+            .list_title_episodes(scope, id, Some(0), 10)
+            .await
+            .expect("the episode read")
+            .len(),
+        0
     );
 }

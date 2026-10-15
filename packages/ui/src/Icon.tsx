@@ -24,6 +24,15 @@ const PATHS = {
       <path d="M15.6 8.4 10.9 10.9 8.4 15.6 13.1 13.1Z" />
     </>
   ),
+  /** Browse: four tiles, which is what a filtered grid is. */
+  grid: (
+    <>
+      <rect height="6.5" rx="1.5" width="6.5" x="3.5" y="3.5" />
+      <rect height="6.5" rx="1.5" width="6.5" x="14" y="3.5" />
+      <rect height="6.5" rx="1.5" width="6.5" x="3.5" y="14" />
+      <rect height="6.5" rx="1.5" width="6.5" x="14" y="14" />
+    </>
+  ),
   /** Close: two strokes crossing, which read the same on all three platforms. */
   close: (
     <>
@@ -68,6 +77,43 @@ const PATHS = {
   "chevron-left": <path d="M15 5l-7 7 7 7" />,
   /** One page on. */
   "chevron-right": <path d="M9 5l7 7-7 7" />,
+  /** Refresh: a circle broken at its top right, with the head that asks again at the break. */
+  refresh: (
+    <>
+      <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+      {/* The head is a V whose vertex is where the arc would have met the top of the circle: a
+          corner mark (an `L` of two strokes) reads as a stray bracket at 20 px, which is the size a
+          toolbar draws it at. */}
+      <path d="M18.9 2.6 21 5.9 17.7 8" />
+    </>
+  ),
+  /** Search: the magnifier, which reads the same way on all three platforms. */
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      {/* The handle starts just inside the lens so the two strokes meet under a round cap rather than
+          leaving a notch at the join. */}
+      <path d="m15.8 15.8 4.2 4.2" />
+    </>
+  ),
+  /** Play: the triangle every player uses, filled rather than stroked — an outlined one reads as a
+      "next" control at 20 px, and a solid mark is what the shape means. */
+  play: <path d="M8.4 5.6 18.6 12 8.4 18.4Z" fill="currentColor" />,
+  /** Information: the mark a "more" action carries, so the word is not the only signal. */
+  info: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11.2v4.6" />
+      <path d="M12 7.9h.01" />
+    </>
+  ),
+  /** Sidebar: a window with its navigation column marked, which is the shape the control toggles. */
+  sidebar: (
+    <>
+      <rect height="16" rx="2" width="18" x="3" y="4" />
+      <path d="M9 4v16" />
+    </>
+  ),
 } as const;
 
 /** The geometry of one icon, as elements inside the shared `svg`. */

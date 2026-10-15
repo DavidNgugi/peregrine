@@ -75,7 +75,10 @@ impl Harness {
             directory.path(),
             directory.path().join("artwork"),
             Arc::new(SilentSink),
-        );
+        )
+        // A command test never reaches the developer's keychain (`AGENTS R14`): a real read from a
+        // freshly built binary raises a macOS access prompt and waits on a person.
+        .with_secrets(Arc::new(crate::test_support::NoCredentials));
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();
@@ -296,6 +299,55 @@ fn forget_match_rule_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `start_playback` resolves the title, the file, and the listener through the runtime, so a dead
+/// runtime is the failure it has — and the one refusal that matters here is that no listener was
+/// opened, which is why the contract asserts the command *fails* rather than what it returns.
+fn start_playback_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::start_playback(harness.dead_state(), crate::library::TitleRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+/// `stop_playback` needs the runtime too, and reports the same failure rather than `false`: "nothing is
+/// playing" and "I could not be asked" are different answers, and a screen that read the second as the
+/// first would show an idle player over a session it never closed.
+fn stop_playback_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::stop_playback(harness.dead_state(), crate::library::SessionRef { id: 0 })
+            .await
+            .map(drop)
+    })
+}
+
+/// `start_poster_capture` resolves the title and opens a listener through the runtime, so it fails the
+/// same way — and the failure that matters is that no socket was opened.
+fn start_poster_capture_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::start_poster_capture(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `stop_poster_capture` answers the runtime's failure rather than `false`, for the reason
+/// `stop_playback` does: a backfill that read "I could not be asked" as "there was nothing open" would
+/// leave a listener behind and report that it had cleaned up.
+fn stop_poster_capture_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::stop_poster_capture(
+            harness.dead_state(),
+            crate::library::SessionRef { id: 0 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// `get_title` reads through the runtime, so it fails the same way.
 fn get_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
@@ -312,6 +364,20 @@ fn list_episodes_without_a_runtime(harness: &Harness) -> Invocation<'_> {
             harness.dead_state(),
             crate::library::TitleRef { id: 1 },
             None,
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `list_seasons` reads through the runtime, so it fails the same way.
+fn list_seasons_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::list_seasons(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
         )
         .await
         .map(drop)
@@ -321,7 +387,7 @@ fn list_episodes_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 /// `search_titles` reads through the runtime, so it fails the same way.
 fn search_providers_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::discover::search_providers(harness.dead_state(), "alien".to_owned(), None)
+        crate::discover::search_providers(harness.dead_state(), "alien".to_owned(), None, None)
             .await
             .map(drop)
     })
@@ -344,7 +410,7 @@ fn refresh_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 /// read has one failure more, the journal the fetch is queued in, and that is still not a provider.
 fn home_rails_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::discover::home_rails(harness.dead_state())
+        crate::discover::home_rails(harness.dead_state(), None)
             .await
             .map(drop)
     })
@@ -354,6 +420,44 @@ fn home_rails_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 fn refresh_rails_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::discover::refresh_rails(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+/// `browse` reads through the runtime before it can reach a provider, so a runtime that never
+/// started is the failure — and it is the same `Internal` the search read reports, because the
+/// two ask the same question of the same core.
+fn browse_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::browse(
+            harness.dead_state(),
+            crate::discover::RailKindDto::Movie,
+            1,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `genres` answers from the runtime's own session cache or asks a provider, both of which need a
+/// runtime to exist first.
+fn genres_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::genres(harness.dead_state(), crate::discover::RailKindDto::Movie)
+            .await
+            .map(drop)
+    })
+}
+
+/// `recommendations` resolves the title through the runtime and then asks a provider, so a runtime
+/// that never started fails before either.
+fn recommendations_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::recommendations(harness.dead_state(), crate::library::TitleRef { id: 1 })
             .await
             .map(drop)
     })
@@ -549,6 +653,30 @@ fn provider_cases() -> Vec<ContractCase> {
             },
             drive: refresh_rails_without_a_runtime,
         },
+        ContractCase {
+            command: "browse",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: browse_without_a_runtime,
+        },
+        ContractCase {
+            command: "genres",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: genres_without_a_runtime,
+        },
+        ContractCase {
+            command: "recommendations",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: recommendations_without_a_runtime,
+        },
     ]
 }
 
@@ -665,6 +793,12 @@ fn library_cases() -> Vec<ContractCase> {
 }
 
 /// The commands the shell's own chrome reaches.
+// One case per command, tabulated rather than written as logic: the length is the point, and splitting
+// the table would separate a command from the expectation beside it.
+#[expect(
+    clippy::too_many_lines,
+    reason = "an inline table of contract cases, not logic"
+)]
 fn autostart_cases() -> Vec<ContractCase> {
     vec![
         ContractCase {
@@ -716,6 +850,14 @@ fn autostart_cases() -> Vec<ContractCase> {
             drive: list_episodes_without_a_runtime,
         },
         ContractCase {
+            command: "list_seasons",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_seasons_without_a_runtime,
+        },
+        ContractCase {
             command: "list_match_rules",
             expected: Expected::Fails {
                 code: ErrorCode::Internal,
@@ -730,6 +872,38 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: forget_match_rule_without_a_runtime,
+        },
+        ContractCase {
+            command: "start_playback",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: start_playback_without_a_runtime,
+        },
+        ContractCase {
+            command: "stop_playback",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: stop_playback_without_a_runtime,
+        },
+        ContractCase {
+            command: "start_poster_capture",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: start_poster_capture_without_a_runtime,
+        },
+        ContractCase {
+            command: "stop_poster_capture",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: stop_poster_capture_without_a_runtime,
         },
         ContractCase {
             command: "match_unmatched",

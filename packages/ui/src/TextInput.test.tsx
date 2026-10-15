@@ -54,4 +54,32 @@ describe("TextInput", () => {
     expect(markup).toContain('placeholder="Alien"');
     expect(markup).toContain('value="al"');
   });
+
+  it("draws the focus ring on the input by default", () => {
+    // The rule a reader of this primitive should be able to rely on: the field shows focus itself, with
+    // the token ring rather than the browser's default outline.
+    const markup = renderToStaticMarkup(<TextInput label="Search" />);
+
+    expect(markup).toContain("focus-visible:outline-2");
+    expect(markup).toContain("outline-focus-ring");
+    expect(markup).not.toContain("focus-visible:outline-none");
+  });
+
+  it("hands the focus ring to the caller when asked, so a composite field draws one ring", () => {
+    // The bug this prop exists for: Discover's search box is an input restyled into a transparent,
+    // borderless, rounded box *inside* a pill, and with the default ring the input drew a second rounded
+    // outline within the pill — two concentric pills on focus. `"none"` is the caller saying "the pill is
+    // the field, and I draw the affordance there".
+    const markup = renderToStaticMarkup(
+      <TextInput
+        className="[&_input]:rounded-full"
+        focusRing="none"
+        label="Search"
+        type="search"
+      />,
+    );
+
+    expect(markup).toContain("focus-visible:outline-none");
+    expect(markup).not.toContain("outline-focus-ring");
+  });
 });

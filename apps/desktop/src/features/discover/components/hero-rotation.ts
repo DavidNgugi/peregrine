@@ -126,30 +126,3 @@ export function selectSlide(state: RotationState, index: number, count: number):
   }
   return { index: Math.min(Math.max(index, 0), count - 1), epoch: state.epoch + 1 };
 }
-
-/** Why the hero's primary action cannot be taken. */
-export type PlayReason = "noFile" | "noPlayer";
-
-/**
- * What the hero's Play is: an action, or a control that is disabled for a stated reason.
- *
- * `noFile` is the core's fact about *this title* — the library holds no file for it — and it is
- * answered first, because it is the one a person can do something about. `noPlayer` is the build's
- * fact and is passed in rather than assumed: this build has no playback surface at all (`PG-E15`),
- * so no caller hands the hero a handler, and a control that fired nothing would be the inert
- * button `PG-E1-07` forbids.
- */
-export type PlayAction =
-  | { readonly kind: "play" }
-  | { readonly kind: "unavailable"; readonly reason: PlayReason };
-
-/** The action, from the two facts that decide it. */
-export function heroPlay(playable: boolean, player: boolean): PlayAction {
-  if (!playable) {
-    return { kind: "unavailable", reason: "noFile" };
-  }
-  if (!player) {
-    return { kind: "unavailable", reason: "noPlayer" };
-  }
-  return { kind: "play" };
-}

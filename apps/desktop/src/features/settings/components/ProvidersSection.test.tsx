@@ -24,6 +24,8 @@ function provider(overrides: Partial<ProviderDto> = {}): ProviderDto {
 function settings(state: Partial<ProviderSettings> = {}): ProviderSettings {
   return {
     providers: [],
+    // The ordinary case: the keychain answered, so a provider's flag is the whole truth.
+    store: "answered",
     loading: false,
     failed: false,
     busy: false,
@@ -32,6 +34,7 @@ function settings(state: Partial<ProviderSettings> = {}): ProviderSettings {
     saveKey: () => Promise.resolve(),
     testConnection: () => Promise.resolve(),
     removeKey: () => Promise.resolve(),
+    reload: () => undefined,
     ...state,
   };
 }
@@ -100,6 +103,72 @@ describe("ProvidersSection", () => {
     expect(unconfigured).not.toContain("Test connection");
     expect(configured).toContain("Test connection");
     expect(configured).toContain("Remove");
+  });
+
+  it("says the keychain refused access rather than that no key is stored", () => {
+    // **The sentence this test exists for.** macOS binds a keychain item's access to the code
+    // signature of the application that created it, so a rebuilt or reinstalled binary is a
+    // different application and is asked; a denial leaves every provider unconfigured exactly as a
+    // first run does. A row that said "No key stored" there is what makes a user believe a reinstall
+    // deleted something that is still in their keychain.
+    const denied = markup(settings({ providers: [provider()], store: "denied" }));
+
+    expect(denied).toContain("Keychain access refused");
+    expect(denied).toContain("Nothing has been deleted");
+    expect(denied).toContain("Keychain Access");
+    expect(denied).not.toContain("No key stored");
+    expect(denied).toContain("Try again");
+  });
+
+  it("says there is no keychain on this system rather than that the key is gone", () => {
+    const unavailable = markup(settings({ providers: [provider()], store: "unavailable" }));
+
+    expect(unavailable).toContain("No keychain available");
+    expect(unavailable).toContain("not available in this session");
+    expect(unavailable).not.toContain("No key stored");
+  });
+
+  it("claims nothing about what is stored before the keychain has been read", () => {
+    // The state a launch is in until the startup read answers. A settings screen opened inside that
+    // window is the other half of the same defect: it was saying "No key stored" about a store
+    // nobody had looked in yet.
+    const unread = markup(settings({ providers: [provider()], store: "unread" }));
+
+    expect(unread).toContain("has not finished reading your keychain");
+    expect(unread).toContain("Checking the keychain");
+    expect(unread).toContain("does not delete the key");
+    expect(unread).not.toContain("No key stored");
+    // And a way to ask again without reopening the app, because the request may just have been
+    // allowed.
+    expect(unread).toContain("Try again");
+  });
+
+  it("still says a provider is configured when a later read was refused", () => {
+    // The adapters built from a key that was read once are still in hand, so the session can still
+    // ask that provider. The section explains the store; it does not overrule the flag — which is why
+    // the row keeps "Configured" and the keychain sentence is the section's rather than the row's.
+    const refused = markup(
+      settings({ providers: [provider({ configured: true })], store: "denied" }),
+    );
+
+    expect(refused).toContain("Configured");
+    expect(refused).not.toContain("No key stored");
+    expect(refused).toContain("Nothing has been deleted");
+  });
+
+  it("offers no retry once the keychain has answered", () => {
+    // Nothing to ask again: the store answered, and a control that re-read it would be a button that
+    // does nothing visible.
+    const answered = markup(settings({ providers: [provider()] }));
+
+    expect(answered).not.toContain("Try again");
+  });
+
+  it("says where the key lives, so a reinstall is not mistaken for a deletion", () => {
+    const html = markup(settings({ providers: [provider()] }));
+
+    expect(html).toContain("keychain");
+    expect(html).toContain("reinstalling Peregrine does not remove it");
   });
 
   it("writes the key field as a password field, never in clear text", () => {

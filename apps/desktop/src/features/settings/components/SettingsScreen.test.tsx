@@ -46,6 +46,7 @@ function noLibraries(): LibraryRoots {
 function noProviders(): ProviderSettings {
   return {
     providers: [],
+    store: "answered",
     loading: false,
     failed: false,
     busy: false,
@@ -54,6 +55,7 @@ function noProviders(): ProviderSettings {
     saveKey: () => Promise.resolve(),
     testConnection: () => Promise.resolve(),
     removeKey: () => Promise.resolve(),
+    reload: () => undefined,
   };
 }
 

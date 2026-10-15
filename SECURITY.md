@@ -36,7 +36,7 @@ Supported versions: the latest stable release and the immediate previous minor. 
 | Provider HTTP responses | Untrusted | Size caps, content-type checks, validating decode, no HTML rendering of provider strings, image decode through a bounded decoder |
 | Media, subtitle, and container files | Hostile | Decoded by out-of-process mpv and ffmpeg; our parsers are fuzzed; subtitle text is treated as data and rendered by libass, never by our UI |
 | Local webview | Semi-trusted | Tauri capabilities per window, strict CSP, no `eval`, no remote code in the main window, sandboxed trailer webview with no IPC |
-| Loopback HTTP server | Any local process, and any web page via DNS rebinding | Loopback-only bind, per-session token, `Host` header validation, no listing, `no-store`, session-lifetime socket |
+| Loopback HTTP server | Any local process, and any web page via DNS rebinding | Loopback-only bind on an ephemeral port, a per-session token in the request path, `Host` header validation, no listing, `no-store` and `nosniff` on every response, and a socket that dies with the session (ADR 0023, T10) |
 | LAN HTTP server (casting) | Any device on the network | Off by default, exists only during a session, interface-bound, separate token, optional PIN, single-file-scoped routes |
 | Local network device responses | Untrusted | Length-bounded parsing of SSDP and mDNS responses, no code or path from a device is ever trusted |
 | Filesystem | User data | `PathGuard` canonicalization with root allowlists and symlink-escape rejection; the only way to obtain a writable path |
@@ -56,7 +56,7 @@ Supported versions: the latest stable release and the immediate previous minor. 
 | T7 | Malicious image exploiting a decoder | Bounded decode (dimension and pixel caps), the `image` crate kept current, decode on a blocking thread behind a catch, and a discarded result on failure |
 | T8 | Provider response containing HTML or script injected into the UI | Provider strings are rendered as text nodes only; no `dangerouslySetInnerHTML` anywhere (lint gate); CSP forbids inline and remote script |
 | T9 | Compromised webview calling privileged commands | Capabilities are per window and minimal; the player window and trailer webview cannot call filesystem, shell, or download commands |
-| T10 | DNS rebinding or a local process reaching the loopback streaming server | `Host` header must be loopback; a per-session bearer token is required; routes are scoped to a single file; no listing; the socket dies with the session |
+| T10 | DNS rebinding or a local process reaching the loopback streaming server | `Host` must name loopback and this listener's port, checked **before** the token; a per-session token is required and is compared byte for byte; the token is a **path segment**, because a `<video>` element cannot set a header — see the note below; routes are scoped to a single file and a path the route does not describe is refused; no listing; `no-store` and `nosniff`; the socket dies with the session |
 | T11 | Exposed LAN cast server leaking media to the network | Off by default, explicit enablement with a plain-language warning, interface-bound, session-scoped, optional PIN, rate-limited, and closed on session end |
 | T12 | Deep link abuse (`peregrine://magnet/...` dropped by a web page) | Magnet deep links require explicit confirmation showing the inspection report before anything is added |
 | T13 | Secret leakage through logs, diagnostics bundles, or crash reports | `Secret` wrapper with no `Debug`/`Display`; a redaction layer that also scrubs key-shaped strings; crash reports opt-in and scrubbed; config export excludes secrets |
@@ -82,6 +82,33 @@ Supported versions: the latest stable release and the immediate previous minor. 
 | T35 | Unlock brute force, or an app PIN being shoulder-surfed or read from storage | OS authentication is primary; app PIN is a documented fallback; attempts back off exponentially and are audited; the PIN is stored only as a hash |
 | T31 | Resource exhaustion: repeated transcode requests pinning the CPU or filling the disk | Transcode is capped per device and globally, hardware encode is preferred, direct play is offered first, and the free-space floor applies as it does to downloads |
 | T27 | The agent audit trail itself leaking sensitive arguments | `mcp_call.args_summary` is redacted and size-capped at write time; raw arguments are never persisted; tokens exist only as hashes |
+
+### The loopback token is in the URL, and that is bounded rather than hidden
+
+A `<video>` element cannot set an `Authorization` header, so a header-borne bearer token is not
+available to the only client the loopback media server has. The token therefore travels as a path
+segment — `GET /media/{token}` — which is the one concession in that design and it is recorded here
+rather than left to be discovered (ADR [0023](./docs/adr/0023-in-app-video-surface.md) §2).
+
+The usual reasons a token in a URL is bad do not apply, and each of them is a fact about this build
+rather than a hope:
+
+* **No `Referer` leaves.** The document's CSP forbids every remote origin, so there is no third party
+  for a referrer to reach, and the client is a media element rather than a page that navigates.
+* **No history and no logs.** The URL is never written to the database, never emitted as an event, and
+  never logged: `SessionToken` has a redacting `Debug`, no `Display`, and the server's own debug line
+  carries the port and nothing else.
+* **One file, one socket, one session.** The route serves the single path the session was opened for,
+  the listener binds an ephemeral loopback port, and the socket closes when the session ends or the
+  value is dropped.
+* **The token's job is to stop a web page, not a local process.** A process running as the same user
+  can already read the file directly, so a token that stopped it would be defending nothing. What the
+  token and the `Host` check actually defeat is the DNS-rebinding case in T10 — a page at `evil.com`
+  that resolves to `127.0.0.1`, whose request arrives with `Host: evil.com` and is refused before the
+  token is read.
+
+What the token is *not* defended against, stated so nobody assumes otherwise: another local process
+that observes the renderer's memory or the URL. That process has the file already.
 
 ## Controls by area
 
@@ -114,6 +141,8 @@ We name these rather than pretend they do not exist.
 | Deep-link magnets are classified by the name in the URI, not verified content | The inspection report is the verification, and it requires user confirmation | Confirmation dialog shows the inspection result before any download starts |
 | **App-level accounts on a shared OS login are a usability boundary, not a security boundary** | The same OS user owns the database, the config, and the keyring, so a determined child with file access can read or reset them. Encrypting the database would not fix it, because the running app under the same user must hold the key | OS-authenticated switching (biometric or Hello, bound to the parent's identity), no bypass or reset path, rate-limited and audited attempts, and the limitation stated once in the parental settings. Separate OS accounts are the documented real fix |
 | Local database is unencrypted | Encrypting it would break portable mode, backup, and inspection, and the threat model is a local attacker who already has the user's session | Secrets are never in it; filesystem permissions are the boundary |
+| macOS binds a keychain item's access to the code signature of the application that created it, so a rebuilt, re-signed, or reinstalled binary is asked for access again | The binding is the OS's, and it is what stops another application from reading our entry silently | The key is never deleted by this: the item stays in the login keychain under `Peregrine`, a denial is reported as `denied` rather than as an absent key (`CredentialStore`), and Settings says the key is still there and how to grant access. The `secret_ref` pointer in the database is not what the app reads, so wiping the data directory cannot orphan a stored key either |
+| A key entered under one OS login is invisible under another, and on a machine with no Secret Service there is nowhere to store one | The store is per-user by construction, and the explicit file-backed backend does not exist yet | The state is reported as `unavailable` rather than as a missing key, so a user is never told their key was deleted; the backend selection is `PLAN` §Phase 9's "Secrets without a keyring" row and is not yet built |
 | No sandbox on the packaged desktop app beyond OS defaults | macOS App Sandbox and Flatpak strict confinement conflict with managing user-chosen media directories | Minimal capabilities, no shell, no remote code, and a documented Flatpak manifest with portals |
 
 ## Release security checklist

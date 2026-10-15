@@ -28,10 +28,16 @@ function contentArea(markup: string): string {
 describe("App", () => {
   it("composes the shell, the current screen, and the player bar", () => {
     const markup = renderToStaticMarkup(<App platform="macos" route={HOME} />);
-    expect(markup).toContain("Peregrine");
-    expect(markup).toContain("Discover");
-    expect(markup).toContain("Nothing here yet");
-    expect(markup).toContain("Nothing playing");
+
+    // The three regions, each anchored on something only it draws: the navigation column's own
+    // landmark, the current screen's heading and toolbar, and the player bar's idle line. A
+    // screen's rails read answers on an effect, which a static render never runs, so what is
+    // composed here is the screen's first frame — and that frame deliberately claims nothing about
+    // a catalogue nobody has read, rather than drawing "Nothing here yet" over one.
+    expect(markup).toContain(`aria-label="${i18n.t("shell.nav.label")}"`);
+    expect(contentArea(markup)).toContain("Discover");
+    expect(contentArea(markup)).toContain(i18n.t("discover.search.placeholder"));
+    expect(markup).toContain(i18n.t("shell.nowPlaying.idle"));
   });
 
   it("offers a reachable theme control with an accessible name", () => {
@@ -56,21 +62,31 @@ describe("App", () => {
     const markup = renderToStaticMarkup(<App platform="macos" route={HOME} />);
     const content = contentArea(markup);
 
-    expect(content).toContain("Nothing here yet");
+    // What the screen draws on its first frame: its own heading and its toolbar, which is what a
+    // reader gets while the rails read is still in the air.
+    expect(content).toContain("<h1");
+    expect(content).toContain(i18n.t("discover.search.placeholder"));
     expect(content).not.toContain("data-tauri-drag-region");
-    expect(content).not.toContain("Nothing playing");
-    expect(content).not.toContain('aria-label="Screens"');
+    expect(content).not.toContain(i18n.t("shell.nowPlaying.idle"));
+    expect(content).not.toContain(`aria-label="${i18n.t("shell.nav.label")}"`);
   });
 
   it("lists one sidebar row per screen, in the order the shell declares them", () => {
     const nav = sidebar(renderToStaticMarkup(<App platform="macos" route={HOME} />));
-    expect(nav.match(/<button/gu)).toHaveLength(SCREENS.length);
 
-    // The labels come from the catalogue rather than from a copy of it here, so a screen
-    // added with a new key is covered by this test rather than silently untested.
+    // A row is counted by the label it draws rather than by every `<button` in the landmark: the
+    // header slot above the rows holds the caller's window chrome — one collapse control today —
+    // and chrome is not a screen. A screen added to the table without a row still fails here,
+    // because its label would then appear nowhere in the navigation; and the labels come from the
+    // catalogue rather than from a copy of it here, so a screen added with a new key is covered by
+    // this test rather than silently untested.
     let previous = -1;
     for (const entry of SCREENS) {
-      const at = nav.indexOf(i18n.t(entry.labelKey));
+      const label = i18n.t(entry.labelKey);
+      const rows = nav.split(label).length - 1;
+      expect(rows, `${entry.labelKey} is one row`).toBe(1);
+
+      const at = nav.indexOf(label);
       expect(at, entry.labelKey).toBeGreaterThan(previous);
       previous = at;
     }

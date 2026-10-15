@@ -16,17 +16,18 @@
 //! method returns a boxed future through [`ProviderFuture`], which costs one allocation per
 //! network request and buys object safety without a proc-macro dependency.
 //!
-//! # Why the port has five operations and not eight
+//! # Why the port's operations are a subset of the eight capabilities
 //!
 //! `ARCHITECTURE` §13 lists eight capabilities. `search` was the first, and it is the one whose
 //! request and response the flows fixed early — FLOWS F3 has the sync service call `search` and get
 //! candidates back to upsert as stub titles. `title` (PG-E5-07) and `image` (PG-E5-15) followed as
-//! their flows arrived, and `rail` followed with the Discover screen's rails (PG-E7-08): it answers
-//! the same [`SearchCandidate`] a search does, which is the whole reason it needed no new type. The
-//! rest return *drafts* of the catalogue entities, which carry no row id and therefore cannot be the
-//! domain's stored types; those drafts are the normal form, and the normal form is designed against
-//! real provider payloads in PG-E5-06 to PG-E5-16 rather than guessed at here from the providers'
-//! documentation.
+//! their flows arrived, `rail` followed with the Discover screen's rails (PG-E7-08): it answers the
+//! same [`SearchCandidate`] a search does, which is the whole reason it needed no new type, and
+//! `seasons`/`season_episodes` followed with the title page's season switcher and episode cards
+//! (PG-E5-06, PG-E7-13). The rest return *drafts* of the catalogue entities, which carry no row id and
+//! therefore cannot be the domain's stored types; those drafts are the normal form, and the normal form
+//! is designed against real provider payloads in PG-E5-06 to PG-E5-16 rather than guessed at here from
+//! the providers' documentation.
 //!
 //! [`MetadataProvider::check`] is the one operation that is **not** one of those eight, and it is here
 //! because it belongs to no single capability: it asks whether the provider can be used at all. A
@@ -39,7 +40,7 @@ use std::pin::Pin;
 
 use jiff::civil::Date;
 
-use peregrine_domain::catalogue::TitleKind;
+use peregrine_domain::catalogue::{EpisodeDetails, SeasonDetails, SeasonNumber, TitleKind};
 use peregrine_domain::id::ExternalId;
 use peregrine_domain::text::NonEmptyText;
 
@@ -142,6 +143,242 @@ impl RailKind {
             Self::PopularShows | Self::OnTheAirShows | Self::TopRatedShows => Some(TitleKind::Show),
         }
     }
+
+    /// Parses the name [`RailKind::as_str`] writes, or `None` for one this build does not know.
+    ///
+    /// The other half of a stored vocabulary: a rail's name is written down — in a manifest, a
+    /// journal payload, an IPC call — and reading it back has to be the same decision as writing
+    /// it, rather than a second list of names somewhere else that can drift from this one.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        // A `match` on the literal rather than a scan of `ALL`: the order of `ALL` is the order a
+        // screen shows the rails in, and a reader here should not have to check that changing it
+        // cannot change what a stored name means.
+        match value {
+            "trending_week" => Some(Self::TrendingWeek),
+            "popular_movies" => Some(Self::PopularMovies),
+            "top_rated_movies" => Some(Self::TopRatedMovies),
+            "upcoming_movies" => Some(Self::UpcomingMovies),
+            "popular_shows" => Some(Self::PopularShows),
+            "on_the_air_shows" => Some(Self::OnTheAirShows),
+            "top_rated_shows" => Some(Self::TopRatedShows),
+            _ => None,
+        }
+    }
+}
+
+/// How a browse page is ordered.
+///
+/// The vocabulary is a person's — the most popular, the best reviewed, the newest, the oldest —
+/// rather than a provider's sort parameter, for the reason [`RailKind`] states about named lists:
+/// TMDB spells these `popularity.desc`, `vote_average.desc`, `primary_release_date.desc`, and
+/// `primary_release_date.asc`, and a port that copied those names would make every other provider
+/// answer in TMDB's vocabulary.
+///
+/// **Popularity is the default because it is the only order every provider means the same thing
+/// by.** A score is a provider's own scale (see [`SearchCandidate::rating`]), and a date is missing
+/// for anything unreleased or undated, so both are orders a caller chooses deliberately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[repr(u8)]
+pub enum BrowseSort {
+    /// What the provider's audience is watching, most first.
+    #[default]
+    Popularity,
+    /// The best reviewed first.
+    Rating,
+    /// The most recently released first.
+    Newest,
+    /// The oldest first.
+    Oldest,
+}
+
+impl BrowseSort {
+    /// Every order, in the order a filter control offers them.
+    pub const ALL: [Self; 4] = [Self::Popularity, Self::Rating, Self::Newest, Self::Oldest];
+
+    /// The stable identifier an order carries across IPC, a log line, and a saved filter.
+    ///
+    /// It is deliberately not the control's label: a label is copy and belongs in the catalogue of
+    /// translations (`packages/i18n`), so renaming "Newest" is a copy change rather than a change
+    /// to what a caller asks for.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Popularity => "popularity",
+            Self::Rating => "rating",
+            Self::Newest => "newest",
+            Self::Oldest => "oldest",
+        }
+    }
+
+    /// Parses the name [`BrowseSort::as_str`] writes, or `None` for one this build does not know.
+    ///
+    /// The other half of a stored vocabulary: an order is written down — in a URL, a saved smart
+    /// collection, an IPC call — and reading it back has to be the same decision as writing it.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "popularity" => Some(Self::Popularity),
+            "rating" => Some(Self::Rating),
+            "newest" => Some(Self::Newest),
+            "oldest" => Some(Self::Oldest),
+            _ => None,
+        }
+    }
+}
+
+/// What one browse page asks a provider for.
+///
+/// **A queried list, not a fixed one.** [`RailKind`] is the vocabulary of the *named* lists a home
+/// screen draws; this is the vocabulary of a list a caller composes — which kind, how ordered, and
+/// the two filters a person reaches for first, a genre and a floor under the score. It exists
+/// because a rail takes no arguments, so "the action films from the eighties, best reviewed first"
+/// is a question the port could not previously ask.
+///
+/// The page is a [`NonZeroU32`] for the reason [`MetadataProvider::rail`] gives: a provider's lists
+/// are paged from one, so "the zeroth page" is unrepresentable rather than refused. The genre is a
+/// *provider's own* identifier, which is what its filter takes; it comes back from
+/// [`MetadataProvider::genres`] and never from a screen. The floor is a whole score out of ten,
+/// which is the scale every filter control this application draws uses; an adapter whose provider
+/// scores out of five maps it, and the port normalizes nothing (see [`SearchCandidate::rating`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowseRequest {
+    kind: TitleKind,
+    page: NonZeroU32,
+    sort: BrowseSort,
+    genre: Option<u32>,
+    min_rating: Option<u8>,
+}
+
+impl BrowseRequest {
+    /// Builds a page request: `kind`'s titles, ordered by `sort`, optionally within one of the
+    /// provider's genres and optionally floored at `min_rating` out of ten.
+    #[must_use]
+    pub const fn new(
+        kind: TitleKind,
+        page: NonZeroU32,
+        sort: BrowseSort,
+        genre: Option<u32>,
+        min_rating: Option<u8>,
+    ) -> Self {
+        Self {
+            kind,
+            page,
+            sort,
+            genre,
+            min_rating,
+        }
+    }
+
+    /// Film or series, which is a fact about the endpoint rather than a filter over the answer.
+    #[must_use]
+    pub const fn kind(&self) -> TitleKind {
+        self.kind
+    }
+
+    /// Which page of the list to read, counting from one.
+    #[must_use]
+    pub const fn page(&self) -> NonZeroU32 {
+        self.page
+    }
+
+    /// How the provider is asked to order the page.
+    #[must_use]
+    pub const fn sort(&self) -> BrowseSort {
+        self.sort
+    }
+
+    /// The provider's own identifier for the genre to restrict to, when the caller picked one.
+    #[must_use]
+    pub const fn genre(&self) -> Option<u32> {
+        self.genre
+    }
+
+    /// The lowest score, out of ten, a title may have to appear, when the caller set a floor.
+    #[must_use]
+    pub const fn min_rating(&self) -> Option<u8> {
+        self.min_rating
+    }
+}
+
+/// One genre a provider filters by, as the provider names it.
+///
+/// It is *not* [`peregrine_domain::catalogue::Genre`]: that type carries the `i64` row id
+/// `peregrine-storage` assigns, and a provider's identifier is not a row. The id is what a
+/// [`BrowseRequest`] hands back to the provider, and the name is what a filter control draws.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenreRef {
+    id: u32,
+    name: NonEmptyText,
+}
+
+impl GenreRef {
+    /// A genre the provider identified by `id` and named `name`.
+    #[must_use]
+    pub const fn new(id: u32, name: NonEmptyText) -> Self {
+        Self { id, name }
+    }
+
+    /// The provider's own identifier, which is what its browse filter takes.
+    #[must_use]
+    pub const fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// The name a filter control draws.
+    #[must_use]
+    pub const fn name(&self) -> &NonEmptyText {
+        &self.name
+    }
+}
+
+/// One page of a provider's list, with whether another page follows it.
+///
+/// **A bare list cannot answer "is there more".** A page that carried only its items would leave a
+/// screen to guess from the item count, and the two guesses are both wrong: a full-looking page
+/// that happens to be the last one sends the reader to a page past the provider's end on every
+/// scroll, and a short final page is indistinguishable from a truncation. TMDB answers
+/// `total_pages` and `page`; this is where that answer travels, so the decision belongs to the
+/// adapter that read it rather than to a screen counting tiles (`AGENTS R7`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderPage {
+    items: Vec<SearchCandidate>,
+    has_more: bool,
+}
+
+impl ProviderPage {
+    /// A page holding `items`, with `has_more` saying whether a further page exists.
+    #[must_use]
+    pub const fn new(items: Vec<SearchCandidate>, has_more: bool) -> Self {
+        Self { items, has_more }
+    }
+
+    /// A page with nothing on it and nothing after it — an empty answer, not a failure.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self {
+            items: Vec::new(),
+            has_more: false,
+        }
+    }
+
+    /// The candidates this page holds, in the provider's order.
+    #[must_use]
+    pub fn items(&self) -> &[SearchCandidate] {
+        &self.items
+    }
+
+    /// The same, owned, for a caller that is done with the page.
+    #[must_use]
+    pub fn into_items(self) -> Vec<SearchCandidate> {
+        self.items
+    }
+
+    /// Whether asking for the next page would find anything.
+    #[must_use]
+    pub const fn has_more(&self) -> bool {
+        self.has_more
+    }
 }
 
 /// What a provider operation answers with, as a future the caller can await.
@@ -221,17 +458,24 @@ pub struct SearchCandidate {
     rating: Option<f64>,
     overview: Option<String>,
     votes: Option<u64>,
+    /// The provider's own identifiers for this title's genres, as a *list* answer spells them.
+    ///
+    /// **Empty means "the answer did not say", not "this title has no genres".** A details read spells
+    /// genres as objects with names rather than as a list of ids, so a candidate built from one carries
+    /// none; only the list endpoints send `genre_ids`. A caller must therefore read an empty vector as
+    /// absent evidence — see `peregrine-app`'s recommendation read, which is careful about exactly that.
+    genre_ids: Vec<u32>,
 }
 
 impl SearchCandidate {
     /// Builds a candidate that carries only what every provider's list carries.
     ///
-    /// The artwork, the rating, the synopsis, and the vote count are set with
+    /// The artwork, the rating, the synopsis, the vote count, and the genres are set with
     /// [`SearchCandidate::with_artwork_path`], [`SearchCandidate::with_backdrop_path`],
-    /// [`SearchCandidate::with_rating`], [`SearchCandidate::with_overview`], and
-    /// [`SearchCandidate::with_votes`], because a provider that sends none of them is the rule rather
-    /// than the exception and a ten-argument constructor would make every call site state five
-    /// `None`s it does not mean.
+    /// [`SearchCandidate::with_rating`], [`SearchCandidate::with_overview`],
+    /// [`SearchCandidate::with_votes`], and [`SearchCandidate::with_genre_ids`], because a provider
+    /// that sends none of them is the rule rather than the exception and a ten-argument constructor
+    /// would make every call site state five `None`s it does not mean.
     #[must_use]
     pub const fn new(
         external_id: ExternalId,
@@ -249,6 +493,7 @@ impl SearchCandidate {
             rating: None,
             overview: None,
             votes: None,
+            genre_ids: Vec::new(),
         }
     }
 
@@ -315,6 +560,21 @@ impl SearchCandidate {
     #[must_use]
     pub const fn with_votes(mut self, votes: Option<u64>) -> Self {
         self.votes = votes;
+        self
+    }
+
+    /// The same candidate, carrying the genres a *list* answer named it under.
+    ///
+    /// It is what lets a caller ask a provider for more of what it just recommended: a list answer's
+    /// `genre_ids` are the provider's own identifiers, so they go straight back into
+    /// [`MetadataProvider::browse`]'s `genre` without a lookup.
+    ///
+    /// **An empty vector is absent evidence rather than a title with no genres**, for the reason
+    /// [`SearchCandidate`]'s field doc gives, and a caller that treated the two as the same would
+    /// conclude that every title from a details read belongs to no genre at all.
+    #[must_use]
+    pub fn with_genre_ids(mut self, genre_ids: Vec<u32>) -> Self {
+        self.genre_ids = genre_ids;
         self
     }
 
@@ -396,6 +656,15 @@ impl SearchCandidate {
     pub const fn votes(&self) -> Option<u64> {
         self.votes
     }
+
+    /// The provider's own identifiers for this title's genres, as a list answer named them.
+    ///
+    /// Empty is "the answer did not say", which is the normal state of a candidate from a details
+    /// read and the reason a caller cannot read it as "no genres".
+    #[must_use]
+    pub fn genre_ids(&self) -> &[u32] {
+        &self.genre_ids
+    }
 }
 
 /// A source of catalogue metadata.
@@ -462,6 +731,44 @@ pub trait MetadataProvider: Send + Sync {
         kind: TitleKind,
     ) -> ProviderFuture<'_, peregrine_domain::catalogue::TitleDetails>;
 
+    /// Reads a series' seasons, with the name, synopsis, air date, poster, and episode count each one
+    /// publishes.
+    ///
+    /// **A film has no seasons, and that is a refusal rather than an empty list.** An empty answer is a
+    /// real statement about a series — a show announced with no season published yet — and a screen
+    /// draws the two differently, so `kind` is a parameter and a provider asked about a film answers
+    /// [`ProviderError::Unsupported`] rather than "nothing".
+    ///
+    /// The numbers in the answer are the canonical ones `DATA_MODEL` §2.3 fixes: they are what the
+    /// write path keys on, which is why a provider that numbers a season differently is an ordering
+    /// overlay upstream of this port rather than a renumbering here.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when `kind` is a film or the descriptor does not declare
+    /// [`crate::capability::Capability::Season`], and otherwise as [`MetadataProvider::search`].
+    fn seasons(&self, id: &ExternalId, kind: TitleKind) -> ProviderFuture<'_, Vec<SeasonDetails>>;
+
+    /// Reads one season's episodes, with everything a card draws: the name, the synopsis, the air date,
+    /// the runtime, the still, and the score.
+    ///
+    /// Bounded by what a season is, and not paged: a season is a few dozen episodes, and the caller that
+    /// writes them does so in one pass. `season_number` is the number `seasons` answered with, so the
+    /// two reads cannot disagree about which season was asked for.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] as [`MetadataProvider::seasons`], and
+    /// [`ProviderError::NotFound`] when the provider holds no such season — which the caller treats as
+    /// that one season's problem rather than the whole title's, because a series whose answer is
+    /// missing one season still has the others.
+    fn season_episodes(
+        &self,
+        id: &ExternalId,
+        kind: TitleKind,
+        season_number: SeasonNumber,
+    ) -> ProviderFuture<'_, Vec<EpisodeDetails>>;
+
     /// Reads one page of a named rail.
     ///
     /// `page` is a [`NonZeroU32`] because a provider's lists are paged from one, so "the zeroth
@@ -481,6 +788,72 @@ pub trait MetadataProvider: Send + Sync {
     /// [`ProviderError::Unsupported`] when the descriptor does not declare
     /// [`crate::capability::Capability::Trending`], and otherwise as [`MetadataProvider::search`].
     fn rail(&self, rail: RailKind, page: NonZeroU32) -> ProviderFuture<'_, Vec<SearchCandidate>>;
+
+    /// Reads one page of a list composed from filters.
+    ///
+    /// This is the operation [`MetadataProvider::rail`] is not: a rail is a *named* list a screen
+    /// draws because a provider publishes it, and this is a list a caller composes — a kind, an
+    /// order, a genre, and a floor under the score. It answers a [`ProviderPage`] rather than a bare
+    /// list because a caller that pages has to know where the provider's list ends, and only the
+    /// adapter that read the answer can say.
+    ///
+    /// **It is gated on [`crate::capability::Capability::Trending`], and that is deliberate.** The
+    /// capability set is `ARCHITECTURE` §13's eight, and "read what is popular now" is the one that
+    /// describes a provider publishing queried lists at all; a ninth name would change a documented
+    /// contract for an operation whose *shape* the existing capability already covers. A provider
+    /// that declares `Trending` and has no filtered endpoint refuses with
+    /// [`ProviderError::Unsupported`] for the reason [`MetadataProvider::rail`] gives — an empty
+    /// answer is a real statement about a catalogue, and a screen draws the two differently.
+    ///
+    /// A page holds at most [`RAIL_PAGE_LIMIT`] candidates, because a page is a page whatever
+    /// composed it.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when the descriptor does not declare
+    /// [`crate::capability::Capability::Trending`], and otherwise as [`MetadataProvider::search`].
+    fn browse(&self, request: &BrowseRequest) -> ProviderFuture<'_, ProviderPage>;
+
+    /// Reads the genres this provider filters by for `kind`.
+    ///
+    /// `kind` is a parameter because a provider's genre vocabulary is per kind rather than global:
+    /// TMDB's film and series lists differ — "Action & Adventure" exists only for series, and the
+    /// two number even the names they share differently — so a caller that cached one list for both
+    /// would hand a series genre id to a film filter and get nothing back.
+    ///
+    /// It is gated on [`crate::capability::Capability::Trending`] beside
+    /// [`MetadataProvider::browse`], because it is the request that gives the browse filter its
+    /// vocabulary: a provider with no queried list has no genres to filter one by.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when the descriptor does not declare
+    /// [`crate::capability::Capability::Trending`], and otherwise as [`MetadataProvider::search`].
+    fn genres(&self, kind: TitleKind) -> ProviderFuture<'_, Vec<GenreRef>>;
+
+    /// Reads the titles a provider considers like `id`.
+    ///
+    /// **A recommendation is the provider's, not this build's.** `PG-E7-15` will one day rank a local
+    /// history, but a title's own page asks a simpler question — what else is like this one — and
+    /// that is a list only the provider can answer. `kind` is a parameter for the reason
+    /// [`MetadataProvider::title`] gives: TMDB numbers films and series in one namespace of integers,
+    /// so an id alone does not say which endpoint answers it.
+    ///
+    /// The answer is bounded like every other list ([`RAIL_PAGE_LIMIT`]), because that is what the
+    /// endpoint returns and what the rail that draws it holds. It is deliberately *not* paged: a rail
+    /// on a title's page is a strip a reader glances along, and `PG-E7-15` owns the version that
+    /// ranks and pages.
+    ///
+    /// Gated on [`crate::capability::Capability::Trending`] beside [`MetadataProvider::browse`]: it is
+    /// the same kind of request — a list a caller composes rather than one a provider names — and a
+    /// provider that publishes no queried list has none to answer with.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderError::Unsupported`] when the descriptor does not declare
+    /// [`crate::capability::Capability::Trending`], and otherwise as [`MetadataProvider::search`].
+    fn similar(&self, id: &ExternalId, kind: TitleKind)
+    -> ProviderFuture<'_, Vec<SearchCandidate>>;
 
     /// Reads one image's bytes.
     ///
@@ -565,10 +938,68 @@ mod tests {
             Box::pin(async { Ok(Vec::new()) })
         }
 
+        fn seasons(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
+        ) -> ProviderFuture<'_, Vec<SeasonDetails>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "get_season",
+                })
+            })
+        }
+
+        fn season_episodes(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
+            _season_number: SeasonNumber,
+        ) -> ProviderFuture<'_, Vec<EpisodeDetails>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "get_season",
+                })
+            })
+        }
+
         fn rail(
             &self,
             _rail: RailKind,
             _page: NonZeroU32,
+        ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
+
+        fn browse(&self, _request: &BrowseRequest) -> ProviderFuture<'_, ProviderPage> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
+
+        fn genres(&self, _kind: TitleKind) -> ProviderFuture<'_, Vec<GenreRef>> {
+            Box::pin(async {
+                Err(ProviderError::Unsupported {
+                    provider: Provider::Tmdb,
+                    capability: "trending",
+                })
+            })
+        }
+
+        fn similar(
+            &self,
+            _id: &ExternalId,
+            _kind: TitleKind,
         ) -> ProviderFuture<'_, Vec<SearchCandidate>> {
             Box::pin(async {
                 Err(ProviderError::Unsupported {
@@ -760,5 +1191,19 @@ mod tests {
         names.dedup();
 
         assert_eq!(names.len(), RailKind::ALL.len());
+    }
+
+    #[test]
+    fn every_rail_name_round_trips_and_an_unknown_one_is_refused() {
+        // The name is written to a manifest and read back at the next launch: a rail whose name
+        // this build writes and cannot read would come back as no rail at all, silently.
+        for rail in RailKind::ALL {
+            assert_eq!(RailKind::parse(rail.as_str()), Some(rail));
+        }
+        assert_eq!(RailKind::parse("trending_day"), None);
+        assert_eq!(RailKind::parse(""), None);
+        // The check is on the stored spelling and not on a case-folded one: a name that reached
+        // the database in another case is not one this build wrote.
+        assert_eq!(RailKind::parse("Trending_Week"), None);
     }
 }
