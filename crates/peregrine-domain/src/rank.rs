@@ -1724,8 +1724,10 @@ mod tests {
     }
 
     /// Replaces one criterion with the value the profile ranks directly above the
-    /// original, leaving every other criterion alone, or `None` when the candidate
-    /// already sits at the top of that family.
+    /// original, leaving every other criterion alone, or `None` when no single-field
+    /// swap moves the criterion the scorer actually sees — either because the
+    /// candidate already sits at the top of that family, or because a group spelling
+    /// already puts the better codec in the candidate's declared set.
     fn improve(parts: &Parts, criterion: Criterion, profile: &QualityProfile) -> Option<Parts> {
         let rules = profile.rules();
         let mut better = parts.clone();
@@ -1774,6 +1776,12 @@ mod tests {
                 let above = at.checked_sub(1)?;
                 better.audio = vec![rules.audio_codecs()[above]];
             }
+        }
+        if better == *parts {
+            // The group can spell the very codec the swap would write. The struct is
+            // unchanged, so the candidate the scorer sees is unchanged with it, and
+            // there is no single-field move to claim.
+            return None;
         }
         Some(better)
     }
