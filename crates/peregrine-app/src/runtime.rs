@@ -923,7 +923,7 @@ impl Runtime {
             config.data_directory(),
         ));
 
-        Ok(Self {
+        let runtime = Self {
             config,
             database,
             scheduler,
@@ -948,7 +948,20 @@ impl Runtime {
             metadata_fetch,
             acquisition,
             prowlarr,
-        })
+        };
+
+        // An installed managed Prowlarr starts with the app (docs/adr/0024), so the user does not
+        // press Start on every launch. Submitting is a journal row and a channel send; the 90 s
+        // health wait belongs to the job, not to this path. A submit that fails is logged and
+        // forgotten: a Prowlarr that cannot run must never fail or delay the launch, and the
+        // existing dedupe key and live-supervisor checks keep a second start from being spawned.
+        if runtime.prowlarr.is_installed() && !runtime.prowlarr.is_running() {
+            if let Err(error) = runtime.start_prowlarr().await {
+                tracing::warn!(%error, "the managed Prowlarr did not start automatically");
+            }
+        }
+
+        Ok(runtime)
     }
 
     /// The configuration this runtime was built with.
