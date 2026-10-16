@@ -7,6 +7,8 @@
  */
 
 import {
+  clearFinishedDownloads,
+  dismissDownload,
   normalizeIpcError,
   pauseDownload,
   removeDownload,
@@ -20,19 +22,32 @@ import { logUiError } from "../../../lib/error-log.js";
 export interface DownloadActions {
   /** The row whose move is in flight, or `null`. */
   readonly busyId: number | null;
+  /** The bulk clear is in flight. */
+  readonly clearing: boolean;
   /** What the last move failed with, or `null`. */
   readonly error: IpcError | null;
   readonly pause: (id: number) => Promise<void>;
   readonly resume: (id: number) => Promise<void>;
   readonly remove: (id: number) => Promise<void>;
+  /** Clears one finished entry from the queue. */
+  readonly dismiss: (id: number) => Promise<void>;
+  /** Clears every finished entry from the queue. */
+  readonly clearFinished: () => Promise<void>;
 }
 
 /** The moves, each re-reading the queue through `onChanged`. */
 export function useDownloadActions(onChanged: () => Promise<void>): DownloadActions {
-  const [state, setState] = useState<{ busyId: number | null; error: IpcError | null }>({
-    busyId: null,
-    error: null,
-  });
+  const [state, setState] = useState<{
+    busyId: number | null;
+    clearing: boolean;
+    error: IpcError | null;
+  }>({ busyId: null, clearing: false, error: null });
+
+  const failed = useCallback((label: string, caught: unknown): void => {
+    const error = normalizeIpcError(caught);
+    logUiError(label, error);
+    setState({ busyId: null, clearing: false, error });
+  }, []);
 
   const move = useCallback(
     async (
@@ -40,23 +55,33 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
       call: (id: number) => Promise<unknown>,
       label: string,
     ): Promise<void> => {
-      setState({ busyId: id, error: null });
+      setState({ busyId: id, clearing: false, error: null });
       try {
         await call(id);
         await onChanged();
-        setState({ busyId: null, error: null });
+        setState({ busyId: null, clearing: false, error: null });
       } catch (caught: unknown) {
-        const error = normalizeIpcError(caught);
-        logUiError(label, error);
-        setState({ busyId: null, error });
+        failed(label, caught);
       }
     },
-    [onChanged],
+    [failed, onChanged],
   );
 
   const pause = useCallback((id: number) => move(id, pauseDownload, "pauseDownload"), [move]);
   const resume = useCallback((id: number) => move(id, resumeDownload, "resumeDownload"), [move]);
   const remove = useCallback((id: number) => move(id, removeDownload, "removeDownload"), [move]);
+  const dismiss = useCallback((id: number) => move(id, dismissDownload, "dismissDownload"), [move]);
 
-  return { ...state, pause, resume, remove };
+  const clearFinished = useCallback(async (): Promise<void> => {
+    setState({ busyId: null, clearing: true, error: null });
+    try {
+      await clearFinishedDownloads();
+      await onChanged();
+      setState({ busyId: null, clearing: false, error: null });
+    } catch (caught: unknown) {
+      failed("clearFinishedDownloads", caught);
+    }
+  }, [failed, onChanged]);
+
+  return { ...state, pause, resume, remove, dismiss, clearFinished };
 }

@@ -300,6 +300,33 @@ impl Database {
         }
     }
 
+    /// Deletes one finished queue entry, answering whether it went.
+    ///
+    /// Only `failed` and `removed` are deletable; the statement scopes the state in SQL. Files
+    /// already written are untouched: this removes the record, not the bytes.
+    pub async fn delete_download_job(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::DeleteDownloadJob { id })
+            .await?
+        {
+            WriteResponse::DownloadJobDeleted { removed } => Ok(removed),
+            other => Err(unexpected_response("delete_download_job", &other)),
+        }
+    }
+
+    /// Deletes every finished queue entry, answering how many went.
+    pub async fn clear_finished_download_jobs(&self) -> Result<u64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::DeleteFinishedDownloadJobs)
+            .await?
+        {
+            WriteResponse::DownloadJobsCleared { removed } => Ok(removed),
+            other => Err(unexpected_response("clear_finished_download_jobs", &other)),
+        }
+    }
+
     /// Writes one coalesced statistics tick, reporting whether the job was there.
     pub async fn record_download_statistics(
         &self,

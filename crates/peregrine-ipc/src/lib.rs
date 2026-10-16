@@ -111,6 +111,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::pause_download,
             downloads::resume_download,
             downloads::remove_download,
+            downloads::dismiss_download,
+            downloads::clear_finished_downloads,
             downloads::preferred_quality,
             downloads::set_preferred_quality,
             watch::continue_watching,

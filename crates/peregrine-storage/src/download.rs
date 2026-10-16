@@ -892,6 +892,36 @@ pub(crate) async fn engine_state(
     Ok(stored.flatten())
 }
 
+/// Deletes one finished `download_job` row; its file rows cascade.
+///
+/// The finished states are scoped inside the statement rather than read first, so an id that raced
+/// a state change cannot delete a live transfer. Answers whether a row went.
+pub(crate) async fn delete_finished(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<bool, StorageError> {
+    let result =
+        sqlx::query("DELETE FROM download_job WHERE id = ?1 AND state IN ('failed', 'removed')")
+            .bind(id)
+            .execute(connection)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Deletes every finished `download_job` row, answering how many went.
+///
+/// Files on disk are untouched: this removes the queue entry, not the bytes.
+pub(crate) async fn delete_all_finished(
+    connection: &mut sqlx::SqliteConnection,
+) -> Result<u64, StorageError> {
+    let result = sqlx::query("DELETE FROM download_job WHERE state IN ('failed', 'removed')")
+        .execute(connection)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected())
+}
+
 /// The columns [`DownloadJobRow`] is built from.
 #[derive(sqlx::FromRow)]
 struct JobRow {

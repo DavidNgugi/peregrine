@@ -60,11 +60,24 @@ export const en = {
         peers: "Peers",
         actions: "Actions",
       },
-      action: { pause: "Pause", resume: "Resume", remove: "Remove" },
+      action: { pause: "Pause", resume: "Resume", remove: "Remove", dismiss: "Dismiss" },
       remove: {
         title: "Remove this download?",
         body: "The transfer stops and the job leaves the queue. Files already written are not deleted.",
         confirm: "Remove",
+        cancel: "Cancel",
+      },
+      dismiss: {
+        title: "Dismiss this finished entry?",
+        body: "The entry leaves the list. Files already downloaded are not deleted.",
+        confirm: "Dismiss",
+        cancel: "Cancel",
+      },
+      clear: {
+        action: "Clear finished",
+        title: "Clear finished downloads?",
+        body: "Every finished entry leaves the list. Files already downloaded are not deleted.",
+        confirm: "Clear finished",
         cancel: "Cancel",
       },
       state: {

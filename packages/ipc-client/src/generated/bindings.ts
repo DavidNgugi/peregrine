@@ -486,6 +486,15 @@ export const commands = {
 	resumeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("resume_download", { download })),
 	/**  Removes one download. */
 	removeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("remove_download", { download })),
+	/**
+	 *  Clears one finished download from the queue.
+	 * 
+	 *  The bytes already written stay on disk; this removes the queue entry only. A row that has not
+	 *  finished is refused rather than cleared, and an entry that is already gone answers false.
+	 */
+	dismissDownload: (download: DownloadRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_download", { download })),
+	/**  Clears every finished download from the queue, answering how many went. */
+	clearFinishedDownloads: () => typedError<number, AppError_Serialize>(__TAURI_INVOKE("clear_finished_downloads")),
 	/**  The quality downloads prefer, as its wire spelling, or null when the stored list names none. */
 	preferredQuality: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("preferred_quality")),
 	/**

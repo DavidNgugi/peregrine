@@ -145,7 +145,7 @@ fn acquisition_error(error: AcquisitionError) -> AppError {
         AcquisitionError::TitleUnavailable | AcquisitionError::NotFound => {
             AppError::new(ErrorCode::NotFound).with_detail(error.to_string())
         }
-        AcquisitionError::Duplicate => {
+        AcquisitionError::Duplicate | AcquisitionError::NotFinished => {
             AppError::new(ErrorCode::Conflict).with_detail(error.to_string())
         }
         AcquisitionError::OptInStillRequired | AcquisitionError::NoOverride => {
@@ -273,6 +273,41 @@ pub async fn remove_download(
     Ok(guard_response(
         "downloads::remove",
         DownloadJobDto::of(&row, title),
+    ))
+}
+
+/// Clears one finished download from the queue.
+///
+/// The bytes already written stay on disk; this removes the queue entry only. A row that has not
+/// finished is refused rather than cleared, and an entry that is already gone answers false.
+#[tauri::command]
+#[specta::specta]
+pub async fn dismiss_download(
+    state: State<'_, RuntimeState>,
+    download: DownloadRef,
+) -> Result<bool, AppError> {
+    let runtime = state.runtime()?;
+    let removed = runtime
+        .acquisition()?
+        .dismiss(download.id)
+        .await
+        .map_err(acquisition_error)?;
+    Ok(guard_response("downloads::dismiss", removed))
+}
+
+/// Clears every finished download from the queue, answering how many went.
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_finished_downloads(state: State<'_, RuntimeState>) -> Result<u32, AppError> {
+    let runtime = state.runtime()?;
+    let removed = runtime
+        .acquisition()?
+        .clear_finished()
+        .await
+        .map_err(acquisition_error)?;
+    Ok(guard_response(
+        "downloads::clear_finished",
+        u32::try_from(removed).unwrap_or(u32::MAX),
     ))
 }
 

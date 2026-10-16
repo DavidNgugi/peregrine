@@ -100,6 +100,16 @@ impl DownloadState {
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Failed | Self::Removed)
     }
+
+    /// Whether a finished queue entry may be dismissed from the list.
+    ///
+    /// `failed` and `removed` are history that nothing is doing, so the user can clear them.
+    /// `completed` is deliberately excluded: a completed torrent is usually still seeding, and
+    /// clearing the row is not how that is stopped.
+    #[must_use]
+    pub const fn is_finished(self) -> bool {
+        matches!(self, Self::Failed | Self::Removed)
+    }
 }
 
 /// Something that happened to a job, which may or may not move it.

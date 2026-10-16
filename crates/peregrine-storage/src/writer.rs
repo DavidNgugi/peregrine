@@ -247,6 +247,13 @@ pub(crate) enum WriteRequest {
         /// The event, which the domain judges against the state the row holds.
         event: Box<peregrine_domain::DownloadEvent>,
     },
+    /// Delete one finished `download_job` row — the queue entry, never the files on disk.
+    DeleteDownloadJob {
+        /// The row.
+        id: i64,
+    },
+    /// Delete every finished `download_job` row.
+    DeleteFinishedDownloadJobs,
     /// Write one coalesced statistics tick onto a `download_job` row.
     RecordDownloadStatistics {
         /// The row.
@@ -327,6 +334,10 @@ pub(crate) enum WriteResponse {
     DownloadJobRefused {
         rejection: peregrine_domain::TransitionRejected,
     },
+    /// Whether a finished `download_job` row was deleted.
+    DownloadJobDeleted { removed: bool },
+    /// How many finished `download_job` rows a clear removed.
+    DownloadJobsCleared { removed: u64 },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -712,6 +723,14 @@ async fn apply_download_write(
                 }
                 Err(crate::download::DownloadTransitionError::Storage(error)) => Err(error),
             }
+        }
+        WriteRequest::DeleteDownloadJob { id } => crate::download::delete_finished(connection, id)
+            .await
+            .map(|removed| WriteResponse::DownloadJobDeleted { removed }),
+        WriteRequest::DeleteFinishedDownloadJobs => {
+            crate::download::delete_all_finished(connection)
+                .await
+                .map(|removed| WriteResponse::DownloadJobsCleared { removed })
         }
         WriteRequest::RecordDownloadStatistics { id, statistics } => {
             crate::download::record_statistics(connection, id, &statistics)

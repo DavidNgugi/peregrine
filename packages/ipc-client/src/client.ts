@@ -129,6 +129,16 @@ export async function removeDownload(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.removeDownload({ id }));
 }
 
+/** Clears one finished queue entry. The bytes on disk stay; only the record goes. */
+export async function dismissDownload(id: number): Promise<boolean> {
+  return unwrap(commands.dismissDownload({ id }));
+}
+
+/** Clears every finished queue entry, answering how many went. */
+export async function clearFinishedDownloads(): Promise<number> {
+  return unwrap(commands.clearFinishedDownloads());
+}
+
 /**
  * Whether an indexer is configured, and the base URL it was configured with.
  *

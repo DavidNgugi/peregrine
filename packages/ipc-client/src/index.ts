@@ -93,6 +93,8 @@ export {
   pauseDownload,
   resumeDownload,
   removeDownload,
+  dismissDownload,
+  clearFinishedDownloads,
   indexerStatus,
   setIndexer,
   testIndexer,

@@ -208,6 +208,11 @@ pub enum AcquisitionError {
     #[error("that download job no longer exists")]
     NotFound,
 
+    /// A queue entry that has not finished cannot be cleared: it is still transferring, waiting in
+    /// line, or blocked with a report the user has not answered.
+    #[error("that download has not finished, so it stays in the queue")]
+    NotFinished,
+
     /// The database refused a read or a write.
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -697,6 +702,36 @@ impl AcquisitionService {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&id);
         self.apply(id, DownloadEvent::Removed).await
+    }
+
+    /// Clears one finished queue entry -- `failed` or `removed`, never a live one.
+    ///
+    /// The bytes already written are untouched: this removes the record, not the files. A live row
+    /// is [`AcquisitionError::NotFinished`], and an id nothing holds is `Ok(false)`, so a double
+    /// click on an entry that is already gone is harmless.
+    pub async fn dismiss(&self, id: i64) -> Result<bool, AcquisitionError> {
+        if self.database.delete_download_job(id).await? {
+            self.handles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&id);
+            self.written_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&id);
+            return Ok(true);
+        }
+        // Nothing went: either the row is not there, or it is not finished. The two are different
+        // answers to the caller, so a live row is a refusal rather than a silent no-op.
+        match self.database.download_job(unrestricted(), id).await? {
+            None => Ok(false),
+            Some(_) => Err(AcquisitionError::NotFinished),
+        }
+    }
+
+    /// Clears every finished queue entry, answering how many went.
+    pub async fn clear_finished(&self) -> Result<u64, AcquisitionError> {
+        Ok(self.database.clear_finished_download_jobs().await?)
     }
 
     /// Persists one coalesced statistics tick and publishes it at the same budget.

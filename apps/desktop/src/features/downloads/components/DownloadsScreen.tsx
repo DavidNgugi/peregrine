@@ -46,6 +46,12 @@ const FINISHED_STATES: ReadonlySet<string> = new Set([
  * that clears a block rather than a terminal no-op. */
 const TERMINAL_STATES: ReadonlySet<string> = new Set(["completed", "failed", "removed"]);
 
+/** A finished entry the user can clear out of the list.
+ *
+ * `completed` is absent on purpose: a completed torrent is usually still seeding, and clearing the
+ * row is not how that is stopped. */
+const CLEARABLE_STATES: ReadonlySet<string> = new Set(["failed", "removed"]);
+
 /** Bytes as a row shows them, in whole units. */
 function sizeLabel(bytes: number, t: Translate): string {
   if (bytes <= 0) {
@@ -88,15 +94,28 @@ function etaLabel(seconds: number | null, t: Translate): string {
 export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }): ReactElement {
   const { t } = useTranslation();
   const actions = useDownloadActions(downloads.refresh);
-  const [removing, setRemoving] = useState<DownloadJobDto | null>(null);
+  // One dialog serves the three destructive moves: removing a running job, dismissing a finished
+  // one, and clearing every finished one. `null` is the closed state.
+  const [confirming, setConfirming] = useState<
+    { kind: "remove" | "dismiss"; row: DownloadJobDto } | { kind: "clear" } | null
+  >(null);
 
-  const confirmRemove = (): void => {
-    const target = removing;
-    setRemoving(null);
-    if (target !== null) {
-      void actions.remove(target.id);
+  const confirm = (): void => {
+    const target = confirming;
+    setConfirming(null);
+    if (target === null) {
+      return;
+    }
+    if (target.kind === "clear") {
+      void actions.clearFinished();
+    } else if (target.kind === "remove") {
+      void actions.remove(target.row.id);
+    } else {
+      void actions.dismiss(target.row.id);
     }
   };
+
+  const hasClearable = downloads.downloads.some((row) => CLEARABLE_STATES.has(row.state));
 
   const columns: readonly TableColumn<DownloadJobDto>[] = [
     {
@@ -200,11 +219,23 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
                 {t("downloads.action.resume")}
               </Button>
             ) : null}
+            {CLEARABLE_STATES.has(row.state) ? (
+              <Button
+                disabled={busy || actions.clearing}
+                onClick={() => {
+                  setConfirming({ kind: "dismiss", row });
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t("downloads.action.dismiss")}
+              </Button>
+            ) : null}
             {TERMINAL_STATES.has(row.state) ? null : (
               <Button
                 disabled={busy}
                 onClick={() => {
-                  setRemoving(row);
+                  setConfirming({ kind: "remove", row });
                 }}
                 size="sm"
                 variant="danger"
@@ -217,6 +248,30 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
       },
     },
   ];
+
+  const copy =
+    confirming === null
+      ? null
+      : confirming.kind === "clear"
+        ? {
+            title: t("downloads.clear.title"),
+            body: t("downloads.clear.body"),
+            confirm: t("downloads.clear.confirm"),
+            cancel: t("downloads.clear.cancel"),
+          }
+        : confirming.kind === "dismiss"
+          ? {
+              title: t("downloads.dismiss.title"),
+              body: t("downloads.dismiss.body"),
+              confirm: t("downloads.dismiss.confirm"),
+              cancel: t("downloads.dismiss.cancel"),
+            }
+          : {
+              title: t("downloads.remove.title"),
+              body: t("downloads.remove.body"),
+              confirm: t("downloads.remove.confirm"),
+              cancel: t("downloads.remove.cancel"),
+            };
 
   return (
     <Screen subtitle={t("downloads.subtitle")} title={t("downloads.title")}>
@@ -246,31 +301,43 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
                 {messageOf(actions.error)}
               </p>
             )}
+            <div className="flex justify-end">
+              <Button
+                disabled={!hasClearable || actions.clearing}
+                onClick={() => {
+                  setConfirming({ kind: "clear" });
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                {t("downloads.clear.action")}
+              </Button>
+            </div>
             <Table columns={columns} rowKey={(row) => row.id} rows={downloads.downloads} />
           </>
         )}
       </Section>
 
-      {removing === null ? null : (
+      {copy === null ? null : (
         <Dialog
-          closeLabel={t("downloads.remove.cancel")}
-          description={t("downloads.remove.body")}
+          closeLabel={copy.cancel}
+          description={copy.body}
           onClose={() => {
-            setRemoving(null);
+            setConfirming(null);
           }}
-          title={t("downloads.remove.title")}
+          title={copy.title}
         >
           <div className="flex justify-end gap-2">
             <Button
               onClick={() => {
-                setRemoving(null);
+                setConfirming(null);
               }}
               variant="ghost"
             >
-              {t("downloads.remove.cancel")}
+              {copy.cancel}
             </Button>
-            <Button onClick={confirmRemove} variant="danger">
-              {t("downloads.remove.confirm")}
+            <Button onClick={confirm} variant="danger">
+              {copy.confirm}
             </Button>
           </div>
         </Dialog>
