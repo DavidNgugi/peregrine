@@ -100,7 +100,7 @@ pub use quality::{
 };
 pub use rank::{
     Candidate, MAX_SCORE, Position, RankReason, Ranking, ReasonKind, Rejection, ReleaseRanker,
-    ranked_candidates,
+    alternative_candidates, ranked_candidates,
 };
 pub use redaction::{RedactionError, check_elements, check_text, is_safe};
 pub use release::{

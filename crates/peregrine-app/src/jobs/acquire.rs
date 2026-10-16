@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use peregrine_domain::rank::{Candidate, ranked_candidates};
+use peregrine_domain::rank::{Candidate, alternative_candidates, ranked_candidates};
 use peregrine_domain::{
-    AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, ReleaseName, Verdict,
+    AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, ReleaseName, Resolution, Verdict,
 };
 use peregrine_indexers::{FetchedTorrent, IndexerRelease, TorrentSource as IndexerSource};
 use peregrine_secrets::SecretStore;
@@ -224,9 +224,16 @@ impl AcquireJob {
 
         let ranked = ranked_candidates(&candidates, &profile);
         if ranked.is_empty() {
-            return Err(JobError::failed(
-                "no release the quality profile accepts met the seeder floor and size ceiling",
-            ));
+            // The preferred quality found nothing, but the releases that do exist are worth
+            // naming: "nothing at 1080p, but 2160p x3 and 720p x1 exist" is a choice, where
+            // "no release matched" is a dead end. The offer-and-pick flow that acts on this is
+            // the next change; this records what it will offer.
+            let alternatives = alternative_candidates(&candidates, &profile);
+            let summary = summarise_alternatives(&candidates, &alternatives);
+            warn!(available = %summary, "no release matched the preferred quality");
+            return Err(JobError::failed(format!(
+                "nothing matched your preferred quality; other qualities available: {summary}"
+            )));
         }
 
         self.phase(job, attempt, 500).await;
@@ -424,4 +431,30 @@ fn folder_for(name: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+/// A short "2160p x3, 720p x1" summary of the qualities the profile refused, for the sentence a
+/// person reads when nothing at their preferred quality was found.
+///
+/// Only resolutions the parser actually read are counted: a release it could not name is not an
+/// offer anyone can act on, and a count that included one would overstate what exists.
+fn summarise_alternatives(candidates: &[Candidate], alternatives: &[usize]) -> String {
+    let mut counts: Vec<(Resolution, usize)> = Vec::new();
+    for index in alternatives {
+        let Some(resolution) = candidates[*index].name.resolution() else {
+            continue;
+        };
+        match counts.iter_mut().find(|(value, _)| *value == resolution) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((resolution, 1)),
+        }
+    }
+    if counts.is_empty() {
+        return "none".to_owned();
+    }
+    counts
+        .iter()
+        .map(|(resolution, count)| format!("{} x{count}", resolution.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

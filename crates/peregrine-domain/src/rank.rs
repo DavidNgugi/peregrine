@@ -496,6 +496,42 @@ pub fn ranked_candidates(candidates: &[Candidate], profile: &QualityProfile) -> 
     scored.into_iter().map(|(index, _)| index).collect()
 }
 
+/// The indices of the candidates the profile refused for a *quality* reason only, best first.
+///
+/// This is what an alternative offer is made of: releases that exist — a 2160p encode when the
+/// profile asks for 1080p — and could be downloaded today if the profile allowed them. A candidate
+/// refused for its size, a blocked group, or a codec the profile does not want is not an
+/// alternative to the preference; it is simply unwanted, so it is left out.
+///
+/// Ordered by the resolution's canonical position (highest first) then by index, so an offer lists
+/// the best of what exists before the rest.
+#[must_use]
+pub fn alternative_candidates(candidates: &[Candidate], profile: &QualityProfile) -> Vec<usize> {
+    let mut alternatives: Vec<(usize, usize)> = candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            let Ranking::Rejected { rejection } = ReleaseRanker::rank(candidate, profile) else {
+                return None;
+            };
+            if !matches!(
+                rejection,
+                Rejection::ResolutionNotAllowed { .. } | Rejection::SourceNotAllowed { .. }
+            ) {
+                return None;
+            }
+            let position = candidate
+                .name
+                .resolution()
+                .and_then(|value| Resolution::ALL.iter().position(|other| *other == value))
+                .unwrap_or(Resolution::ALL.len());
+            Some((position, index))
+        })
+        .collect();
+    alternatives.sort_by_key(|(position, index)| (*position, *index));
+    alternatives.into_iter().map(|(_, index)| index).collect()
+}
+
 /// The scoring policy: a pure function from a candidate and a profile to a
 /// [`Ranking`].
 ///
