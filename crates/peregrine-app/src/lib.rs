@@ -70,6 +70,9 @@ pub use peregrine_domain::{
     EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, PreferredQuality, Provider,
     ScanMode, SeasonNumber, TitleOffer, WatchProgress,
 };
+// The notification centre's rows and severity, for the reason above: the commands that list the
+// centre name them, and `peregrine-ipc` may not take a `peregrine-domain` edge (AGENTS R6).
+pub use peregrine_domain::notify::Severity;
 pub use peregrine_storage::{
     ArtworkPath, LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity,
     TitleKind, TitleSeasonRow, TitleSubtype, UnmatchedFileRow,

@@ -21,7 +21,8 @@ pub mod service;
 use jiff::Timestamp;
 use jiff::civil::Time;
 use peregrine_domain::notify::{
-    EnableReason, EventSetting, NotificationEvent, QuietHoursWindow, Severity,
+    EnableReason, EventSetting, NotificationEvent, NotifyError, OsNotifier, Outgoing,
+    QuietHoursWindow, Severity,
 };
 
 pub use peregrine_domain::centre::{
@@ -31,6 +32,61 @@ pub use peregrine_domain::centre::{
 };
 pub use peregrine_domain::notify::{Consent, ConsentDecision};
 pub use service::{NotificationService, ServiceError};
+
+/// The preferences the shipping binary uses until \`PG-E20-01\`'s settings registry exists.
+///
+/// It answers the catalogue defaults and stores nothing. \`Preferences::default\` carries
+/// \`Consent::UNASKED\`, so no toast is delivered while the centre row is still written — which
+/// is R31's order and ADR 0015 §1's. Replacing it with a real store is \`PG-E20-01\`'s job;
+/// writing through it is \`PG-E1-20\`'s.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CataloguePreferences;
+
+impl NotificationPreferences for CataloguePreferences {
+    fn load(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Preferences, PreferencesError>> + Send {
+        std::future::ready(Ok(Preferences::default()))
+    }
+
+    fn save(
+        &self,
+        _preferences: &Preferences,
+    ) -> impl std::future::Future<Output = Result<(), PreferencesError>> + Send {
+        // Nothing is stored yet, so a save is accepted and dropped rather than reported as a
+        // failure: the only writers would be the wizard and permissions UI that do not exist.
+        std::future::ready(Ok(()))
+    }
+}
+
+/// The OS notifier until \`PG-E1-14\` writes the adapter that talks to the notification server.
+///
+/// It reports the honest outcome — no server is reachable — rather than claiming a toast the
+/// user never saw. The service reaches it only when consent permits delivery, which the
+/// catalogue defaults do not, so today the centre row is the whole record.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOsNotifier;
+
+impl OsNotifier for NoOsNotifier {
+    fn notify(&self, _notification: &Outgoing) -> Result<i32, NotifyError> {
+        Err(NotifyError::Unavailable)
+    }
+}
+
+/// The one notification the acquisition path raises, so a job does not have to name the
+/// service's four generic ports.
+///
+/// The future is boxed to keep the trait object-safe: a job holds \`Arc<dyn NotifyOffers>\`, and
+/// an \`impl Future\` return would make that impossible.
+pub trait NotifyOffers: Send + Sync {
+    /// Records that a search found only alternatives to the preferred quality.
+    fn offers_available<'a>(
+        &'a self,
+        scope: peregrine_domain::AccountScope,
+        title_id: i64,
+        label: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+}
 
 /// Where the user's notification choices are stored.
 ///

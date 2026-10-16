@@ -24,6 +24,7 @@ use tracing::{debug, warn};
 use crate::acquisition::{AcquisitionService, StartRequest};
 use crate::events::{Event, EventBus, JOB_PROGRESS};
 use crate::indexers;
+use crate::notify::NotifyOffers;
 
 /// The kind this job registers under, in the scheduler and in the journal.
 pub const KIND: &str = "acquisition.acquire";
@@ -87,6 +88,8 @@ pub struct AcquireJob {
     journal_id: i64,
     target: Target,
     min_seeders: u32,
+    /// The one notification this job raises, so the job does not name the service's four ports.
+    offers: Arc<dyn NotifyOffers>,
 }
 
 impl AcquireJob {
@@ -104,6 +107,7 @@ impl AcquireJob {
         journal_id: i64,
         target: Target,
         min_seeders: u32,
+        offers: Arc<dyn NotifyOffers>,
     ) -> Self {
         Self {
             database,
@@ -116,6 +120,7 @@ impl AcquireJob {
             journal_id,
             target,
             min_seeders,
+            offers,
         }
     }
 
@@ -268,8 +273,20 @@ impl AcquireJob {
             // release matched" is a dead end. They are stored with their sources so the user can
             // pick one without the search running again.
             let alternatives = alternative_candidates(&candidates, &profile);
-            self.persist_offers(&candidates, &kept, &alternatives, &profile)
-                .await;
+            if self
+                .persist_offers(&candidates, &kept, &alternatives, &profile)
+                .await
+            {
+                // Once per search that produced offers, not once per offer: the service coalesces a
+                // repeat on its dedupe key, and the centre row is written before any toast (R31).
+                self.offers
+                    .offers_available(
+                        self.account,
+                        self.target.title_id,
+                        Some(identity.name.clone()),
+                    )
+                    .await;
+            }
             let summary = summarise_alternatives(&candidates, &alternatives);
             warn!(available = %summary, "no release matched the preferred quality");
             return Err(JobError::failed(format!(
@@ -333,7 +350,7 @@ impl AcquireJob {
         kept: &[&IndexerRelease],
         alternatives: &[usize],
         profile: &peregrine_domain::QualityProfile,
-    ) {
+    ) -> bool {
         let mut offers = Vec::with_capacity(alternatives.len());
         for (position, index) in alternatives.iter().enumerate() {
             let (Some(release), Some(candidate)) = (kept.get(*index), candidates.get(*index))
@@ -359,9 +376,9 @@ impl AcquireJob {
             });
         }
         if offers.is_empty() {
-            return;
+            return false;
         }
-        if let Err(error) = self
+        match self
             .database
             .replace_release_offers(
                 self.target.title_id,
@@ -370,7 +387,11 @@ impl AcquireJob {
             )
             .await
         {
-            warn!(%error, "the offers a search found could not be stored");
+            Ok(_stored) => true,
+            Err(error) => {
+                warn!(%error, "the offers a search found could not be stored");
+                false
+            }
         }
     }
 

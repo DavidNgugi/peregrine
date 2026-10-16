@@ -31,6 +31,7 @@ import type {
   CaptureSessionDto,
   DownloadJobDto,
   ReleaseOfferDto,
+  NotificationDto,
   ContinueWatchingDto,
   ProgressReport,
   EpisodeDto,
@@ -148,6 +149,11 @@ export async function clearFinishedDownloads(): Promise<number> {
  */
 export async function listReleaseOffers(titleId: number): Promise<ReleaseOfferDto[]> {
   return unwrap(commands.listReleaseOffers({ id: titleId }));
+}
+
+/** The recent notification centre rows, newest first (R31 makes the row the record). */
+export async function listNotifications(limit = 20): Promise<NotificationDto[]> {
+  return unwrap(commands.listNotifications(limit));
 }
 
 /** Queues the release the user picked, without running a second search. */

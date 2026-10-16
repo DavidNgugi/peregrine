@@ -510,6 +510,15 @@ export const commands = {
 	chooseReleaseOffer: (offer: OfferRef, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("choose_release_offer", { offer, minSeeders })),
 	/**  Dismisses one offer so a later search does not offer it again. */
 	dismissReleaseOffer: (offer: OfferRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_release_offer", { offer })),
+	/**
+	 *  The most recent centre rows, newest first.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `INTERNAL` when the centre could not be read; the cause is logged, and the message stays
+	 *  generic because a storage failure is not the user's to act on.
+	 */
+	listNotifications: (limit: number) => typedError<NotificationDto[], AppError_Serialize>(__TAURI_INVOKE("list_notifications", { limit })),
 	/**  What the account is part-way through, most recently updated first. */
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
@@ -1233,6 +1242,31 @@ export type MatchRuleDto = {
 export type MatchRuleRef = {
 	/**  The row id, as the list returned it. */
 	id: number,
+};
+
+/**
+ *  One centre row, as the shell draws it.
+ * 
+ *  No magnet, path, or secret can appear here: the row stores rendered copy that the domain
+ *  already scanned before it was written (R11/R31).
+ */
+export type NotificationDto = {
+	/**  The row id. */
+	id: number,
+	/**  The catalogue event's key. */
+	event: string,
+	/**  `normal` or `critical`, the stored spelling. */
+	severity: string,
+	/**  The stored title. */
+	title: string,
+	/**  The stored body, when there is one. */
+	body: string | null,
+	/**  The app route this notification opens, when it names one. */
+	deepLink: string | null,
+	/**  When it was created, in Unix milliseconds UTC. */
+	createdAt: number,
+	/**  Whether the user has read it. */
+	read: boolean,
 };
 
 /**  A release offer's id, as a listing returned it. */

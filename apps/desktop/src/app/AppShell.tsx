@@ -1,5 +1,6 @@
 import { NowPlayingBar } from "@peregrine/player-ui";
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
+import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -136,6 +137,13 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         }}
         title={collapseLabel}
       />
+      {collapsed ? null : (
+        // The centre lives in the shell so a notification can reach the user from any screen; it
+        // is hidden on the rail, where there is no room for a label.
+        <div className="ms-auto">
+          <NotificationCentre />
+        </div>
+      )}
     </div>
   );
 

@@ -20,6 +20,13 @@ export const en = {
       nowPlaying: {
         idle: "Nothing playing",
       },
+      notifications: {
+        label: "Notifications",
+        labelWithCount: "Notifications ({{count}})",
+        title: "Recent",
+        empty: "Nothing yet.",
+        failed: "The notification centre could not be read.",
+      },
       error: {
         retry: "Try again",
         code: "Code {{code}}",

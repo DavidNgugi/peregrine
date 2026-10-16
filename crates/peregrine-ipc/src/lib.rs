@@ -24,6 +24,7 @@ pub mod guard;
 pub mod indexers;
 pub mod jobs;
 pub mod library;
+pub mod notifications;
 pub mod providers;
 pub mod prowlarr;
 pub mod runtime;
@@ -118,6 +119,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::list_release_offers,
             downloads::choose_release_offer,
             downloads::dismiss_release_offer,
+            notifications::list_notifications,
             watch::continue_watching,
             watch::record_progress,
             prowlarr::prowlarr_status,

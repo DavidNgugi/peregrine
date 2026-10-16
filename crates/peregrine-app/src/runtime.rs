@@ -19,13 +19,18 @@ use std::time::Duration;
 
 use std::num::NonZeroU32;
 
+use crate::notify::{CataloguePreferences, NoOsNotifier, NotificationService, NotifyOffers};
+use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _};
+use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
-    Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, PlaybackPosition,
-    PreferredQuality, ProgressSource, SafePath, ScanMode, TokenSource, WatchProgress,
+    AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback,
+    PlaybackPosition, PreferredQuality, ProgressSource, SafePath, ScanMode, TokenSource,
+    WatchProgress,
 };
 use peregrine_platform::{SystemClock, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
+use peregrine_storage::NotificationRepository;
 use peregrine_storage::{
     Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
     WatchProgressRow,
@@ -753,6 +758,62 @@ pub struct Runtime {
     /// The managed indexer manager (docs/adr/0024). Installed and started only when asked, so a
     /// launch that never opens Settings pays for neither.
     prowlarr: Arc<crate::jobs::prowlarr::Managed>,
+    /// The notification service, behind the one capability the acquisition path uses. The centre
+    /// row is the record; the OS toast is a no-op until `PG-E1-14` writes the adapter.
+    notifications: Arc<dyn NotifyOffers>,
+}
+
+/// The notification service this runtime composes.
+///
+/// The storage repository appears twice because it implements both ports the service needs: the
+/// centre that stores the row, and the catalogue question asked before a title may be named.
+type Notifications = NotificationService<
+    NotificationRepository,
+    CataloguePreferences,
+    NoOsNotifier,
+    NotificationRepository,
+>;
+
+/// The acquire path's view of the notification service.
+///
+/// A job holds this rather than the service so it does not have to name four generic ports, and
+/// so what it can do is one capability rather than the whole service.
+struct OfferNotifier(Arc<Notifications>);
+
+impl NotifyOffers for OfferNotifier {
+    fn offers_available<'a>(
+        &'a self,
+        scope: AccountScope,
+        title_id: i64,
+        label: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            // The centre row is the record and the toast is a bonus (R31), so a failure here is
+            // logged and never changes the acquire job's outcome.
+            if let Err(error) = self
+                .0
+                .notify(
+                    scope,
+                    NotificationEvent::ReleaseAlternatives,
+                    title_id,
+                    label.as_deref(),
+                    Focus::default(),
+                )
+                .await
+            {
+                warn!(%error, "the alternatives notification could not be recorded");
+            }
+        })
+    }
+}
+
+/// The runtime's own clock, handed to the notification service so both read one source.
+struct SharedClock(Arc<dyn Clock + Send + Sync>);
+
+impl Clock for SharedClock {
+    fn now(&self) -> jiff::Timestamp {
+        self.0.now()
+    }
 }
 
 /// A job the runtime can still cancel.
@@ -938,6 +999,20 @@ impl Runtime {
             config.data_directory(),
         ));
 
+        // The notification service, composed here because this is the only place that may pick the
+        // adapters. The OS notifier is the placeholder until PG-E1-14 and the preferences answer the
+        // catalogue defaults until PG-E20-01; the centre row is written either way, which is R31's
+        // order and the reason a refused toast is not an error.
+        let notifications: Arc<dyn NotifyOffers> =
+            Arc::new(OfferNotifier(Arc::new(NotificationService::new(
+                NotificationRepository::new(Arc::clone(&database)),
+                CataloguePreferences,
+                NoOsNotifier,
+                NotificationRepository::new(Arc::clone(&database)),
+                Box::new(SharedClock(Arc::clone(&clock))),
+                Platform::current(),
+            ))));
+
         let runtime = Self {
             config,
             database,
@@ -963,6 +1038,7 @@ impl Runtime {
             metadata_fetch,
             acquisition,
             prowlarr,
+            notifications,
         };
 
         // An installed managed Prowlarr starts with the app (docs/adr/0024), so the user does not
@@ -1776,6 +1852,7 @@ impl Runtime {
             journal_id,
             target,
             min_seeders,
+            Arc::clone(&self.notifications),
         );
         match self.scheduler.submit(spec, job).await {
             Ok(handle) => {
@@ -3154,6 +3231,20 @@ impl Runtime {
             None => PageRequest::first(limit),
         };
         Ok(self.database.list_jobs(request).await?)
+    }
+
+    /// The in-app notification centre, newest first.
+    ///
+    /// R31 makes the centre row the record and the OS toast the bonus, so this read is how a
+    /// notification reaches the user at all while `PG-E1-14`'s notifier is unwritten.
+    ///
+    /// # Errors
+    ///
+    /// `CentreError` when the centre could not be read; the command maps it to a typed refusal.
+    pub async fn list_notifications(&self, limit: u32) -> Result<Vec<CentreEntry>, CentreError> {
+        NotificationRepository::new(Arc::clone(&self.database))
+            .list(installation_scope(), None, limit)
+            .await
     }
 
     /// The counters a diagnostics screen shows.
