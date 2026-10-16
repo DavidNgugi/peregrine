@@ -25,6 +25,7 @@ import type { LibraryTitleDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { TitleHero } from "./TitleHero.js";
+import { ReleaseOffers } from "./ReleaseOffers.js";
 import { EpisodeCard } from "./EpisodeCard.js";
 import { SeasonSwitcher } from "./SeasonSwitcher.js";
 import { messageOf } from "../../../lib/ipc-message.js";
@@ -192,6 +193,14 @@ export function TitleScreen({
                 {messageOf(acquire.error)}
               </p>
             )}
+            {/* A preferred quality that is missing is a choice, not a failure: the core keeps what a
+                search did find, and this offers them with a Download each. It reloads when the
+                acquire control settles, because that is when a search persists any offers. */}
+            <ReleaseOffers
+              onNavigate={onNavigate}
+              reloadKey={acquire?.titleId === title.id ? (acquire?.outcome ?? null) : null}
+              titleId={title.id}
+            />
             {/* The library's own arithmetic stays a table: four counts are a row of numbers rather than
                 something a hero draws, and a reader comparing them across pages wants them aligned. */}
             <Table

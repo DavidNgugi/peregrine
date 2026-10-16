@@ -317,6 +317,19 @@ export const en = {
     },
     title: {
       section: "In your library",
+      offers: {
+        title: "Other qualities available",
+        description: "Nothing matched your preferred quality. These are what the indexers have.",
+        download: "Download",
+        dismiss: "Dismiss",
+        seeders: "{{seeders}} seeders",
+        noSeeders: "no seeders",
+        queued: "Added to Downloads.",
+        reason: {
+          resolution: "{{value}} is not in your preferred qualities",
+          source: "{{value}} is not a preferred source",
+        },
+      },
       column: {
         items: "Items",
         episode: "Episode",

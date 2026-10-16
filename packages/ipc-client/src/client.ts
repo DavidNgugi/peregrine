@@ -30,6 +30,7 @@ import type {
   LibraryRootDto,
   CaptureSessionDto,
   DownloadJobDto,
+  ReleaseOfferDto,
   ContinueWatchingDto,
   ProgressReport,
   EpisodeDto,
@@ -137,6 +138,29 @@ export async function dismissDownload(id: number): Promise<boolean> {
 /** Clears every finished queue entry, answering how many went. */
 export async function clearFinishedDownloads(): Promise<number> {
   return unwrap(commands.clearFinishedDownloads());
+}
+
+/**
+ * The releases a search left at qualities the preferred profile excluded.
+ *
+ * The core keeps them when nothing matches the preference, ordered best-first. Their sources stay
+ * server-side, so this answers ids and metadata and nothing that could be fetched from here (R11).
+ */
+export async function listReleaseOffers(titleId: number): Promise<ReleaseOfferDto[]> {
+  return unwrap(commands.listReleaseOffers({ id: titleId }));
+}
+
+/** Queues the release the user picked, without running a second search. */
+export async function chooseReleaseOffer(
+  offerId: number,
+  minSeeders?: number,
+): Promise<JobStarted> {
+  return unwrap(commands.chooseReleaseOffer({ id: offerId }, minSeeders ?? null));
+}
+
+/** Dismisses one offer so a later search does not surface it again. */
+export async function dismissReleaseOffer(offerId: number): Promise<boolean> {
+  return unwrap(commands.dismissReleaseOffer({ id: offerId }));
 }
 
 /**
