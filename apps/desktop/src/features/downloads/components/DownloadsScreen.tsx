@@ -104,6 +104,25 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
       cell: (row) => t(`downloads.state.${row.state}`),
     },
     {
+      id: "reason",
+      header: t("downloads.column.reason"),
+      // Only a blocked row has findings, and they are the whole reason it is not downloading. The
+      // report is the one the gate persisted, read back rather than recomputed (invariant I4).
+      cell: (row) =>
+        row.state === "blocked" && row.findings.length > 0 ? (
+          <ul className="flex flex-col gap-1 text-caption text-text-tertiary">
+            {row.findings.map((finding, index) => (
+              <li key={`${finding.reason}-${String(index)}`}>
+                {t(`downloads.finding.${finding.reason}`, { defaultValue: finding.reason })}
+                {finding.entry === null ? "" : ` — ${finding.entry}`}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          t("downloads.none")
+        ),
+    },
+    {
       id: "progress",
       header: t("downloads.column.progress"),
       cell: (row) => (

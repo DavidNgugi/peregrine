@@ -39,6 +39,7 @@ export type {
   ProviderStatusDto,
   CredentialStoreDto,
   DownloadJobDto,
+  SafetyFindingDto,
   ContinueWatchingDto,
   ProgressReport,
   TitleDetailDto,

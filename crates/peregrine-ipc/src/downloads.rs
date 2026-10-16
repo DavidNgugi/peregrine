@@ -28,6 +28,19 @@ pub struct DownloadRef {
     pub id: i64,
 }
 
+/// One rule the safety gate reported, as a screen says it.
+///
+/// The reason is the domain's stable spelling rather than a sentence: the UI owns the wording, and
+/// renaming a reason is a data migration, so the wire must not bake in a label.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetyFindingDto {
+    /// The rule's stable spelling, which the screen turns into a sentence.
+    pub reason: String,
+    /// The entry the rule applies to, when it names one.
+    pub entry: Option<String>,
+}
+
 /// One download job, as the Downloads screen draws it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +83,9 @@ pub struct DownloadJobDto {
     pub error_code: Option<String>,
     /// The engine's failure message, already redacted.
     pub error_message: Option<String>,
+    /// The safety gate's findings, read from the report the row persists. Non-empty for a row the
+    /// gate parked as `blocked`, which is the only way a screen can explain the refusal.
+    pub findings: Vec<SafetyFindingDto>,
 }
 
 impl DownloadJobDto {
@@ -91,6 +107,20 @@ impl DownloadJobDto {
             added_at: row.added_at.as_millisecond(),
             error_code: row.error_code.clone(),
             error_message: row.error_message.clone(),
+            findings: row
+                .safety_report
+                .as_ref()
+                .map(|report| {
+                    report
+                        .findings()
+                        .iter()
+                        .map(|finding| SafetyFindingDto {
+                            reason: finding.reason().as_str().to_owned(),
+                            entry: finding.entry().map(str::to_owned),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }

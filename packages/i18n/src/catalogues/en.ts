@@ -34,6 +34,7 @@ export const en = {
       acquireStarted: "Finding the best release and queueing it. Track it in Downloads.",
       acquireFinding: "Finding a release… {{percent}}%",
       acquireQueued: "Added to Downloads.",
+      acquireBlocked: "Peregrine refused this release, so nothing was downloaded.",
       acquireFailed: "No release could be queued.",
       view: "View downloads",
       empty: {
@@ -51,6 +52,7 @@ export const en = {
       column: {
         title: "Title",
         state: "State",
+        reason: "Reason",
         progress: "Progress",
         size: "Size",
         rate: "Rate",
@@ -76,6 +78,27 @@ export const en = {
         failed: "Failed",
         blocked: "Blocked",
         removed: "Removed",
+      },
+      // One sentence per `Reason` spelling in peregrine-domain's safety report. A code with no
+      // entry here falls back to the code itself rather than rendering blank, so a new reason is a
+      // missing sentence and never a missing row.
+      finding: {
+        path_traversal: "The name tries to leave the download folder.",
+        absolute_path: "The name is an absolute path, not a file inside the folder.",
+        percent_encoded_path: "The name hides a path character behind percent-encoding.",
+        reserved_device_name: "The name is a reserved device name on Windows.",
+        forbidden_character: "The name contains a character this filesystem cannot store.",
+        component_too_long: "A path component is longer than the filesystem allows.",
+        malformed_path: "The entry is not a plain relative file name.",
+        symlink_entry: "The torrent contains a symbolic link.",
+        hardlink_entry: "The torrent contains a hard link.",
+        executable_payload: "The torrent contains a program or a script.",
+        unicode_spoofing: "The name uses invisible characters that change how it reads.",
+        nested_archive: "The torrent contains an archive whose contents were not inspected.",
+        disk_image: "The torrent contains a disk image, which mounts another filesystem.",
+        extension_not_allowed: "The file's type is not one Peregrine downloads.",
+        file_count_capped: "The torrent has more files than the limit allows.",
+        total_size_capped: "The torrent is larger than the size limit allows.",
       },
     },
     discover: {

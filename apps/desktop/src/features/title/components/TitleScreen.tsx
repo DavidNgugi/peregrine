@@ -151,15 +151,31 @@ export function TitleScreen({
             acquire.titleId !== title.id ||
             (acquire.outcome === null && !acquire.running) ? null : (
               <div className="flex items-center gap-3" role="status">
-                <p className="text-caption text-text-secondary">
-                  {acquire.running
-                    ? t("downloads.acquireFinding", {
-                        percent: Math.floor(acquire.permille / 10),
-                      })
-                    : acquire.outcome === "queued"
-                      ? t("downloads.acquireQueued")
-                      : (acquire.failure ?? t("downloads.acquireFailed"))}
-                </p>
+                <div className="flex flex-col gap-1">
+                  <p className="text-caption text-text-secondary">
+                    {acquire.running
+                      ? t("downloads.acquireFinding", {
+                          percent: Math.floor(acquire.permille / 10),
+                        })
+                      : acquire.outcome === "queued"
+                        ? t("downloads.acquireQueued")
+                        : acquire.outcome === "blocked"
+                          ? t("downloads.acquireBlocked")
+                          : (acquire.failure ?? t("downloads.acquireFailed"))}
+                  </p>
+                  {acquire.outcome === "blocked" && acquire.findings.length > 0 ? (
+                    <ul className="flex flex-col gap-1 text-caption text-text-tertiary">
+                      {acquire.findings.map((finding, index) => (
+                        <li key={`${finding.reason}-${String(index)}`}>
+                          {t(`downloads.finding.${finding.reason}`, {
+                            defaultValue: finding.reason,
+                          })}
+                          {finding.entry === null ? "" : ` — ${finding.entry}`}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
                 <Button
                   onClick={() => {
                     onNavigate({ kind: "downloads" });

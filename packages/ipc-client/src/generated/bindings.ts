@@ -721,6 +721,11 @@ export type DownloadJobDto = {
 	errorCode: string | null,
 	/**  The engine's failure message, already redacted. */
 	errorMessage: string | null,
+	/**
+	 *  The safety gate's findings, read from the report the row persists. Non-empty for a row the
+	 *  gate parked as `blocked`, which is the only way a screen can explain the refusal.
+	 */
+	findings: SafetyFindingDto[],
 };
 
 /**  A download job's id, as a listing returned it. */
@@ -1491,6 +1496,19 @@ export type RootScanMode =
 "scheduled" | 
 /**  Only when the user asks. */
 "manual";
+
+/**
+ *  One rule the safety gate reported, as a screen says it.
+ * 
+ *  The reason is the domain's stable spelling rather than a sentence: the UI owns the wording, and
+ *  renaming a reason is a data migration, so the wire must not bake in a label.
+ */
+export type SafetyFindingDto = {
+	/**  The rule's stable spelling, which the screen turns into a sentence. */
+	reason: string,
+	/**  The entry the rule applies to, when it names one. */
+	entry: string | null,
+};
 
 /**  The scheduler's counters. */
 export type SchedulerHealth = {

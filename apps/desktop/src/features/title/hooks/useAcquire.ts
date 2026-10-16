@@ -7,15 +7,22 @@
  * still the Downloads screen's to draw.
  */
 
-import { acquire, commands, eventTopics, normalizeIpcError, unwrap } from "@peregrine/ipc-client";
-import type { IpcError, JobState } from "@peregrine/ipc-client";
+import {
+  acquire,
+  commands,
+  eventTopics,
+  listDownloads,
+  normalizeIpcError,
+  unwrap,
+} from "@peregrine/ipc-client";
+import type { IpcError, JobState, SafetyFindingDto } from "@peregrine/ipc-client";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 import { eventPayload, isTerminal, jobPhase } from "../../../lib/job-events.js";
 
 /** How the last acquire ended, or `null` while it has not. */
-export type AcquireOutcome = "queued" | "failed" | null;
+export type AcquireOutcome = "queued" | "blocked" | "failed" | null;
 
 /** What the title page's Download control reads. */
 export interface AcquireControl {
@@ -29,6 +36,8 @@ export interface AcquireControl {
   readonly permille: number;
   /** How the last acquire ended. */
   readonly outcome: AcquireOutcome;
+  /** The safety gate's findings when `outcome` is `blocked`; empty otherwise. */
+  readonly findings: readonly SafetyFindingDto[];
   /** The core's own sentence for a failure, when the journal carries one. */
   readonly failure: string | null;
   /** What the start itself refused with, or `null`. */
@@ -48,6 +57,9 @@ interface AcquireState {
   permille: number;
   starting: boolean;
   outcome: AcquireOutcome;
+  findings: SafetyFindingDto[];
+  /** A succeeded job whose created row has not been read back yet. */
+  settled: boolean;
   failure: string | null;
   error: IpcError | null;
 }
@@ -60,6 +72,8 @@ const IDLE: AcquireState = {
   permille: 0,
   starting: false,
   outcome: null,
+  findings: [],
+  settled: false,
   failure: null,
   error: null,
 };
@@ -119,7 +133,10 @@ export function useAcquire(): AcquireControl {
             permille,
             phase,
             jobId: null,
-            outcome: phase === "succeeded" ? "queued" : "failed",
+            // Success is not the end of the story: the safety gate may have parked the row it
+            // created as `blocked`, so the row is read back before an outcome is claimed.
+            outcome: phase === "succeeded" ? null : "failed",
+            settled: phase === "succeeded",
           };
         });
       }).then((unlisten) => {
@@ -167,6 +184,44 @@ export function useAcquire(): AcquireControl {
       cancelled = true;
     };
   }, [outcome, journalId]);
+
+  // A job that succeeded has still not said what happened: the gate may have parked the created row
+  // as blocked, in which case a download was never started. The row's own persisted report is the
+  // answer, so it is read rather than recomputed (invariant I4).
+  const { settled, titleId } = state;
+  useEffect(() => {
+    if (!settled || titleId === null) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await listDownloads();
+        const row = rows.find((candidate) => candidate.titleId === titleId);
+        if (cancelled) {
+          return;
+        }
+        if (row?.state === "blocked") {
+          setState((previous) => ({
+            ...previous,
+            settled: false,
+            outcome: "blocked",
+            findings: row.findings,
+          }));
+        } else {
+          setState((previous) => ({ ...previous, settled: false, outcome: "queued" }));
+        }
+      } catch (caught: unknown) {
+        logUiError("acquire.downloads", normalizeIpcError(caught));
+        if (!cancelled) {
+          setState((previous) => ({ ...previous, settled: false, outcome: "queued" }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settled, titleId]);
 
   return { ...state, running: state.jobId !== null && !isTerminal(state.phase), start };
 }

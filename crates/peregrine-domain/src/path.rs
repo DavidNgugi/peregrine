@@ -266,7 +266,10 @@ fn check_component(component: &str) -> Result<(), PathGuardError> {
             bytes: component.len(),
         });
     }
-    if let Some(character) = component.chars().find(|character| is_forbidden(*character)) {
+    if let Some(character) = component
+        .chars()
+        .find(|character| is_forbidden(*character) || is_platform_forbidden(*character))
+    {
         return Err(PathGuardError::ForbiddenCharacter { character });
     }
     if is_reserved_name(component) {
@@ -277,11 +280,29 @@ fn check_component(component: &str) -> Result<(), PathGuardError> {
     Ok(())
 }
 
+/// Characters no filename may contain on any platform: the NUL terminator, the two path
+/// separators, and the confusables that NFKC can fold into one of them.
 fn is_forbidden(character: char) -> bool {
     character == '\0'
+        || character == '/'
         || character == '\\'
-        || character == ':'
         || CONFUSABLE_SEPARATORS.contains(&character)
+}
+
+/// Characters Windows refuses in a filename: the NTFS alternate-data-stream `:` and the
+/// six Win32 metacharacters. Every one of them is legal on macOS/APFS and Linux, and real
+/// releases are full of them — a live acquire was blocked on
+/// `Uchuu Senkan Yamato 2199: Hoshimeguru Hakobune` — so refusing them on every host
+/// rejects ordinary media. Sonarr and Radarr sanitize rather than refuse; here the name is
+/// refused only where the filesystem would.
+#[cfg(windows)]
+fn is_platform_forbidden(character: char) -> bool {
+    matches!(character, ':' | '<' | '>' | '"' | '|' | '?' | '*')
+}
+
+#[cfg(not(windows))]
+const fn is_platform_forbidden(_character: char) -> bool {
+    false
 }
 
 fn is_reserved_name(component: &str) -> bool {
@@ -465,16 +486,35 @@ mod tests {
 
     #[test]
     fn windows_drive_forms_are_rejected() {
+        // Windows finds the drive colon first, a Unix host finds the backslash. Both refuse
+        // the text, which is the point.
+        #[cfg(windows)]
         assert_eq!(
             guard().resolve_relative("C:\\Windows\\System32"),
             Err(PathGuardError::ForbiddenCharacter { character: ':' })
         );
+        #[cfg(not(windows))]
+        assert_eq!(
+            guard().resolve_relative("C:\\Windows\\System32"),
+            Err(PathGuardError::ForbiddenCharacter { character: '\\' })
+        );
+        // `:` is an alternate-data-stream hazard on Windows only. Off Windows it is an
+        // ordinary filename character, and refusing it blocked nearly every real release
+        // (a live acquire died on `Uchuu Senkan Yamato 2199: Hoshimeguru Hakobune`).
+        #[cfg(windows)]
         assert_eq!(
             guard().resolve_relative("C:autoexec.bat"),
             Err(PathGuardError::ForbiddenCharacter { character: ':' })
         );
+        #[cfg(not(windows))]
+        assert!(
+            guard()
+                .resolve_relative("Uchuu Senkan Yamato 2199: Hoshimeguru Hakobune.mkv")
+                .is_ok(),
+            "a colon is legal in a filename on this platform"
+        );
         // On Windows this is a prefix plus components; on a Unix host it is one
-        // component containing `:` and `\`. Both hosts refuse it.
+        // component containing `:` and `\`. Both hosts refuse it, for the backslash.
         assert!(guard().resolve(Path::new(r"C:\Windows\System32")).is_err());
     }
 

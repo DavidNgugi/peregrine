@@ -266,8 +266,9 @@ stored_enum! {
         /// A Windows device name in any spelling, including one wearing a media
         /// extension (T1).
         ReservedDeviceName => "reserved_device_name",
-        /// A component character the guard refuses: NUL, `\`, `:`, or a
-        /// lookalike separator (T1).
+        /// A component character the guard refuses: NUL, a path separator, or a
+        /// lookalike separator on any host, and the Win32 set (`:`, `<`, `>`,
+        /// `"`, `|`, `?`, `*`) on Windows alone (T1).
         ForbiddenCharacter => "forbidden_character",
         /// A component longer than a filesystem accepts.
         ComponentTooLong => "component_too_long",
