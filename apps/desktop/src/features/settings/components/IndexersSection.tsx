@@ -200,7 +200,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
                   className="max-h-48 w-72 overflow-y-auto rounded-md border border-border-subtle bg-surface-2"
                   role="listbox"
                 >
-                  {filtered.slice(0, 100).map((entry) => (
+                  {filtered.map((entry) => (
                     <button
                       aria-selected={false}
                       className="block w-full px-2 py-1 text-left text-body text-text-primary hover:bg-surface-3"

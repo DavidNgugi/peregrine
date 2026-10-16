@@ -85,6 +85,22 @@ export function useProwlarr(): ManagedProwlarr {
     void read();
   }, [read]);
 
+  // The core auto-starts an installed pack at launch, which is not a user action, so the hook has
+  // to follow an active phase on its own. Without this the mount read is the only one and the
+  // section sits on "Starting…" for ever, because nothing re-reads the status the core already
+  // reset to idle.
+  useEffect(() => {
+    if (status?.phase !== "installing" && status?.phase !== "starting") {
+      return;
+    }
+    const timer = setInterval(() => {
+      void read();
+    }, POLL_MILLIS);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [status?.phase, read]);
+
   const waitFor = useCallback(
     async (done: (state: ProwlarrStatusDto) => boolean): Promise<boolean> => {
       for (let attempt = 0; attempt < POLL_LIMIT; attempt += 1) {

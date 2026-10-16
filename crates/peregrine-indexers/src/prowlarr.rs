@@ -440,6 +440,36 @@ impl Prowlarr {
         Ok(body)
     }
 
+    /// Prowlarr's default app profile id. An add that does not name one is refused with
+    /// "AppProfileId: must be greater than 0", because every schema definition ships the field
+    /// as zero; verified against a live 2.6.5.5623 instance.
+    async fn default_app_profile_id(&self) -> Result<i64, IndexerError> {
+        let response = self
+            .client
+            .get(self.endpoint("/api/v1/appprofile"))
+            .header("X-Api-Key", &self.api_key)
+            .send()
+            .await
+            .map_err(|_| IndexerError::Transport)?;
+        let body = self.read_admin(response).await?;
+        let profiles: Vec<serde_json::Value> =
+            serde_json::from_slice(&body).map_err(|_| IndexerError::SchemaDrift)?;
+        let chosen = profiles
+            .iter()
+            .find(|profile| {
+                profile
+                    .get("isDefault")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+            })
+            .or_else(|| profiles.first())
+            .ok_or(IndexerError::SchemaDrift)?;
+        chosen
+            .get("id")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or(IndexerError::SchemaDrift)
+    }
+
     async fn schema(&self) -> Result<Vec<serde_json::Value>, IndexerError> {
         let response = self
             .client
@@ -484,6 +514,9 @@ impl Prowlarr {
         &self,
         request: &NewIndexer,
     ) -> Result<ConfiguredIndexer, IndexerError> {
+        // Read the app profile first: every schema definition carries an appProfileId of 0, which
+        // Prowlarr refuses, so an add that does not name a real profile always answers 400.
+        let app_profile_id = self.default_app_profile_id().await?;
         let mut entries = self.schema().await?;
         let entry = entries
             .iter_mut()
@@ -493,6 +526,10 @@ impl Prowlarr {
             object.insert(
                 "name".to_owned(),
                 serde_json::Value::String(request.name.clone()),
+            );
+            object.insert(
+                "appProfileId".to_owned(),
+                serde_json::Value::from(app_profile_id),
             );
             if let Some(fields) = object
                 .get_mut("fields")
