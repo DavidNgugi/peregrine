@@ -982,8 +982,6 @@ export type IndexerSummaryDto = {
 	key: string,
 	/**  The definition's name. */
 	name: string,
-	/**  Its one-line description. */
-	description: string | null,
 };
 
 /**  One row of the job journal. */

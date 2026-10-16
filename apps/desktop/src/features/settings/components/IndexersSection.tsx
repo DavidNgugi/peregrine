@@ -51,6 +51,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
   const [chosenKey, setChosenKey] = useState("");
   const [name, setName] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<{ kind: "status" | "alert"; text: string } | null>(null);
 
   const stored = indexers.status?.baseUrl ?? "";
   // The stored base URL is not a secret, so it fills the field; the key never does.
@@ -86,14 +87,43 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
   const definition = indexers.definition;
   const visibleFields = definition?.fields.filter((field) => !field.advanced) ?? [];
 
-  const outcomes: Record<string, string | undefined> = {
-    saved: t("settings.indexers.saved"),
-    removed: t("settings.indexers.removed"),
-    tested: t("settings.indexers.tested"),
-    added: t("settings.indexers.add.added"),
-    deleted: t("settings.indexers.deleted"),
-  };
-  const sentence = indexers.outcome === null ? undefined : outcomes[indexers.outcome];
+  const chosenName =
+    indexers.definition?.name ??
+    indexers.catalog.find((entry) => entry.key === chosenKey)?.name ??
+    chosenKey;
+
+  // A transient notice for the last action, or the core's own error sentence. Adding clears the
+  // picker and the filter so the next indexer starts from an empty form.
+  useEffect(() => {
+    if (indexers.error !== null) {
+      setNotice({ kind: "alert", text: indexers.error });
+      return;
+    }
+    if (indexers.outcome === "added") {
+      setNotice({ kind: "status", text: t("settings.indexers.add.added") });
+      setChosenKey("");
+      setFilter("");
+      setName("");
+      setValues({});
+    } else if (indexers.outcome === "deleted" || indexers.outcome === "removed") {
+      setNotice({ kind: "status", text: t("settings.indexers.removed") });
+    } else if (indexers.outcome === "saved") {
+      setNotice({ kind: "status", text: t("settings.indexers.saved") });
+    }
+  }, [indexers.error, indexers.outcome, t]);
+
+  // It clears itself, so a sentence about a past action is not left on screen.
+  useEffect(() => {
+    if (notice === null) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setNotice(null);
+    }, 4000);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [notice]);
 
   return (
     <SettingsSection
@@ -109,11 +139,6 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
 
       {indexers.error !== null ? <ErrorState title={indexers.error} /> : null}
 
-      {sentence === undefined ? null : (
-        <p className="px-3 py-2 text-body text-text-secondary" role="status">
-          {sentence}
-        </p>
-      )}
       {indexers.outcome === "testFailed" ? (
         <ErrorState title={t("settings.indexers.testFailed")} />
       ) : null}
@@ -169,28 +194,51 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
                   {t("settings.indexers.add.browse")}
                 </Button>
               </div>
-              {indexers.catalog.length === 0 ? null : (
-                <select
+              {indexers.catalog.length === 0 ? null : chosenKey === "" ? (
+                <div
                   aria-label={t("settings.indexers.add.choose")}
-                  className="h-8 w-72 rounded-md border border-border-subtle bg-surface-2 px-2 text-body text-text-primary"
-                  onChange={(event) => {
-                    setChosenKey(event.target.value);
-                    void indexers.choose(event.target.value);
-                  }}
-                  value={chosenKey}
+                  className="max-h-48 w-72 overflow-y-auto rounded-md border border-border-subtle bg-surface-2"
+                  role="listbox"
                 >
-                  <option value="">{t("settings.indexers.add.choose")}</option>
-                  {filtered.map((entry) => (
-                    <option key={entry.key} value={entry.key}>
+                  {filtered.slice(0, 100).map((entry) => (
+                    <button
+                      aria-selected={false}
+                      className="block w-full px-2 py-1 text-left text-body text-text-primary hover:bg-surface-3"
+                      key={entry.key}
+                      onClick={() => {
+                        setChosenKey(entry.key);
+                        void indexers.choose(entry.key);
+                      }}
+                      role="option"
+                      type="button"
+                    >
                       {entry.name}
-                    </option>
+                    </button>
                   ))}
-                </select>
+                  {filtered.length === 0 ? (
+                    <p className="px-2 py-1 text-body text-text-tertiary">
+                      {t("settings.indexers.add.noMatches")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-body text-text-primary">{chosenName}</span>
+                  <Button
+                    onClick={() => {
+                      setChosenKey("");
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t("settings.indexers.add.change")}
+                  </Button>
+                </div>
               )}
             </div>
           </SettingsRow>
 
-          {definition === null ? null : (
+          {definition === null || chosenKey === "" ? null : (
             <>
               <SettingsRow label={t("settings.indexers.add.name")}>
                 <TextInput
@@ -430,6 +478,18 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
             </Button>
           </div>
         </Dialog>
+      )}
+      {notice === null ? null : (
+        <div
+          className={
+            notice.kind === "alert"
+              ? "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border border-state-danger bg-surface-2 px-3 py-2 text-body text-state-danger shadow-lg"
+              : "fixed bottom-4 right-4 z-50 max-w-sm rounded-md border border-border-subtle bg-surface-2 px-3 py-2 text-body text-text-primary shadow-lg"
+          }
+          role={notice.kind === "alert" ? "alert" : "status"}
+        >
+          {notice.text}
+        </div>
       )}
     </SettingsSection>
   );

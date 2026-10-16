@@ -601,6 +601,8 @@ export const en = {
           submit: "Add indexer",
           added: "Added to Prowlarr.",
           none: "Prowlarr offered no indexer definitions.",
+          noMatches: "No indexer matches that filter.",
+          change: "Change",
         },
         confirm: {
           title: "Remove the indexer?",

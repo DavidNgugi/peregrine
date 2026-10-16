@@ -14,6 +14,9 @@ use crate::port::{Indexer, IndexerFuture, IndexerQuery, IndexerRelease, TorrentS
 /// keeps a wrong or hostile answer from being read into memory before it is parsed.
 pub const SEARCH_BODY_CAP: usize = 8 * 1024 * 1024;
 
+/// How much of a non-success answer is read to recover the indexer's own explanation.
+const REJECTION_BODY_CAP: usize = 64 * 1024;
+
 /// How long a request may take before it is abandoned.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -63,9 +66,9 @@ impl Prowlarr {
     }
 
     /// Reads a response under SEARCH_BODY_CAP, refusing a non-success status first.
-    async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>, IndexerError> {
+    async fn read_capped(&self, mut response: reqwest::Response) -> Result<Vec<u8>, IndexerError> {
         if !response.status().is_success() {
-            return Err(IndexerError::Status(response.status().as_u16()));
+            return Err(self.rejection(response).await);
         }
         let mut body = Vec::new();
         while let Some(chunk) = response
@@ -80,6 +83,59 @@ impl Prowlarr {
         }
         Ok(body)
     }
+
+    /// Reads the indexer's own explanation out of a non-success answer.
+    ///
+    /// Prowlarr's validation body is an array of `{ propertyName, errorMessage }`, which tells the
+    /// user which field is wrong rather than only the status. Nothing a request carried is echoed:
+    /// the key is redacted if it appears, and the base URL is never part of the body.
+    async fn rejection(&self, mut response: reqwest::Response) -> IndexerError {
+        let status = response.status().as_u16();
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.ok().flatten() {
+            if body.len() + chunk.len() > REJECTION_BODY_CAP {
+                break;
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let detail = validation_detail(&body);
+        if detail.is_empty() {
+            return IndexerError::Status(status);
+        }
+        IndexerError::Rejected {
+            status,
+            detail: if self.api_key.is_empty() {
+                detail
+            } else {
+                detail.replace(&self.api_key, "***")
+            },
+        }
+    }
+}
+
+/// Recovers the messages from Prowlarr's validation body, or a short text fallback.
+fn validation_detail(body: &[u8]) -> String {
+    if let Ok(serde_json::Value::Array(items)) = serde_json::from_slice::<serde_json::Value>(body) {
+        let mut parts = Vec::new();
+        for item in items {
+            let name = item.get("propertyName").and_then(serde_json::Value::as_str);
+            let message = item.get("errorMessage").and_then(serde_json::Value::as_str);
+            match (name, message) {
+                (Some(name), Some(message)) => parts.push(format!("{name}: {message}")),
+                (None, Some(message)) => parts.push(message.to_owned()),
+                (Some(name), None) => parts.push(name.to_owned()),
+                (None, None) => {}
+            }
+        }
+        if !parts.is_empty() {
+            return parts.join("; ");
+        }
+    }
+    String::from_utf8_lossy(body)
+        .trim()
+        .chars()
+        .take(300)
+        .collect()
 }
 
 impl Indexer for Prowlarr {
@@ -92,7 +148,7 @@ impl Indexer for Prowlarr {
                 .send()
                 .await
                 .map_err(|_| IndexerError::Transport)?;
-            let _ = Self::read_capped(response).await?;
+            let _ = self.read_capped(response).await?;
             Ok(())
         })
     }
@@ -114,7 +170,7 @@ impl Indexer for Prowlarr {
                 .send()
                 .await
                 .map_err(|_| IndexerError::Transport)?;
-            let body = Self::read_capped(response).await?;
+            let body = self.read_capped(response).await?;
             let wire: Vec<WireRelease> =
                 serde_json::from_slice(&body).map_err(|_| IndexerError::SchemaDrift)?;
             Ok(wire
@@ -366,9 +422,9 @@ impl WireField {
 
 impl Prowlarr {
     /// Reads an admin answer under a cap large enough for the whole indexer schema.
-    async fn read_admin(mut response: reqwest::Response) -> Result<Vec<u8>, IndexerError> {
+    async fn read_admin(&self, mut response: reqwest::Response) -> Result<Vec<u8>, IndexerError> {
         if !response.status().is_success() {
-            return Err(IndexerError::Status(response.status().as_u16()));
+            return Err(self.rejection(response).await);
         }
         let mut body = Vec::new();
         while let Some(chunk) = response
@@ -392,7 +448,7 @@ impl Prowlarr {
             .send()
             .await
             .map_err(|_| IndexerError::Transport)?;
-        let body = Self::read_admin(response).await?;
+        let body = self.read_admin(response).await?;
         serde_json::from_slice(&body).map_err(|_| IndexerError::SchemaDrift)
     }
 
@@ -405,7 +461,7 @@ impl Prowlarr {
             .send()
             .await
             .map_err(|_| IndexerError::Transport)?;
-        let body = Self::read_admin(response).await?;
+        let body = self.read_admin(response).await?;
         let wire: Vec<WireIndexer> =
             serde_json::from_slice(&body).map_err(|_| IndexerError::SchemaDrift)?;
         Ok(wire.into_iter().map(WireIndexer::into_configured).collect())
@@ -468,7 +524,7 @@ impl Prowlarr {
             .send()
             .await
             .map_err(|_| IndexerError::Transport)?;
-        let body = Self::read_admin(posted).await?;
+        let body = self.read_admin(posted).await?;
         let wire: WireIndexer =
             serde_json::from_slice(&body).map_err(|_| IndexerError::SchemaDrift)?;
         Ok(wire.into_configured())

@@ -9,7 +9,15 @@ pub enum IndexerError {
     /// The request did not complete.
     #[error("the indexer could not be reached")]
     Transport,
-    /// The indexer answered with a non-success status.
+    /// The indexer answered with a non-success status and said why.
+    #[error("the indexer refused the request ({status}): {detail}")]
+    Rejected {
+        /// The HTTP status the indexer answered with.
+        status: u16,
+        /// The indexer's own validation messages, with anything secret removed.
+        detail: String,
+    },
+    /// The indexer answered with a non-success status and said nothing useful.
     #[error("the indexer answered with status {0}")]
     Status(u16),
     /// The answer was not the documented shape.

@@ -209,16 +209,16 @@ pub struct IndexerSummaryDto {
     pub key: String,
     /// The definition's name.
     pub name: String,
-    /// Its one-line description.
-    pub description: Option<String>,
 }
 
 impl From<IndexerDefinition> for IndexerSummaryDto {
     fn from(value: IndexerDefinition) -> Self {
+        // The description is deliberately not carried: 657 of them pushed the catalog over the
+        // 64 KB IPC payload budget (AGENTS R11), and the picker shows only the name. The one
+        // chosen definition's detail, description included, is read on demand.
         Self {
             key: value.key,
             name: value.name,
-            description: value.description,
         }
     }
 }
