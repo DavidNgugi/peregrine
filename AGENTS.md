@@ -282,3 +282,17 @@ A reviewer confirms, in this order:
 6. Security controls from [SECURITY.md](./SECURITY.md) are intact; no new trust in untrusted input.
 7. Documentation that the change invalidates is updated, and no unnecessary documentation was added.
 8. No dead code, no new dependency without a reason, no scope creep, no weakened gate.
+
+---
+
+## 9. Fast iteration mode
+
+While the goal is to make the application **run** — to wire a feature until it can be used — work in fast mode. The full rebuild and the gate run cost more than the edit they would verify, and a number nobody reads is not verification.
+
+- **Do not write tests.** The tests a change owes under R1, R4 and R5 are due when the task is marked done, not before it runs.
+- **Do not run the workspace shape.** No `cargo build --workspace`, no `cargo nextest run --workspace`, no `cargo clippy --workspace`, no `cargo clean`, and no `pnpm test` / `pnpm test:e2e`.
+- **Use the dev loop.** `pnpm tauri dev`, `cargo check -p <member>`, and a single named test only when it is cheap. Compile incidentally and narrowly: keep one `-p <member>` shape and never widen it.
+- **Install only what the feature needs to run.**
+- **A feature exercised this way is *running*, not *done*.** The gates in §3 still decide done, and this section does not weaken R29 for a change that is being landed.
+
+Fast mode is for the loop between an edit and the application showing it. It is not a licence to merge unverified code, and a task is not ticked `[x]` for it.
