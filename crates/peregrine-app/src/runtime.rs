@@ -22,7 +22,7 @@ use std::num::NonZeroU32;
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
     Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, PlaybackPosition,
-    ProgressSource, SafePath, ScanMode, TokenSource, WatchProgress,
+    PreferredQuality, ProgressSource, SafePath, ScanMode, TokenSource, WatchProgress,
 };
 use peregrine_platform::{SystemClock, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
@@ -2735,6 +2735,56 @@ impl Runtime {
     /// # Errors
     ///
     /// [`RuntimeError::Storage`] when the read fails.
+    /// The quality downloads prefer, as the default profile currently spells it.
+    ///
+    /// None means the stored list is one no choice names — a hand-edited profile — which the
+    /// screen reports rather than silently relabelling.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the read fails.
+    pub async fn preferred_quality(&self) -> Result<Option<PreferredQuality>, RuntimeError> {
+        let profile = self.database.default_quality_profile().await?;
+        Ok(profile
+            .and_then(|profile| PreferredQuality::of_resolutions(profile.rules().resolutions())))
+    }
+
+    /// Records the quality downloads should prefer.
+    ///
+    /// The choice is written as the default profile's resolution list, because that list is the
+    /// ranker's accept list: a resolution it omits is not a candidate, so naming 2160p is what
+    /// makes a 4K release available again and naming 1080p is what keeps one out.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the write fails, and RuntimeError::InvalidRequest when there
+    /// is no default profile to write.
+    pub async fn set_preferred_quality(
+        &self,
+        quality: PreferredQuality,
+    ) -> Result<(), RuntimeError> {
+        let resolutions = serde_json::to_string(quality.resolutions()).map_err(|error| {
+            RuntimeError::InvalidRequest {
+                detail: error.to_string(),
+            }
+        })?;
+        let wrote = self
+            .database
+            .set_default_quality_resolutions(&resolutions, self.clock.now().as_millisecond())
+            .await?;
+        if !wrote {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "no default quality profile to write".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The titles this account has started and not finished, most recent first.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the read fails.
     pub async fn continue_watching(&self) -> Result<Vec<WatchProgressRow>, RuntimeError> {
         Ok(self
             .database

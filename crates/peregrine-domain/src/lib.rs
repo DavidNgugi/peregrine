@@ -95,8 +95,8 @@ pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
 pub use playback::LocalPlayback;
 pub use ports::{Clock, IdGenerator, SessionToken, SessionTokenError, TokenSource};
 pub use quality::{
-    DEFAULT_HD_CEILING_BYTES, GroupRules, QualityProfile, QualityProfileError, QualityRank,
-    QualityRules, SizeCaps,
+    DEFAULT_HD_CEILING_BYTES, GroupRules, PreferredQuality, QualityProfile, QualityProfileError,
+    QualityRank, QualityRules, SizeCaps,
 };
 pub use rank::{
     Candidate, MAX_SCORE, Position, RankReason, Ranking, ReasonKind, Rejection, ReleaseRanker,

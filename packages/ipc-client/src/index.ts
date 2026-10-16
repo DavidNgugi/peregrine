@@ -88,6 +88,8 @@ export {
   setAutoStart,
   acquire,
   listDownloads,
+  getPreferredQuality,
+  setPreferredQuality,
   pauseDownload,
   resumeDownload,
   removeDownload,

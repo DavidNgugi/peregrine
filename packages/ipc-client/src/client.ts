@@ -104,6 +104,16 @@ export async function listDownloads(): Promise<DownloadJobDto[]> {
   return unwrap(commands.listDownloads());
 }
 
+/** The quality downloads prefer, as its wire spelling, or null when the stored list names none. */
+export async function getPreferredQuality(): Promise<string | null> {
+  return unwrap(commands.preferredQuality());
+}
+
+/** Records the quality downloads should prefer. */
+export async function setPreferredQuality(quality: string): Promise<void> {
+  await unwrap(commands.setPreferredQuality(quality));
+}
+
 /** Pauses one transfer, answering the row as it stands after the move. */
 export async function pauseDownload(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.pauseDownload({ id }));

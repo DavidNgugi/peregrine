@@ -7,6 +7,7 @@
 //! the answer.
 
 use peregrine_app::DownloadJobRow;
+use peregrine_app::PreferredQuality;
 use peregrine_app::acquisition::AcquisitionError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -273,6 +274,39 @@ pub async fn remove_download(
         "downloads::remove",
         DownloadJobDto::of(&row, title),
     ))
+}
+
+/// The quality downloads prefer, as its wire spelling, or null when the stored list names none.
+#[tauri::command]
+#[specta::specta]
+pub async fn preferred_quality(state: State<'_, RuntimeState>) -> Result<Option<String>, AppError> {
+    let runtime = state.runtime()?;
+    runtime
+        .preferred_quality()
+        .await
+        .map(|quality| quality.map(|quality| quality.as_str().to_owned()))
+        .map_err(AppError::from)
+}
+
+/// Records the quality downloads should prefer.
+///
+/// The choice is the default profile's resolution list, so this is the one control that decides
+/// whether a 4K release is a candidate at all.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_preferred_quality(
+    state: State<'_, RuntimeState>,
+    quality: String,
+) -> Result<(), AppError> {
+    let runtime = state.runtime()?;
+    let parsed = PreferredQuality::parse(&quality).ok_or_else(|| {
+        AppError::new(ErrorCode::InvalidInput)
+            .with_detail(format!("unknown preferred quality: {quality}"))
+    })?;
+    runtime
+        .set_preferred_quality(parsed)
+        .await
+        .map_err(AppError::from)
 }
 
 /// The row a move left behind, or a typed refusal when it vanished.

@@ -174,6 +174,32 @@ impl Database {
         crate::quality::default_profile(&self.readers).await
     }
 
+    /// Rewrites the built-in default profile's resolution list.
+    ///
+    /// Answers whether a default profile was there to write. The caller turns a preference into
+    /// the list; this only persists it.
+    pub async fn set_default_quality_resolutions(
+        &self,
+        resolutions_json: &str,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetDefaultQualityResolutions {
+                resolutions_json: resolutions_json.to_owned(),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(true),
+            WriteResponse::RowIgnored => Ok(false),
+            other => Err(unexpected_response(
+                "set_default_quality_resolutions",
+                &other,
+            )),
+        }
+    }
+
     /// The profile new work uses, seeding the built-in default the first time it is needed.
     ///
     /// A fresh installation has no profile, and ranking cannot run without one — the acquire job

@@ -486,6 +486,15 @@ export const commands = {
 	resumeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("resume_download", { download })),
 	/**  Removes one download. */
 	removeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("remove_download", { download })),
+	/**  The quality downloads prefer, as its wire spelling, or null when the stored list names none. */
+	preferredQuality: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("preferred_quality")),
+	/**
+	 *  Records the quality downloads should prefer.
+	 * 
+	 *  The choice is the default profile's resolution list, so this is the one control that decides
+	 *  whether a 4K release is a candidate at all.
+	 */
+	setPreferredQuality: (quality: string) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_preferred_quality", { quality })),
 	/**  What the account is part-way through, most recently updated first. */
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */

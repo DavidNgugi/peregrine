@@ -47,6 +47,10 @@ pub(crate) enum WriteRequest {
     /// Insert the built-in default quality profile when the table is empty.
     ///
     /// The rules are built and serialized by the domain, so this never carries hand-written JSON.
+    SetDefaultQualityResolutions {
+        resolutions_json: String,
+        at: i64,
+    },
     InsertDefaultQualityProfile {
         /// The profile's name.
         name: String,
@@ -480,6 +484,19 @@ async fn apply_library_write(
         WriteRequest::RemoveImageCache { key } => crate::image_cache::remove(connection, &key)
             .await
             .map(|removed| WriteResponse::RowChanged { changed: removed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::SetDefaultQualityResolutions {
+            resolutions_json,
+            at,
+        } => crate::quality::set_default_resolutions(connection, &resolutions_json, at)
+            .await
+            .map(|updated| {
+                if updated {
+                    WriteResponse::Applied
+                } else {
+                    WriteResponse::RowIgnored
+                }
+            })
             .map_err(StorageError::from_sqlx),
         WriteRequest::InsertDefaultQualityProfile {
             name,

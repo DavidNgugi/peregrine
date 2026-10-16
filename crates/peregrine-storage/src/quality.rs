@@ -21,9 +21,11 @@ use crate::error::StorageError;
 /// the constructor refuses a duplicate.
 pub(crate) fn default_rules() -> QualityRules {
     QualityRules::new(
+        // 1080p first, and 1440p/2160p are not accepted at all: the list is the ranker's first
+        // key *and* its accept list, so naming a resolution here is what makes it a candidate.
+        // An ordinary HD release is what a download should be unless the user asks for more
+        // (PG-E12-07 will own the control; until then the core rewrites this list).
         vec![
-            Resolution::UltraHd,
-            Resolution::QuadHd,
             Resolution::FullHd,
             Resolution::Hd,
             Resolution::Sd576,
@@ -87,6 +89,28 @@ pub(crate) async fn insert_default(
     .bind(rules_json)
     .bind(cutoff_rank)
     .bind(if upgrade_allowed { 1 } else { 0 })
+    .bind(at)
+    .execute(connection)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Rewrites the built-in default profile's resolution list.
+///
+/// The list is the ranker's accept list as well as its first key, so this is how a preference
+/// becomes behaviour: naming 2160p is what makes a 4K release a candidate, and leaving it out is
+/// what stops one. Only the default row is touched. Answers whether a row was written.
+pub(crate) async fn set_default_resolutions(
+    connection: &mut SqliteConnection,
+    resolutions_json: &str,
+    at: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE quality_profile \
+         SET rules_json = json_set(rules_json, '$.resolutions', json(?1)), updated_at = ?2 \
+         WHERE is_default = 1",
+    )
+    .bind(resolutions_json)
     .bind(at)
     .execute(connection)
     .await?;

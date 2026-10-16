@@ -10,6 +10,11 @@ import {
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
+import {
+  PREFERRED_QUALITIES,
+  usePreferredQuality,
+  type PreferredQuality,
+} from "../hooks/usePreferredQuality.js";
 import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
@@ -84,6 +89,7 @@ export function SettingsScreen({
 }: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
   const autoStart = useAutoStart();
+  const quality = usePreferredQuality();
 
   return (
     <Screen title={t("settings.title")}>
@@ -120,6 +126,32 @@ export function SettingsScreen({
           }}
         />
         {autoStart.failed ? <ErrorState title={t("settings.autostart.failed")} /> : null}
+      </SettingsSection>
+
+      <SettingsSection
+        description={t("settings.quality.description")}
+        title={t("settings.quality.title")}
+      >
+        <SettingsRow label={t("settings.quality.label")}>
+          <select
+            className="rounded-md border border-border bg-surface px-2 py-1 text-body text-text-primary"
+            disabled={quality.busy}
+            onChange={(event) => {
+              quality.choose(event.target.value as PreferredQuality);
+            }}
+            value={quality.quality ?? ""}
+          >
+            {quality.quality === null ? (
+              <option value="">{t("settings.quality.custom")}</option>
+            ) : null}
+            {PREFERRED_QUALITIES.map((choice) => (
+              <option key={choice} value={choice}>
+                {t("settings.quality.choice." + choice)}
+              </option>
+            ))}
+          </select>
+        </SettingsRow>
+        {quality.failed ? <ErrorState title={t("settings.quality.failed")} /> : null}
       </SettingsSection>
 
       <LibrariesSection libraries={libraries} />

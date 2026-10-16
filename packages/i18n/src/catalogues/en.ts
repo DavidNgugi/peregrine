@@ -520,6 +520,19 @@ export const en = {
     },
     settings: {
       title: "Settings",
+      quality: {
+        title: "Downloads",
+        description: "The quality Peregrine looks for. A higher quality is larger and slower to fetch.",
+        label: "Preferred quality",
+        failed: "The preferred quality could not be read.",
+        custom: "Custom (not one of these)",
+        choice: {
+          "1080p": "1080p (default)",
+          "1440p": "1440p",
+          "2160p": "2160p (4K)",
+          best: "Best available",
+        },
+      },
       shortcuts: {
         title: "Keyboard shortcuts",
         description: "Every shortcut this build has, written the way this platform writes them.",

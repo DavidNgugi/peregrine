@@ -39,6 +39,84 @@ impl QualityRank {
 /// release; a remux does not.
 pub const DEFAULT_HD_CEILING_BYTES: u64 = 12 * 1024 * 1024 * 1024;
 
+/// The quality a person asks a download to prefer.
+///
+/// The resolution list is the ranker's first key *and* its accept list, so a resolution left out
+/// is not deprioritised — it is not a candidate. 1080p is the default because it plays
+/// everywhere and keeps a download ordinary; the higher choices are opt-in, and `Best` restores
+/// the widest list the build knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PreferredQuality {
+    /// `1080p` first, with `720p` and the SD resolutions as fallbacks.
+    #[serde(rename = "1080p")]
+    FullHd,
+    /// `1440p` first, then `1080p` and below.
+    #[serde(rename = "1440p")]
+    QuadHd,
+    /// `2160p` first, then the rest — the widest practical choice.
+    #[serde(rename = "2160p")]
+    UltraHd,
+    /// Every resolution the build accepts, best first.
+    #[serde(rename = "best")]
+    Best,
+}
+
+impl PreferredQuality {
+    /// The resolutions this choice accepts, preferred first.
+    pub const fn resolutions(self) -> &'static [Resolution] {
+        match self {
+            Self::FullHd => &[
+                Resolution::FullHd,
+                Resolution::Hd,
+                Resolution::Sd576,
+                Resolution::Sd480,
+            ],
+            Self::QuadHd => &[
+                Resolution::QuadHd,
+                Resolution::FullHd,
+                Resolution::Hd,
+                Resolution::Sd576,
+                Resolution::Sd480,
+            ],
+            Self::UltraHd | Self::Best => &[
+                Resolution::UltraHd,
+                Resolution::QuadHd,
+                Resolution::FullHd,
+                Resolution::Hd,
+                Resolution::Sd576,
+                Resolution::Sd480,
+            ],
+        }
+    }
+
+    /// The spelling the setting and the wire use.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FullHd => "1080p",
+            Self::QuadHd => "1440p",
+            Self::UltraHd => "2160p",
+            Self::Best => "best",
+        }
+    }
+
+    /// Parses that spelling, refusing anything else so a typo cannot become a silent default.
+    pub fn parse(value: &str) -> Option<Self> {
+        [Self::FullHd, Self::QuadHd, Self::UltraHd, Self::Best]
+            .into_iter()
+            .find(|choice| choice.as_str() == value)
+    }
+
+    /// The choice a resolution list spells, when it spells one of them exactly.
+    ///
+    /// `None` is a list no choice names — a hand-edited profile, or one a future editor wrote —
+    /// and the caller leaves it alone rather than relabelling it.
+    pub fn of_resolutions(resolutions: &[Resolution]) -> Option<Self> {
+        [Self::FullHd, Self::QuadHd, Self::UltraHd, Self::Best]
+            .into_iter()
+            .find(|choice| choice.resolutions() == resolutions)
+    }
+}
+
 /// The byte sizes a release must fall between; an unset end is uncapped.
 // The fields are `floor` and `ceiling` rather than `minimum_bytes` and
 // `maximum_bytes` because clippy reads a shared `_bytes` suffix as a naming slip.

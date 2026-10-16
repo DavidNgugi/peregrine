@@ -67,8 +67,8 @@ pub use peregrine_secrets::{SecretKey, SecretStore, SecretStoreError};
 // this block already exports, so a caller that must build or destructure the row a command answers
 // with would otherwise have a type it cannot name.
 pub use peregrine_domain::{
-    EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, Provider, ScanMode, SeasonNumber,
-    TitleOffer, WatchProgress,
+    EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, PreferredQuality, Provider,
+    ScanMode, SeasonNumber, TitleOffer, WatchProgress,
 };
 pub use peregrine_storage::{
     ArtworkPath, LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity,
