@@ -159,6 +159,27 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       void refreshIndexers();
     }
   }, [managedProwlarrRunning, refreshIndexers]);
+  // The key is written before the seed lands, so the flip to running alone is too early. While the
+  // managed instance is up and the list is still empty, re-read for a bounded window so the seeded
+  // public indexers appear without the user reopening the screen; the effect stops as soon as one
+  // arrives.
+  const configuredIndexers = indexers.indexers.length;
+  useEffect(() => {
+    if (!managedProwlarrRunning || configuredIndexers > 0) {
+      return;
+    }
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts += 1;
+      void refreshIndexers();
+      if (attempts >= 20) {
+        clearInterval(timer);
+      }
+    }, 3000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [managedProwlarrRunning, configuredIndexers, refreshIndexers]);
   const library = useLibraryTitles();
   const downloads = useDownloads();
   const scan = useScan();
