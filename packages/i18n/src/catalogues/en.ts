@@ -594,6 +594,7 @@ export const en = {
         add: {
           title: "Add an indexer",
           browse: "Browse indexers",
+          browsing: "Loading indexers…",
           search: "Filter",
           searchPlaceholder: "Type to filter…",
           choose: "Choose an indexer",

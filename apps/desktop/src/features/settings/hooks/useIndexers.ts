@@ -57,6 +57,8 @@ export interface IndexerSettings {
   readonly definition: IndexerDefinitionDto | null;
   /** The first read is still in flight. */
   readonly loading: boolean;
+  /** The catalog is being loaded, so the browse control can say so. */
+  readonly catalogLoading: boolean;
   /** The read failed, so the answer is unknown rather than "not configured". */
   readonly failed: boolean;
   /** An action is in flight, so the controls are refused. */
@@ -90,6 +92,7 @@ export function useIndexers(): IndexerSettings {
   const [catalog, setCatalog] = useState<IndexerSummaryDto[]>([]);
   const [definition, setDefinition] = useState<IndexerDefinitionDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<IndexerOutcome>(null);
@@ -178,12 +181,15 @@ export function useIndexers(): IndexerSettings {
 
   const loadCatalog = useCallback(async (): Promise<void> => {
     setError(null);
+    setCatalogLoading(true);
     try {
       setCatalog(await indexerCatalog());
     } catch (caught: unknown) {
       const normalized = normalizeIpcError(caught);
       logUiError("indexers.catalog", normalized);
       setError(messageOf(normalized));
+    } finally {
+      setCatalogLoading(false);
     }
   }, []);
 
@@ -232,6 +238,7 @@ export function useIndexers(): IndexerSettings {
     catalog,
     definition,
     loading,
+    catalogLoading,
     failed,
     busy,
     outcome,

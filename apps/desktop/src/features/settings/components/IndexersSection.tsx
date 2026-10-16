@@ -184,14 +184,16 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
                   value={filter}
                 />
                 <Button
-                  disabled={indexers.busy}
+                  disabled={indexers.busy || indexers.catalogLoading}
                   onClick={() => {
                     void indexers.loadCatalog();
                   }}
                   size="sm"
                   variant="secondary"
                 >
-                  {t("settings.indexers.add.browse")}
+                  {indexers.catalogLoading
+                    ? t("settings.indexers.add.browsing")
+                    : t("settings.indexers.add.browse")}
                 </Button>
               </div>
               {indexers.catalog.length === 0 ? null : chosenKey === "" ? (

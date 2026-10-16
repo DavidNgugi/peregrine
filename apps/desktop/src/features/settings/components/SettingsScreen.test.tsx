@@ -69,6 +69,7 @@ function noIndexers(): IndexerSettings {
     catalog: [],
     definition: null,
     loading: false,
+    catalogLoading: false,
     failed: false,
     busy: false,
     outcome: null,
