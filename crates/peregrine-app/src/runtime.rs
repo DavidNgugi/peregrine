@@ -810,6 +810,16 @@ impl Runtime {
         // The composition root is the one place the production adapters are chosen
         // (AGENTS R8); the scheduler is handed both ports rather than reaching for them.
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
+        // A fresh installation has no quality profile, and ranking cannot run without one, so the
+        // built-in default is written the first time the runtime composes. A failure is not fatal:
+        // the acquire job reports "no profile" in its own words.
+        match database
+            .ensure_default_quality_profile(clock.now().as_millisecond())
+            .await
+        {
+            Ok(_) => {}
+            Err(error) => warn!(%error, "the built-in quality profile could not be seeded"),
+        }
         let ids: Arc<dyn IdGenerator + Send + Sync> = Arc::new(UlidGenerator);
         // The third adapter the domain may not reach for itself: a token has to come from a real random
         // source, and `cargo xtask check-determinism` permits one in `peregrine-platform` and nowhere

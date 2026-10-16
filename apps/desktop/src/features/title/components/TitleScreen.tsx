@@ -20,7 +20,7 @@
  * `PG-E5`, and `PG-E16` for the player itself.
  */
 
-import { EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
+import { Button, EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
 import type { LibraryTitleDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
@@ -129,7 +129,7 @@ export function TitleScreen({
               onPlay={() => {
                 onNavigate({ kind: "player", id: title.id });
               }}
-              acquiring={acquire?.starting ?? false}
+              acquiring={(acquire?.starting ?? false) || (acquire?.running ?? false)}
               onAcquire={
                 acquire === undefined
                   ? undefined
@@ -144,10 +144,27 @@ export function TitleScreen({
               released={detail.released}
               seasons={seasons.seasons.length}
             />
-            {acquire === undefined || !acquire.started ? null : (
-              <p className="text-caption text-text-secondary" role="status">
-                {t("downloads.acquireStarted")}
-              </p>
+            {acquire === undefined || (acquire.outcome === null && !acquire.running) ? null : (
+              <div className="flex items-center gap-3" role="status">
+                <p className="text-caption text-text-secondary">
+                  {acquire.running
+                    ? t("downloads.acquireFinding", {
+                        percent: Math.floor(acquire.permille / 10),
+                      })
+                    : acquire.outcome === "queued"
+                      ? t("downloads.acquireQueued")
+                      : (acquire.failure ?? t("downloads.acquireFailed"))}
+                </p>
+                <Button
+                  onClick={() => {
+                    onNavigate({ kind: "downloads" });
+                  }}
+                  size="sm"
+                  variant="secondary"
+                >
+                  {t("downloads.view")}
+                </Button>
+              </div>
             )}
             {acquire === undefined || acquire.error === null ? null : (
               <p className="text-caption text-state-danger" role="status">

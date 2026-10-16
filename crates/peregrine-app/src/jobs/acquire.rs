@@ -15,7 +15,7 @@ use peregrine_storage::{AddedBy, Database, DownloadSource, JobChange, MagnetUri,
 use peregrine_sync::{Job, JobContext, JobError, JobFuture};
 use peregrine_torrent::{TorrentMetadataFetch, TorrentSource as EngineSource};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::acquisition::{AcquisitionService, StartRequest};
 use crate::events::{Event, EventBus, JOB_PROGRESS};
@@ -254,7 +254,16 @@ impl Job for AcquireJob {
         let job = context.id();
         let attempt = context.attempt();
         let cancellation = context.cancellation().clone();
-        Box::pin(self.acquire(job, attempt, cancellation))
+        Box::pin(async move {
+            let outcome = self.acquire(job, attempt, cancellation).await;
+            // The scheduler's journal line says only "failed"; the sentence a person needs — no
+            // profile, no indexer, no acceptable release — is here or nowhere. These messages are
+            // built to carry no secret, magnet, or path.
+            if let Err(error) = &outcome {
+                warn!(%error, "the acquire job failed");
+            }
+            outcome
+        })
     }
 }
 

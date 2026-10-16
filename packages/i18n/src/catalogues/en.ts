@@ -32,6 +32,10 @@ export const en = {
       description: "Progress updates while a transfer is active.",
       none: "—",
       acquireStarted: "Finding the best release and queueing it. Track it in Downloads.",
+      acquireFinding: "Finding a release… {{percent}}%",
+      acquireQueued: "Added to Downloads.",
+      acquireFailed: "No release could be queued.",
+      view: "View downloads",
       empty: {
         title: "Nothing is downloading",
         body: "Open a title and choose Download; its transfers appear here.",
@@ -307,6 +311,7 @@ export const en = {
         episodes_other: "{{count}} episodes",
         play: "Play",
         download: "Download",
+        finding: "Finding a release…",
         noFile: "The library holds no file for this title yet.",
         fileMissing: "The library recorded a file for this title, and it is not on disk right now.",
         arriving: "A download for this title is in flight.",

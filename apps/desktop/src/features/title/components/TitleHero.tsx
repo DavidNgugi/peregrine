@@ -179,7 +179,7 @@ export function TitleHero({
                 // Download is the alternate; when there is nothing to play, Download is it.
                 variant={actions.play.kind === "play" ? "secondary" : "primary"}
               >
-                {t("title.hero.download")}
+                {acquiring === true ? t("title.hero.finding") : t("title.hero.download")}
               </Button>
             ) : null}
             {/* The reason, said rather than left to a disabled control: a reader who does not know why

@@ -5,10 +5,92 @@
 //! the profile type also wants. Parsing through the domain's own Deserialize is what keeps a
 //! hand-edited file from widening a preference order the constructor would have refused.
 
-use peregrine_domain::{QualityProfile, QualityRank, QualityRules};
-use sqlx::SqlitePool;
+use peregrine_domain::{
+    AudioCodec, GroupRules, QualityProfile, QualityRank, QualityRules, ReleaseSource, Resolution,
+    SizeCaps, VideoCodec,
+};
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::error::StorageError;
+
+/// The rules the built-in default profile starts with.
+///
+/// A preference order, best first: UHD and disc-grade sources outrank the HD web baseline, so the
+/// best release available wins. Pre-release and cam sources (cam, ts, tc, r5) are left out of the
+/// accept list entirely, because a list admits exactly what it names. Each value is spelled once —
+/// the constructor refuses a duplicate.
+pub(crate) fn default_rules() -> QualityRules {
+    QualityRules::new(
+        vec![
+            Resolution::UltraHd,
+            Resolution::QuadHd,
+            Resolution::FullHd,
+            Resolution::Hd,
+            Resolution::Sd576,
+            Resolution::Sd480,
+        ],
+        vec![
+            ReleaseSource::Remux,
+            ReleaseSource::BluRay,
+            ReleaseSource::BdRip,
+            ReleaseSource::BrRip,
+            ReleaseSource::WebDl,
+            ReleaseSource::WebRip,
+            ReleaseSource::Hdtv,
+            ReleaseSource::HdRip,
+            ReleaseSource::DvdRip,
+        ],
+        vec![
+            VideoCodec::H265,
+            VideoCodec::Av1,
+            VideoCodec::H264,
+            VideoCodec::Vp9,
+        ],
+        vec![
+            AudioCodec::TrueHd,
+            AudioCodec::DtsHd,
+            AudioCodec::DtsX,
+            AudioCodec::Atmos,
+            AudioCodec::Dts,
+            AudioCodec::Flac,
+            AudioCodec::Eac3,
+            AudioCodec::Ac3,
+            AudioCodec::Opus,
+            AudioCodec::Aac,
+            AudioCodec::Mp3,
+            AudioCodec::Pcm,
+        ],
+        SizeCaps::new(None, None).expect("an unset floor cannot exceed an unset ceiling"),
+        GroupRules::new(Vec::new(), Vec::new()).expect("no group is listed twice"),
+    )
+    .expect("the built-in lists spell each value once")
+}
+
+/// Inserts the built-in default profile when `quality_profile` has no row at all.
+///
+/// `WHERE NOT EXISTS` makes it idempotent: a retry, or a second process, finds a row already there
+/// and writes nothing. Answers whether this call inserted it.
+pub(crate) async fn insert_default(
+    connection: &mut SqliteConnection,
+    name: &str,
+    rules_json: &str,
+    cutoff_rank: i64,
+    upgrade_allowed: bool,
+    at: i64,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "INSERT INTO quality_profile (name, is_default, rules_json, cutoff_rank, upgrade_allowed, updated_at) \
+         SELECT ?1, 1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (SELECT 1 FROM quality_profile)",
+    )
+    .bind(name)
+    .bind(rules_json)
+    .bind(cutoff_rank)
+    .bind(if upgrade_allowed { 1 } else { 0 })
+    .bind(at)
+    .execute(connection)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
 
 /// The one profile marked is_default, or None when the installation has not chosen one.
 ///

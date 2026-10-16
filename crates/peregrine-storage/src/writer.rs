@@ -44,6 +44,21 @@ pub(crate) enum WriteRequest {
     InsertStubSeason(Box<crate::catalogue::StubSeason>),
     /// Insert one `episode` row.
     InsertStubEpisode(Box<crate::catalogue::StubEpisode>),
+    /// Insert the built-in default quality profile when the table is empty.
+    ///
+    /// The rules are built and serialized by the domain, so this never carries hand-written JSON.
+    InsertDefaultQualityProfile {
+        /// The profile's name.
+        name: String,
+        /// `QualityRules` as JSON.
+        rules_json: String,
+        /// The rank upgrading stops at.
+        cutoff_rank: i64,
+        /// Whether a better release may replace a file.
+        upgrade_allowed: bool,
+        /// Unix milliseconds.
+        at: i64,
+    },
     /// Write what a provider said about one season, creating the row when the library has none.
     UpsertSeasonDetails {
         /// The title the season belongs to.
@@ -466,6 +481,29 @@ async fn apply_library_write(
             .await
             .map(|removed| WriteResponse::RowChanged { changed: removed })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::InsertDefaultQualityProfile {
+            name,
+            rules_json,
+            cutoff_rank,
+            upgrade_allowed,
+            at,
+        } => crate::quality::insert_default(
+            connection,
+            &name,
+            &rules_json,
+            cutoff_rank,
+            upgrade_allowed,
+            at,
+        )
+        .await
+        .map(|inserted| {
+            if inserted {
+                WriteResponse::Applied
+            } else {
+                WriteResponse::RowIgnored
+            }
+        })
+        .map_err(StorageError::from_sqlx),
         WriteRequest::UpsertWatchProgress(progress) => {
             crate::watch::upsert_progress(connection, &progress)
                 .await

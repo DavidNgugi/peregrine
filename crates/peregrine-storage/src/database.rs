@@ -174,6 +174,54 @@ impl Database {
         crate::quality::default_profile(&self.readers).await
     }
 
+    /// The profile new work uses, seeding the built-in default the first time it is needed.
+    ///
+    /// A fresh installation has no profile, and ranking cannot run without one — the acquire job
+    /// failed at the profile step on exactly that. The insert is conditional, so a second caller or
+    /// a second process never adds a second default.
+    pub async fn ensure_default_quality_profile(
+        &self,
+        at: i64,
+    ) -> Result<peregrine_domain::QualityProfile, StorageError> {
+        if let Some(profile) = self.default_quality_profile().await? {
+            return Ok(profile);
+        }
+        let profile = peregrine_domain::QualityProfile::new(
+            "Default",
+            crate::quality::default_rules(),
+            peregrine_domain::QualityRank::new(u16::MAX),
+            true,
+            true,
+        )
+        .map_err(|error| StorageError::UnexpectedValue {
+            column: "quality_profile",
+            found: error.to_string(),
+        })?;
+        let rules_json = serde_json::to_string(profile.rules()).map_err(|error| {
+            StorageError::InvalidJsonField {
+                column: "rules_json",
+                detail: error.to_string(),
+            }
+        })?;
+        match self
+            .writer
+            .send(WriteRequest::InsertDefaultQualityProfile {
+                name: profile.name().to_owned(),
+                rules_json,
+                cutoff_rank: i64::from(profile.cutoff_rank().position()),
+                upgrade_allowed: profile.upgrade_allowed(),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied | WriteResponse::RowIgnored => Ok(profile),
+            other => Err(unexpected_response(
+                "ensure_default_quality_profile",
+                &other,
+            )),
+        }
+    }
+
     /// A page of journal rows, newest first.
     pub async fn list_jobs(&self, request: PageRequest) -> Result<Vec<JobRecord>, StorageError> {
         crate::jobs::list(&self.readers, request).await
