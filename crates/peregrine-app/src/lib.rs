@@ -82,7 +82,10 @@ pub use peregrine_providers::error::ProviderError;
 // The indexer vocabulary, for the reason the provider one above gives: the command surface answers
 // DTOs built from these and may not depend on `peregrine-indexers` itself (AGENTS R6).
 pub use indexers::{DEFAULT_LIMIT, IndexerConfigError, IndexerStatus, MAX_LIMIT, PROWLARR};
-pub use peregrine_indexers::{IndexerError, IndexerRelease, TorrentSource};
+pub use peregrine_indexers::{
+    ConfiguredIndexer, IndexerDefinition, IndexerError, IndexerField, IndexerOption,
+    IndexerRelease, NewIndexer, TorrentSource,
+};
 // The rail vocabulary, for the same reason: the command surface answers a DTO whose `rail` field
 // is one of these, and a caller that had to reach for `peregrine-providers` to name it would be a
 // second dependency edge for a string (AGENTS R6).

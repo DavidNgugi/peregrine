@@ -7,9 +7,12 @@
 //! Ranking is deliberately absent: no quality profile is stored yet and PG-E12-10 owns the release
 //! decision, so these results are in the indexer's own order and nothing here pretends otherwise.
 
+use std::sync::Arc;
+
 use peregrine_app::indexers;
 use peregrine_app::{
-    IndexerConfigError, IndexerRelease, IndexerStatus, MAX_LIMIT, Secret, TorrentSource,
+    ConfiguredIndexer, IndexerConfigError, IndexerDefinition, IndexerField, IndexerOption,
+    IndexerRelease, IndexerStatus, MAX_LIMIT, Secret, TorrentSource,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -82,6 +85,173 @@ impl From<IndexerRelease> for ReleaseCandidateDto {
             guid: value.guid,
         }
     }
+}
+
+/// One indexer already configured in Prowlarr.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfiguredIndexerDto {
+    /// Prowlarr's own id, which removal names it by.
+    ///
+    /// `Number` opts this `i64` into a TypeScript `number`; a row id stays inside 2^53.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The name it is stored under.
+    pub name: String,
+    /// Whether Prowlarr is using it.
+    pub enable: bool,
+}
+
+impl From<ConfiguredIndexer> for ConfiguredIndexerDto {
+    fn from(value: ConfiguredIndexer) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            enable: value.enable,
+        }
+    }
+}
+
+/// One selectable option of a `select` field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerOptionDto {
+    /// The stored value.
+    pub value: String,
+    /// What a person sees.
+    pub label: String,
+}
+
+impl From<IndexerOption> for IndexerOptionDto {
+    fn from(value: IndexerOption) -> Self {
+        Self {
+            value: value.value,
+            label: value.label,
+        }
+    }
+}
+
+/// One field of an addable definition, as a form renders it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerFieldDto {
+    /// The field's name in Prowlarr's post body.
+    pub name: String,
+    /// The human label.
+    pub label: String,
+    /// The control kind Prowlarr states.
+    pub kind: String,
+    /// The current or default value.
+    pub value: Option<String>,
+    /// The choices for a `select`.
+    pub options: Vec<IndexerOptionDto>,
+    /// Whether Prowlarr marks it advanced, which the form hides.
+    pub advanced: bool,
+    /// Whether the value is a credential, which the form masks.
+    pub secret: bool,
+}
+
+impl From<IndexerField> for IndexerFieldDto {
+    fn from(value: IndexerField) -> Self {
+        Self {
+            name: value.name,
+            label: value.label,
+            kind: value.kind,
+            value: value.value,
+            options: value
+                .options
+                .into_iter()
+                .map(IndexerOptionDto::from)
+                .collect(),
+            advanced: value.advanced,
+            secret: value.secret,
+        }
+    }
+}
+
+/// One addable definition from Prowlarr's schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerDefinitionDto {
+    /// The identity an add selects it by.
+    pub key: String,
+    /// The definition's name.
+    pub name: String,
+    /// Its one-line description.
+    pub description: Option<String>,
+    /// Its fields, in Prowlarr's order.
+    pub fields: Vec<IndexerFieldDto>,
+}
+
+impl From<IndexerDefinition> for IndexerDefinitionDto {
+    fn from(value: IndexerDefinition) -> Self {
+        Self {
+            key: value.key,
+            name: value.name,
+            description: value.description,
+            fields: value
+                .fields
+                .into_iter()
+                .map(IndexerFieldDto::from)
+                .collect(),
+        }
+    }
+}
+
+/// One addable definition as the picker lists it, with its fields left out.
+///
+/// The fields are large — every definition carries dozens — and are read only for the one the user
+/// chooses, so a catalog of several hundred stays inside the IPC payload budget (AGENTS R11).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerSummaryDto {
+    /// The definition key an add or a detail read names.
+    pub key: String,
+    /// The definition's name.
+    pub name: String,
+    /// Its one-line description.
+    pub description: Option<String>,
+}
+
+impl From<IndexerDefinition> for IndexerSummaryDto {
+    fn from(value: IndexerDefinition) -> Self {
+        Self {
+            key: value.key,
+            name: value.name,
+            description: value.description,
+        }
+    }
+}
+
+/// One field value an add sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerFieldValueDto {
+    /// The field's name.
+    pub name: String,
+    /// The value the user set.
+    pub value: String,
+}
+
+/// What an add sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AddIndexerRequest {
+    /// The definition key.
+    pub key: String,
+    /// The name to store it under.
+    pub name: String,
+    /// The field values the user set.
+    pub fields: Vec<IndexerFieldValueDto>,
+}
+
+/// Identifies one configured indexer for removal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerRef {
+    /// Prowlarr's own id.
+    #[specta(type = Number)]
+    pub id: i64,
 }
 
 fn map_config(error: IndexerConfigError) -> AppError {
@@ -187,5 +357,99 @@ pub async fn search_releases(
             .into_iter()
             .map(ReleaseCandidateDto::from)
             .collect(),
+    ))
+}
+
+/// Lists the indexers already configured in Prowlarr.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_indexers(
+    state: State<'_, RuntimeState>,
+) -> Result<Vec<ConfiguredIndexerDto>, AppError> {
+    let store = state.runtime()?.secret_store();
+    let rows = indexers::list_indexers_async(store)
+        .await
+        .map_err(map_config)?;
+    Ok(guard_response(
+        "indexers::list",
+        rows.into_iter().map(ConfiguredIndexerDto::from).collect(),
+    ))
+}
+
+/// Lists the definitions the configured Prowlarr can add, without their fields.
+#[tauri::command]
+#[specta::specta]
+pub async fn indexer_catalog(
+    state: State<'_, RuntimeState>,
+) -> Result<Vec<IndexerSummaryDto>, AppError> {
+    let store = state.runtime()?.secret_store();
+    let rows = indexers::catalog_async(store).await.map_err(map_config)?;
+    Ok(guard_response(
+        "indexers::catalog",
+        rows.into_iter().map(IndexerSummaryDto::from).collect(),
+    ))
+}
+
+/// One definition's fields, read only when the user picks it.
+#[tauri::command]
+#[specta::specta]
+pub async fn indexer_definition(
+    state: State<'_, RuntimeState>,
+    key: String,
+) -> Result<Option<IndexerDefinitionDto>, AppError> {
+    let key = required(&key, "Choose an indexer to add.")?;
+    let store = state.runtime()?.secret_store();
+    let found = indexers::definition_async(store, key)
+        .await
+        .map_err(map_config)?;
+    Ok(guard_response(
+        "indexers::definition",
+        found.map(IndexerDefinitionDto::from),
+    ))
+}
+
+/// Adds one indexer and answers the refreshed list.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_indexer(
+    state: State<'_, RuntimeState>,
+    request: AddIndexerRequest,
+) -> Result<Vec<ConfiguredIndexerDto>, AppError> {
+    let name = required(&request.name, "Name the indexer before adding it.")?;
+    let fields = request
+        .fields
+        .into_iter()
+        .map(|field| (field.name, field.value))
+        .collect();
+    let store = state.runtime()?.secret_store();
+    indexers::add_indexer_async(store.clone(), request.key, name, fields)
+        .await
+        .map_err(map_config)?;
+    let rows = indexers::list_indexers_async(store)
+        .await
+        .map_err(map_config)?;
+    Ok(guard_response(
+        "indexers::add",
+        rows.into_iter().map(ConfiguredIndexerDto::from).collect(),
+    ))
+}
+
+/// Removes one indexer and answers the refreshed list.
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_indexer(
+    state: State<'_, RuntimeState>,
+    indexer: IndexerRef,
+) -> Result<Vec<ConfiguredIndexerDto>, AppError> {
+    let store = state.runtime()?.secret_store();
+    indexers::remove_indexer_async(Arc::clone(&store), indexer.id)
+        .await
+        .map_err(map_config)?;
+    let rows = indexers::list_indexers_async(store)
+        .await
+        .map_err(map_config)?;
+    Ok(guard_response(
+        "indexers::remove",
+        rows.into_iter().map(ConfiguredIndexerDto::from).collect(),
     ))
 }

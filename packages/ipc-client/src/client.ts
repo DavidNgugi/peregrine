@@ -19,6 +19,11 @@ import type {
   GenreDto,
   HomeRailDto,
   IndexerStatusDto,
+  AddIndexerRequest,
+  ConfiguredIndexerDto,
+  IndexerDefinitionDto,
+  IndexerRef,
+  IndexerSummaryDto,
   RailKindDto,
   RecommendationsDto,
   JobStarted,
@@ -136,6 +141,31 @@ export async function testIndexer(baseUrl: string, apiKey: string): Promise<bool
 /** Removes the stored indexer configuration. */
 export async function clearIndexer(): Promise<IndexerStatusDto> {
   return unwrap(commands.clearIndexer());
+}
+
+/** Lists the indexers already configured in Prowlarr. */
+export async function listIndexers(): Promise<ConfiguredIndexerDto[]> {
+  return unwrap(commands.listIndexers());
+}
+
+/** Lists the addable definitions, without their fields. */
+export async function indexerCatalog(): Promise<IndexerSummaryDto[]> {
+  return unwrap(commands.indexerCatalog());
+}
+
+/** One definition's fields, read when the user picks it. */
+export async function indexerDefinition(key: string): Promise<IndexerDefinitionDto | null> {
+  return unwrap(commands.indexerDefinition(key));
+}
+
+/** Adds one indexer and answers the refreshed list. */
+export async function addIndexer(request: AddIndexerRequest): Promise<ConfiguredIndexerDto[]> {
+  return unwrap(commands.addIndexer(request));
+}
+
+/** Removes one indexer and answers the refreshed list. */
+export async function removeIndexer(indexer: IndexerRef): Promise<ConfiguredIndexerDto[]> {
+  return unwrap(commands.removeIndexer(indexer));
 }
 
 /** The managed Prowlarr pack's state: supported, installed, running, and its loopback URL. */

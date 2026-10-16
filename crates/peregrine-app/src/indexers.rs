@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use peregrine_indexers::{Indexer, IndexerError, IndexerQuery, IndexerRelease, Prowlarr};
+use peregrine_indexers::{
+    ConfiguredIndexer, Indexer, IndexerDefinition, IndexerError, IndexerQuery, IndexerRelease,
+    NewIndexer, Prowlarr,
+};
 use peregrine_secrets::{Secret, SecretKey, SecretStore, SecretStoreError};
 
 /// The name Prowlarr's entries are stored under.
@@ -149,4 +152,62 @@ pub async fn search_async(
     };
     let indexer = build_adapter(&base_url, &api_key)?;
     Ok(indexer.search(&IndexerQuery { text, limit }).await?)
+}
+
+/// The adapter over what is stored, or a typed refusal when nothing is.
+async fn configured_adapter(store: Arc<dyn SecretStore>) -> Result<Prowlarr, IndexerConfigError> {
+    let loaded = tokio::task::spawn_blocking(move || load(store.as_ref()))
+        .await
+        .map_err(|_| IndexerConfigError::Store(SecretStoreError::Failed))??;
+    let Some((base_url, api_key)) = loaded else {
+        return Err(IndexerConfigError::Unconfigured);
+    };
+    Ok(build_adapter(&base_url, &api_key)?)
+}
+
+/// The indexers already configured in Prowlarr.
+pub async fn list_indexers_async(
+    store: Arc<dyn SecretStore>,
+) -> Result<Vec<ConfiguredIndexer>, IndexerConfigError> {
+    Ok(configured_adapter(store).await?.list_indexers().await?)
+}
+
+/// The definitions the configured Prowlarr can add.
+pub async fn catalog_async(
+    store: Arc<dyn SecretStore>,
+) -> Result<Vec<IndexerDefinition>, IndexerConfigError> {
+    Ok(configured_adapter(store).await?.indexer_catalog().await?)
+}
+
+/// One definition by key, or `None` when the catalog no longer offers it.
+pub async fn definition_async(
+    store: Arc<dyn SecretStore>,
+    key: String,
+) -> Result<Option<IndexerDefinition>, IndexerConfigError> {
+    Ok(catalog_async(store)
+        .await?
+        .into_iter()
+        .find(|definition| definition.key == key))
+}
+
+/// Adds one indexer to the configured Prowlarr.
+pub async fn add_indexer_async(
+    store: Arc<dyn SecretStore>,
+    key: String,
+    name: String,
+    fields: Vec<(String, String)>,
+) -> Result<ConfiguredIndexer, IndexerConfigError> {
+    let request = NewIndexer { key, name, fields };
+    Ok(configured_adapter(store)
+        .await?
+        .add_indexer(&request)
+        .await?)
+}
+
+/// Removes one indexer from the configured Prowlarr by its own id.
+pub async fn remove_indexer_async(
+    store: Arc<dyn SecretStore>,
+    id: i64,
+) -> Result<(), IndexerConfigError> {
+    Ok(configured_adapter(store).await?.remove_indexer(id).await?)
 }

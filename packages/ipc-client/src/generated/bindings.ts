@@ -450,6 +450,25 @@ export const commands = {
 	testIndexer: (baseUrl: string, apiKey: string) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("test_indexer", { baseUrl, apiKey })),
 	/**  Searches the configured indexer for releases. */
 	searchReleases: (query: string, limit: number | null) => typedError<ReleaseCandidateDto[], AppError_Serialize>(__TAURI_INVOKE("search_releases", { query, limit })),
+	/**  Lists the indexers already configured in Prowlarr. */
+	listIndexers: () => typedError<ConfiguredIndexerDto[], AppError_Serialize>(__TAURI_INVOKE("list_indexers")),
+	/**  Lists the definitions the configured Prowlarr can add, without their fields. */
+	indexerCatalog: () => typedError<IndexerSummaryDto[], AppError_Serialize>(__TAURI_INVOKE("indexer_catalog")),
+	/**  One definition's fields, read only when the user picks it. */
+	indexerDefinition: (key: string) => typedError<{
+	/**  The identity an add selects it by. */
+	key: string,
+	/**  The definition's name. */
+	name: string,
+	/**  Its one-line description. */
+	description: string | null,
+	/**  Its fields, in Prowlarr's order. */
+	fields: IndexerFieldDto[],
+} | null, AppError_Serialize>(__TAURI_INVOKE("indexer_definition", { key })),
+	/**  Adds one indexer and answers the refreshed list. */
+	addIndexer: (request: AddIndexerRequest) => typedError<ConfiguredIndexerDto[], AppError_Serialize>(__TAURI_INVOKE("add_indexer", { request })),
+	/**  Removes one indexer and answers the refreshed list. */
+	removeIndexer: (indexer: IndexerRef) => typedError<ConfiguredIndexerDto[], AppError_Serialize>(__TAURI_INVOKE("remove_indexer", { indexer })),
 	/**
 	 *  Starts an automatic acquisition for one title, and answers the job doing it.
 	 * 
@@ -482,6 +501,16 @@ export const commands = {
 };
 
 /* Types */
+/**  What an add sends. */
+export type AddIndexerRequest = {
+	/**  The definition key. */
+	key: string,
+	/**  The name to store it under. */
+	name: string,
+	/**  The field values the user set. */
+	fields: IndexerFieldValueDto[],
+};
+
 /**
  *  The error payload for every command, and the only shape the UI has to handle.
  * 
@@ -606,6 +635,20 @@ export type CaptureSessionDto = {
 	url: string,
 	/**  Where the frame is posted, or `null` when this session keeps no poster. */
 	thumbnailUrl: string | null,
+};
+
+/**  One indexer already configured in Prowlarr. */
+export type ConfiguredIndexerDto = {
+	/**
+	 *  Prowlarr's own id, which removal names it by.
+	 * 
+	 *  `Number` opts this `i64` into a TypeScript `number`; a row id stays inside 2^53.
+	 */
+	id: number,
+	/**  The name it is stored under. */
+	name: string,
+	/**  Whether Prowlarr is using it. */
+	enable: boolean,
 };
 
 /**  One in-progress title, as the Continue Watching rail draws it. */
@@ -868,12 +911,79 @@ export type HomeRailDto = {
 	state: RailsStateDto,
 };
 
+/**  One addable definition from Prowlarr's schema. */
+export type IndexerDefinitionDto = {
+	/**  The identity an add selects it by. */
+	key: string,
+	/**  The definition's name. */
+	name: string,
+	/**  Its one-line description. */
+	description: string | null,
+	/**  Its fields, in Prowlarr's order. */
+	fields: IndexerFieldDto[],
+};
+
+/**  One field of an addable definition, as a form renders it. */
+export type IndexerFieldDto = {
+	/**  The field's name in Prowlarr's post body. */
+	name: string,
+	/**  The human label. */
+	label: string,
+	/**  The control kind Prowlarr states. */
+	kind: string,
+	/**  The current or default value. */
+	value: string | null,
+	/**  The choices for a `select`. */
+	options: IndexerOptionDto[],
+	/**  Whether Prowlarr marks it advanced, which the form hides. */
+	advanced: boolean,
+	/**  Whether the value is a credential, which the form masks. */
+	secret: boolean,
+};
+
+/**  One field value an add sends. */
+export type IndexerFieldValueDto = {
+	/**  The field's name. */
+	name: string,
+	/**  The value the user set. */
+	value: string,
+};
+
+/**  One selectable option of a `select` field. */
+export type IndexerOptionDto = {
+	/**  The stored value. */
+	value: string,
+	/**  What a person sees. */
+	label: string,
+};
+
+/**  Identifies one configured indexer for removal. */
+export type IndexerRef = {
+	/**  Prowlarr's own id. */
+	id: number,
+};
+
 /**  What this installation has configured, as a settings screen renders it. */
 export type IndexerStatusDto = {
 	/**  Whether both a base URL and a key are stored. */
 	configured: boolean,
 	/**  The configured base URL, which is not a secret. */
 	baseUrl: string | null,
+};
+
+/**
+ *  One addable definition as the picker lists it, with its fields left out.
+ * 
+ *  The fields are large — every definition carries dozens — and are read only for the one the user
+ *  chooses, so a catalog of several hundred stays inside the IPC payload budget (AGENTS R11).
+ */
+export type IndexerSummaryDto = {
+	/**  The definition key an add or a detail read names. */
+	key: string,
+	/**  The definition's name. */
+	name: string,
+	/**  Its one-line description. */
+	description: string | null,
 };
 
 /**  One row of the job journal. */

@@ -65,6 +65,9 @@ function noProviders(): ProviderSettings {
 function noIndexers(): IndexerSettings {
   return {
     status: null,
+    indexers: [],
+    catalog: [],
+    definition: null,
     loading: false,
     failed: false,
     busy: false,
@@ -73,6 +76,11 @@ function noIndexers(): IndexerSettings {
     save: () => Promise.resolve(),
     test: () => Promise.resolve(),
     clear: () => Promise.resolve(),
+    loadCatalog: () => Promise.resolve(),
+    choose: () => Promise.resolve(),
+    add: () => Promise.resolve(),
+    remove: () => Promise.resolve(),
+    refresh: () => Promise.resolve(),
   };
 }
 

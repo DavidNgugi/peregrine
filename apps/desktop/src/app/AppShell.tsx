@@ -149,6 +149,16 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const providers = useProviders();
   const indexers = useIndexers();
   const prowlarr = useProwlarr();
+  // The managed instance writes the Prowlarr key out of band when it starts, so the indexer
+  // section's one read is stale the moment that happens. Re-read when the managed state flips to
+  // running, so the section stops claiming nothing is configured.
+  const managedProwlarrRunning = prowlarr.status?.running ?? false;
+  const refreshIndexers = indexers.refresh;
+  useEffect(() => {
+    if (managedProwlarrRunning) {
+      void refreshIndexers();
+    }
+  }, [managedProwlarrRunning, refreshIndexers]);
   const library = useLibraryTitles();
   const downloads = useDownloads();
   const scan = useScan();

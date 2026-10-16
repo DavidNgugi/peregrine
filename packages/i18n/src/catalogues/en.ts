@@ -581,6 +581,27 @@ export const en = {
         removed: "Removed. Downloads already queued are not affected.",
         tested: "Prowlarr answered. The URL and key work.",
         testFailed: "Prowlarr did not answer with that URL and key.",
+        list: {
+          title: "Indexers in Prowlarr",
+          empty: "Prowlarr has no indexers yet. Add one below.",
+        },
+        remove: "Remove",
+        removeConfirm: {
+          title: "Remove this indexer?",
+          body: "{{name}} will be removed from Prowlarr. Downloads already queued are not affected.",
+        },
+        deleted: "Removed from Prowlarr.",
+        add: {
+          title: "Add an indexer",
+          browse: "Browse indexers",
+          search: "Filter",
+          searchPlaceholder: "Type to filter…",
+          choose: "Choose an indexer",
+          name: "Name",
+          submit: "Add indexer",
+          added: "Added to Prowlarr.",
+          none: "Prowlarr offered no indexer definitions.",
+        },
         confirm: {
           title: "Remove the indexer?",
           body: "Peregrine will stop searching Prowlarr for releases. Downloads already queued are not affected, and nothing else is removed.",
