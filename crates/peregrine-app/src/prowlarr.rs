@@ -471,10 +471,19 @@ impl Supervisor {
 
         let client = client()?;
         let port = read_config(&config_dir).map_or(DEFAULT_PORT, |config| config.port);
+        // The data-directory argument is read only in its equals form, -data=<dir>. With a
+        // space Prowlarr ignores it and writes into the user's own default config directory,
+        // so the supervisor would look for a config.xml that is never there. Verified against
+        // a real 2.6.5.5623 run.
+        let data_argument = format!("-data={}", config_dir.display());
         let mut child = Command::new(&executable)
-            .arg("-data")
-            .arg(&config_dir)
+            .arg(data_argument)
             .arg("-nobrowser")
+            // Prowlarr defaults BindAddress to every interface. This override keeps the managed
+            // instance on loopback (ADR 0024), and it is set on every spawn because the value is
+            // not persisted into config.xml.
+            .env("PROWLARR__SERVER__BINDADDRESS", "127.0.0.1")
+            .env("PROWLARR__SERVER__PORT", port.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
