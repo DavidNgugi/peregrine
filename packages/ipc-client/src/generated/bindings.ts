@@ -504,6 +504,12 @@ export const commands = {
 	 *  whether a 4K release is a candidate at all.
 	 */
 	setPreferredQuality: (quality: string) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_preferred_quality", { quality })),
+	/**  The offers a search left for one title. */
+	listReleaseOffers: (title: TitleRef) => typedError<ReleaseOfferDto[], AppError_Serialize>(__TAURI_INVOKE("list_release_offers", { title })),
+	/**  Queues the release the user picked from the offers, without a second search. */
+	chooseReleaseOffer: (offer: OfferRef, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("choose_release_offer", { offer, minSeeders })),
+	/**  Dismisses one offer so a later search does not offer it again. */
+	dismissReleaseOffer: (offer: OfferRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_release_offer", { offer })),
 	/**  What the account is part-way through, most recently updated first. */
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
@@ -1229,6 +1235,12 @@ export type MatchRuleRef = {
 	id: number,
 };
 
+/**  A release offer's id, as a listing returned it. */
+export type OfferRef = {
+	/**  The row a choice names. */
+	id: number,
+};
+
 /**
  *  One open playback session: what is playing, and where the bytes come from.
  * 
@@ -1481,6 +1493,27 @@ export type ReleaseCandidateDto = {
 	published: string | null,
 	/**  The indexer's own identifier for the release. */
 	guid: string | null,
+};
+
+/**
+ *  One release a search found at a quality the preference excluded.
+ * 
+ *  The release's source is deliberately absent: it stays in the core and is looked up by id when
+ *  a choice names one, so no magnet, URL, or path crosses IPC (R11).
+ */
+export type ReleaseOfferDto = {
+	/**  The row a choice names. */
+	id: number,
+	/**  The release name the indexer advertised. */
+	releaseTitle: string,
+	/**  Which indexer it came from. */
+	indexer: string | null,
+	/**  Why the preferred quality excluded it, in the domain's own words. */
+	reason: string,
+	/**  The size the indexer stated. */
+	sizeBytes: number | null,
+	/**  The seeders the indexer stated. */
+	seeders: number | null,
 };
 
 /**  What a root is expected to hold, as the webview spells it. */

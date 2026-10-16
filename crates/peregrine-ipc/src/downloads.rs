@@ -344,6 +344,96 @@ pub async fn set_preferred_quality(
         .map_err(AppError::from)
 }
 
+/// A release offer's id, as a listing returned it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OfferRef {
+    /// The row a choice names.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
+/// One release a search found at a quality the preference excluded.
+///
+/// The release's source is deliberately absent: it stays in the core and is looked up by id when
+/// a choice names one, so no magnet, URL, or path crosses IPC (R11).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseOfferDto {
+    /// The row a choice names.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The release name the indexer advertised.
+    pub release_title: String,
+    /// Which indexer it came from.
+    pub indexer: Option<String>,
+    /// Why the preferred quality excluded it, in the domain's own words.
+    pub reason: String,
+    /// The size the indexer stated.
+    #[specta(type = Option<Number>)]
+    pub size_bytes: Option<u64>,
+    /// The seeders the indexer stated.
+    pub seeders: Option<u32>,
+}
+
+/// The offers a search left for one title.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_release_offers(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+) -> Result<Vec<ReleaseOfferDto>, AppError> {
+    let runtime = state.runtime()?;
+    let rows = runtime.release_offers(title.id).await?;
+    Ok(guard_response(
+        "downloads::list_offers",
+        rows.into_iter()
+            .map(|row| ReleaseOfferDto {
+                id: row.id,
+                release_title: row.release_title,
+                indexer: row.indexer,
+                reason: row.reasons_json,
+                size_bytes: row.size_bytes.and_then(|value| u64::try_from(value).ok()),
+                seeders: row.seeders.and_then(|value| u32::try_from(value).ok()),
+            })
+            .collect(),
+    ))
+}
+
+/// Queues the release the user picked from the offers, without a second search.
+#[tauri::command]
+#[specta::specta]
+pub async fn choose_release_offer(
+    state: State<'_, RuntimeState>,
+    offer: OfferRef,
+    min_seeders: Option<u32>,
+) -> Result<JobStarted, AppError> {
+    let started = state
+        .runtime()?
+        .acquire_release(
+            peregrine_app::runtime::installation_scope(),
+            offer.id,
+            min_seeders.unwrap_or(1),
+        )
+        .await?;
+    Ok(guard_response(
+        "downloads::choose_offer",
+        JobStarted::from(started),
+    ))
+}
+
+/// Dismisses one offer so a later search does not offer it again.
+#[tauri::command]
+#[specta::specta]
+pub async fn dismiss_release_offer(
+    state: State<'_, RuntimeState>,
+    offer: OfferRef,
+) -> Result<bool, AppError> {
+    let runtime = state.runtime()?;
+    let changed = runtime.dismiss_release_offer(offer.id).await?;
+    Ok(guard_response("downloads::dismiss_offer", changed))
+}
+
 /// The row a move left behind, or a typed refusal when it vanished.
 async fn row_after(
     runtime: &peregrine_app::runtime::Runtime,

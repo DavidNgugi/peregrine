@@ -7,14 +7,14 @@
 
 use std::sync::Arc;
 
-use peregrine_domain::rank::{Candidate, alternative_candidates, ranked_candidates};
+use peregrine_domain::rank::{Candidate, ReleaseRanker, alternative_candidates, ranked_candidates};
 use peregrine_domain::{
     AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, ReleaseName, Resolution, Verdict,
 };
 use peregrine_indexers::{FetchedTorrent, IndexerRelease, TorrentSource as IndexerSource};
 use peregrine_secrets::SecretStore;
 use peregrine_storage::{
-    AddedBy, Database, DownloadSource, JobChange, JobPhase, MagnetUri, NewDownloadJob,
+    AddedBy, Database, DownloadSource, JobChange, JobPhase, MagnetUri, NewDownloadJob, NewOffer,
 };
 use peregrine_sync::{Job, JobContext, JobError, JobFuture};
 use peregrine_torrent::{TorrentMetadataFetch, TorrentSource as EngineSource};
@@ -42,11 +42,31 @@ const SEARCH_LIMIT: u32 = 100;
 /// allowed but the volume cannot hold, a name the guard refuses, a swarm with no peers left.
 const MAX_CANDIDATES_TRIED: usize = 5;
 
-/// Which title to acquire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A release the user picked from the offers.
+///
+/// Carried into the job so the chosen release is acquired without a second search; the safety
+/// gate and the free-space admission still run, because a manual choice is not a safety bypass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChosenOffer {
+    /// The release name as the indexer stated it.
+    pub raw_title: String,
+    /// Which indexer it came from.
+    pub indexer: Option<String>,
+    /// Its stated size.
+    pub size_bytes: Option<u64>,
+    /// Its stated seeders.
+    pub seeders: Option<u32>,
+    /// Where its bytes are fetched from, looked up from the row rather than sent over IPC.
+    pub source: IndexerSource,
+}
+
+/// Which title to acquire, and the release to acquire when the user has chosen one.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     /// The catalogue row.
     pub title_id: i64,
+    /// The release the user picked, or None to search.
+    pub chosen: Option<ChosenOffer>,
 }
 
 /// The dedupe key: one live acquire per title.
@@ -168,6 +188,25 @@ impl AcquireJob {
             .map_err(|error| JobError::failed(format!("the title could not be read: {error}")))?
             .ok_or_else(|| JobError::failed("that title is not in this account's library"))?;
 
+        if let Some(chosen) = self.target.chosen.clone() {
+            // The user picked this release from the offers: no search and no ranking, but the gate
+            // and the admission below still run. A manual choice never bypasses a safety check.
+            self.phase(job, attempt, 500).await;
+            let release = IndexerRelease {
+                raw_title: chosen.raw_title.clone(),
+                title: ReleaseName::parse(&chosen.raw_title),
+                size_bytes: chosen.size_bytes,
+                seeders: chosen.seeders,
+                leechers: None,
+                source: chosen.source,
+                indexer: chosen.indexer,
+                published: None,
+                guid: None,
+            };
+            let request = self.prepare(&release, &identity.name).await?;
+            return self.start_candidate(job, attempt, request).await;
+        }
+
         let profile = self
             .database
             .default_quality_profile()
@@ -225,10 +264,12 @@ impl AcquireJob {
         let ranked = ranked_candidates(&candidates, &profile);
         if ranked.is_empty() {
             // The preferred quality found nothing, but the releases that do exist are worth
-            // naming: "nothing at 1080p, but 2160p x3 and 720p x1 exist" is a choice, where
-            // "no release matched" is a dead end. The offer-and-pick flow that acts on this is
-            // the next change; this records what it will offer.
+            // offering: "nothing at 1080p, but 2160p x3 and 720p x1 exist" is a choice, where "no
+            // release matched" is a dead end. They are stored with their sources so the user can
+            // pick one without the search running again.
             let alternatives = alternative_candidates(&candidates, &profile);
+            self.persist_offers(&candidates, &kept, &alternatives, &profile)
+                .await;
             let summary = summarise_alternatives(&candidates, &alternatives);
             warn!(available = %summary, "no release matched the preferred quality");
             return Err(JobError::failed(format!(
@@ -279,6 +320,58 @@ impl AcquireJob {
         Err(last_error.unwrap_or_else(|| {
             JobError::failed("no release the quality profile accepts could be prepared")
         }))
+    }
+
+    /// Stores what a search found at other qualities, so a person can pick one later.
+    ///
+    /// The source goes into the row and stays there: the chooser is answered from the metadata
+    /// columns only, and the source is looked up by id when a choice names one. A failure is a
+    /// warning rather than the job's outcome: an unstored offer costs a choice, not the search.
+    async fn persist_offers(
+        &self,
+        candidates: &[Candidate],
+        kept: &[&IndexerRelease],
+        alternatives: &[usize],
+        profile: &peregrine_domain::QualityProfile,
+    ) {
+        let mut offers = Vec::with_capacity(alternatives.len());
+        for (position, index) in alternatives.iter().enumerate() {
+            let (Some(release), Some(candidate)) = (kept.get(*index), candidates.get(*index))
+            else {
+                continue;
+            };
+            // describe() is the domain's own audit line for this outcome, so the reason stored
+            // here is the same text the "why this release" panel would show.
+            let ranking = ReleaseRanker::rank(candidate, profile);
+            let reasons_json = ranking.describe();
+            let Ok(source_json) = serde_json::to_string(&release.source) else {
+                continue;
+            };
+            offers.push(NewOffer {
+                release_title: release.raw_title.clone(),
+                indexer: release.indexer.clone(),
+                score: ranking.score().map_or(0.0, |score| score as f64),
+                rank_position: position as i64,
+                reasons_json,
+                source_json,
+                size_bytes: release.size_bytes.map(|value| value as i64),
+                seeders: release.seeders.map(i64::from),
+            });
+        }
+        if offers.is_empty() {
+            return;
+        }
+        if let Err(error) = self
+            .database
+            .replace_release_offers(
+                self.target.title_id,
+                &offers,
+                self.clock.now().as_millisecond(),
+            )
+            .await
+        {
+            warn!(%error, "the offers a search found could not be stored");
+        }
     }
 
     /// One ranked candidate as a start request: its source, its metadata, and the destination

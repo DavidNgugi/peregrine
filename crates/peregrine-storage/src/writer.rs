@@ -254,6 +254,25 @@ pub(crate) enum WriteRequest {
     },
     /// Delete every finished `download_job` row.
     DeleteFinishedDownloadJobs,
+    /// Replace the offers a search found for one title, keeping anything already acted on.
+    ReplaceReleaseOffers {
+        /// The title the offers belong to.
+        title_id: i64,
+        /// The set the newest search found.
+        offers: Vec<crate::offers::NewOffer>,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Mark one offer chosen and answer its source, serialized.
+    ChooseReleaseOffer {
+        /// The offer row.
+        id: i64,
+    },
+    /// Mark one offer dismissed.
+    DismissReleaseOffer {
+        /// The offer row.
+        id: i64,
+    },
     /// Write one coalesced statistics tick onto a `download_job` row.
     RecordDownloadStatistics {
         /// The row.
@@ -338,6 +357,12 @@ pub(crate) enum WriteResponse {
     DownloadJobDeleted { removed: bool },
     /// How many finished `download_job` rows a clear removed.
     DownloadJobsCleared { removed: u64 },
+    /// How many offers a search stored.
+    ReleaseOffersStored { written: u64 },
+    /// The offer a choice named, or `None` when it was already acted on.
+    ReleaseOfferChosen {
+        chosen: Option<crate::offers::ChosenOfferRow>,
+    },
 }
 
 /// A row to append to `event_log` (`DATA_MODEL` §2.8).
@@ -732,6 +757,21 @@ async fn apply_download_write(
                 .await
                 .map(|removed| WriteResponse::DownloadJobsCleared { removed })
         }
+        WriteRequest::ReplaceReleaseOffers {
+            title_id,
+            offers,
+            at,
+        } => crate::offers::replace_offers(connection, title_id, &offers, at)
+            .await
+            .map(|written| WriteResponse::ReleaseOffersStored {
+                written: written as u64,
+            }),
+        WriteRequest::ChooseReleaseOffer { id } => crate::offers::choose_offer(connection, id)
+            .await
+            .map(|chosen| WriteResponse::ReleaseOfferChosen { chosen }),
+        WriteRequest::DismissReleaseOffer { id } => crate::offers::dismiss_offer(connection, id)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed }),
         WriteRequest::RecordDownloadStatistics { id, statistics } => {
             crate::download::record_statistics(connection, id, &statistics)
                 .await

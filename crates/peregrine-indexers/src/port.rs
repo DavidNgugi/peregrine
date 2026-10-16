@@ -4,6 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use peregrine_domain::ReleaseName;
+use serde::{Deserialize, Serialize};
 
 use crate::error::IndexerError;
 
@@ -24,7 +25,7 @@ pub struct IndexerQuery {
 ///
 /// `Magnet` is preferred when an indexer gives both because it carries the trackers; `InfoHash`
 /// is what a caller has to work with when it does not.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TorrentSource {
     /// A magnet URI.
     Magnet(String),

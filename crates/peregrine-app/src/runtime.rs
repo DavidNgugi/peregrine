@@ -1655,6 +1655,96 @@ impl Runtime {
         title_id: i64,
         min_seeders: u32,
     ) -> Result<StartedJob, RuntimeError> {
+        self.submit_acquire(
+            account,
+            crate::jobs::acquire::Target {
+                title_id,
+                chosen: None,
+            },
+            min_seeders,
+        )
+        .await
+    }
+
+    /// Queues the release the user picked from the offers, without a second search.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::InvalidRequest when the offer is gone or was already acted on, plus the same
+    /// storage, scheduler and engine errors that start_acquire reports.
+    pub async fn acquire_release(
+        &self,
+        account: peregrine_domain::AccountScope,
+        offer_id: i64,
+        min_seeders: u32,
+    ) -> Result<StartedJob, RuntimeError> {
+        let chosen = self
+            .database
+            .choose_release_offer(offer_id)
+            .await?
+            .ok_or_else(|| RuntimeError::InvalidRequest {
+                detail: "that offer is gone or was already used".to_owned(),
+            })?;
+        let source: peregrine_indexers::TorrentSource = serde_json::from_str(&chosen.source_json)
+            .map_err(|_| {
+            RuntimeError::InvalidRequest {
+                detail: "that offer's release is not usable".to_owned(),
+            }
+        })?;
+        self.submit_acquire(
+            account,
+            crate::jobs::acquire::Target {
+                title_id: chosen.title_id,
+                chosen: Some(crate::jobs::acquire::ChosenOffer {
+                    raw_title: chosen.release_title,
+                    indexer: chosen.indexer,
+                    size_bytes: chosen
+                        .size_bytes
+                        .and_then(|value| u64::try_from(value).ok()),
+                    seeders: chosen.seeders.and_then(|value| u32::try_from(value).ok()),
+                    source,
+                }),
+            },
+            min_seeders,
+        )
+        .await
+    }
+
+    /// The offers a search left for one title.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the read fails.
+    pub async fn release_offers(
+        &self,
+        title_id: i64,
+    ) -> Result<Vec<peregrine_storage::OfferRow>, RuntimeError> {
+        self.database
+            .list_release_offers(title_id)
+            .await
+            .map_err(RuntimeError::from)
+    }
+
+    /// Dismisses one offer so a later search does not offer it again.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the write fails.
+    pub async fn dismiss_release_offer(&self, offer_id: i64) -> Result<bool, RuntimeError> {
+        self.database
+            .dismiss_release_offer(offer_id)
+            .await
+            .map_err(RuntimeError::from)
+    }
+
+    /// The one submit path both entry points use.
+    async fn submit_acquire(
+        &self,
+        account: peregrine_domain::AccountScope,
+        target: crate::jobs::acquire::Target,
+        min_seeders: u32,
+    ) -> Result<StartedJob, RuntimeError> {
+        let title_id = target.title_id;
         let now = self.clock.now().as_millisecond();
         let key = crate::jobs::acquire::dedupe_key(title_id);
         let journal_id = self
@@ -1684,7 +1774,7 @@ impl Runtime {
             Arc::clone(&self.clock),
             account,
             journal_id,
-            crate::jobs::acquire::Target { title_id },
+            target,
             min_seeders,
         );
         match self.scheduler.submit(spec, job).await {

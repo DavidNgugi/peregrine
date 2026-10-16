@@ -29,6 +29,7 @@ mod library;
 mod maintenance;
 mod migrations;
 mod notify;
+mod offers;
 mod page;
 mod pragmas;
 mod quality;
@@ -38,6 +39,8 @@ mod test_support;
 mod usage;
 mod watch;
 mod writer;
+
+pub use offers::{ChosenOfferRow, NewOffer, OfferRow};
 
 pub use catalogue::{
     MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StubEpisode, StubSeason, StubTitle,

@@ -327,6 +327,80 @@ impl Database {
         }
     }
 
+    /// Replaces the offers a search found for one title, answering how many were stored.
+    ///
+    /// Anything the user already acted on is kept, so a dismissed offer does not come back.
+    ///
+    /// # Errors
+    ///
+    /// StorageError when the statement fails.
+    pub async fn replace_release_offers(
+        &self,
+        title_id: i64,
+        offers: &[crate::offers::NewOffer],
+        at: i64,
+    ) -> Result<u64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ReplaceReleaseOffers {
+                title_id,
+                offers: offers.to_vec(),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::ReleaseOffersStored { written } => Ok(written),
+            other => Err(unexpected_response("replace_release_offers", &other)),
+        }
+    }
+
+    /// Marks one offer chosen and answers its source, which never crosses IPC.
+    ///
+    /// # Errors
+    ///
+    /// StorageError when the statement fails.
+    pub async fn choose_release_offer(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::offers::ChosenOfferRow>, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ChooseReleaseOffer { id })
+            .await?
+        {
+            WriteResponse::ReleaseOfferChosen { chosen } => Ok(chosen),
+            other => Err(unexpected_response("choose_release_offer", &other)),
+        }
+    }
+
+    /// Marks one offer dismissed, answering whether a row changed.
+    ///
+    /// # Errors
+    ///
+    /// StorageError when the statement fails.
+    pub async fn dismiss_release_offer(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::DismissReleaseOffer { id })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("dismiss_release_offer", &other)),
+        }
+    }
+
+    /// The offers still on the table for one title.
+    ///
+    /// # Errors
+    ///
+    /// StorageError when the read fails.
+    pub async fn list_release_offers(
+        &self,
+        title_id: i64,
+    ) -> Result<Vec<crate::offers::OfferRow>, StorageError> {
+        crate::offers::list_offers(&self.readers, title_id).await
+    }
+
     /// Writes one coalesced statistics tick, reporting whether the job was there.
     pub async fn record_download_statistics(
         &self,
