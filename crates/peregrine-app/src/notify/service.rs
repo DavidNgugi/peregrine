@@ -738,9 +738,9 @@ impl Counts {
 /// The subject kind the schema's constraint accepts, when the event has one.
 fn subject_kind(event: NotificationEvent) -> Option<SubjectKind> {
     match event {
-        NotificationEvent::NewEpisodeAvailable | NotificationEvent::SubtitleDownloadFinished => {
-            Some(SubjectKind::Title)
-        }
+        NotificationEvent::NewEpisodeAvailable
+        | NotificationEvent::SubtitleDownloadFinished
+        | NotificationEvent::ReleaseAlternatives => Some(SubjectKind::Title),
         NotificationEvent::DownloadCompleted
         | NotificationEvent::DownloadFailed
         | NotificationEvent::TorrentBlocked => Some(SubjectKind::Download),

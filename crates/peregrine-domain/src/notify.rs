@@ -309,6 +309,12 @@ pub enum NotificationEvent {
     DiskSpaceLow,
     /// An application update is available. Never installs.
     UpdateAvailable,
+    /// A search found nothing at the preferred quality and other qualities are available.
+    ///
+    /// Raised once per search that produced offers, never per offer: the title page is where
+    /// they are chosen, so the event exists to say "there is something to choose", not to
+    /// carry the choices themselves.
+    ReleaseAlternatives,
     /// A subtitle download finished.
     SubtitleDownloadFinished,
     /// A library scan or metadata sync finished.
@@ -325,13 +331,14 @@ pub enum NotificationEvent {
 impl NotificationEvent {
     /// Every event, in the order ADR 0015 §3 lists them, with the internal
     /// digest last.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::DownloadCompleted,
         Self::DownloadFailed,
         Self::TorrentBlocked,
         Self::NewEpisodeAvailable,
         Self::DiskSpaceLow,
         Self::UpdateAvailable,
+        Self::ReleaseAlternatives,
         Self::SubtitleDownloadFinished,
         Self::LibraryScanFinished,
         Self::CastSessionEnded,
@@ -348,6 +355,7 @@ impl NotificationEvent {
             Self::NewEpisodeAvailable => "episode.available",
             Self::DiskSpaceLow => "disk.low",
             Self::UpdateAvailable => "update.available",
+            Self::ReleaseAlternatives => "release.alternatives",
             Self::SubtitleDownloadFinished => "subtitle.downloaded",
             Self::LibraryScanFinished => "scan.finished",
             Self::CastSessionEnded => "cast.ended",
@@ -368,7 +376,8 @@ impl NotificationEvent {
             | Self::TorrentBlocked
             | Self::NewEpisodeAvailable
             | Self::DiskSpaceLow
-            | Self::UpdateAvailable => true,
+            | Self::UpdateAvailable
+            | Self::ReleaseAlternatives => true,
             Self::SubtitleDownloadFinished
             | Self::LibraryScanFinished
             | Self::CastSessionEnded
@@ -386,6 +395,7 @@ impl NotificationEvent {
             | Self::DiskSpaceLow => true,
             Self::NewEpisodeAvailable
             | Self::UpdateAvailable
+            | Self::ReleaseAlternatives
             | Self::SubtitleDownloadFinished
             | Self::LibraryScanFinished
             | Self::CastSessionEnded
@@ -714,6 +724,7 @@ pub fn deep_link_for(event: NotificationEvent, subject_id: i64) -> Result<DeepLi
             let id = subject.as_str();
             deep_link("title", &["tmdb", id])
         }
+        NotificationEvent::ReleaseAlternatives => deep_link("title", &["tmdb", subject.as_str()]),
         NotificationEvent::UpdateAvailable => deep_link("update", &[]),
         NotificationEvent::DiskSpaceLow => deep_link("settings", &[]),
         NotificationEvent::CastSessionEnded => deep_link("queue", &[]),
@@ -954,6 +965,10 @@ impl NotificationPayload {
             NotificationEvent::UpdateAvailable => (
                 "An update is available".to_owned(),
                 Some("Open the update prompt to install it".to_owned()),
+            ),
+            NotificationEvent::ReleaseAlternatives => (
+                self.subject("Other qualities are available"),
+                Some("Open the title to choose one".to_owned()),
             ),
             NotificationEvent::SubtitleDownloadFinished => (
                 self.subject("Subtitle downloaded"),

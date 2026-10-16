@@ -42,6 +42,7 @@ Every user-facing event writes a row to the `notification` table and appears in 
 | New episode available for a watchlisted show | on | off | Batched into one digest per day when several land together |
 | Disk space low | on | on | **Critical** |
 | Update available | on | off | Click opens the update prompt, never installs |
+| Release alternatives available | on | off | Raised **once per search** that found nothing at the preferred quality, never per offer; click opens the title to choose. The copy names the title and the count, never a magnet or path (R31) |
 | Subtitle download finished | off | — | Background noise by default |
 | Library scan or metadata sync finished | off | — | — |
 | Cast session ended | off | — | — |
