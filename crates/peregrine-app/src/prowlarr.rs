@@ -28,6 +28,9 @@ pub const VERSION: &str = "2.6.5.5623";
 
 /// How long to wait for Prowlarr to answer its own health check after it is spawned.
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
+/// How long to keep re-reading config.xml after /ping answers. Prowlarr can answer the health
+/// check before it has written its key, so a single read is a race a real run lost.
+const CONFIG_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often to ask while waiting.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Prowlarr's port before it has written a config.xml of its own.
@@ -146,6 +149,9 @@ pub enum ProwlarrError {
     /// The macOS bundle could not be un-quarantined or re-signed.
     #[error("the Prowlarr macOS bundle could not be prepared")]
     Bundle,
+    /// A managed instance is already answering on the loopback port.
+    #[error("a managed Prowlarr is already running")]
+    AlreadyRunning,
     /// Prowlarr did not answer GET /ping inside the timeout.
     #[error("Prowlarr did not answer its health check in time")]
     NotReady,
@@ -486,6 +492,11 @@ impl Supervisor {
 
         let client = client()?;
         let port = read_config(&config_dir).map_or(DEFAULT_PORT, |config| config.port);
+        // An instance left running by a previous process still answers here. Reusing the port
+        // would put two Prowlarrs on one config directory, so refuse rather than spawn a second.
+        if answers(&client, port).await {
+            return Err(ProwlarrError::AlreadyRunning);
+        }
         // The data-directory argument is read only in its equals form, -data=<dir>. With a
         // space Prowlarr ignores it and writes into the user's own default config directory,
         // so the supervisor would look for a config.xml that is never there. Verified against
@@ -496,33 +507,52 @@ impl Supervisor {
             .arg("-nobrowser")
             // Prowlarr defaults BindAddress to every interface. This override keeps the managed
             // instance on loopback (ADR 0024), and it is set on every spawn because the value is
-            // not persisted into config.xml.
+            // not persisted into config.xml. The port is deliberately NOT overridden: an
+            // environment port is not written to config.xml, and the persisted one is what the
+            // supervisor reads back to build the URL.
             .env("PROWLARR__SERVER__BINDADDRESS", "127.0.0.1")
-            .env("PROWLARR__SERVER__PORT", port.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .map_err(ProwlarrError::Io)?;
 
-        if !wait_ready(&client, port).await {
-            let _ = child.kill();
-            let _ = child.wait();
+        // Every path after the spawn either succeeds or reaps the child. An orphaned Prowlarr is
+        // a listener nobody stops and a port the next attempt cannot bind; a real run left one.
+        match Self::finish_start(&client, &config_dir, &store, port).await {
+            Ok(base_url) => Ok(Self { child, base_url }),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(error)
+            }
+        }
+    }
+
+    /// The part of a start that can fail: wait for health, read the key it wrote, store it.
+    async fn finish_start(
+        client: &reqwest::Client,
+        config_dir: &Path,
+        store: &Arc<dyn SecretStore>,
+        port: u16,
+    ) -> Result<String, ProwlarrError> {
+        if !wait_ready(client, port).await {
             return Err(ProwlarrError::NotReady);
         }
-
-        let config = read_config(&config_dir).ok_or(ProwlarrError::Config)?;
+        let config = read_config_when_written(config_dir)
+            .await
+            .ok_or(ProwlarrError::Config)?;
         let base_url = format!("http://127.0.0.1:{}", config.port);
         let endpoint = base_url.clone();
         let key = config.api_key;
+        let store = Arc::clone(store);
         tokio::task::spawn_blocking(move || {
             store.set(&endpoint_key(), &Secret::new(endpoint))?;
             store.set(&api_key_key(), &Secret::new(key))
         })
         .await
         .map_err(|_| ProwlarrError::Task)??;
-
-        Ok(Self { child, base_url })
+        Ok(base_url)
     }
 
     /// The loopback endpoint the managed instance answers on.
@@ -596,6 +626,26 @@ async fn wait_ready(client: &reqwest::Client, port: u16) -> bool {
         }
         if tokio::time::Instant::now() >= deadline {
             return false;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Whether something already answers Prowlarr's health check on this port.
+async fn answers(client: &reqwest::Client, port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{port}/ping");
+    matches!(client.get(&url).send().await, Ok(response) if response.status().is_success())
+}
+
+/// Reads config.xml, retrying until Prowlarr has written its key or the deadline passes.
+async fn read_config_when_written(config_dir: &Path) -> Option<Config> {
+    let deadline = tokio::time::Instant::now() + CONFIG_TIMEOUT;
+    loop {
+        if let Some(config) = read_config(config_dir) {
+            return Some(config);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }

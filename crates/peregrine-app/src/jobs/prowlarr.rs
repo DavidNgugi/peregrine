@@ -280,6 +280,11 @@ impl ProwlarrStartJob {
         attempt: u32,
         _cancellation: CancellationToken,
     ) -> peregrine_sync::JobResult {
+        if self.managed.is_running() {
+            // One managed instance is all there can be, so a second Start is a no-op rather than
+            // a second spawn fighting for the same port and config directory.
+            return Ok(Box::new(()));
+        }
         let installed = self
             .managed
             .installed_pack()
