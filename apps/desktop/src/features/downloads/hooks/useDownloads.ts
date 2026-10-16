@@ -14,6 +14,14 @@ import { logUiError } from "../../../lib/error-log.js";
 /** How often a row is re-read while any of them can still move. */
 const POLL_INTERVAL_MS = 2_000;
 
+/** How often an idle queue is re-read.
+ *
+ * A queue with nothing in it still has to notice a download started from a title page, and this
+ * hook is mounted by the shell rather than the screen, so "nothing active, stop asking" froze the
+ * list on the empty state until a full reload. Slower than the active rate because an idle queue
+ * has nothing to animate. */
+const IDLE_POLL_INTERVAL_MS = 5_000;
+
 /** A state from which no further change comes, so polling can stop. */
 const TERMINAL_STATES: ReadonlySet<string> = new Set([
   "completed",
@@ -58,12 +66,12 @@ export function useDownloads(): Downloads {
 
   const active = state.downloads.some((download) => !TERMINAL_STATES.has(download.state));
   useEffect(() => {
-    if (!active) {
-      return;
-    }
-    const timer = setInterval(() => {
-      void read();
-    }, POLL_INTERVAL_MS);
+    const timer = setInterval(
+      () => {
+        void read();
+      },
+      active ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
+    );
     return () => {
       clearInterval(timer);
     };
