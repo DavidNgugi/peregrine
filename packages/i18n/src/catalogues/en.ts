@@ -588,7 +588,9 @@ export const en = {
         installed: "Installed, not running",
         runningAt: "Running at {{url}}",
         install: "Install Prowlarr",
+        installing: "Installing…",
         start: "Start",
+        starting: "Starting…",
         stop: "Stop",
         outcome: {
           installed: "Prowlarr is installed.",

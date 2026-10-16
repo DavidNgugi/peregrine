@@ -41,6 +41,10 @@ export interface ManagedProwlarr {
   readonly outcome: ProwlarrOutcome;
   /** What the last action failed with, in the core's own words. */
   readonly error: string | null;
+  /** The effective phase: optimistic while an action begins, else the core's. */
+  readonly phase: string;
+  /** Install progress in permille (0..=1000), from the core. */
+  readonly progressPermille: number;
   /** Downloads, verifies, and installs the pinned pack. */
   readonly install: () => Promise<void>;
   /** Starts the installed instance and stores the key it generated. */
@@ -57,6 +61,9 @@ export function useProwlarr(): ManagedProwlarr {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ProwlarrOutcome>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set the moment a control is pressed, so the section shows "Installing…" immediately rather
+  // than waiting a poll cycle for the core to report the phase.
+  const [pending, setPending] = useState<"installing" | "starting" | null>(null);
 
   const read = useCallback(async (): Promise<ProwlarrStatusDto | null> => {
     try {
@@ -98,8 +105,10 @@ export function useProwlarr(): ManagedProwlarr {
       done: ProwlarrOutcome,
       tag: string,
       settled: (state: ProwlarrStatusDto) => boolean,
+      startedAs: "installing" | "starting",
     ): Promise<void> => {
       setBusy(true);
+      setPending(startedAs);
       setError(null);
       setOutcome(null);
       try {
@@ -115,6 +124,7 @@ export function useProwlarr(): ManagedProwlarr {
         setError(messageOf(normalized));
       } finally {
         setBusy(false);
+        setPending(null);
         await read();
       }
     },
@@ -122,12 +132,26 @@ export function useProwlarr(): ManagedProwlarr {
   );
 
   const install = useCallback(
-    () => action(() => installProwlarr(), "installed", "prowlarr.install", (state) => state.installed),
+    () =>
+      action(
+        () => installProwlarr(),
+        "installed",
+        "prowlarr.install",
+        (state) => state.installed,
+        "installing",
+      ),
     [action],
   );
 
   const start = useCallback(
-    () => action(() => startProwlarr(), "started", "prowlarr.start", (state) => state.running),
+    () =>
+      action(
+        () => startProwlarr(),
+        "started",
+        "prowlarr.start",
+        (state) => state.running,
+        "starting",
+      ),
     [action],
   );
 
@@ -147,5 +171,19 @@ export function useProwlarr(): ManagedProwlarr {
     }
   }, []);
 
-  return { status, loading, failed, busy, outcome, error, install, start, stop };
+  const phase = pending ?? status?.phase ?? "idle";
+  const progressPermille = status?.progressPermille ?? 0;
+  return {
+    status,
+    loading,
+    failed,
+    busy,
+    outcome,
+    error,
+    phase,
+    progressPermille,
+    install,
+    start,
+    stop,
+  };
 }

@@ -774,6 +774,10 @@ pub struct ProwlarrStatus {
     pub version: &'static str,
     /// The loopback endpoint, when one is running.
     pub base_url: Option<String>,
+    /// What the managed instance is doing: `idle`, `installing`, or `starting`.
+    pub phase: &'static str,
+    /// Install progress in permille (0..=1000), reported only while installing.
+    pub progress_permille: u16,
 }
 
 impl Runtime {
@@ -992,12 +996,29 @@ impl Runtime {
     /// would leave it with nothing to draw.
     #[must_use]
     pub fn prowlarr_status(&self) -> ProwlarrStatus {
+        let phase = self.prowlarr.phase();
+        // Only the install has a byte total to divide by; the start is a health wait with no
+        // measurable fraction, so it reports the phase and no bar.
+        let progress_permille = match phase {
+            crate::jobs::prowlarr::Phase::Installing => {
+                let total = crate::prowlarr::pinned_size().unwrap_or(0);
+                if total == 0 {
+                    0
+                } else {
+                    let done = self.prowlarr.downloaded_bytes().min(total);
+                    u16::try_from(done.saturating_mul(1000) / total).unwrap_or(1000)
+                }
+            }
+            _ => 0,
+        };
         ProwlarrStatus {
             supported: crate::prowlarr::is_supported(),
             installed: self.prowlarr.is_installed(),
             running: self.prowlarr.is_running(),
             version: crate::prowlarr::VERSION,
             base_url: self.prowlarr.base_url(),
+            phase: phase.as_str(),
+            progress_permille,
         }
     }
 

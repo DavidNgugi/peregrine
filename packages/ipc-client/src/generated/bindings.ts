@@ -1207,6 +1207,10 @@ export type ProwlarrStatusDto = {
 	version: string,
 	/**  The loopback endpoint, when one is running. */
 	baseUrl: string | null,
+	/**  What the managed instance is doing: `idle`, `installing`, or `starting`. */
+	phase: string,
+	/**  Install progress in permille (0..=1000), reported only while installing. */
+	progressPermille: number,
 };
 
 /**  One title in a rail, as the screen draws it. */

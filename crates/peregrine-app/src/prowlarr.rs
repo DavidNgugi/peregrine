@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use peregrine_secrets::{Secret, SecretStore, SecretStoreError};
@@ -105,6 +106,13 @@ fn platform() -> Result<Artifact, ProwlarrError> {
 #[must_use]
 pub fn is_supported() -> bool {
     platform().is_ok()
+}
+
+/// The pinned size for this platform, or `None` where no pack exists. The install job reports
+/// progress against it, so the total is the same number the download verifies against.
+#[must_use]
+pub fn pinned_size() -> Option<u64> {
+    platform().ok().map(|artifact| artifact.size)
 }
 
 /// Why the managed Prowlarr could not be installed or started.
@@ -218,8 +226,9 @@ fn executable_at(root: &Path) -> PathBuf {
 /// UnsupportedPlatform when this OS/arch is not pinned; the transport, size, checksum, archive,
 /// and I/O variants for a download that failed; and Bundle when macOS refused to un-quarantine or
 /// re-sign the app.
-pub async fn install(data_dir: &Path) -> Result<Installed, ProwlarrError> {
+pub async fn install(data_dir: &Path, progress: &AtomicU64) -> Result<Installed, ProwlarrError> {
     let artifact = platform()?;
+    progress.store(0, Ordering::Relaxed);
     let directory = data_dir.join("sidecars").join("prowlarr");
     tokio::fs::create_dir_all(&directory)
         .await
@@ -228,11 +237,12 @@ pub async fn install(data_dir: &Path) -> Result<Installed, ProwlarrError> {
     let root = directory.join(VERSION);
     let installed = Installed { root: root.clone() };
     if installed.is_ready() {
+        progress.store(artifact.size, Ordering::Relaxed);
         return Ok(installed);
     }
 
     let staged = directory.join(format!("{VERSION}.part"));
-    download(&artifact, &staged).await?;
+    download(&artifact, &staged, progress).await?;
 
     let unpacking = directory.join(format!("{VERSION}.unpacking"));
     let _ = tokio::fs::remove_dir_all(&unpacking).await;
@@ -268,7 +278,11 @@ pub fn installed(data_dir: &Path) -> Option<Installed> {
 
 /// Streams the release to destination, rejecting the first byte past the pinned size and comparing
 /// both the byte count and the SHA-256 before it can be extracted.
-async fn download(artifact: &Artifact, destination: &Path) -> Result<(), ProwlarrError> {
+async fn download(
+    artifact: &Artifact,
+    destination: &Path,
+    progress: &AtomicU64,
+) -> Result<(), ProwlarrError> {
     use tokio::io::AsyncWriteExt as _;
 
     let client = client()?;
@@ -298,6 +312,7 @@ async fn download(artifact: &Artifact, destination: &Path) -> Result<(), Prowlar
         }
         hasher.update(&chunk);
         file.write_all(&chunk).await.map_err(ProwlarrError::Io)?;
+        progress.store(total, Ordering::Relaxed);
     }
     file.flush().await.map_err(ProwlarrError::Io)?;
 

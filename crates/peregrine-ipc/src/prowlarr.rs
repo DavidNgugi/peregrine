@@ -7,6 +7,7 @@
 use peregrine_app::ProwlarrStatus;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use specta_typescript::Number;
 use tauri::State;
 
 use crate::error::AppError;
@@ -28,6 +29,11 @@ pub struct ProwlarrStatusDto {
     pub version: String,
     /// The loopback endpoint, when one is running.
     pub base_url: Option<String>,
+    /// What the managed instance is doing: `idle`, `installing`, or `starting`.
+    pub phase: String,
+    /// Install progress in permille (0..=1000), reported only while installing.
+    #[specta(type = Number)]
+    pub progress_permille: i64,
 }
 
 impl From<ProwlarrStatus> for ProwlarrStatusDto {
@@ -38,6 +44,8 @@ impl From<ProwlarrStatus> for ProwlarrStatusDto {
             running: value.running,
             version: value.version.to_owned(),
             base_url: value.base_url,
+            phase: value.phase.to_owned(),
+            progress_permille: i64::from(value.progress_permille),
         }
     }
 }

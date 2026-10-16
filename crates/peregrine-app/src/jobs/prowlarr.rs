@@ -5,6 +5,7 @@
 //! budget (AGENTS R10), so the scheduler runs them and the bus reports their progress.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use peregrine_secrets::SecretStore;
@@ -23,13 +24,40 @@ pub const START_KIND: &str = "prowlarr.start";
 /// A person asked for this and is waiting on it, so it outranks background maintenance.
 pub const PRIORITY: i32 = 4;
 
+/// What the managed instance is doing, for a status a screen polls while a job runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Phase {
+    /// Nothing in flight.
+    #[default]
+    Idle,
+    /// The pinned pack is downloading.
+    Installing,
+    /// The instance is booting and its key is being read.
+    Starting,
+}
+
+impl Phase {
+    /// The wire spelling a settings screen reads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Installing => "installing",
+            Self::Starting => "starting",
+        }
+    }
+}
+
 /// The managed instance's state, shared between the runtime and the jobs that move it.
 ///
-/// Two locks rather than one, so a status read never waits on a download.
+/// The locks are separate and the byte counter is atomic, so a status read never waits on a
+/// download.
 #[derive(Default)]
 pub struct Managed {
     installed: Mutex<Option<Installed>>,
     supervisor: Mutex<Option<Supervisor>>,
+    phase: Mutex<Phase>,
+    progress: AtomicU64,
 }
 
 impl Managed {
@@ -42,6 +70,8 @@ impl Managed {
         Self {
             installed: Mutex::new(prowlarr::installed(data_dir)),
             supervisor: Mutex::new(None),
+            phase: Mutex::new(Phase::Idle),
+            progress: AtomicU64::new(0),
         }
     }
 
@@ -71,6 +101,23 @@ impl Managed {
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map(|supervisor| supervisor.base_url().to_owned())
+    }
+
+    /// What the managed instance is doing right now.
+    #[must_use]
+    pub fn phase(&self) -> Phase {
+        *self.phase.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Sets the phase a status read reports.
+    pub fn set_phase(&self, phase: Phase) {
+        *self.phase.lock().unwrap_or_else(PoisonError::into_inner) = phase;
+    }
+
+    /// Bytes of the pinned pack streamed so far, for install progress.
+    #[must_use]
+    pub fn downloaded_bytes(&self) -> u64 {
+        self.progress.load(Ordering::Relaxed)
     }
 
     /// The installed pack, cloned out so a caller never holds the lock across an await.
@@ -166,8 +213,11 @@ impl ProwlarrInstallJob {
         attempt: u32,
         _cancellation: CancellationToken,
     ) -> peregrine_sync::JobResult {
+        self.managed.set_phase(Phase::Installing);
         phase(&self.database, &self.bus, self.journal_id, job, attempt, 50).await;
-        let installed = prowlarr::install(&self.data_dir).await.map_err(|error| {
+        let installed = prowlarr::install(&self.data_dir, &self.managed.progress).await;
+        self.managed.set_phase(Phase::Idle);
+        let installed = installed.map_err(|error| {
             JobError::failed(format!("the Prowlarr pack could not be installed: {error}"))
         })?;
         self.managed.set_installed(installed);
@@ -230,6 +280,11 @@ impl ProwlarrStartJob {
         attempt: u32,
         _cancellation: CancellationToken,
     ) -> peregrine_sync::JobResult {
+        let installed = self
+            .managed
+            .installed_pack()
+            .ok_or_else(|| JobError::failed("the Prowlarr pack is not installed yet"))?;
+        self.managed.set_phase(Phase::Starting);
         phase(
             &self.database,
             &self.bus,
@@ -239,17 +294,13 @@ impl ProwlarrStartJob {
             100,
         )
         .await;
-        let installed = self
-            .managed
-            .installed_pack()
-            .ok_or_else(|| JobError::failed("the Prowlarr pack is not installed yet"))?;
-        let supervisor = Supervisor::start(&installed, Arc::clone(&self.store), &self.data_dir)
-            .await
-            .map_err(|error| {
-                JobError::failed(format!(
-                    "the managed Prowlarr could not be started: {error}"
-                ))
-            })?;
+        let started = Supervisor::start(&installed, Arc::clone(&self.store), &self.data_dir).await;
+        self.managed.set_phase(Phase::Idle);
+        let supervisor = started.map_err(|error| {
+            JobError::failed(format!(
+                "the managed Prowlarr could not be started: {error}"
+            ))
+        })?;
         self.managed.set_supervisor(supervisor);
         phase(
             &self.database,

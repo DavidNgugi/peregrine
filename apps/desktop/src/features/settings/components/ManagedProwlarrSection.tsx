@@ -6,7 +6,7 @@
  * path — a remote, homelab, or future media-server instance — and stays available either way.
  */
 
-import { Button, ErrorState, SettingsRow, SettingsSection } from "@peregrine/ui";
+import { Button, ErrorState, Progress, SettingsRow, SettingsSection } from "@peregrine/ui";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
@@ -58,7 +58,9 @@ export function ManagedProwlarrSection({
                 }}
                 variant="primary"
               >
-                {t("settings.prowlarr.install")}
+                {prowlarr.phase === "installing"
+                  ? t("settings.prowlarr.installing")
+                  : t("settings.prowlarr.install")}
               </Button>
             )}
             {status.installed && !status.running ? (
@@ -69,7 +71,9 @@ export function ManagedProwlarrSection({
                 }}
                 variant="primary"
               >
-                {t("settings.prowlarr.start")}
+                {prowlarr.phase === "starting"
+                  ? t("settings.prowlarr.starting")
+                  : t("settings.prowlarr.start")}
               </Button>
             ) : null}
             {status.running ? (
@@ -84,6 +88,12 @@ export function ManagedProwlarrSection({
               </Button>
             ) : null}
           </div>
+          {prowlarr.phase === "installing" ? (
+            <Progress
+              label={t("settings.prowlarr.installing")}
+              value={Math.min(100, Math.max(0, prowlarr.progressPermille / 10))}
+            />
+          ) : null}
           {prowlarr.error !== null ? (
             <p className="text-caption text-text-secondary" role="status">
               {prowlarr.error}

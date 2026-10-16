@@ -92,6 +92,8 @@ function noProwlarr(): ManagedProwlarr {
     busy: false,
     outcome: null,
     error: null,
+    phase: "idle",
+    progressPermille: 0,
     install: () => Promise.resolve(),
     start: () => Promise.resolve(),
     stop: () => Promise.resolve(),
