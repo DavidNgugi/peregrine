@@ -13,6 +13,15 @@ use crate::error::{AppError, ErrorCode};
 use crate::guard::guard_response;
 use crate::runtime::RuntimeState;
 
+/// A centre row's id, as the listing returned it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationRef {
+    /// The centre row's id.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
 /// One centre row, as the shell draws it.
 ///
 /// No magnet, path, or secret can appear here: the row stores rendered copy that the domain
@@ -89,4 +98,57 @@ pub async fn list_notifications(
         "notifications::list",
         rows.into_iter().map(NotificationDto::of).collect(),
     ))
+}
+
+/// Marks one centre row read.
+///
+/// # Errors
+///
+/// `INTERNAL` when the centre could not be written; the cause is logged and the message stays
+/// generic.
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_notification_read(
+    state: State<'_, RuntimeState>,
+    notification: NotificationRef,
+) -> Result<bool, AppError> {
+    let runtime = state.runtime()?;
+    runtime
+        .mark_notification_read(notification.id)
+        .await
+        .map_err(|error| AppError::new(ErrorCode::Internal).with_cause(error.to_string()))
+}
+
+/// Marks every unread centre row read, answering how many changed.
+///
+/// # Errors
+///
+/// `INTERNAL` when the centre could not be written.
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_all_notifications_read(state: State<'_, RuntimeState>) -> Result<u32, AppError> {
+    let runtime = state.runtime()?;
+    let changed = runtime
+        .mark_all_notifications_read()
+        .await
+        .map_err(|error| AppError::new(ErrorCode::Internal).with_cause(error.to_string()))?;
+    Ok(u32::try_from(changed).unwrap_or(u32::MAX))
+}
+
+/// Dismisses one centre row.
+///
+/// # Errors
+///
+/// `INTERNAL` when the centre could not be written.
+#[tauri::command]
+#[specta::specta]
+pub async fn dismiss_notification(
+    state: State<'_, RuntimeState>,
+    notification: NotificationRef,
+) -> Result<bool, AppError> {
+    let runtime = state.runtime()?;
+    runtime
+        .dismiss_notification(notification.id)
+        .await
+        .map_err(|error| AppError::new(ErrorCode::Internal).with_cause(error.to_string()))
 }

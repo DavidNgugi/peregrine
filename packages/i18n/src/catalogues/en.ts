@@ -26,6 +26,8 @@ export const en = {
         title: "Recent",
         empty: "Nothing yet.",
         failed: "The notification centre could not be read.",
+        markAll: "Mark all read",
+        dismiss: "Dismiss",
       },
       error: {
         retry: "Try again",

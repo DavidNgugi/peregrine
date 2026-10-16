@@ -156,6 +156,21 @@ export async function listNotifications(limit = 20): Promise<NotificationDto[]> 
   return unwrap(commands.listNotifications(limit));
 }
 
+/** Marks one centre row read, answering whether it changed. */
+export async function markNotificationRead(id: number): Promise<boolean> {
+  return unwrap(commands.markNotificationRead({ id }));
+}
+
+/** Marks every unread centre row read, answering how many changed. */
+export async function markAllNotificationsRead(): Promise<number> {
+  return unwrap(commands.markAllNotificationsRead());
+}
+
+/** Dismisses one centre row, so it leaves the list. */
+export async function dismissNotification(id: number): Promise<boolean> {
+  return unwrap(commands.dismissNotification({ id }));
+}
+
 /** Queues the release the user picked, without running a second search. */
 export async function chooseReleaseOffer(
   offerId: number,

@@ -305,6 +305,35 @@ pub trait NotificationCentre {
         delivery: &Delivery,
     ) -> impl std::future::Future<Output = Result<bool, CentreError>> + Send;
 
+    /// Marks one entry the scope may see as read, answering whether a row changed.
+    ///
+    /// The scope is applied in the same predicate the reads use, so an entry an account may not
+    /// see cannot be marked; marking an already-read row is a no-op rather than an error.
+    fn mark_read(
+        &self,
+        scope: AccountScope,
+        id: NotificationId,
+        at: i64,
+    ) -> impl std::future::Future<Output = Result<bool, CentreError>> + Send;
+
+    /// Marks every unread entry the scope may see as read, answering how many changed.
+    fn mark_all_read(
+        &self,
+        scope: AccountScope,
+        at: i64,
+    ) -> impl std::future::Future<Output = Result<u64, CentreError>> + Send;
+
+    /// Dismisses one entry the scope may see, answering whether a row changed.
+    ///
+    /// A dismissed row leaves [`Self::list`]; its delivery history stays in the row, so a toast
+    /// in flight cannot resurrect it.
+    fn dismiss(
+        &self,
+        scope: AccountScope,
+        id: NotificationId,
+        at: i64,
+    ) -> impl std::future::Future<Output = Result<bool, CentreError>> + Send;
+
     /// How many entries are held for the quiet-hours digest.
     ///
     /// Counts the rows suppressed for quiet hours since the last digest, visible to `scope`,

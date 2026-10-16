@@ -3,10 +3,11 @@
  *
  * It exists because a centre row written and never shown is not a notification. A row whose
  * event named a title opens that title: the core sends the title's kind and id because the stored
- * deep link carries no kind, and a guessed kind would open the wrong screen. The dismiss and read
- * actions still belong to the centre repository, which exposes no command for either yet.
+ * deep link carries no kind, and a guessed kind would open the wrong screen. Opening a row marks
+ * it read, a row can be dismissed, and the whole list can be marked read.
  */
 
+import type { NotificationDto } from "@peregrine/ipc-client";
 import { Button } from "@peregrine/ui";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -40,15 +41,18 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
 
   const unread = notifications.rows.filter((row) => !row.read).length;
 
-  const openTitle = useCallback(
-    (kind: string | null, subjectId: number | null): void => {
-      if (!isTitleKind(kind) || subjectId === null) {
+  // Opening a row is reading it: the flag lives in the repository, so the mutation is what
+  // clears the count, not the navigation.
+  const openRow = useCallback(
+    (row: NotificationDto): void => {
+      void notifications.markRead(row.id);
+      if (!isTitleKind(row.titleKind) || row.subjectId === null) {
         return;
       }
-      onNavigate({ kind: "title", titleKind: kind, id: subjectId });
+      onNavigate({ kind: "title", titleKind: row.titleKind, id: row.subjectId });
       setOpen(false);
     },
-    [onNavigate],
+    [notifications, onNavigate],
   );
 
   return (
@@ -66,33 +70,53 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
           className="absolute end-2 top-full z-20 mt-2 w-80 rounded-md border border-border-subtle bg-surface-1 p-2 shadow-lg"
           role="region"
         >
-          <p className="px-1 pb-1 text-caption text-text-secondary">{t("shell.notifications.title")}</p>
+          <div className="flex items-center justify-between px-1 pb-1">
+            <p className="text-caption text-text-secondary">{t("shell.notifications.title")}</p>
+            {unread > 0 ? (
+              <Button
+                onClick={() => {
+                  void notifications.markAllRead();
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t("shell.notifications.markAll")}
+              </Button>
+            ) : null}
+          </div>
           {notifications.failed ? (
             <p className="px-1 py-2 text-caption text-state-danger">{t("shell.notifications.failed")}</p>
           ) : notifications.rows.length === 0 ? (
             <p className="px-1 py-2 text-caption text-text-secondary">{t("shell.notifications.empty")}</p>
           ) : (
             <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
-              {notifications.rows.map((row) => {
-                const opens = isTitleKind(row.titleKind) && row.subjectId !== null;
-                return (
-                  <li className="rounded-sm" key={row.id}>
-                    <button
-                      className="flex w-full flex-col items-start rounded-sm px-1 py-1 text-start enabled:hover:bg-surface-2 disabled:cursor-default"
-                      disabled={!opens}
-                      onClick={() => {
-                        openTitle(row.titleKind, row.subjectId);
-                      }}
-                      type="button"
-                    >
-                      <p className="text-caption text-text-primary">{row.title}</p>
-                      {row.body === null ? null : (
-                        <p className="text-caption text-text-secondary">{row.body}</p>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
+              {notifications.rows.map((row) => (
+                <li className="flex items-start gap-1 rounded-sm" key={row.id}>
+                  <button
+                    className="flex min-w-0 flex-1 flex-col items-start rounded-sm px-1 py-1 text-start hover:bg-surface-2"
+                    onClick={() => {
+                      openRow(row);
+                    }}
+                    type="button"
+                  >
+                    <p className="text-caption text-text-primary">
+                      {row.read ? row.title : `• ${row.title}`}
+                    </p>
+                    {row.body === null ? null : (
+                      <p className="text-caption text-text-secondary">{row.body}</p>
+                    )}
+                  </button>
+                  <Button
+                    onClick={() => {
+                      void notifications.dismiss(row.id);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t("shell.notifications.dismiss")}
+                  </Button>
+                </li>
+              ))}
             </ul>
           )}
         </div>

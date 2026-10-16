@@ -6,7 +6,14 @@
  * copy only: the core scanned the row for a magnet, path, or secret before it was stored.
  */
 
-import { listNotifications, normalizeIpcError, type NotificationDto } from "@peregrine/ipc-client";
+import {
+  dismissNotification,
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  normalizeIpcError,
+  type NotificationDto,
+} from "@peregrine/ipc-client";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 
@@ -20,6 +27,12 @@ export interface Notifications {
   readonly failed: boolean;
   /** Re-reads the centre. */
   readonly refresh: () => Promise<void>;
+  /** Marks one row read. */
+  readonly markRead: (id: number) => Promise<void>;
+  /** Marks every unread row read. */
+  readonly markAllRead: () => Promise<void>;
+  /** Dismisses one row, so it leaves the list. */
+  readonly dismiss: (id: number) => Promise<void>;
 }
 
 /** How many rows the centre panel shows. */
@@ -46,5 +59,34 @@ export function useNotifications(): Notifications {
     void refresh();
   }, [refresh]);
 
-  return { rows, loading, failed, refresh };
+  // Every mutation re-reads rather than patching local state: whether a row is read is the
+  // repository's answer, and a second source of truth would drift from it.
+  const markRead = useCallback(async (id: number): Promise<void> => {
+    try {
+      await markNotificationRead(id);
+      await refresh();
+    } catch (caught: unknown) {
+      logUiError("notifications.markRead", normalizeIpcError(caught));
+    }
+  }, [refresh]);
+
+  const markAllRead = useCallback(async (): Promise<void> => {
+    try {
+      await markAllNotificationsRead();
+      await refresh();
+    } catch (caught: unknown) {
+      logUiError("notifications.markAllRead", normalizeIpcError(caught));
+    }
+  }, [refresh]);
+
+  const dismiss = useCallback(async (id: number): Promise<void> => {
+    try {
+      await dismissNotification(id);
+      await refresh();
+    } catch (caught: unknown) {
+      logUiError("notifications.dismiss", normalizeIpcError(caught));
+    }
+  }, [refresh]);
+
+  return { rows, loading, failed, refresh, markRead, markAllRead, dismiss };
 }

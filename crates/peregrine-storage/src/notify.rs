@@ -71,6 +71,55 @@ impl NotificationCentre for NotificationRepository {
         }
     }
 
+    async fn mark_read(
+        &self,
+        scope: AccountScope,
+        id: NotificationId,
+        at: i64,
+    ) -> Result<bool, CentreError> {
+        match self
+            .database
+            .writer()
+            .send(WriteRequest::MarkNotificationRead { scope, id, at })
+            .await
+        {
+            Ok(WriteResponse::NotificationRead { changed }) => Ok(changed),
+            Ok(other) => Err(unexpected("mark_read", &other)),
+            Err(error) => Err(centre_error(error)),
+        }
+    }
+
+    async fn mark_all_read(&self, scope: AccountScope, at: i64) -> Result<u64, CentreError> {
+        match self
+            .database
+            .writer()
+            .send(WriteRequest::MarkAllNotificationsRead { scope, at })
+            .await
+        {
+            Ok(WriteResponse::NotificationsRead { changed }) => Ok(changed),
+            Ok(other) => Err(unexpected("mark_all_read", &other)),
+            Err(error) => Err(centre_error(error)),
+        }
+    }
+
+    async fn dismiss(
+        &self,
+        scope: AccountScope,
+        id: NotificationId,
+        at: i64,
+    ) -> Result<bool, CentreError> {
+        match self
+            .database
+            .writer()
+            .send(WriteRequest::DismissNotification { scope, id, at })
+            .await
+        {
+            Ok(WriteResponse::NotificationDismissed { changed }) => Ok(changed),
+            Ok(other) => Err(unexpected("dismiss", &other)),
+            Err(error) => Err(centre_error(error)),
+        }
+    }
+
     async fn list(
         &self,
         scope: AccountScope,
@@ -369,6 +418,83 @@ async fn recent(
             .collect::<Result<_, _>>()?,
         delivered_in_window: usize::try_from(delivered).unwrap_or(usize::MAX),
     })
+}
+
+/// Marks one visible row read, answering whether it changed.
+///
+/// The scope is the same predicate the reads use, so an entry an account may not see is not
+/// there to mark. Marking an already-read row leaves it alone.
+pub(crate) async fn mark_read(
+    connection: &mut SqliteConnection,
+    scope: AccountScope,
+    id: NotificationId,
+    at: i64,
+) -> Result<bool, StorageError> {
+    let result = sqlx::query(
+        "UPDATE notification SET read_at = ?1 \
+         WHERE id = ?2 AND read_at IS NULL \
+           AND (?3 = 0 OR subject_kind IS NULL OR subject_kind NOT IN ('title','episode') \
+                OR EXISTS (SELECT 1 FROM title t WHERE t.adult = 0 AND t.content_rating IS NOT NULL \
+                     AND ((subject_kind = 'title' AND t.id = subject_id) \
+                       OR (subject_kind = 'episode' AND t.id = \
+                             (SELECT e.title_id FROM episode e WHERE e.id = subject_id)))))",
+    )
+    .bind(at)
+    .bind(id.0)
+    .bind(hidden_by_scope(scope))
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Marks every unread visible row read, answering how many changed.
+pub(crate) async fn mark_all_read(
+    connection: &mut SqliteConnection,
+    scope: AccountScope,
+    at: i64,
+) -> Result<u64, StorageError> {
+    let result = sqlx::query(
+        "UPDATE notification SET read_at = ?1 \
+         WHERE read_at IS NULL \
+           AND (?2 = 0 OR subject_kind IS NULL OR subject_kind NOT IN ('title','episode') \
+                OR EXISTS (SELECT 1 FROM title t WHERE t.adult = 0 AND t.content_rating IS NOT NULL \
+                     AND ((subject_kind = 'title' AND t.id = subject_id) \
+                       OR (subject_kind = 'episode' AND t.id = \
+                             (SELECT e.title_id FROM episode e WHERE e.id = subject_id)))))",
+    )
+    .bind(at)
+    .bind(hidden_by_scope(scope))
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected())
+}
+
+/// Dismisses one visible row, answering whether it changed. The row leaves `list`; its
+/// delivery history stays, so a toast in flight cannot resurrect it.
+pub(crate) async fn dismiss(
+    connection: &mut SqliteConnection,
+    scope: AccountScope,
+    id: NotificationId,
+    at: i64,
+) -> Result<bool, StorageError> {
+    let result = sqlx::query(
+        "UPDATE notification SET dismissed_at = ?1 \
+         WHERE id = ?2 AND dismissed_at IS NULL \
+           AND (?3 = 0 OR subject_kind IS NULL OR subject_kind NOT IN ('title','episode') \
+                OR EXISTS (SELECT 1 FROM title t WHERE t.adult = 0 AND t.content_rating IS NOT NULL \
+                     AND ((subject_kind = 'title' AND t.id = subject_id) \
+                       OR (subject_kind = 'episode' AND t.id = \
+                             (SELECT e.title_id FROM episode e WHERE e.id = subject_id)))))",
+    )
+    .bind(at)
+    .bind(id.0)
+    .bind(hidden_by_scope(scope))
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// One row's delivery state, when the scope may see the row.

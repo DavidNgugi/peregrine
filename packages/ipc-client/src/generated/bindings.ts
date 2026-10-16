@@ -519,6 +519,31 @@ export const commands = {
 	 *  generic because a storage failure is not the user's to act on.
 	 */
 	listNotifications: (limit: number) => typedError<NotificationDto[], AppError_Serialize>(__TAURI_INVOKE("list_notifications", { limit })),
+	/**
+	 *  Marks one centre row read.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `INTERNAL` when the centre could not be written; the cause is logged and the message stays
+	 *  generic.
+	 */
+	markNotificationRead: (notification: NotificationRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("mark_notification_read", { notification })),
+	/**
+	 *  Marks every unread centre row read, answering how many changed.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `INTERNAL` when the centre could not be written.
+	 */
+	markAllNotificationsRead: () => typedError<number, AppError_Serialize>(__TAURI_INVOKE("mark_all_notifications_read")),
+	/**
+	 *  Dismisses one centre row.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `INTERNAL` when the centre could not be written.
+	 */
+	dismissNotification: (notification: NotificationRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_notification", { notification })),
 	/**  What the account is part-way through, most recently updated first. */
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
@@ -1276,6 +1301,12 @@ export type NotificationDto = {
 	titleKind: string | null,
 	/**  The subject title's row id, when the notification names a title. */
 	subjectId: number | null,
+};
+
+/**  A centre row's id, as the listing returned it. */
+export type NotificationRef = {
+	/**  The centre row's id. */
+	id: number,
 };
 
 /**  A release offer's id, as a listing returned it. */

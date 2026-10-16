@@ -20,7 +20,7 @@ use std::time::Duration;
 use std::num::NonZeroU32;
 
 use crate::notify::{CataloguePreferences, NoOsNotifier, NotificationService, NotifyOffers};
-use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _};
+use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _, NotificationId};
 use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
@@ -3244,6 +3244,42 @@ impl Runtime {
     pub async fn list_notifications(&self, limit: u32) -> Result<Vec<CentreEntry>, CentreError> {
         NotificationRepository::new(Arc::clone(&self.database))
             .list(installation_scope(), None, limit)
+            .await
+    }
+
+    /// Marks one centre row read, under the installation scope.
+    ///
+    /// # Errors
+    ///
+    /// `CentreError` when the centre could not be written.
+    pub async fn mark_notification_read(&self, id: i64) -> Result<bool, CentreError> {
+        let at = self.clock.now().as_millisecond();
+        NotificationRepository::new(Arc::clone(&self.database))
+            .mark_read(installation_scope(), NotificationId(id), at)
+            .await
+    }
+
+    /// Marks every unread centre row read, answering how many changed.
+    ///
+    /// # Errors
+    ///
+    /// `CentreError` when the centre could not be written.
+    pub async fn mark_all_notifications_read(&self) -> Result<u64, CentreError> {
+        let at = self.clock.now().as_millisecond();
+        NotificationRepository::new(Arc::clone(&self.database))
+            .mark_all_read(installation_scope(), at)
+            .await
+    }
+
+    /// Dismisses one centre row, under the installation scope.
+    ///
+    /// # Errors
+    ///
+    /// `CentreError` when the centre could not be written.
+    pub async fn dismiss_notification(&self, id: i64) -> Result<bool, CentreError> {
+        let at = self.clock.now().as_millisecond();
+        NotificationRepository::new(Arc::clone(&self.database))
+            .dismiss(installation_scope(), NotificationId(id), at)
             .await
     }
 

@@ -5,7 +5,7 @@
 //! message on one channel. Callers therefore cannot contend for the lock, and a write
 //! is serialized behind the writer task instead of failing with `SQLITE_BUSY`.
 
-use peregrine_domain::{Event, ScanMode};
+use peregrine_domain::{AccountScope, Event, ScanMode};
 use sqlx::Connection as _;
 use tokio::sync::{mpsc, oneshot};
 
@@ -202,6 +202,23 @@ pub(crate) enum WriteRequest {
         id: NotificationId,
         delivery: Box<Delivery>,
     },
+    /// Mark one `notification` row the scope may see as read.
+    MarkNotificationRead {
+        scope: AccountScope,
+        id: NotificationId,
+        at: i64,
+    },
+    /// Mark every unread `notification` row the scope may see as read.
+    MarkAllNotificationsRead {
+        scope: AccountScope,
+        at: i64,
+    },
+    /// Dismiss one `notification` row the scope may see.
+    DismissNotification {
+        scope: AccountScope,
+        id: NotificationId,
+        at: i64,
+    },
     /// Rewrite one title's search index row from the source tables.
     ReindexTitle {
         title_id: i64,
@@ -329,6 +346,12 @@ pub(crate) enum WriteResponse {
     NotificationRecorded { recorded: Recorded },
     /// Whether a `notification` row was there to change.
     NotificationDelivered { changed: bool },
+    /// Whether a `notification` row was there to mark read.
+    NotificationRead { changed: bool },
+    /// How many `notification` rows a mark-all-read changed.
+    NotificationsRead { changed: u64 },
+    /// Whether a `notification` row was there to dismiss.
+    NotificationDismissed { changed: bool },
     /// Whether a search index row was written, which is `false` for an id no title holds.
     TitleReindexed { indexed: bool },
     /// Whether a search index row was removed.
@@ -671,6 +694,21 @@ async fn apply(
             crate::notify::apply_delivery(connection, id, &delivery)
                 .await
                 .map(|changed| WriteResponse::NotificationDelivered { changed })
+        }
+        WriteRequest::MarkNotificationRead { scope, id, at } => {
+            crate::notify::mark_read(connection, scope, id, at)
+                .await
+                .map(|changed| WriteResponse::NotificationRead { changed })
+        }
+        WriteRequest::MarkAllNotificationsRead { scope, at } => {
+            crate::notify::mark_all_read(connection, scope, at)
+                .await
+                .map(|changed| WriteResponse::NotificationsRead { changed })
+        }
+        WriteRequest::DismissNotification { scope, id, at } => {
+            crate::notify::dismiss(connection, scope, id, at)
+                .await
+                .map(|changed| WriteResponse::NotificationDismissed { changed })
         }
         WriteRequest::ReindexTitle { title_id } => {
             let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
