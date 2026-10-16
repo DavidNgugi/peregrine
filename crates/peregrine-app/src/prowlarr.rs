@@ -589,16 +589,24 @@ fn read_config(config_dir: &Path) -> Option<Config> {
     let mut api_key = None;
     loop {
         match reader.read_event() {
-            Ok(quick_xml::events::Event::Start(event))
-            | Ok(quick_xml::events::Event::Empty(event)) => {
+            Ok(quick_xml::events::Event::Start(event)) => {
                 element = String::from_utf8_lossy(event.name().as_ref()).into_owned();
             }
+            Ok(quick_xml::events::Event::Empty(_)) => element.clear(),
+            // Clearing on the end tag is load-bearing: without it the whitespace between two
+            // elements inherits the name of the one just closed, so the newline after
+            // </ApiKey> overwrote the real key with an empty string and the whole read
+            // answered None — a permanent start timeout. Verified with a standalone parser.
+            Ok(quick_xml::events::Event::End(_)) => element.clear(),
             Ok(quick_xml::events::Event::Text(text)) => {
                 if let Ok(value) = text.xml10_content() {
-                    match element.as_str() {
-                        "Port" => port = value.trim().parse::<u16>().ok(),
-                        "ApiKey" => api_key = Some(value.trim().to_owned()),
-                        _ => {}
+                    let value = value.trim();
+                    if !value.is_empty() {
+                        match element.as_str() {
+                            "Port" => port = value.parse::<u16>().ok(),
+                            "ApiKey" => api_key = Some(value.to_owned()),
+                            _ => {}
+                        }
                     }
                 }
             }
