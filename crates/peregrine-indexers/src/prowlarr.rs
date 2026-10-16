@@ -370,10 +370,35 @@ fn json_text(value: serde_json::Value) -> Option<String> {
     }
 }
 
+/// The identity a schema entry is addressed by.
+///
+/// It cannot be `implementation::configContract` alone: every Cardigann definition carries that
+/// same pair, so such a key resolved every lookup to the first entry in the schema — the bug that
+/// made a chosen 1337x add a different indexer. The Cardigann `definitionFile` field is the file
+/// id and is unique per definition; an entry without one falls back to its own name.
 fn definition_key(value: &serde_json::Value) -> Option<String> {
     let implementation = value.get("implementation")?.as_str()?;
     let contract = value.get("configContract")?.as_str()?;
-    Some(format!("{implementation}::{contract}"))
+    let unique = value
+        .get("fields")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|fields| {
+            fields.iter().find(|field| {
+                field.get("name").and_then(serde_json::Value::as_str) == Some("definitionFile")
+            })
+        })
+        .and_then(|field| field.get("value"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            value
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })?;
+    Some(format!("{implementation}::{contract}::{unique}"))
 }
 
 impl WireIndexer {
@@ -390,8 +415,18 @@ impl WireIndexer {
         let contract = stated(self.config_contract)?;
         let name = stated(self.definition_name).or_else(|| stated(self.name))?;
         let indexer_urls = self.indexer_urls;
+        // The unique half of the key must be the definition's own file id, not the shared
+        // implementation and contract: see `definition_key`.
+        let unique = self
+            .fields
+            .iter()
+            .find(|field| field.name.as_deref() == Some("definitionFile"))
+            .and_then(|field| field.value.as_ref())
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map_or_else(|| name.clone(), str::to_owned);
         Some(IndexerDefinition {
-            key: format!("{implementation}::{contract}"),
+            key: format!("{implementation}::{contract}::{unique}"),
             name,
             description: stated(self.description),
             fields: self

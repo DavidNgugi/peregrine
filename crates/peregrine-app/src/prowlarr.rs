@@ -460,7 +460,9 @@ fn find_app(staging: &Path) -> Result<PathBuf, ProwlarrError> {
 /// does not leave an indexer manager behind.
 #[derive(Debug)]
 pub struct Supervisor {
-    child: Child,
+    /// The process this session owns, or `None` when it adopted one a previous session left
+    /// running. An adopted instance is not killed on the way out, because it was not ours.
+    child: Option<Child>,
     base_url: String,
 }
 
@@ -492,10 +494,27 @@ impl Supervisor {
 
         let client = client()?;
         let port = read_config(&config_dir).map_or(DEFAULT_PORT, |config| config.port);
-        // An instance left running by a previous process still answers here. Reusing the port
-        // would put two Prowlarrs on one config directory, so refuse rather than spawn a second.
+        // An instance left running by a previous process still answers here. If it is OURS — the
+        // managed config.xml holds a key — adopt it and store that key, so a dev restart or an
+        // unclean shutdown does not strand a healthy Prowlarr with nothing in the keyring. A
+        // listener that is not ours (no managed config) is still refused.
         if answers(&client, port).await {
-            return Err(ProwlarrError::AlreadyRunning);
+            let Some(config) = read_config_when_written(&config_dir).await else {
+                return Err(ProwlarrError::AlreadyRunning);
+            };
+            let base_url = format!("http://127.0.0.1:{}", config.port);
+            let endpoint = base_url.clone();
+            let key = config.api_key;
+            tokio::task::spawn_blocking(move || {
+                store.set(&endpoint_key(), &Secret::new(endpoint))?;
+                store.set(&api_key_key(), &Secret::new(key))
+            })
+            .await
+            .map_err(|_| ProwlarrError::Task)??;
+            return Ok(Self {
+                child: None,
+                base_url,
+            });
         }
         // The data-directory argument is read only in its equals form, -data=<dir>. With a
         // space Prowlarr ignores it and writes into the user's own default config directory,
@@ -520,7 +539,10 @@ impl Supervisor {
         // Every path after the spawn either succeeds or reaps the child. An orphaned Prowlarr is
         // a listener nobody stops and a port the next attempt cannot bind; a real run left one.
         match Self::finish_start(&client, &config_dir, &store, port).await {
-            Ok(base_url) => Ok(Self { child, base_url }),
+            Ok(base_url) => Ok(Self {
+                child: Some(child),
+                base_url,
+            }),
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -563,8 +585,10 @@ impl Supervisor {
 
     /// Stops the child and waits for it, so no listener outlives the call.
     pub fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
