@@ -17,10 +17,18 @@ pub struct SystemVolume;
 
 impl VolumeSpace for SystemVolume {
     fn available_bytes(&self, path: &Path) -> Result<u64, SpaceError> {
-        if !path.exists() {
-            return Err(SpaceError::Unreachable);
+        // The destination folder is created by the add, so a path that does not exist yet is the
+        // normal case, not an error: the volume the release will land on is the nearest ancestor
+        // that does exist. Measuring the folder itself answered `Unreachable` and refused every
+        // acquire before it could start.
+        let mut probe = path;
+        while !probe.exists() {
+            match probe.parent() {
+                Some(parent) => probe = parent,
+                None => return Err(SpaceError::Unreachable),
+            }
         }
-        available_via_platform(path).ok_or(SpaceError::Denied)
+        available_via_platform(probe).ok_or(SpaceError::Denied)
     }
 }
 
