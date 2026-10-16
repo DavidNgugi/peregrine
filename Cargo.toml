@@ -190,6 +190,17 @@ zeroize = { version = "1.9.1" }
 # exactly because the adapter wraps the session API and docs/DEPENDENCIES.md §1 pins a
 # patch-stable version for precisely that reason. Only `peregrine-torrent` may name it.
 librqbit = { version = "=9.0.1", default-features = false, features = ["rust-tls"] }
+# The managed Prowlarr component pack (docs/adr/0024) downloads and verifies an archive before it
+# is runnable, so it needs an HTTP client, a hash, and archive readers. `reqwest` and `sha2` are
+# already here; `flate2` and `quick-xml` were in the graph transitively. Extraction rather than
+# shelling out: an `unzip` on `PATH` is the same class of hazard as a bare sidecar name
+# (docs/adr/0022). `quick-xml` reads Prowlarr's own `config.xml` for the port and the key it
+# generated, because a hand-rolled reader for a document we did not write is the correctness risk
+# `docs/DEPENDENCIES.md` §4 names.
+flate2 = { version = "1.1.10" }
+quick-xml = { version = "0.41.0" }
+tar = { version = "0.4.46" }
+zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

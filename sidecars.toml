@@ -36,3 +36,12 @@ source = "https://github.com/FFmpeg/FFmpeg"
 source_offer = "Written offer: the complete corresponding source for the exact binary shipped, with the recorded `configure` line and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases"
 why_separate = "Same build and licence as `ffmpeg`; no in-process probe reports HDR mastering or dynamic metadata (docs/DEPENDENCIES.md §5), and LGPL code stays outside the process boundary (docs/adr/0009)."
 build = "The ffprobe binary of the same ffmpeg build declared above, so one `configure` line covers both. Ships in the base install."
+
+[[sidecar]]
+name = "prowlarr"
+licence = "GPL-3.0-or-later"
+version = "pinned-per-os"
+source = "https://github.com/Prowlarr/Prowlarr"
+source_offer = "Written offer: the complete corresponding source for the exact binary, as published by the Prowlarr project, is at https://github.com/Prowlarr/Prowlarr/releases/tag/v2.6.5.5623; we ship the upstream release artefact unpatched, and the same pinned artefact is republished on our distribution channel with this offer."
+why_separate = "GPL-3.0-or-later, so it runs out of process as a managed sidecar (docs/adr/0009, R25). It is an indexer manager, not part of the media path."
+build = "Upstream release build, unpatched. Installed on demand as a component pack (docs/adr/0024): osx-app-core-arm64.zip on macOS, linux-core-x64.tar.gz on Linux, windows-core-x64.zip on Windows, each pinned by size and SHA-256 per docs/DEPENDENCIES.md §1."

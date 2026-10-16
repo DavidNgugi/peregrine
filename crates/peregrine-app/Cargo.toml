@@ -29,6 +29,20 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 ulid = { workspace = true }
+# The managed Prowlarr component pack (docs/adr/0024): an HTTP download, a hash over the bytes as
+# they arrive, and Prowlarr's own `config.xml` for the port and the key it generated.
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+quick-xml = { workspace = true }
+
+# The archives are per-OS — macOS and Windows publish a zip, Linux a tar.gz — so neither reader is
+# compiled on the other's target.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+zip = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+flate2 = { workspace = true }
+tar = { workspace = true }
 
 [dev-dependencies]
 # The job tests inject the shared clock and id generator instead of declaring their own.

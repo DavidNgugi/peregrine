@@ -104,10 +104,18 @@ may_depend_on = [
 runtime = [
   "anyhow",
   "dashmap",
+  # The managed Prowlarr component pack (ADR 0024): `reqwest` downloads the pinned
+  # artefact, `sha2` verifies it, `zip`/`tar`/`flate2` unpack it, and `quick-xml`
+  # reads Prowlarr's own config.xml for the port and API key.
+  "flate2",
   "futures",
   "jiff",
+  "quick-xml",
+  "reqwest",
   "serde",
   "serde_json",
+  "sha2",
+  "tar",
   "thiserror",
   "tokio",
   "tokio-util",
@@ -115,6 +123,7 @@ runtime = [
   "tracing-appender",
   "tracing-subscriber",
   "ulid",
+  "zip",
 ]
 build = []
 pure = false

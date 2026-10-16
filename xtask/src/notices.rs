@@ -55,9 +55,10 @@ const PNPM_LOCKFILE_VERSION: &str = "9.0";
 const SHIPPED_ROOT: &str = "peregrine-desktop";
 
 /// Licences a sidecar may carry. Copyleft only ever leaves the process boundary
-/// (AGENTS R25, `docs/adr/0009`), and these are the two `docs/DEPENDENCIES.md` §5
-/// has reviewed; a third is a deliberate change to that document and to this list.
-const SIDECAR_LICENCES: [&str; 2] = ["GPL-2.0-or-later", "LGPL-2.1-or-later"];
+/// (AGENTS R25, `docs/adr/0009`), and each is one `docs/DEPENDENCIES.md` §5 has
+/// reviewed; a new one is a deliberate change to that document and to this list.
+/// GPL-3.0-or-later is Prowlarr, the on-demand indexer manager (`docs/adr/0024`).
+const SIDECAR_LICENCES: [&str; 3] = ["GPL-2.0-or-later", "GPL-3.0-or-later", "LGPL-2.1-or-later"];
 
 /// The version value meaning `docs/DEPENDENCIES.md` §1's rule: the release
 /// records the exact version and SHA-256 for each platform. It is a pin, not a

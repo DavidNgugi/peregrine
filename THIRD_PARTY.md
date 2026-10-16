@@ -35,9 +35,18 @@ These are separate programs invoked as subprocesses and never linked into the ap
 - **Why it is a separate executable:** Same build and licence as `ffmpeg`; no in-process probe reports HDR mastering or dynamic metadata (docs/DEPENDENCIES.md §5), and LGPL code stays outside the process boundary (docs/adr/0009).
 - **Build configuration:** The ffprobe binary of the same ffmpeg build declared above, so one `configure` line covers both. Ships in the base install.
 
+### prowlarr
+
+- **Licence:** GPL-3.0-or-later
+- **Version pin:** pinned per OS; the exact version and SHA-256 for each platform are recorded by the release bundling work (`docs/DEPENDENCIES.md` §1)
+- **Upstream source:** https://github.com/Prowlarr/Prowlarr
+- **Written offer of corresponding source:** Written offer: the complete corresponding source for the exact binary, as published by the Prowlarr project, is at https://github.com/Prowlarr/Prowlarr/releases/tag/v2.6.5.5623; we ship the upstream release artefact unpatched, and the same pinned artefact is republished on our distribution channel with this offer.
+- **Why it is a separate executable:** GPL-3.0-or-later, so it runs out of process as a managed sidecar (docs/adr/0009, R25). It is an indexer manager, not part of the media path.
+- **Build configuration:** Upstream release build, unpatched. Installed on demand as a component pack (docs/adr/0024): osx-app-core-arm64.zip on macOS, linux-core-x64.tar.gz on Linux, windows-core-x64.zip on Windows, each pinned by size and SHA-256 per docs/DEPENDENCIES.md §1.
+
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 635 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 699 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -53,6 +62,9 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `android_system_properties` | 0.1.6 |
 | `anyhow` | 1.0.104 |
 | `apple-native-keyring-store` | 1.0.2 |
+| `arc-swap` | 1.9.2 |
+| `arrayvec` | 0.7.8 |
+| `assert_cfg` | 0.1.0 |
 | `async-broadcast` | 0.7.2 |
 | `async-channel` | 2.5.0 |
 | `async-compression` | 0.4.50 |
@@ -62,11 +74,14 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `async-process` | 2.5.0 |
 | `async-recursion` | 1.2.0 |
 | `async-signal` | 0.2.14 |
+| `async-stream` | 0.3.6 |
+| `async-stream-impl` | 0.3.6 |
 | `async-task` | 4.7.1 |
 | `async-trait` | 0.1.92 |
 | `atk` | 0.18.2 |
 | `atk-sys` | 0.18.2 |
 | `atoi` | 2.0.0 |
+| `atoi` | 3.1.0 |
 | `atomic-waker` | 1.1.2 |
 | `auto-launch` | 0.6.0 |
 | `autocfg` | 1.5.1 |
@@ -74,6 +89,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `aws-lc-sys` | 0.46.0 |
 | `axum` | 0.8.9 |
 | `axum-core` | 0.5.6 |
+| `axum-extra` | 0.12.6 |
+| `backon` | 1.6.0 |
 | `base64` | 0.21.7 |
 | `base64` | 0.22.1 |
 | `base64` | 0.23.1 |
@@ -81,6 +98,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `bit-vec` | 0.8.0 |
 | `bitflags` | 1.3.2 |
 | `bitflags` | 2.13.2 |
+| `bitvec` | 1.1.1 |
 | `block-buffer` | 0.10.4 |
 | `block-buffer` | 0.12.1 |
 | `block-padding` | 0.4.2 |
@@ -89,6 +107,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `brotli` | 9.0.0 |
 | `brotli-decompressor` | 6.0.1 |
 | `bs58` | 0.5.1 |
+| `bstr` | 1.13.1 |
 | `bumpalo` | 3.20.3 |
 | `bytemuck` | 1.25.2 |
 | `byteorder` | 1.5.0 |
@@ -107,6 +126,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `cfg-if` | 1.0.5 |
 | `cfg_aliases` | 0.2.2 |
 | `chacha20` | 0.10.2 |
+| `chardetng` | 1.0.0 |
 | `chrono` | 0.4.45 |
 | `cipher` | 0.5.2 |
 | `cmake` | 0.1.58 |
@@ -118,6 +138,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `const-oid` | 0.10.2 |
 | `const-random` | 0.1.18 |
 | `const-random-macro` | 0.1.16 |
+| `const_panic` | 0.2.17 |
 | `cookie` | 0.18.2 |
 | `core-foundation` | 0.10.1 |
 | `core-foundation-sys` | 0.8.7 |
@@ -146,6 +167,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `darling_core` | 0.24.1 |
 | `darling_macro` | 0.23.0 |
 | `darling_macro` | 0.24.1 |
+| `dashmap` | 6.2.1 |
+| `data-encoding` | 2.11.1 |
 | `dbus` | 0.9.12 |
 | `defmt` | 1.1.1 |
 | `defmt-macros` | 1.1.1 |
@@ -155,6 +178,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `derive_more-impl` | 2.1.1 |
 | `digest` | 0.10.7 |
 | `digest` | 0.11.3 |
+| `directories` | 6.0.0 |
 | `dirs` | 6.0.0 |
 | `dirs` | 7.0.0 |
 | `dirs-sys` | 0.5.0 |
@@ -164,6 +188,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `dlopen2_derive` | 0.4.3 |
 | `dlv-list` | 0.5.2 |
 | `dom_query` | 0.28.0 |
+| `dontfrag` | 1.0.1 |
 | `dotenvy` | 0.15.7 |
 | `dpi` | 0.1.2 |
 | `dtoa` | 1.0.11 |
@@ -196,6 +221,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `foreign-types-shared` | 0.3.1 |
 | `form_urlencoded` | 1.2.2 |
 | `fs_extra` | 1.3.0 |
+| `funty` | 2.0.0 |
 | `futures` | 0.3.34 |
 | `futures-channel` | 0.3.34 |
 | `futures-core` | 0.3.34 |
@@ -206,6 +232,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `futures-macro` | 0.3.34 |
 | `futures-sink` | 0.3.34 |
 | `futures-task` | 0.3.34 |
+| `futures-timer` | 3.0.4 |
 | `futures-util` | 0.3.34 |
 | `gdk` | 0.18.2 |
 | `gdk-pixbuf` | 0.18.5 |
@@ -214,6 +241,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `gdkwayland-sys` | 0.18.2 |
 | `gdkx11` | 0.18.2 |
 | `gdkx11-sys` | 0.18.2 |
+| `generic-array` | 0.12.4 |
 | `generic-array` | 0.14.9 |
 | `getrandom` | 0.2.17 |
 | `getrandom` | 0.3.4 |
@@ -224,7 +252,9 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `glib-macros` | 0.18.5 |
 | `glib-sys` | 0.18.1 |
 | `glob` | 0.3.4 |
+| `gloo-timers` | 0.3.0 |
 | `gobject-sys` | 0.18.0 |
+| `governor` | 0.10.4 |
 | `gtk` | 0.18.2 |
 | `gtk-sys` | 0.18.2 |
 | `gtk3-macros` | 0.18.2 |
@@ -269,7 +299,9 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `indexmap` | 2.14.2 |
 | `infer` | 0.22.0 |
 | `inout` | 0.2.2 |
+| `intervaltree` | 0.2.7 |
 | `ipnet` | 2.12.2 |
+| `itertools` | 0.15.0 |
 | `itoa` | 1.0.18 |
 | `javascriptcore-rs` | 1.1.2 |
 | `javascriptcore-rs-sys` | 1.1.1 |
@@ -292,12 +324,26 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `keyring` | 4.2.0 |
 | `keyring-core` | 1.0.1 |
 | `lazy_static` | 1.5.1 |
+| `leaky-bucket` | 1.1.2 |
 | `libappindicator` | 0.9.0 |
 | `libappindicator-sys` | 0.9.0 |
 | `libc` | 0.2.190 |
 | `libdbus-sys` | 0.2.7 |
 | `libloading` | 0.7.4 |
 | `libredox` | 0.1.25 |
+| `librqbit` | 9.0.1 |
+| `librqbit-bencode` | 9.0.1 |
+| `librqbit-buffers` | 9.0.1 |
+| `librqbit-clone-to-owned` | 9.0.1 |
+| `librqbit-core` | 9.0.1 |
+| `librqbit-dht` | 9.0.1 |
+| `librqbit-dualstack-sockets` | 0.7.0 |
+| `librqbit-lsd` | 9.0.1 |
+| `librqbit-peer-protocol` | 9.0.1 |
+| `librqbit-sha1-wrapper` | 9.0.1 |
+| `librqbit-tracker-comms` | 9.0.1 |
+| `librqbit-upnp` | 9.0.1 |
+| `librqbit-utp` | 0.7.0 |
 | `libsqlite3-sys` | 0.37.0 |
 | `linux-raw-sys` | 0.12.1 |
 | `litemap` | 0.8.3 |
@@ -310,7 +356,9 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `matchit` | 0.8.4 |
 | `md-5` | 0.11.0 |
 | `memchr` | 2.8.3 |
+| `memmap2` | 0.9.11 |
 | `memoffset` | 0.9.1 |
+| `metrics` | 0.24.6 |
 | `mime` | 0.3.17 |
 | `mime_guess` | 2.0.5 |
 | `miniz_oxide` | 0.8.9 |
@@ -321,16 +369,22 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `ndk` | 0.9.0 |
 | `ndk-context` | 0.1.1 |
 | `ndk-sys` | 0.6.0+11769913 |
+| `network-interface` | 2.0.5 |
 | `new_debug_unreachable` | 1.0.6 |
+| `nix` | 0.30.1 |
 | `nix` | 0.31.3 |
+| `nonzero_ext` | 0.3.0 |
 | `notify-rust` | 4.18.2 |
 | `nu-ansi-term` | 0.50.3 |
+| `num` | 0.2.1 |
 | `num` | 0.4.3 |
 | `num-bigint` | 0.4.8 |
+| `num-complex` | 0.2.4 |
 | `num-complex` | 0.4.6 |
 | `num-conv` | 0.2.2 |
 | `num-integer` | 0.1.47 |
 | `num-iter` | 0.1.46 |
+| `num-rational` | 0.2.4 |
 | `num-rational` | 0.4.2 |
 | `num-traits` | 0.2.19 |
 | `num_enum` | 0.7.6 |
@@ -391,6 +445,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `proc-macro-error` | 1.0.4 |
 | `proc-macro-error-attr` | 1.0.4 |
 | `proc-macro2` | 1.0.107 |
+| `quanta` | 0.12.6 |
+| `quick-xml` | 0.41.0 |
 | `quick-xml` | 0.42.0 |
 | `quinn` | 0.11.12 |
 | `quinn-proto` | 0.11.19 |
@@ -398,12 +454,15 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `quote` | 1.0.47 |
 | `r-efi` | 5.3.0 |
 | `r-efi` | 6.0.0 |
+| `radium` | 0.7.0 |
 | `rand` | 0.10.3 |
 | `rand` | 0.9.5 |
 | `rand_chacha` | 0.9.0 |
 | `rand_core` | 0.10.1 |
 | `rand_core` | 0.9.5 |
 | `rand_pcg` | 0.10.2 |
+| `rapidhash` | 4.5.1 |
+| `raw-cpuid` | 11.6.0 |
 | `raw-window-handle` | 0.6.2 |
 | `redox_syscall` | 0.5.18 |
 | `redox_users` | 0.5.3 |
@@ -415,6 +474,8 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `reqwest` | 0.13.5 |
 | `rfd` | 0.16.0 |
 | `ring` | 0.17.14 |
+| `ringbuf` | 0.4.8 |
+| `rlimit` | 0.11.0 |
 | `rust-ini` | 0.21.3 |
 | `rustc-hash` | 2.1.3 |
 | `rustc_version` | 0.4.1 |
@@ -426,6 +487,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `rustls-platform-verifier-android` | 0.2.0 |
 | `rustls-webpki` | 0.103.15 |
 | `rustversion` | 1.0.23 |
+| `ryu` | 1.0.23 |
 | `same-file` | 1.0.6 |
 | `schannel` | 0.1.29 |
 | `schemars` | 0.8.22 |
@@ -444,10 +506,13 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `serde_core` | 1.0.229 |
 | `serde_derive` | 1.0.229 |
 | `serde_derive_internals` | 0.29.1 |
+| `serde_html_form` | 0.2.8 |
 | `serde_json` | 1.0.151 |
+| `serde_path_to_error` | 0.1.20 |
 | `serde_repr` | 0.1.21 |
 | `serde_spanned` | 0.6.9 |
 | `serde_spanned` | 1.1.2 |
+| `serde_urlencoded` | 0.7.1 |
 | `serde_with` | 3.24.0 |
 | `serde_with_macros` | 3.24.0 |
 | `serialize-to-javascript` | 0.1.2 |
@@ -463,6 +528,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `simd_cesu8` | 1.2.0 |
 | `simdutf8` | 0.1.5 |
 | `siphasher` | 1.0.4 |
+| `size_format` | 1.0.2 |
 | `slab` | 0.4.12 |
 | `smallvec` | 1.16.2 |
 | `smappservice-rs` | 0.1.3 |
@@ -476,6 +542,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `specta-typescript` | 0.0.12 |
 | `specta-util` | 0.0.12 |
 | `spin` | 0.9.9 |
+| `spinning_top` | 0.3.0 |
 | `sqlx` | 0.9.0 |
 | `sqlx-core` | 0.9.0 |
 | `sqlx-macros` | 0.9.0 |
@@ -499,6 +566,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `system-deps` | 6.2.2 |
 | `tao` | 0.37.1 |
 | `tao-macros` | 0.1.4 |
+| `tap` | 1.0.1 |
 | `target-lexicon` | 0.12.16 |
 | `tauri` | 2.12.1 |
 | `tauri-build` | 2.7.1 |
@@ -535,6 +603,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tokio` | 1.53.2 |
 | `tokio-macros` | 2.7.2 |
 | `tokio-rustls` | 0.26.6 |
+| `tokio-socks` | 0.5.3 |
 | `tokio-stream` | 0.1.19 |
 | `tokio-util` | 0.7.19 |
 | `toml` | 0.8.2 |
@@ -562,6 +631,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `try-lock` | 0.2.5 |
 | `typeid` | 1.0.3 |
 | `typenum` | 1.20.1 |
+| `typewit` | 1.15.2 |
 | `uds_windows` | 1.2.1 |
 | `ulid` | 3.0.0 |
 | `unicase` | 2.10.0 |
@@ -570,8 +640,10 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `unicode-normalization` | 0.1.25 |
 | `unicode-properties` | 0.1.4 |
 | `unicode-segmentation` | 1.13.3 |
+| `untrusted` | 0.7.1 |
 | `untrusted` | 0.9.0 |
 | `url` | 2.5.8 |
+| `urlencoding` | 2.1.3 |
 | `urlpattern` | 0.6.0 |
 | `utf8_iter` | 1.0.4 |
 | `uuid` | 1.27.0 |
@@ -656,6 +728,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `wit-bindgen` | 0.57.1 |
 | `writeable` | 0.6.4 |
 | `wry` | 0.57.0 |
+| `wyz` | 0.5.1 |
 | `x11` | 2.21.0 |
 | `x11-dl` | 2.21.0 |
 | `yoke` | 0.8.3 |

@@ -16,6 +16,7 @@ mod media_source;
 pub mod notify;
 mod observability;
 pub mod providers;
+pub mod prowlarr;
 pub mod runtime;
 #[cfg(test)]
 mod testing;
@@ -32,6 +33,9 @@ pub use notify::{
     RecentQuery, RecentWindow, Recorded, ServiceError, SubjectKind, SubjectNaming,
 };
 pub use observability::{LogConfig, Observability, ObservabilityError};
+// The managed Prowlarr pack (docs/adr/0024): the component's own surface, re-exported so the
+// command surface in the next slice can name what it starts without reaching into the module.
+pub use prowlarr::{Installed, ProwlarrError, Supervisor, VERSION as PROWLARR_VERSION};
 // The runtime's own surface speaks these, so a caller that only uses `Runtime` — the IPC
 // layer, which may depend on this crate and not on storage — can name what it is handed
 // without a second dependency edge (AGENTS R6).
