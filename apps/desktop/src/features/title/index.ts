@@ -7,3 +7,5 @@ export { useSimilarTitles } from "./hooks/useSimilarTitles.js";
 export type { SimilarTitles } from "./hooks/useSimilarTitles.js";
 export { useTitleFeed } from "./hooks/useTitleFeed.js";
 export type { TitleFeed } from "./hooks/useTitleFeed.js";
+export { useAcquire } from "./hooks/useAcquire.js";
+export type { AcquireControl } from "./hooks/useAcquire.js";

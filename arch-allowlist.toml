@@ -396,6 +396,9 @@ may_depend_on = [
 ]
 runtime = [
   "axum",
+  # A torrent-backed response body is a stream the handler pulls one chunk at a time, which is what
+  # `futures::stream::unfold` expresses without buffering a range.
+  "futures",
   "hyper",
   "serde",
   "thiserror",

@@ -23,6 +23,8 @@ function session(overrides: Partial<PlaybackSessionDto> = {}): PlaybackSessionDt
     // there would be a decode of the film to overwrite real artwork.
     needsPoster: false,
     thumbnailUrl: null,
+    // No stored position: a first watch, which is the ordinary case.
+    resumePositionMs: null,
     ...overrides,
   };
 }

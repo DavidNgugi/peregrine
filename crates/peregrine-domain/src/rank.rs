@@ -462,6 +462,25 @@ impl Candidate {
     }
 }
 
+/// The index of the best candidate the profile accepts, or None when it refuses all of them.
+///
+/// Only the score decides here. Every admission rule a caller adds on top — a seeder floor, an
+/// indexer health check, a size the metadata has not yet confirmed — filters the slice before it
+/// reaches this, so the ranking is one rule in one place.
+#[must_use]
+pub fn best_candidate(candidates: &[Candidate], profile: &QualityProfile) -> Option<usize> {
+    candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            ReleaseRanker::rank(candidate, profile)
+                .score()
+                .map(|score| (index, score))
+        })
+        .max_by_key(|&(_, score)| score)
+        .map(|(index, _)| index)
+}
+
 /// The scoring policy: a pure function from a candidate and a profile to a
 /// [`Ranking`].
 ///

@@ -20,6 +20,7 @@ import {
   useDiscoverSearch,
   type SearchSource,
 } from "../hooks/useDiscoverSearch.js";
+import { useContinueWatching, type ContinueWatchingView } from "../hooks/useContinueWatching.js";
 import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
 import { DiscoverHero, DiscoverHeroSkeleton, type HeroSlide } from "./DiscoverHero.js";
 import { heroSlides } from "./hero-rotation.js";
@@ -72,6 +73,13 @@ export function itemMeta(item: RailItemDto, kind: string): string {
 /** What the drawing needs, which is what the hooks answered plus what the search box holds. */
 export interface DiscoverViewProps {
   readonly rails: HomeRailsView;
+  /**
+   * What the account is part-way through, drawn as its own rail above the provider rails.
+   *
+   * Optional so a caller that draws the view from synthetic props — the rendering tests — need not
+   * invent rows it is not testing; an absent rail is an empty one.
+   */
+  readonly continueWatching?: ContinueWatchingView;
   readonly search: {
     readonly results: readonly TitleMatchDto[];
     readonly searching: boolean;
@@ -244,6 +252,7 @@ export function DiscoverToolbar({
 /** The screen as it is drawn, from answers. */
 export function DiscoverView({
   rails,
+  continueWatching,
   search,
   onPlay,
   onNavigate,
@@ -293,6 +302,7 @@ export function DiscoverView({
     playable: item.playable,
   }));
 
+  const watching = continueWatching?.rows ?? [];
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
@@ -432,6 +442,30 @@ export function DiscoverView({
               title={t("discover.empty.title")}
             />
           ) : null}
+          {watching.length === 0 ? null : (
+            <Rail
+              empty={null}
+              itemKey={(row) => String(row.titleId)}
+              items={watching}
+              renderItem={(row, tabIndex) => (
+                <TitleCard
+                  detailsLabel={t("card.details")}
+                  href={routePath({ kind: "player", id: row.titleId })}
+                  meta={t("discover.continue.percent", {
+                    percent: Math.round((row.percent ?? 0) * 100),
+                  })}
+                  onNavigate={() => {
+                    onNavigate({ kind: "player", id: row.titleId });
+                  }}
+                  poster={imageUrl(row.poster)}
+                  size="lg"
+                  tabIndex={tabIndex}
+                  title={row.title ?? t("discover.rail.unknown")}
+                />
+              )}
+              title={t("discover.rail.continueWatching")}
+            />
+          )}
           {rails.rails.map((rail) => (
             <Rail
               empty={
@@ -492,6 +526,9 @@ export function DiscoverScreen({
   readonly trailing?: ReactNode;
 }): ReactElement {
   const rails = useHomeRails(titleKind);
+  // What this account watched most recently, drawn above the provider rails; one read per visit,
+  // because the only writer is the player this same page opens.
+  const continueWatching = useContinueWatching();
   // The box's text lives in the hook, because the debounce does: a screen that held it would have to
   // run the timer itself, and the "catalogue first" rule would be split across two files.
   const { failed, results, searched, searching, source, query, setQuery, searchNow } =
@@ -512,6 +549,7 @@ export function DiscoverScreen({
         // search through its own effect — one place owns that rule rather than two.
       }}
       rails={rails}
+      continueWatching={continueWatching}
       search={{
         results,
         searching,

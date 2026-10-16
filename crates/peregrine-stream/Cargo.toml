@@ -15,6 +15,9 @@ axum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }
+# `futures::stream::unfold` is what turns an engine reader into an HTTP body without buffering
+# the file: the handler owns the reader and pulls one chunk per poll.
+futures = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

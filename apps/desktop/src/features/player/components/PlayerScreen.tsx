@@ -34,6 +34,7 @@ import { useTranslation } from "react-i18next";
 import { messageOf } from "../../../lib/ipc-message.js";
 import { useFrameCapture } from "../hooks/useFrameCapture.js";
 import { usePlayback, type Playback } from "../hooks/usePlayback.js";
+import { usePlaybackProgress } from "../hooks/usePlaybackProgress.js";
 
 export interface PlayerViewProps {
   /** What the hook answered: the session, or why there is none. */
@@ -50,6 +51,8 @@ export function PlayerView({ playback, onClose }: PlayerViewProps): ReactElement
   // Whether the webview refused to start playing on its own. Set from the promise `play()` returns and
   // cleared by the same element's `playing` event, so the overlay cannot outlive the state it reports.
   const [blocked, setBlocked] = useState(false);
+  // Seek to the account's stored position on the first frame, and report as the film advances.
+  usePlaybackProgress(surface, session);
 
   // A new session is a new chance to autoplay, and a refusal belongs to the session it happened in.
   useEffect(() => {

@@ -21,23 +21,27 @@ use std::num::NonZeroU32;
 
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
-    Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, SafePath, ScanMode,
-    TokenSource,
+    Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, PlaybackPosition,
+    ProgressSource, SafePath, ScanMode, TokenSource, WatchProgress,
 };
 use peregrine_platform::{SystemClock, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
 use peregrine_storage::{
     Cursor, Database, JobChange, JobPhase, JobRecord, NewJob, PageRequest, StorageError,
+    WatchProgressRow,
 };
 use peregrine_sync::{
     JobHandle, JobSpec, Scheduler, SchedulerConfig, SchedulerError, SchedulerMetrics,
 };
+use peregrine_torrent::{EngineLimits, LibrqbitEngine, TorrentEngine, TorrentMetadataFetch};
 use serde_json::json;
 
+use crate::acquisition::AcquisitionService;
 use crate::jobs::library_scan::{self, LibraryScanJob};
 use crate::jobs::provider_credential;
 use crate::library::{LibraryRootRow, LibraryService};
 use crate::providers::BuildError;
+use crate::volume::SystemVolume;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::time::Instant;
 use tracing::{info, warn};
@@ -73,6 +77,15 @@ const DATABASE_FILE: &str = "peregrine.sqlite";
 
 /// The log directory inside the data directory.
 const LOG_DIRECTORY: &str = "logs";
+
+/// The directory downloads are written to when no root has been configured for them.
+const DOWNLOAD_DIRECTORY: &str = "downloads";
+
+/// The room the admission floor reserves on the download volume.
+///
+/// A settings-registry entry (`PG-E20-01`) will own it; until then it is one constant here rather
+/// than a number spelled at a call site with none of the reasoning.
+const FREE_SPACE_FLOOR: u64 = 2 * 1024 * 1024 * 1024;
 
 /// The directives the runtime logs with when the caller does not choose.
 const DEFAULT_DIRECTIVES: &str = "info";
@@ -338,6 +351,12 @@ pub struct StartedPlayback {
     /// read prefers the provider's. This is `AGENTS R7` applied to the last surface that could decide it:
     /// the answer needs the catalogue row, the cache, and the local key, none of which a renderer has.
     pub needs_poster: bool,
+    /// Where playback should resume, in milliseconds, when the account has a stored position.
+    ///
+    /// Read here rather than by a second command: the player already holds this session, and a
+    /// follow-up round trip would race the frame it is trying to position. It is the account's own
+    /// row for the title, which is why it is scoped rather than global.
+    pub resume_position_ms: Option<i64>,
 }
 
 /// One title as the library screen lists it: what the library holds, and where the cached poster is.
@@ -719,6 +738,18 @@ pub struct Runtime {
     /// out, drops the guard, and only then awaits closing it.
     session: Mutex<Option<peregrine_playback::PlaybackSession>>,
     startup: Duration,
+    /// The torrent session, or `None` when it could not be started (see [`Runtime::start`]).
+    ///
+    /// An `Option` rather than a hard failure because a session that cannot bind its listeners or
+    /// open its storage must not take the library, providers, and playback down with it. A caller
+    /// that needs the engine asks [`Runtime::torrent_engine`] and gets a typed refusal.
+    torrent_engine: Option<Arc<dyn TorrentEngine>>,
+    /// The same session as [`Runtime::torrent_engine`], as the metadata-only fetch `FLOWS` F6
+    /// sequences before an add. One `Arc<LibrqbitEngine>` coerced to both traits, so the fetch
+    /// that produces a file list and the session that downloads it cannot be two engines.
+    metadata_fetch: Option<Arc<dyn TorrentMetadataFetch>>,
+    /// The acquisition service built over [`Runtime::torrent_engine`], and `None` with it.
+    acquisition: Option<Arc<AcquisitionService>>,
 }
 
 /// A job the runtime can still cancel.
@@ -817,6 +848,55 @@ impl Runtime {
             "the runtime is ready"
         );
 
+        // The download root. `RuntimeConfig` carries no configured download directory — library
+        // roots live in the database and are read per scan rather than cached here — so the session
+        // writes under the data directory, the one directory the app already owns and creates. A
+        // downloads root the user configured can replace it once the settings registry lands
+        // (PG-E20-01); this is deliberately not a second reading of that table.
+        let download_root = config.data_directory().join(DOWNLOAD_DIRECTORY);
+        let mut torrent_engine: Option<Arc<dyn TorrentEngine>> = None;
+        let mut metadata_fetch: Option<Arc<dyn TorrentMetadataFetch>> = None;
+        let mut acquisition: Option<Arc<AcquisitionService>> = None;
+        match tokio::fs::create_dir_all(&download_root).await {
+            Err(error) => {
+                warn!(%error, "the download directory could not be created; downloads are unavailable this session");
+            }
+            Ok(()) => match peregrine_domain::PathGuard::new(&download_root) {
+                Err(error) => {
+                    warn!(%error, "the download root is not a usable path; downloads are unavailable this session");
+                }
+                Ok(destination) => {
+                    match LibrqbitEngine::start(download_root, &EngineLimits::unlimited()).await {
+                        Err(error) => {
+                            // Fail soft: the engine is one feature. The error's own `Display` carries
+                            // no path, magnet, or hash (PG-E10-15), so the line is safe to log.
+                            warn!(%error, "the torrent engine did not start; downloads are unavailable this session");
+                        }
+                        Ok(engine) => {
+                            // One concrete session coerced to both traits: the fetch that produces a
+                            // file list and the session that then downloads it must be the same
+                            // engine, and cloning one `Arc` twice is what makes that structural.
+                            let engine = Arc::new(engine);
+                            let torrent: Arc<dyn TorrentEngine> = engine.clone();
+                            let fetch: Arc<dyn TorrentMetadataFetch> = engine;
+                            let service = AcquisitionService::new(
+                                Arc::clone(&database),
+                                Arc::clone(&torrent),
+                                Arc::clone(&clock),
+                                destination,
+                                Arc::new(SystemVolume),
+                                FREE_SPACE_FLOOR,
+                                Arc::clone(&bus),
+                            );
+                            torrent_engine = Some(torrent);
+                            metadata_fetch = Some(fetch);
+                            acquisition = Some(Arc::new(service));
+                        }
+                    }
+                }
+            },
+        }
+
         Ok(Self {
             config,
             database,
@@ -838,6 +918,9 @@ impl Runtime {
             session_id: Mutex::new(None),
             session: Mutex::new(None),
             startup,
+            torrent_engine,
+            metadata_fetch,
+            acquisition,
         })
     }
 
@@ -845,6 +928,39 @@ impl Runtime {
     #[must_use]
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
+    }
+
+    /// The torrent session, or the typed refusal that says it did not start.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::TorrentEngineUnavailable`] when the session is down (see [`Runtime::start`]).
+    pub fn torrent_engine(&self) -> Result<Arc<dyn TorrentEngine>, RuntimeError> {
+        self.torrent_engine
+            .clone()
+            .ok_or(RuntimeError::TorrentEngineUnavailable)
+    }
+
+    /// The acquisition service built over [`Runtime::torrent_engine`].
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::TorrentEngineUnavailable`] when the session is down.
+    pub fn acquisition(&self) -> Result<Arc<AcquisitionService>, RuntimeError> {
+        self.acquisition
+            .clone()
+            .ok_or(RuntimeError::TorrentEngineUnavailable)
+    }
+
+    /// The same session as [`Runtime::torrent_engine`], as the metadata-only fetch.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::TorrentEngineUnavailable`] when the session is down.
+    pub fn metadata_fetch(&self) -> Result<Arc<dyn TorrentMetadataFetch>, RuntimeError> {
+        self.metadata_fetch
+            .clone()
+            .ok_or(RuntimeError::TorrentEngineUnavailable)
     }
 
     /// Starts the hello job (`PG-E0-19`) and returns its identities.
@@ -1308,6 +1424,109 @@ impl Runtime {
                 Err(RuntimeError::Scheduler(error))
             }
         }
+    }
+
+    /// Finds one title's best release and queues its download, as a job.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the journal cannot be written, RuntimeError::Scheduler when the
+    /// queue refuses the job, and RuntimeError::TorrentEngineUnavailable when the torrent session
+    /// did not start.
+    pub async fn start_acquire(
+        &self,
+        account: peregrine_domain::AccountScope,
+        title_id: i64,
+        min_seeders: u32,
+    ) -> Result<StartedJob, RuntimeError> {
+        let now = self.clock.now().as_millisecond();
+        let key = crate::jobs::acquire::dedupe_key(title_id);
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: crate::jobs::acquire::KIND.to_owned(),
+                priority: crate::jobs::acquire::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: json!({ "titleId": title_id }).to_string(),
+                max_attempts: 2,
+                created_at: now,
+            })
+            .await?;
+
+        let spec = JobSpec {
+            kind: crate::jobs::acquire::KIND.to_owned(),
+            priority: crate::jobs::acquire::PRIORITY,
+            dedupe_key: Some(key),
+            max_attempts: 2,
+        };
+        let job = crate::jobs::acquire::AcquireJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            self.secret_store(),
+            self.metadata_fetch()?,
+            self.acquisition()?,
+            Arc::clone(&self.clock),
+            account,
+            journal_id,
+            crate::jobs::acquire::Target { title_id },
+            min_seeders,
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                    coalesced: false,
+                };
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some("INTERNAL".to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
+    }
+
+    /// The download queue, newest first, under the scope every user-facing read uses.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the read fails.
+    pub async fn download_jobs(
+        &self,
+    ) -> Result<Vec<peregrine_storage::DownloadJobRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_download_jobs(
+                installation_scope(),
+                peregrine_domain::DownloadState::ALL,
+                PageRequest::first(200),
+            )
+            .await?)
+    }
+
+    /// One download job, or None when no such row exists or the scope may not see its title.
+    ///
+    /// # Errors
+    ///
+    /// RuntimeError::Storage when the read fails.
+    pub async fn download_job(
+        &self,
+        id: i64,
+    ) -> Result<Option<peregrine_storage::DownloadJobRow>, RuntimeError> {
+        Ok(self.database.download_job(installation_scope(), id).await?)
     }
 
     /// Proves, stores, or clears one provider's credential, and answers the job doing it.
@@ -2147,6 +2366,51 @@ impl Runtime {
         }
     }
 
+    /// The engine-backed source for a title whose download is still running, when there is one.
+    ///
+    /// `None` covers every reason there is nothing to stream — no engine, no live handle for the job
+    /// (a job another process started has none here), no selected media file, or no job for the title
+    /// at all. The caller turns `None` into the same refusal a title with nothing on disk gets.
+    async fn torrent_media(
+        &self,
+        title_id: i64,
+    ) -> Result<Option<Arc<dyn peregrine_stream::TorrentMedia>>, RuntimeError> {
+        let (Ok(engine), Ok(acquisition)) = (self.torrent_engine(), self.acquisition()) else {
+            return Ok(None);
+        };
+        let scope = installation_scope();
+        let jobs = self
+            .database
+            .list_download_jobs(
+                scope,
+                peregrine_domain::DownloadState::ALL,
+                peregrine_storage::PageRequest::first(50),
+            )
+            .await?;
+        let Some(job) = jobs.into_iter().find(|job| job.title_id == title_id) else {
+            return Ok(None);
+        };
+        let Some(handle) = acquisition.handle_for(job.id) else {
+            return Ok(None);
+        };
+        let files = self.database.download_files(scope, job.id).await?;
+        let Some(file) = files
+            .into_iter()
+            .filter(|file| file.selected && file.is_media)
+            .max_by_key(|file| file.size_bytes)
+        else {
+            return Ok(None);
+        };
+        let index = usize::try_from(file.torrent_file_index).unwrap_or_default();
+        Ok(Some(Arc::new(crate::media_source::EngineMedia::new(
+            engine,
+            handle,
+            index,
+            file.size_bytes,
+            file.path.as_str(),
+        ))))
+    }
+
     /// Starts playing one of a title's files, replacing whatever was playing.
     ///
     /// **Four decisions, in the order they matter.** The title is resolved under the installation scope,
@@ -2156,10 +2420,13 @@ impl Runtime {
     /// only ever be handed a [`SafePath`]. And the session replaces the previous one rather than
     /// competing with it, which is what makes the listener's lifetime the session's (SECURITY.md T10).
     ///
+    /// A title with nothing on disk but an active download is served from the engine instead, which is
+    /// what lets a film be watched before its last pieces arrive.
+    ///
     /// # Errors
     ///
     /// [`RuntimeError::UnknownTitle`] when no title the account may see has that id,
-    /// [`RuntimeError::NoPlayableFile`] when it holds none that is on disk,
+    /// [`RuntimeError::NoPlayableFile`] when it holds none that is on disk and none is downloading,
     /// [`RuntimeError::FileOutsideRoots`] when what it holds is outside every configured folder, and
     /// [`RuntimeError::Playback`] when the file cannot be served.
     pub async fn start_playback(&self, title_id: i64) -> Result<StartedPlayback, RuntimeError> {
@@ -2174,22 +2441,42 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
-        let (file, safe) = self.playable(title_id).await?;
-        let media_file_id = file.id;
-        let support = LocalPlayback::of_name(file.path.as_str());
-        // Whether a poster is worth capturing on the way, asked from the same read the play needs: only
-        // when there is nothing to draw, which is the rule that stops a film still replacing real artwork.
-        let needs_poster = self.needs_poster(title_id).await?;
-
-        let session = peregrine_playback::PlaybackSession::open(
-            media_file_id,
-            title_id,
-            &safe,
-            self.tokens.next_token(),
-            Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
-        )
-        .await
-        .map_err(playback_error)?;
+        let (media_file_id, support, needs_poster, session) = match self.playable(title_id).await {
+            Ok((file, safe)) => {
+                let support = LocalPlayback::of_name(file.path.as_str());
+                // Whether a poster is worth capturing on the way, asked from the same read the play
+                // needs: only when there is nothing to draw, which is the rule that stops a film still
+                // replacing real artwork.
+                let needs_poster = self.needs_poster(title_id).await?;
+                let session = peregrine_playback::PlaybackSession::open(
+                    file.id,
+                    title_id,
+                    &safe,
+                    self.tokens.next_token(),
+                    Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
+                )
+                .await
+                .map_err(playback_error)?;
+                (file.id, support, needs_poster, session)
+            }
+            // A title with nothing on disk may still be downloading: serve it from the engine so a film
+            // can be watched while its last pieces arrive.
+            Err(RuntimeError::NoPlayableFile) => match self.torrent_media(title_id).await? {
+                Some(media) => {
+                    let session = peregrine_playback::PlaybackSession::open_torrent(
+                        title_id,
+                        media,
+                        self.tokens.next_token(),
+                        Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
+                    )
+                    .await
+                    .map_err(playback_error)?;
+                    (0, LocalPlayback::Unknown, false, session)
+                }
+                None => return Err(RuntimeError::NoPlayableFile),
+            },
+            Err(other) => return Err(other),
+        };
         let url = session.url().to_owned();
         let thumbnail_url = session.thumbnail_url().map(str::to_owned);
         // The guard is dropped before the answer is built: nothing below this line awaits while holding
@@ -2204,6 +2491,14 @@ impl Runtime {
             .lock()
             .expect("the session id lock is not poisoned") = Some(session_id);
 
+        // Read after the session opens rather than before: a title that cannot play at all should
+        // not pay for a progress read, and the answer is the same either way.
+        let resume_position_ms = self
+            .database
+            .watch_progress(installation_scope(), title_id, None)
+            .await?
+            .map(|progress| progress.position_ms());
+
         Ok(StartedPlayback {
             session_id,
             title_id,
@@ -2212,7 +2507,58 @@ impl Runtime {
             url,
             thumbnail_url,
             needs_poster,
+            resume_position_ms,
         })
+    }
+
+    /// A page of what the installation account is part-way through, most recently updated first.
+    ///
+    /// The account is the installation scope for the same reason every other read uses it (R34); the
+    /// page is small because a rail shows a handful.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn continue_watching(&self) -> Result<Vec<WatchProgressRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_continue_watching(installation_scope(), PageRequest::first(20))
+            .await?)
+    }
+
+    /// Records where the player is in a title or episode.
+    ///
+    /// The value is the domain's, so the percentage is one derivation (I6) and a position reported
+    /// twice updates a single row. It is deliberately stored unwatched: whether a position finishes a
+    /// title is the watch policy's decision at the end of a session, not the player's at every tick.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the write fails, and [`RuntimeError::InvalidRequest`] for a
+    /// negative position or duration.
+    pub async fn record_progress(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        position_ms: i64,
+        duration_ms: Option<i64>,
+    ) -> Result<(), RuntimeError> {
+        let position = PlaybackPosition::new(position_ms, duration_ms).map_err(|error| {
+            RuntimeError::InvalidRequest {
+                detail: error.to_string(),
+            }
+        })?;
+        let progress = WatchProgress::record(
+            installation_scope().account(),
+            title_id,
+            episode_id,
+            position,
+            ProgressSource::Local,
+            self.clock.now(),
+            None,
+        );
+        self.database.record_watch_progress(progress).await?;
+        Ok(())
     }
 
     /// Stops the playback session `session_id` names, answering whether that one was open.
@@ -2480,11 +2826,23 @@ impl Runtime {
         self.providers.status()
     }
 
+    /// The secret store this runtime reads and writes.
+    ///
+    /// Exposed rather than copied so a feature that owns its own credential shape — an indexer's base
+    /// URL and key — reads the same store a provider key does, without this module learning the shape.
+    #[must_use]
+    pub fn secret_store(&self) -> Arc<dyn SecretStore> {
+        Arc::clone(&self.secrets)
+    }
+
     /// The state the tray's menu presents (PG-E1-09).
     pub async fn shell_status(&self) -> ShellStatus {
         let scheduler = self.scheduler.metrics().await;
         ShellStatus {
             active_downloads: u32::try_from(scheduler.live).unwrap_or(u32::MAX),
+            // The port reads stats per handle and the runtime keeps no handle-to-job index yet, so
+            // "how many are seeding" has no cheap answer; a non-zero value is PG-E10-09's, whose
+            // seeding policy is what decides when a finished torrent stops.
             seeding: 0,
             tray_enabled: self.config.tray_enabled,
         }
@@ -2664,6 +3022,10 @@ const MAX_MEDIA_ROOTS: u32 = 200;
 /// Why the runtime could not start, or could not do what it was asked.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    /// The torrent session did not start, so acquisition and streaming are unavailable.
+    #[error("the torrent engine is not running")]
+    TorrentEngineUnavailable,
+
     /// The data directory could not be created.
     #[error("cannot create the data directory {}: {source}", path.display())]
     DataDirectory {

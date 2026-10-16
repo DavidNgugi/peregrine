@@ -31,6 +31,7 @@ mod migrations;
 mod notify;
 mod page;
 mod pragmas;
+mod quality;
 mod retention;
 #[cfg(test)]
 mod test_support;

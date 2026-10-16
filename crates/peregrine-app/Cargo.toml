@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 peregrine-domain = { workspace = true }
+peregrine-indexers = { workspace = true }
 peregrine-platform = { workspace = true }
 peregrine-playback = { workspace = true }
 peregrine-secrets = { workspace = true }

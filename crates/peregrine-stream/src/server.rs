@@ -39,20 +39,23 @@
 //! session whose caller has nowhere to store a frame.
 
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::Router;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
+use futures::stream;
 use peregrine_domain::{SafePath, SessionToken};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -72,6 +75,37 @@ const MEDIA_ROUTE: &str = "/media/{token}";
 
 /// The prefix [`MEDIA_ROUTE`] matches, for the guard to strip the token out of a request path.
 const MEDIA_PREFIX: &str = "/media/";
+
+/// A reader over one range of a torrent-backed file, opened fresh for each HTTP request.
+///
+/// The engine's reader has no seek — a different offset is a new stream — so each range request is
+/// answered by opening a reader at the range's start rather than moving one. `Ok(None)` is the end
+/// of the file; a read that has bytes answers `Ok(Some(..))`.
+pub trait MediaReader: Send {
+    /// Reads up to `max` bytes from the current position.
+    fn read<'a>(
+        &'a mut self,
+        max: usize,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Option<Vec<u8>>>> + Send + 'a>>;
+}
+
+/// A torrent-backed file the server can open readers over, and the four facts serving one needs.
+///
+/// Implemented in `peregrine-app` over the engine, so this crate keeps no torrent dependency: the
+/// server needs a length, a content type, and a way to open a reader, and nothing else (`AGENTS R8`).
+pub trait TorrentMedia: Send + Sync + 'static {
+    /// The file's length in bytes, as the torrent's metadata reports it.
+    fn len(&self) -> u64;
+
+    /// The content type a media element is told the bytes are.
+    fn content_type(&self) -> &str;
+
+    /// Opens a reader starting at `offset`.
+    fn open<'a>(
+        &'a self,
+        offset: u64,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Box<dyn MediaReader>>> + Send + 'a>>;
+}
 
 /// The route a captured poster frame is posted to, by the renderer that captured it.
 ///
@@ -137,6 +171,12 @@ struct Guard {
     /// by something that cannot store a poster does not offer one, and a route that said so with a
     /// different status would be telling a caller about a capability it does not have.
     capture: Option<Capture>,
+    /// The torrent-backed media this session serves, or `None` when it serves a local file.
+    ///
+    /// `None` is the file case rather than a broken one: a file session's bytes come from
+    /// `ServeFile`, which owns the whole route, and the handler below is only reached when this is
+    /// `Some`.
+    media: Option<Arc<dyn TorrentMedia>>,
     /// Whether the first request of this session has been logged yet.
     ///
     /// **The one line a black rectangle needs.** A renderer that fails to play reports a code and not a
@@ -147,13 +187,22 @@ struct Guard {
     asked: Arc<AtomicBool>,
 }
 
+/// What a session serves: one local file, or one torrent-backed file.
+///
+/// The bytes' origin is the only difference the rest of the type cares about — the token, the
+/// listener, the capture, and the lifetime are the same — so it is one field rather than two types.
+enum Served {
+    File(PathBuf),
+    Torrent,
+}
+
 /// One file, served over loopback HTTP for as long as one playback session lasts.
 ///
 /// The socket is bound when this is built and closed when it is dropped or shut down, whichever comes
 /// first: a session that is replaced cannot leave a listener behind, and a session the runtime forgets
 /// to shut down still cannot outlive its own value.
 pub struct MediaServer {
-    file: PathBuf,
+    served: Served,
     token: SessionToken,
     /// Whether a `Capture` was supplied, kept here because the router takes ownership of the guard that
     /// holds it: a caller asking "can this session keep a poster" must not have to ask the router.
@@ -209,6 +258,7 @@ impl MediaServer {
             token: token.clone(),
             port: address.port(),
             capture,
+            media: None,
             asked: Arc::new(AtomicBool::new(false)),
         };
         let app = Router::new()
@@ -269,7 +319,81 @@ impl MediaServer {
         );
 
         Ok(Self {
-            file: path,
+            served: Served::File(path),
+            token,
+            capture: has_capture,
+            address,
+            stop: Some(stop),
+            running: Some(running),
+        })
+    }
+
+    /// Binds a loopback listener that serves one torrent-backed file to whoever holds `token`.
+    ///
+    /// The bytes come from the engine rather than the filesystem, so a file that is still downloading
+    /// can be played: every request — including each range a media element asks for — opens a fresh
+    /// engine reader at that offset, because the engine's reader has no seek.
+    ///
+    /// # Errors
+    ///
+    /// [`StreamError::Bind`] when the operating system refuses the listener.
+    pub async fn start_torrent(
+        media: Arc<dyn TorrentMedia>,
+        token: SessionToken,
+        capture: Option<Capture>,
+    ) -> Result<Self, StreamError> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .map_err(|source| StreamError::Bind { source })?;
+        let address = listener
+            .local_addr()
+            .map_err(|source| StreamError::Bind { source })?;
+
+        let has_capture = capture.is_some();
+        let guard = Guard {
+            token: token.clone(),
+            port: address.port(),
+            capture,
+            media: Some(media),
+            asked: Arc::new(AtomicBool::new(false)),
+        };
+        let app = Router::new()
+            .route(MEDIA_ROUTE, get(serve_torrent))
+            .route(THUMBNAIL_ROUTE, post(capture_frame))
+            .with_state(guard.clone())
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(DefaultBodyLimit::max(MAX_FRAME_BYTES))
+            .layer(middleware::from_fn_with_state(guard, authorize))
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(Any)
+                    .allow_methods([Method::GET, Method::HEAD, Method::POST])
+                    .allow_headers([header::CONTENT_TYPE]),
+            );
+
+        let (stop, stopped) = oneshot::channel();
+        let running = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = stopped.await;
+                })
+                .await
+        });
+
+        debug!(
+            port = address.port(),
+            "a torrent media session is listening on loopback"
+        );
+
+        Ok(Self {
+            served: Served::Torrent,
             token,
             capture: has_capture,
             address,
@@ -325,10 +449,13 @@ impl MediaServer {
         &self.token
     }
 
-    /// The file being served.
+    /// The file being served, or `None` for a torrent-backed session, which has no path.
     #[must_use]
-    pub fn file(&self) -> &std::path::Path {
-        &self.file
+    pub fn file(&self) -> Option<&std::path::Path> {
+        match &self.served {
+            Served::File(path) => Some(path),
+            Served::Torrent => None,
+        }
     }
 
     /// Stops the listener and waits for the task to finish.
@@ -488,6 +615,110 @@ async fn capture_frame(State(guard): State<Guard>, headers: HeaderMap, body: Byt
             refusal(StatusCode::BAD_REQUEST, "that frame could not be stored")
         }
     }
+}
+
+/// Serves one range of a torrent-backed file, opening a fresh engine reader for the request.
+///
+/// The whole of the range handling the file path gets from `ServeFile` lives here, because a reader
+/// of a torrent has no path for `ServeFile` to open and no way to seek one.
+async fn serve_torrent(State(guard): State<Guard>, method: Method, headers: HeaderMap) -> Response {
+    let Some(media) = guard.media.clone() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let len = media.len();
+
+    let ranged = headers.contains_key(header::RANGE);
+    let (start, end) = match headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| parse_range(value, len))
+    {
+        Some(Ok(range)) => range,
+        Some(Err(())) => {
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{len}"))
+                .body(Body::empty())
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+        None => (0, len.saturating_sub(1)),
+    };
+
+    let length = if len == 0 { 0 } else { end - start + 1 };
+    let mut builder = Response::builder()
+        .status(if ranged && len > 0 {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CONTENT_TYPE, media.content_type())
+        .header(header::CONTENT_LENGTH, length.to_string());
+    if ranged && len > 0 {
+        builder = builder.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"));
+    }
+
+    let body = if method == Method::HEAD || length == 0 {
+        Body::empty()
+    } else {
+        match media.open(start).await {
+            Ok(reader) => Body::from_stream(stream::unfold(
+                (reader, length),
+                |(mut reader, remaining)| async move {
+                    if remaining == 0 {
+                        return None;
+                    }
+                    let want = usize::try_from(remaining.min(64 * 1024)).unwrap_or(64 * 1024);
+                    match reader.read(want).await {
+                        Ok(Some(bytes)) if !bytes.is_empty() => {
+                            let chunk = Bytes::from(bytes);
+                            let served = u64::try_from(chunk.len()).unwrap_or(0);
+                            Some((
+                                Ok::<_, io::Error>(chunk),
+                                (reader, remaining.saturating_sub(served)),
+                            ))
+                        }
+                        _ => None,
+                    }
+                },
+            )),
+            Err(_) => Body::empty(),
+        }
+    };
+
+    builder
+        .body(body)
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// Parses a single-range `Range` header.
+///
+/// `None` serves the whole file, which covers a header this build does not understand and a
+/// multi-range request a media element does not send. `Some(Err(()))` is a range that cannot be
+/// satisfied, which is the one answer that is deliberately not the whole file.
+fn parse_range(value: &str, len: u64) -> Option<Result<(u64, u64), ()>> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') || len == 0 {
+        return None;
+    }
+    let (start, end) = spec.trim().split_once('-')?;
+    if start.is_empty() {
+        let suffix: u64 = end.trim().parse().ok()?;
+        if suffix == 0 {
+            return Some(Err(()));
+        }
+        return Some(Ok((len.saturating_sub(suffix), len - 1)));
+    }
+    let start: u64 = start.trim().parse().ok()?;
+    let end = if end.trim().is_empty() {
+        len - 1
+    } else {
+        end.trim().parse().ok()?
+    };
+    if start > end || start >= len {
+        return Some(Err(()));
+    }
+    Some(Ok((start, end.min(len - 1))))
 }
 
 /// Whether a capture declared itself as a JPEG.

@@ -27,6 +27,8 @@ import { useTranslation } from "react-i18next";
 import { TitleHero } from "./TitleHero.js";
 import { EpisodeCard } from "./EpisodeCard.js";
 import { SeasonSwitcher } from "./SeasonSwitcher.js";
+import { messageOf } from "../../../lib/ipc-message.js";
+import type { AcquireControl } from "../hooks/useAcquire.js";
 import type { TitleDetail } from "../hooks/useTitle.js";
 import type { TitleSeasons } from "../hooks/useSeasons.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
@@ -57,6 +59,11 @@ interface TitleScreenProps {
    */
   readonly seasons: TitleSeasons;
   readonly onNavigate: (route: Route) => void;
+  /**
+   * The acquisition control: what the Download button does once the core says acquisition is the
+   * action left. The page does not decide that — `detail.offer` is the core's answer (R7).
+   */
+  readonly acquire?: AcquireControl;
 }
 
 /** What `useTranslation` hands a component. */
@@ -84,6 +91,7 @@ export function TitleScreen({
   detail,
   feed,
   seasons,
+  acquire,
   onNavigate,
 }: TitleScreenProps): ReactElement {
   const { t } = useTranslation();
@@ -121,6 +129,14 @@ export function TitleScreen({
               onPlay={() => {
                 onNavigate({ kind: "player", id: title.id });
               }}
+              acquiring={acquire?.starting ?? false}
+              onAcquire={
+                acquire === undefined
+                  ? undefined
+                  : () => {
+                      void acquire.start(title.id);
+                    }
+              }
               overview={detail.overview}
               playSupport={detail.playSupport}
               poster={detail.poster}
@@ -128,6 +144,16 @@ export function TitleScreen({
               released={detail.released}
               seasons={seasons.seasons.length}
             />
+            {acquire === undefined || !acquire.started ? null : (
+              <p className="text-caption text-text-secondary" role="status">
+                {t("downloads.acquireStarted")}
+              </p>
+            )}
+            {acquire === undefined || acquire.error === null ? null : (
+              <p className="text-caption text-state-danger" role="status">
+                {messageOf(acquire.error)}
+              </p>
+            )}
             {/* The library's own arithmetic stays a table: four counts are a row of numbers rather than
                 something a hero draws, and a reader comparing them across pages wants them aligned. */}
             <Table

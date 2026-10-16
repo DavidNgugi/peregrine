@@ -18,6 +18,14 @@ peregrine-domain = { workspace = true }
 # The refusal vocabulary is one closed `thiserror` enum per crate, so a caller matches on a variant
 # and never on a message (AGENTS §5, PG-E10-15).
 thiserror = { workspace = true }
+# The BitTorrent engine behind `TorrentEngine` (PG-E10-02). It is a leaf adapter: no
+# librqbit type reaches a public signature (AGENTS R8), which is why the crate's own doc
+# said librqbit was deliberately absent until the adapter existed.
+librqbit = { workspace = true }
+# The reader adapter drives librqbit's `FileStream` through `AsyncRead`/`AsyncSeek`, and the
+# metadata fetch awaits the session. `io-util` carries the extension traits and the workspace
+# `tokio` already enables it.
+tokio = { workspace = true }
 
 [lints]
 workspace = true

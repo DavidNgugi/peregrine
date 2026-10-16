@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use peregrine_domain::{SafePath, SessionToken};
-use peregrine_stream::{Capture, MediaServer, StreamError, ThumbnailSink};
+use peregrine_stream::{Capture, MediaServer, StreamError, ThumbnailSink, TorrentMedia};
 use thiserror::Error;
 
 /// Why a session could not be opened.
@@ -72,6 +72,34 @@ impl PlaybackSession {
         let thumbnail_url = (server.has_capture()).then(|| server.thumbnail_url());
         Ok(Self {
             media_file_id,
+            title_id,
+            url,
+            thumbnail_url,
+            server,
+        })
+    }
+
+    /// Opens a session for a file that is still downloading, served from the engine.
+    ///
+    /// **The bytes come from the engine, not the filesystem**, so a film can be watched while its last
+    /// pieces arrive: the server opens a fresh engine reader per range request. `media_file_id` is
+    /// `0` because there is no library row yet — the import that creates one is later (`PG-E14`).
+    ///
+    /// # Errors
+    ///
+    /// [`PlaybackError::Serve`] when the loopback listener cannot be bound.
+    pub async fn open_torrent(
+        title_id: i64,
+        media: Arc<dyn TorrentMedia>,
+        token: SessionToken,
+        posters: Option<Arc<dyn ThumbnailSink>>,
+    ) -> Result<Self, PlaybackError> {
+        let capture = posters.map(|sink| Capture { title_id, sink });
+        let server = MediaServer::start_torrent(media, token, capture).await?;
+        let url = server.url();
+        let thumbnail_url = (server.has_capture()).then(|| server.thumbnail_url());
+        Ok(Self {
+            media_file_id: 0,
             title_id,
             url,
             thumbnail_url,

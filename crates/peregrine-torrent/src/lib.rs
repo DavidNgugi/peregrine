@@ -15,17 +15,18 @@
 //! [`AddRefused`] vocabularies, and the [`TorrentStats`] a progress row draws. Those are what
 //! PG-E10-01 asks for, and the conformance suite that runs over them lives in `peregrine-testkit`.
 //!
-//! **The adapter is not here.** librqbit arrives with PG-E10-02, and `librqbit` is deliberately not
-//! a dependency of this crate yet: the port needs nothing from it, and keeping it out is what
-//! proves no third-party type reached a public signature. A second adapter (libtorrent bindings,
-//! ADR 0005) stays a leaf-crate change for the same reason.
+//! **The adapter is here.** [`LibrqbitEngine`] implements the port over a librqbit session, and
+//! [`TorrentMetadataFetch`] is the metadata-only fetch `PG-E10-03` asks for. No librqbit type
+//! reaches a public signature, and the adapter's module doc records the exact 9.0.1 API it is
+//! written against and the things that engine cannot do. A second adapter (libtorrent bindings,
+//! ADR 0005) stays a leaf-crate change.
 //!
-//! Nor is the rest of the epic: the metadata-only fetch (PG-E10-03), the per-file selection the
-//! adapter applies on disk (PG-E10-04), the sequential read-ahead window and the piece-priority
-//! driver that moves it (PG-E10-05, PG-E10-06), the statistics stream (PG-E10-07), reattachment
-//! from a stored [`EngineState`] (PG-E10-08), the seeding policy that decides when a finished
-//! torrent stops (PG-E10-09), the runtime application of [`EngineLimits`] (PG-E10-10), and proxy
-//! and interface binding (PG-E10-11).
+//! Nor is the rest of the epic: the per-file selection the adapter applies on disk (PG-E10-04),
+//! the sequential read-ahead window and the piece-priority driver that moves it (PG-E10-05,
+//! PG-E10-06), the statistics stream (PG-E10-07), reattachment from a stored [`EngineState`]
+//! (PG-E10-08), the seeding policy that decides when a finished torrent stops (PG-E10-09), the
+//! runtime application of [`EngineLimits`] (PG-E10-10), and proxy and interface binding
+//! (PG-E10-11).
 //!
 //! The safety inspection itself is also not here: it is
 //! [`peregrine_domain::inspect::TorrentInspector`], which judges a torrent's description on
@@ -35,12 +36,14 @@
 
 pub mod engine;
 pub mod error;
+pub mod librqbit;
 pub mod stats;
 
 pub use engine::{
     AddIntent, AddRequest, EngineDescriptor, EngineFuture, EngineLimits, EngineState,
-    FileSelection, StreamChunk, StreamRequest, TorrentEngine, TorrentHandle, TorrentSource,
-    TorrentStream,
+    FetchedMetadata, FileSelection, StreamChunk, StreamRequest, TorrentEngine, TorrentHandle,
+    TorrentMetadataFetch, TorrentSource, TorrentStream,
 };
 pub use error::{AddRefused, EngineError};
+pub use librqbit::LibrqbitEngine;
 pub use stats::{ByteRate, Bytes, PeerCounts, Ratio, TorrentHealth, TorrentStats, Transfer};

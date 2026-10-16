@@ -17,6 +17,9 @@ import { twMerge } from "./merge.js";
  * walks it cannot inspect a smaller set than the one that ships.
  */
 const PATHS = {
+  /** Downloads: an arrow into a tray. */
+  download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />,
+
   /** Discover: a compass rose. */
   compass: (
     <>

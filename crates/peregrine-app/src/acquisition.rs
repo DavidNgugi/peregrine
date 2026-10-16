@@ -59,16 +59,15 @@
 //! because a poller in this module would be the one thing in this slice that no test could stop
 //! from touching real time.
 //!
-//! # Free space is a port, and its shipping adapter is not in this slice
+//! # Free space is a port, and its shipping adapter is `crate::volume::SystemVolume`
 //!
 //! [`VolumeSpace`] is the port the admission floor and the full-disk pause read. It is a trait
 //! rather than a `u64` argument because one value decides two different things at two different
 //! moments — admission before an add, and a level during a transfer — and a caller that supplied it
-//! once could not report the second. There is deliberately no production implementation here: a real
-//! free-space read is FFI on both desktop platforms (`statvfs`, `GetDiskFreeSpaceEx`) and every
-//! crate in this tree is `#![forbid(unsafe_code)]`, so it cannot be written inside `peregrine-app`
-//! at all. It belongs with the other OS work in `peregrine-platform` and lands with the wiring
-//! (`PG-E10-02`).
+//! once could not report the second. A native read is FFI on both desktop platforms (`statvfs`,
+//! `GetDiskFreeSpaceEx`) and every crate in this tree is `#![forbid(unsafe_code)]`, so the shipping
+//! implementation asks the platform's own tool instead; it lives in [`crate::volume`], and a native
+//! adapter in `peregrine-platform` can replace it behind the same trait.
 //!
 //! # What is deliberately absent
 //!
@@ -333,6 +332,15 @@ impl AcquisitionService {
             handles: Mutex::new(HashMap::new()),
             written_at: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The live engine handle for a job this process started, when it still holds one.
+    ///
+    /// A job started by another process has no handle here — `PG-E10-08`'s reattach is what finds it
+    /// again — so `None` is "not this session's to read", not "no such job".
+    #[must_use]
+    pub fn handle_for(&self, job_id: i64) -> Option<TorrentHandle> {
+        self.handles.lock().ok()?.get(&job_id).copied()
     }
 
     /// Inspects one release and, if the gate allows it, hands it to the engine.

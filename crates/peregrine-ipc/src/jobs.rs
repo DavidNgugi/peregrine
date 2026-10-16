@@ -319,6 +319,11 @@ impl From<RuntimeError> for AppError {
             RuntimeError::Playback(inner) => AppError::new(ErrorCode::Internal)
                 .with_detail("Playback could not be started.")
                 .with_cause(inner.to_string()),
+            // The session did not start, so acquisition and streaming cannot answer. The request is
+            // not what is wrong, so the sentence says what is unavailable rather than what broke.
+            RuntimeError::TorrentEngineUnavailable => AppError::new(ErrorCode::Unsupported)
+                .with_detail("Downloads are unavailable because the torrent engine did not start.")
+                .with_cause("the torrent session was not composed at startup"),
         }
     }
 }

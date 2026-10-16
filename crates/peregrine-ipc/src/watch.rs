@@ -1,0 +1,135 @@
+//! The watch namespace: what the account is part-way through, and the position a player reports.
+//!
+//! Two thin commands. The Continue Watching read exists so a rail draws without a call per tile, and
+//! the progress write is the player's tick; neither computes a rule, because the percentage and the
+//! finished decision are the domain's (I6).
+
+use peregrine_app::WatchProgressRow;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use specta_typescript::Number;
+use tauri::State;
+
+use crate::error::AppError;
+use crate::guard::guard_response;
+use crate::runtime::RuntimeState;
+
+/// One in-progress title, as the Continue Watching rail draws it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinueWatchingDto {
+    /// The title this row is about.
+    #[specta(type = Number)]
+    pub title_id: i64,
+    /// The title's display name, when the library can answer it.
+    pub title: Option<String>,
+    /// Where the cached poster is, when the cache holds one (AGENTS R11 keeps it a path).
+    pub poster: Option<String>,
+    /// The episode, for a series; `null` for a film or a whole-title row.
+    #[specta(type = Option<Number>)]
+    pub episode_id: Option<i64>,
+    /// Where the account left off, in milliseconds.
+    #[specta(type = Number)]
+    pub position_ms: i64,
+    /// The runtime at that position, when the player knew it.
+    #[specta(type = Option<Number>)]
+    pub duration_ms: Option<i64>,
+    /// How far through, as a fraction in `0.0..=1.0`.
+    pub percent: f64,
+    /// When the row was last written, in Unix milliseconds.
+    #[specta(type = Number)]
+    pub updated_at: i64,
+}
+
+impl ContinueWatchingDto {
+    /// The row, plus what this read could resolve about its title.
+    fn of(row: WatchProgressRow, title: Option<String>, poster: Option<String>) -> Self {
+        let progress = row.progress;
+        Self {
+            title_id: progress.title_id(),
+            title,
+            poster,
+            episode_id: progress.episode_id(),
+            position_ms: progress.position_ms(),
+            duration_ms: progress.duration_ms(),
+            percent: progress.percent(),
+            updated_at: progress.updated_at().as_millisecond(),
+        }
+    }
+}
+
+/// One position a player reports, as one argument rather than four.
+///
+/// Specta refuses a bare `i64` argument, and a struct keeps the four numbers together so a caller
+/// cannot pass a duration where a position belongs.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressReport {
+    /// The title the player is showing.
+    #[specta(type = Number)]
+    pub title_id: i64,
+    /// The episode, for a series.
+    #[specta(type = Option<Number>)]
+    pub episode_id: Option<i64>,
+    /// The current position, in milliseconds.
+    #[specta(type = Number)]
+    pub position_ms: i64,
+    /// The media's runtime, in milliseconds, when the player knows it.
+    #[specta(type = Option<Number>)]
+    pub duration_ms: Option<i64>,
+}
+
+/// The title's name and cached poster, when the library can answer them.
+///
+/// One read per row of a page a rail shows; batching is a follow-up if the list ever grows past a
+/// screen, which is the same trade the downloads list makes.
+async fn title_art(
+    runtime: &peregrine_app::runtime::Runtime,
+    title_id: i64,
+) -> (Option<String>, Option<String>) {
+    match runtime.library_title(title_id).await {
+        Ok(Some(detail)) => (
+            Some(detail.entry.row.title.name),
+            detail
+                .entry
+                .poster
+                .map(|path| path.to_string_lossy().into_owned()),
+        ),
+        _ => (None, None),
+    }
+}
+
+/// What the account is part-way through, most recently updated first.
+#[tauri::command]
+#[specta::specta]
+pub async fn continue_watching(
+    state: State<'_, RuntimeState>,
+) -> Result<Vec<ContinueWatchingDto>, AppError> {
+    let runtime = state.runtime()?;
+    let rows = runtime.continue_watching().await?;
+    let mut watching = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (title, poster) = title_art(runtime, row.progress.title_id()).await;
+        watching.push(ContinueWatchingDto::of(row, title, poster));
+    }
+    Ok(guard_response("watch::continue_watching", watching))
+}
+
+/// Records where the player is in a title or episode.
+#[tauri::command]
+#[specta::specta]
+pub async fn record_progress(
+    state: State<'_, RuntimeState>,
+    report: ProgressReport,
+) -> Result<(), AppError> {
+    state
+        .runtime()?
+        .record_progress(
+            report.title_id,
+            report.episode_id,
+            report.position_ms,
+            report.duration_ms,
+        )
+        .await?;
+    Ok(guard_response("watch::record_progress", ()))
+}

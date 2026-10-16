@@ -28,6 +28,9 @@ export type {
   ProviderDto,
   ProviderStatusDto,
   CredentialStoreDto,
+  DownloadJobDto,
+  ContinueWatchingDto,
+  ProgressReport,
   TitleDetailDto,
   TitleMatchDto,
   TitleOfferDto,
@@ -72,6 +75,13 @@ export {
   scanLibrary,
   removeLibraryRoot,
   setAutoStart,
+  acquire,
+  listDownloads,
+  pauseDownload,
+  resumeDownload,
+  removeDownload,
+  continueWatching,
+  recordProgress,
   unwrap,
 } from "./client.js";
 export type { CommandResult } from "./client.js";

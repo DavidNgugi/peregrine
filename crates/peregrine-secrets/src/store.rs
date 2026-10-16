@@ -28,6 +28,15 @@ impl SecretKey {
         Self(format!("provider.{provider}"))
     }
 
+    /// The key for one provider's endpoint, such as a self-hosted indexer's base URL.
+    ///
+    /// A separate entry rather than part of a credential because a URL is configuration and a key is
+    /// a secret: a screen may show the first and must never show the second.
+    #[must_use]
+    pub fn endpoint(provider: &str) -> Self {
+        Self(format!("endpoint.{provider}"))
+    }
+
     /// The name, as the store sees it.
     #[must_use]
     pub fn as_str(&self) -> &str {

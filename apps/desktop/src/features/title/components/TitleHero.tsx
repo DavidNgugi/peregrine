@@ -74,6 +74,10 @@ export interface TitleHeroProps {
   readonly playSupport: LocalPlaybackDto | null;
   /** What Play does when it can. Absent means this build has no player to give. */
   readonly onPlay?: () => void;
+  /** What Download does when it can. Absent means this build has no acquisition path to give. */
+  readonly onAcquire?: (() => void) | undefined;
+  /** A start is in flight, so the control waits rather than offering a second. */
+  readonly acquiring?: boolean | undefined;
 }
 
 /** The hero. */
@@ -90,6 +94,8 @@ export function TitleHero({
   offer,
   playSupport,
   onPlay,
+  onAcquire,
+  acquiring,
 }: TitleHeroProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: another title's page has to give the next backdrop
@@ -166,7 +172,11 @@ export function TitleHero({
                 Download control at all, because a disabled one beside a working Play still reads as an
                 offer to fetch what the user already has. */}
             {actions.acquire ? (
-              <Button disabled variant="secondary">
+              <Button
+                disabled={onAcquire === undefined || acquiring === true}
+                onClick={onAcquire}
+                variant="secondary"
+              >
                 {t("title.hero.download")}
               </Button>
             ) : null}

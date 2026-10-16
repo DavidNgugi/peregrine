@@ -29,6 +29,9 @@ export const SCREENS: readonly ScreenEntry[] = [
   // is on this machine is known as soon as a scan has run, while the two above wait on the metadata
   // road.
   { route: { kind: "library" }, labelKey: "library.title", icon: "library" },
+  // After the library, because a download is one of the two ways a title reaches it: what the
+  // scanner found on disk, and what the acquisition service is fetching.
+  { route: { kind: "downloads" }, labelKey: "downloads.title", icon: "download" },
   { route: { kind: "diagnostics" }, labelKey: "jobs.title", icon: "pulse" },
   { route: { kind: "settings" }, labelKey: "settings.title", icon: "tune" },
 ];

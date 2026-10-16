@@ -440,6 +440,37 @@ export const commands = {
 	 *  when the journal or the queue refuses the job.
 	 */
 	clearKey: (provider: string) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("clear_key", { provider })),
+	/**  Reads what indexer is configured. */
+	indexerStatus: () => typedError<IndexerStatusDto, AppError_Serialize>(__TAURI_INVOKE("indexer_status")),
+	/**  Stores a Prowlarr base URL and API key. */
+	setIndexer: (baseUrl: string, apiKey: string) => typedError<IndexerStatusDto, AppError_Serialize>(__TAURI_INVOKE("set_indexer", { baseUrl, apiKey })),
+	/**  Removes the stored Prowlarr configuration. */
+	clearIndexer: () => typedError<IndexerStatusDto, AppError_Serialize>(__TAURI_INVOKE("clear_indexer")),
+	/**  Asks a candidate Prowlarr configuration whether it works. */
+	testIndexer: (baseUrl: string, apiKey: string) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("test_indexer", { baseUrl, apiKey })),
+	/**  Searches the configured indexer for releases. */
+	searchReleases: (query: string, limit: number | null) => typedError<ReleaseCandidateDto[], AppError_Serialize>(__TAURI_INVOKE("search_releases", { query, limit })),
+	/**
+	 *  Starts an automatic acquisition for one title, and answers the job doing it.
+	 * 
+	 *  # Errors
+	 * 
+	 *  ErrorCode::Internal when the runtime is not running or the journal refuses the row, and
+	 *  ErrorCode::Unsupported when the torrent session did not start.
+	 */
+	acquire: (title: TitleRef, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire", { title, minSeeders })),
+	/**  The download queue, newest first. */
+	listDownloads: () => typedError<DownloadJobDto[], AppError_Serialize>(__TAURI_INVOKE("list_downloads")),
+	/**  Pauses one download and answers its row as it stands after the move. */
+	pauseDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("pause_download", { download })),
+	/**  Resumes one stopped download. */
+	resumeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("resume_download", { download })),
+	/**  Removes one download. */
+	removeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("remove_download", { download })),
+	/**  What the account is part-way through, most recently updated first. */
+	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
+	/**  Records where the player is in a title or episode. */
+	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
 };
 
 /* Types */
@@ -569,6 +600,26 @@ export type CaptureSessionDto = {
 	thumbnailUrl: string | null,
 };
 
+/**  One in-progress title, as the Continue Watching rail draws it. */
+export type ContinueWatchingDto = {
+	/**  The title this row is about. */
+	titleId: number,
+	/**  The title's display name, when the library can answer it. */
+	title: string | null,
+	/**  Where the cached poster is, when the cache holds one (AGENTS R11 keeps it a path). */
+	poster: string | null,
+	/**  The episode, for a series; `null` for a film or a whole-title row. */
+	episodeId: number | null,
+	/**  Where the account left off, in milliseconds. */
+	positionMs: number,
+	/**  The runtime at that position, when the player knew it. */
+	durationMs: number | null,
+	/**  How far through, as a fraction in `0.0..=1.0`. */
+	percent: number | null,
+	/**  When the row was last written, in Unix milliseconds. */
+	updatedAt: number,
+};
+
 /**
  *  What the last read of the credential store answered, as the settings screen spells it.
  * 
@@ -586,6 +637,46 @@ export type CredentialStoreDto =
 "denied" | 
 /**  There is no store this system can use. */
 "unavailable";
+
+/**  One download job, as the Downloads screen draws it. */
+export type DownloadJobDto = {
+	/**  The row id, which every move command takes. */
+	id: number,
+	/**  The title this download fills. */
+	titleId: number,
+	/**  The title's display name, when the library can answer it. */
+	title: string | null,
+	/**  The release the indexer advertised. */
+	releaseTitle: string,
+	/**  The state machine's current state, as its stored spelling. */
+	state: string,
+	/**  Completion in permille, where 1000 is the whole payload. */
+	progressPermille: number,
+	/**  The size the indexer claimed, when it claimed one. */
+	reportedSizeBytes: number | null,
+	/**  Payload bytes received so far. */
+	downloadedBytes: number,
+	/**  Last reported download rate, in bytes per second. */
+	downloadRateBps: number,
+	/**  Peers the last statistics tick was connected to. */
+	peersConnected: number,
+	/**  Peers the swarm was believed to hold. */
+	peersSwarm: number,
+	/**  Seconds the transfer was expected to take, when there was an estimate. */
+	etaSeconds: number | null,
+	/**  Unix milliseconds when the job was admitted. */
+	addedAt: number,
+	/**  The engine's stable failure code, when it failed. */
+	errorCode: string | null,
+	/**  The engine's failure message, already redacted. */
+	errorMessage: string | null,
+};
+
+/**  A download job's id, as a listing returned it. */
+export type DownloadRef = {
+	/**  The download job's row id. */
+	id: number,
+};
 
 /**
  *  One episode of a title, as its card draws it.
@@ -767,6 +858,14 @@ export type HomeRailDto = {
 	 *  air, or here.
 	 */
 	state: RailsStateDto,
+};
+
+/**  What this installation has configured, as a settings screen renders it. */
+export type IndexerStatusDto = {
+	/**  Whether both a base URL and a key are stored. */
+	configured: boolean,
+	/**  The configured base URL, which is not a secret. */
+	baseUrl: string | null,
 };
 
 /**  One row of the job journal. */
@@ -1029,6 +1128,30 @@ export type PlaybackSessionDto = {
 	 *  the first time a provider's poster was evicted.
 	 */
 	needsPoster: boolean,
+	/**
+	 *  Where the account left off, in milliseconds, or `null` when it never started this title.
+	 * 
+	 *  On the session rather than behind a second command because the player already holds this
+	 *  value's carrier, and a follow-up call would race the frame it is trying to position.
+	 */
+	resumePositionMs: number | null,
+};
+
+/**
+ *  One position a player reports, as one argument rather than four.
+ * 
+ *  Specta refuses a bare `i64` argument, and a struct keeps the four numbers together so a caller
+ *  cannot pass a duration where a position belongs.
+ */
+export type ProgressReport = {
+	/**  The title the player is showing. */
+	titleId: number,
+	/**  The episode, for a series. */
+	episodeId: number | null,
+	/**  The current position, in milliseconds. */
+	positionMs: number,
+	/**  The media's runtime, in milliseconds, when the player knows it. */
+	durationMs: number | null,
 };
 
 /**
@@ -1176,6 +1299,31 @@ export type RecommendationsDto = {
 	items: RailItemDto[],
 	/**  The genres the rail shares, most-shared first and already named; empty when none is shared. */
 	genres: GenreDto[],
+};
+
+/**  One release an indexer found, as a results list renders it. */
+export type ReleaseCandidateDto = {
+	/**  The release name as the indexer stated it. */
+	title: string,
+	/**
+	 *  Size in bytes, when the indexer stated one.
+	 * 
+	 *  `Number` opts this `i64` into a TypeScript `number`, which specta otherwise refuses
+	 *  rather than losing precision; a release size stays well inside the 2^53 a `number` holds.
+	 */
+	sizeBytes: number | null,
+	/**  Reported seeds. */
+	seeders: number | null,
+	/**  Reported leeches. */
+	leechers: number | null,
+	/**  Where the bytes come from: magnet or infoHash. A download path reads this. */
+	source: string,
+	/**  Which indexer answered. */
+	indexer: string | null,
+	/**  The indexer's publish date, as it stated it. */
+	published: string | null,
+	/**  The indexer's own identifier for the release. */
+	guid: string | null,
 };
 
 /**  What a root is expected to hold, as the webview spells it. */

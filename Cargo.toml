@@ -186,6 +186,10 @@ ulid = { version = "3.0.0", features = ["serde"] }
 yaml-rust2 = { version = "0.13.0", default-features = false }
 keyring = { version = "4.2.0", default-features = false, features = ["v1", "apple-native-keyring-store", "windows-native-keyring-store", "zbus-secret-service-keyring-store"] }
 zeroize = { version = "1.9.1" }
+# The BitTorrent engine behind the `TorrentEngine` port (PG-E10-02, ADR 0005). Pinned
+# exactly because the adapter wraps the session API and docs/DEPENDENCIES.md §1 pins a
+# patch-stable version for precisely that reason. Only `peregrine-torrent` may name it.
+librqbit = { version = "=9.0.1", default-features = false, features = ["rust-tls"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

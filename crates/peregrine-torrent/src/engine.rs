@@ -85,7 +85,7 @@ use std::num::NonZeroU32;
 use std::pin::Pin;
 
 use peregrine_domain::id::InfoHash;
-use peregrine_domain::inspect::{SafetyReport, Verdict};
+use peregrine_domain::inspect::{SafetyReport, TorrentDescription, Verdict};
 use peregrine_domain::path::SafePath;
 use peregrine_domain::text::NonEmptyText;
 
@@ -602,6 +602,53 @@ impl EngineLimits {
     pub const fn active_downloads(&self) -> Option<u32> {
         self.active_downloads
     }
+}
+
+/// What a metadata-only fetch answered: the torrent's identity and the file set to judge.
+///
+/// It is the input the safety gate needs and the shape `AcquisitionService::start` takes, so the
+/// fetch and the engine speak one vocabulary rather than a caller translating between two.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedMetadata {
+    info_hash: InfoHash,
+    description: TorrentDescription,
+}
+
+impl FetchedMetadata {
+    /// Names the torrent and the files it says it will write.
+    #[must_use]
+    pub const fn new(info_hash: InfoHash, description: TorrentDescription) -> Self {
+        Self {
+            info_hash,
+            description,
+        }
+    }
+
+    /// The torrent's identity, which is also its dedupe key.
+    #[must_use]
+    pub const fn info_hash(&self) -> InfoHash {
+        self.info_hash
+    }
+
+    /// The files the metadata describes.
+    #[must_use]
+    pub const fn description(&self) -> &TorrentDescription {
+        &self.description
+    }
+}
+
+/// The metadata-only fetch `FLOWS` F6 sequences before an add (`PG-E10-03`).
+///
+/// A second trait rather than a [`TorrentEngine`] method because it happens before a session holds
+/// the torrent: it is the gate's input. The engine still owns digesting a magnet or a `.torrent`
+/// into a file list — that is an adapter's work (AGENTS R8) — but no librqbit type crosses here.
+pub trait TorrentMetadataFetch: Send + Sync {
+    /// Resolves `source` far enough to describe its files, and writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::SessionClosed`] and [`EngineError::Failed`].
+    fn fetch_metadata(&self, source: &TorrentSource) -> EngineFuture<'_, FetchedMetadata>;
 }
 
 /// One `BitTorrent` session: what the acquisition service and the stream server talk to.

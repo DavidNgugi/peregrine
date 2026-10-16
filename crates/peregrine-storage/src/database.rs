@@ -162,6 +162,18 @@ impl Database {
         crate::jobs::get(&self.readers, id).await
     }
 
+    /// The profile new work uses when the caller names none, or None when none is marked.
+    ///
+    /// # Errors
+    ///
+    /// StorageError::InvalidJsonField or StorageError::UnexpectedValue when the stored row is
+    /// not a profile this build wrote.
+    pub async fn default_quality_profile(
+        &self,
+    ) -> Result<Option<peregrine_domain::QualityProfile>, StorageError> {
+        crate::quality::default_profile(&self.readers).await
+    }
+
     /// A page of journal rows, newest first.
     pub async fn list_jobs(&self, request: PageRequest) -> Result<Vec<JobRecord>, StorageError> {
         crate::jobs::list(&self.readers, request).await

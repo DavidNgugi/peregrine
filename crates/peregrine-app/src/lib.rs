@@ -8,15 +8,18 @@
 pub mod acquisition;
 pub mod artwork;
 pub mod events;
+pub mod indexers;
 pub mod jobs;
 pub mod library;
 mod local_posters;
+mod media_source;
 pub mod notify;
 mod observability;
 pub mod providers;
 pub mod runtime;
 #[cfg(test)]
 mod testing;
+mod volume;
 
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
 pub use library::{
@@ -32,7 +35,9 @@ pub use observability::{LogConfig, Observability, ObservabilityError};
 // The runtime's own surface speaks these, so a caller that only uses `Runtime` — the IPC
 // layer, which may depend on this crate and not on storage — can name what it is handed
 // without a second dependency edge (AGENTS R6).
-pub use peregrine_storage::{Cursor, JobPhase, JobRecord, PageRequest, StorageError};
+pub use peregrine_storage::{
+    Cursor, DownloadJobRow, JobPhase, JobRecord, PageRequest, StorageError, WatchProgressRow,
+};
 pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,
     RailsState, Recommendations, Runtime, RuntimeConfig, RuntimeError, SessionId, ShellStatus,
@@ -59,7 +64,7 @@ pub use peregrine_secrets::{SecretKey, SecretStore, SecretStoreError};
 // with would otherwise have a type it cannot name.
 pub use peregrine_domain::{
     EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, Provider, ScanMode, SeasonNumber,
-    TitleOffer,
+    TitleOffer, WatchProgress,
 };
 pub use peregrine_storage::{
     ArtworkPath, LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity,
@@ -70,6 +75,10 @@ pub use peregrine_storage::{
 pub use jiff::Timestamp;
 
 pub use peregrine_providers::error::ProviderError;
+// The indexer vocabulary, for the reason the provider one above gives: the command surface answers
+// DTOs built from these and may not depend on `peregrine-indexers` itself (AGENTS R6).
+pub use indexers::{DEFAULT_LIMIT, IndexerConfigError, IndexerStatus, MAX_LIMIT, PROWLARR};
+pub use peregrine_indexers::{IndexerError, IndexerRelease, TorrentSource};
 // The rail vocabulary, for the same reason: the command surface answers a DTO whose `rail` field
 // is one of these, and a caller that had to reach for `peregrine-providers` to name it would be a
 // second dependency edge for a string (AGENTS R6).

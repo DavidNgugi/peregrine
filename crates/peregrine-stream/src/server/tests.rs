@@ -502,8 +502,8 @@ async fn one_session_s_token_does_not_open_another_session() {
         .expect("the second session opens");
 
     assert_ne!(a.port(), b.port(), "each session gets its own socket");
-    assert_eq!(a.file(), first.path());
-    assert_eq!(b.file(), second.path());
+    assert_eq!(a.file(), Some(first.path()).as_deref());
+    assert_eq!(b.file(), Some(second.path()).as_deref());
 
     // A's token against B's port.
     let crossed = ask(

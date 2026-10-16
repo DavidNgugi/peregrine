@@ -18,14 +18,17 @@
 pub mod autostart;
 pub mod bindings;
 pub mod discover;
+pub mod downloads;
 mod error;
 pub mod guard;
+pub mod indexers;
 pub mod jobs;
 pub mod library;
 pub mod providers;
 pub mod runtime;
 pub mod shortcuts;
 pub mod system;
+pub mod watch;
 
 // The shell reads the tray's counters through [`runtime::shell_status`] and may not depend
 // on `peregrine-app` directly, so the type that function answers with is named here rather
@@ -92,6 +95,18 @@ pub fn builder() -> Builder<tauri::Wry> {
             providers::set_key,
             providers::test_connection,
             providers::clear_key,
+            indexers::indexer_status,
+            indexers::set_indexer,
+            indexers::clear_indexer,
+            indexers::test_indexer,
+            indexers::search_releases,
+            downloads::acquire,
+            downloads::list_downloads,
+            downloads::pause_download,
+            downloads::resume_download,
+            downloads::remove_download,
+            watch::continue_watching,
+            watch::record_progress,
         ])
         .events(collect_events![])
 }

@@ -23,6 +23,9 @@ import type {
   JobStarted,
   LibraryRootDto,
   CaptureSessionDto,
+  DownloadJobDto,
+  ContinueWatchingDto,
+  ProgressReport,
   EpisodeDto,
   SeasonDto,
   LibraryTitleDto,
@@ -77,6 +80,46 @@ export async function getBuildInfo(): Promise<BuildInfo> {
  */
 export async function listShortcuts(): Promise<ShortcutBinding[]> {
   return unwrap(commands.listShortcuts());
+}
+
+/**
+ * Asks the core to find and queue a release for a title.
+ *
+ * Answers the job, not the download: the search, the metadata fetch, and the safety gate all leave
+ * the machine, so the caller watches the job rather than waiting for one (PG-E13).
+ */
+export async function acquire(titleId: number, minSeeders?: number): Promise<JobStarted> {
+  return unwrap(commands.acquire({ id: titleId }, minSeeders ?? null));
+}
+
+/** The transfer queue, newest first. */
+export async function listDownloads(): Promise<DownloadJobDto[]> {
+  return unwrap(commands.listDownloads());
+}
+
+/** Pauses one transfer, answering the row as it stands after the move. */
+export async function pauseDownload(id: number): Promise<DownloadJobDto> {
+  return unwrap(commands.pauseDownload({ id }));
+}
+
+/** Resumes one paused transfer. */
+export async function resumeDownload(id: number): Promise<DownloadJobDto> {
+  return unwrap(commands.resumeDownload({ id }));
+}
+
+/** Removes one job from the queue. Files already written are a different operation. */
+export async function removeDownload(id: number): Promise<DownloadJobDto> {
+  return unwrap(commands.removeDownload({ id }));
+}
+
+/** What the account is part-way through, most recently updated first. */
+export async function continueWatching(): Promise<ContinueWatchingDto[]> {
+  return unwrap(commands.continueWatching());
+}
+
+/** Records where the player is in a title or episode. */
+export async function recordProgress(report: ProgressReport): Promise<void> {
+  await unwrap(commands.recordProgress(report));
 }
 
 /**

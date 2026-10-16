@@ -326,6 +326,12 @@ pub struct PlaybackSessionDto {
     /// nothing for. A renderer that captured on every play would overwrite real artwork with a film still
     /// the first time a provider's poster was evicted.
     pub needs_poster: bool,
+    /// Where the account left off, in milliseconds, or `null` when it never started this title.
+    ///
+    /// On the session rather than behind a second command because the player already holds this
+    /// value's carrier, and a follow-up call would race the frame it is trying to position.
+    #[specta(type = Option<Number>)]
+    pub resume_position_ms: Option<i64>,
 }
 
 impl From<peregrine_app::StartedPlayback> for PlaybackSessionDto {
@@ -338,6 +344,7 @@ impl From<peregrine_app::StartedPlayback> for PlaybackSessionDto {
             url: started.url,
             thumbnail_url: started.thumbnail_url,
             needs_poster: started.needs_poster,
+            resume_position_ms: started.resume_position_ms,
         }
     }
 }

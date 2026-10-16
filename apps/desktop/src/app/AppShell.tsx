@@ -5,10 +5,12 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrowseScreen } from "../features/browse/index.js";
 import { DiscoverScreen } from "../features/discover/index.js";
+import { DownloadsScreen, useDownloads } from "../features/downloads/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
 import { PlayerScreen } from "../features/player/index.js";
 import {
   TitleScreen,
+  useAcquire,
   useSeasons,
   useSimilarTitles,
   useTitle,
@@ -144,6 +146,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const libraries = useLibraryRoots();
   const providers = useProviders();
   const library = useLibraryTitles();
+  const downloads = useDownloads();
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
   const rules = useMatchRules();
@@ -152,6 +155,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const libraryView = useLibraryView();
   // One title's screen is the only route with a parameter. The hook is always called — the rules of
   // hooks — and reads nothing when the route names no title.
+  const acquire = useAcquire();
   const title = useTitle(route.kind === "title" ? route.id : null);
   // The recommendations the page draws under its episodes, asked for by the same rule and for the
   // same route: a provider read that the page can live without, which is why it is its own hook.
@@ -244,6 +248,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               view={libraryView.view}
             />
           ) : null}
+          {route.kind === "downloads" ? <DownloadsScreen downloads={downloads} /> : null}
           {route.kind === "diagnostics" ? <JobsScreen /> : null}
           {route.kind === "settings" ? (
             <SettingsScreen libraries={libraries} providers={providers} shortcuts={shortcuts} />
@@ -275,6 +280,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                  component state — the season switcher would otherwise open on the season the *last*
                  title was left on. */
               key={`${route.titleKind}:${String(route.id)}`}
+              acquire={acquire}
               onNavigate={setRoute}
               seasons={seasons}
             />
