@@ -26,6 +26,7 @@ import {
 } from "../features/library/index.js";
 import {
   SettingsScreen,
+  useIndexers,
   useLibraryRoots,
   useProviders,
   useShortcutDispatch,
@@ -145,6 +146,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const shortcuts = useShortcuts();
   const libraries = useLibraryRoots();
   const providers = useProviders();
+  const indexers = useIndexers();
   const library = useLibraryTitles();
   const downloads = useDownloads();
   const scan = useScan();
@@ -251,7 +253,12 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           {route.kind === "downloads" ? <DownloadsScreen downloads={downloads} /> : null}
           {route.kind === "diagnostics" ? <JobsScreen /> : null}
           {route.kind === "settings" ? (
-            <SettingsScreen libraries={libraries} providers={providers} shortcuts={shortcuts} />
+            <SettingsScreen
+              indexers={indexers}
+              libraries={libraries}
+              providers={providers}
+              shortcuts={shortcuts}
+            />
           ) : null}
           {route.kind === "player" ? (
             /* The player is a screen of its own rather than a state inside the title page: the video

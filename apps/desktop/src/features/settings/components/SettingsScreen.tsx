@@ -10,9 +10,11 @@ import {
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
+import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
+import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
 
@@ -40,6 +42,14 @@ interface SettingsScreenProps {
    * here could disagree with the provider list the rest of the app is working from.
    */
   readonly providers: ProviderSettings;
+
+  /**
+   * The indexer configuration, as the shell read it.
+   *
+   * Passed in for the same reason the other reads are: the shell owns the read, and a second one
+   * here could disagree with the indexer the acquire job is working from.
+   */
+  readonly indexers: IndexerSettings;
 }
 
 /**
@@ -59,6 +69,7 @@ export function SettingsScreen({
   shortcuts,
   libraries,
   providers,
+  indexers,
 }: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
   const autoStart = useAutoStart();
@@ -103,6 +114,8 @@ export function SettingsScreen({
       <LibrariesSection libraries={libraries} />
 
       <ProvidersSection providers={providers} />
+
+      <IndexersSection indexers={indexers} />
     </Screen>
   );
 }

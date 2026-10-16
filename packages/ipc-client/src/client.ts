@@ -18,6 +18,7 @@ import type {
   BuildInfo,
   GenreDto,
   HomeRailDto,
+  IndexerStatusDto,
   RailKindDto,
   RecommendationsDto,
   JobStarted,
@@ -110,6 +111,30 @@ export async function resumeDownload(id: number): Promise<DownloadJobDto> {
 /** Removes one job from the queue. Files already written are a different operation. */
 export async function removeDownload(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.removeDownload({ id }));
+}
+
+/**
+ * Whether an indexer is configured, and the base URL it was configured with.
+ *
+ * The API key is never part of the answer: it lives in the keychain and nothing reads it back.
+ */
+export async function indexerStatus(): Promise<IndexerStatusDto> {
+  return unwrap(commands.indexerStatus());
+}
+
+/** Stores a Prowlarr base URL and API key, answering the status as it stands after the write. */
+export async function setIndexer(baseUrl: string, apiKey: string): Promise<IndexerStatusDto> {
+  return unwrap(commands.setIndexer(baseUrl, apiKey));
+}
+
+/** Asks a candidate Prowlarr configuration whether it answers. */
+export async function testIndexer(baseUrl: string, apiKey: string): Promise<boolean> {
+  return unwrap(commands.testIndexer(baseUrl, apiKey));
+}
+
+/** Removes the stored indexer configuration. */
+export async function clearIndexer(): Promise<IndexerStatusDto> {
+  return unwrap(commands.clearIndexer());
 }
 
 /** What the account is part-way through, most recently updated first. */

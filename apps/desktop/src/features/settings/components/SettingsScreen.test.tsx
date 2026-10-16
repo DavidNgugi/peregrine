@@ -3,6 +3,7 @@ import type { ShortcutBinding } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
+import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
@@ -59,6 +60,21 @@ function noProviders(): ProviderSettings {
   };
 }
 
+/** The indexer read as a resolved, unconfigured one: this suite is about the shortcut list. */
+function noIndexers(): IndexerSettings {
+  return {
+    status: null,
+    loading: false,
+    failed: false,
+    busy: false,
+    outcome: null,
+    error: null,
+    save: () => Promise.resolve(),
+    test: () => Promise.resolve(),
+    clear: () => Promise.resolve(),
+  };
+}
+
 /**
  * The screen as markup rather than as a mounted tree.
  *
@@ -70,10 +86,16 @@ function markup(
   shortcuts: ShortcutRegistry,
   libraries: LibraryRoots = noLibraries(),
   providers: ProviderSettings = noProviders(),
+  indexers: IndexerSettings = noIndexers(),
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <SettingsScreen libraries={libraries} providers={providers} shortcuts={shortcuts} />
+      <SettingsScreen
+        indexers={indexers}
+        libraries={libraries}
+        providers={providers}
+        shortcuts={shortcuts}
+      />
     </I18nextProvider>,
   );
 }

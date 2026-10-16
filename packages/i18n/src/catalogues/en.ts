@@ -540,6 +540,44 @@ export const en = {
         failed:
           "The system would not change whether Peregrine starts with it. Your account may not allow it.",
       },
+      indexers: {
+        title: "Indexers",
+        description:
+          "Where Peregrine looks for releases. Prowlarr is asked over its own API, and the API key is stored in your operating system's keychain, never in Peregrine's database.",
+        baseUrl: {
+          label: "Prowlarr URL",
+          accessible: "Prowlarr base URL",
+          placeholder: "http://localhost:9696",
+          description: "The address Prowlarr answers on, including the scheme and port.",
+        },
+        key: {
+          label: "API key",
+          accessible: "Prowlarr API key",
+          placeholder: "Paste the key",
+          description:
+            "From Prowlarr under Settings → General → API Key. Stored in your keychain and never shown again.",
+        },
+        status: {
+          label: "Status",
+        },
+        configured: "Configured at {{url}}",
+        notConfigured: "No indexer is configured yet.",
+        save: "Save",
+        test: "Test connection",
+        clear: "Remove",
+        saved: "Saved. Peregrine will search this indexer for releases.",
+        removed: "Removed. Downloads already queued are not affected.",
+        tested: "Prowlarr answered. The URL and key work.",
+        testFailed: "Prowlarr did not answer with that URL and key.",
+        confirm: {
+          title: "Remove the indexer?",
+          body: "Peregrine will stop searching Prowlarr for releases. Downloads already queued are not affected, and nothing else is removed.",
+        },
+        unavailable: {
+          title: "Your indexer settings could not be read.",
+          body: "Peregrine's core did not answer, so this is unknown rather than empty.",
+        },
+      },
       providers: {
         title: "Metadata providers",
         description:

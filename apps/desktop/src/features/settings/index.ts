@@ -1,8 +1,11 @@
+export { IndexersSection } from "./components/IndexersSection.js";
 export { LibrariesSection } from "./components/LibrariesSection.js";
 export { ProvidersSection } from "./components/ProvidersSection.js";
 export { SettingsScreen } from "./components/SettingsScreen.js";
 export { useLibraryRoots } from "./hooks/useLibraryRoots.js";
 export type { LibraryRoots } from "./hooks/useLibraryRoots.js";
+export { useIndexers } from "./hooks/useIndexers.js";
+export type { IndexerOutcome, IndexerSettings } from "./hooks/useIndexers.js";
 export { useProviders } from "./hooks/useProviders.js";
 export type { CredentialOutcome, ProviderSettings } from "./hooks/useProviders.js";
 export { useAutoStart } from "./hooks/useAutoStart.js";
