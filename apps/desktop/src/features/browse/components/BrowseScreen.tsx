@@ -106,7 +106,7 @@ export function BrowseView({
             onClick={() => {
               onKind(option);
             }}
-            variant={kind === option ? "primary" : "ghost"}
+            variant={kind === option ? "secondary" : "ghost"}
           >
             {t(option === "movie" ? "discover.filter.movies" : "discover.filter.shows")}
           </Button>

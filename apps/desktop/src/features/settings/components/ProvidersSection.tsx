@@ -92,7 +92,7 @@ function ProviderRow({
                 setConfirming(true);
               }}
               size="sm"
-              variant="ghost"
+              variant="danger"
             >
               {t("settings.providers.remove")}
             </Button>
@@ -128,7 +128,7 @@ function ProviderRow({
               void onSave(entry.provider, candidate);
             }}
             size="sm"
-            variant="secondary"
+            variant="primary"
           >
             {t("settings.providers.key.save")}
           </Button>

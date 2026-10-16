@@ -6,8 +6,9 @@
  * path — a remote, homelab, or future media-server instance — and stays available either way.
  */
 
-import { Button, ErrorState, Progress, SettingsRow, SettingsSection } from "@peregrine/ui";
+import { Button, Dialog, ErrorState, Progress, SettingsRow, SettingsSection } from "@peregrine/ui";
 import type { ReactElement } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 
@@ -22,6 +23,7 @@ export function ManagedProwlarrSection({
 }: ManagedProwlarrSectionProps): ReactElement {
   const { t } = useTranslation();
   const status = prowlarr.status;
+  const [confirmingStop, setConfirmingStop] = useState(false);
 
   return (
     <SettingsSection
@@ -49,7 +51,7 @@ export function ManagedProwlarrSection({
           <SettingsRow label={t("settings.prowlarr.version")}>
             <span>{status.version}</span>
           </SettingsRow>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
             {status.installed ? null : (
               <Button
                 disabled={prowlarr.busy}
@@ -80,14 +82,44 @@ export function ManagedProwlarrSection({
               <Button
                 disabled={prowlarr.busy}
                 onClick={() => {
-                  void prowlarr.stop();
+                  setConfirmingStop(true);
                 }}
-                variant="secondary"
+                variant="danger"
               >
                 {t("settings.prowlarr.stop")}
               </Button>
             ) : null}
           </div>
+          {confirmingStop ? (
+            <Dialog
+              closeLabel={t("settings.prowlarr.stopConfirm.cancel")}
+              description={t("settings.prowlarr.stopConfirm.body")}
+              onClose={() => {
+                setConfirmingStop(false);
+              }}
+              title={t("settings.prowlarr.stopConfirm.title")}
+            >
+              <div className="flex justify-end gap-2">
+                <Button
+                  onClick={() => {
+                    setConfirmingStop(false);
+                  }}
+                  variant="ghost"
+                >
+                  {t("settings.prowlarr.stopConfirm.cancel")}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setConfirmingStop(false);
+                    void prowlarr.stop();
+                  }}
+                  variant="danger"
+                >
+                  {t("settings.prowlarr.stopConfirm.confirm")}
+                </Button>
+              </div>
+            </Dialog>
+          ) : null}
           {prowlarr.phase === "installing" ? (
             <Progress
               label={t("settings.prowlarr.installing")}

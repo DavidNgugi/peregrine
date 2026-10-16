@@ -138,7 +138,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
               void indexers.save(baseUrl.trim(), candidate);
             }}
             size="sm"
-            variant="secondary"
+            variant="primary"
           >
             {t("settings.indexers.save")}
           </Button>
@@ -159,7 +159,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
                 setConfirming(true);
               }}
               size="sm"
-              variant="ghost"
+              variant="danger"
             >
               {t("settings.indexers.clear")}
             </Button>

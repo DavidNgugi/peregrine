@@ -1,5 +1,6 @@
 import {
   Button,
+  Dialog,
   EmptyState,
   ErrorState,
   Panel,
@@ -12,6 +13,7 @@ import {
 import type { JobRecord } from "@peregrine/ipc-client";
 import { describeIpcError } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { findJournalRow, isTerminal, percentOf } from "../job-progress.js";
 import { useJobs } from "../hooks/useJobs.js";
@@ -37,6 +39,7 @@ export function JobsScreen(): ReactElement {
   const { t } = useTranslation();
   const { live, journal, health, logLines, error, starting, cancelling, refreshing } = useJobs();
   const { start, cancel, refresh, clearError } = useJobs();
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   const terminal = isTerminal(live?.phase ?? null);
   const row = findJournalRow(journal, live);
@@ -85,21 +88,22 @@ export function JobsScreen(): ReactElement {
         />
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           disabled={starting || (live !== null && !terminal)}
           onClick={() => {
             void start(STEPS);
           }}
+          variant="primary"
         >
           {t("jobs.action.start")}
         </Button>
         <Button
           disabled={cancelling || live === null || terminal}
           onClick={() => {
-            void cancel();
+            setConfirmingCancel(true);
           }}
-          variant="secondary"
+          variant="danger"
         >
           {t("jobs.action.cancel")}
         </Button>
@@ -108,7 +112,7 @@ export function JobsScreen(): ReactElement {
           onClick={() => {
             void refresh();
           }}
-          variant="ghost"
+          variant="secondary"
         >
           {t("jobs.action.refresh")}
         </Button>
@@ -118,6 +122,39 @@ export function JobsScreen(): ReactElement {
           </p>
         ) : null}
       </div>
+
+      {confirmingCancel ? (
+        <Dialog
+          closeLabel={t("jobs.cancelConfirm.cancel")}
+          description={t("jobs.cancelConfirm.body")}
+          onClose={() => {
+            setConfirmingCancel(false);
+          }}
+          title={t("jobs.cancelConfirm.title")}
+        >
+          <div className="flex justify-end gap-2">
+            <Button
+              onClick={() => {
+                setConfirmingCancel(false);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t("jobs.cancelConfirm.cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmingCancel(false);
+                void cancel();
+              }}
+              size="sm"
+              variant="danger"
+            >
+              {t("jobs.cancelConfirm.confirm")}
+            </Button>
+          </div>
+        </Dialog>
+      ) : null}
 
       <div className="flex flex-col gap-1">
         <Progress label={t("jobs.progress.label")} value={percent} />

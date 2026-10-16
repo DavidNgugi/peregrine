@@ -201,7 +201,7 @@ export function DiscoverToolbar({
               aria-pressed={titleKind === kind}
               className="rounded-full"
               onClick={() => onKindChange(kind)}
-              variant={titleKind === kind ? "primary" : "ghost"}
+              variant={titleKind === kind ? "secondary" : "ghost"}
             >
               {t(
                 kind === undefined

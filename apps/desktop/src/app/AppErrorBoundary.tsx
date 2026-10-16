@@ -19,7 +19,7 @@ function ErrorFallback({ error, resetErrorBoundary }: FallbackProps): ReactEleme
       <p className="text-caption text-text-tertiary">
         {t("shell.error.code", { code: normalized.code })}
       </p>
-      <Button className="mt-2 self-start" onClick={resetErrorBoundary}>
+      <Button className="mt-2 self-start" onClick={resetErrorBoundary} variant="secondary">
         {t("shell.error.retry")}
       </Button>
     </div>

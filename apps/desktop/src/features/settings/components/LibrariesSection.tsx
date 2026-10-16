@@ -11,10 +11,18 @@
  * holds about it: what it is expected to hold, and when it was last scanned.
  */
 
-import { Button, EmptyState, ErrorState, SettingsRow, SettingsSection } from "@peregrine/ui";
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  SettingsRow,
+  SettingsSection,
+} from "@peregrine/ui";
 import { useTranslation } from "react-i18next";
 import type { LibraryRootDto, RootKind } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
+import { useState } from "react";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 
 interface LibrariesSectionProps {
@@ -55,6 +63,7 @@ function describe(root: LibraryRootDto, t: (key: string) => string): string {
 export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactElement {
   const { t } = useTranslation();
   const busy = libraries.busy;
+  const [removing, setRemoving] = useState<LibraryRootDto | null>(null);
 
   return (
     <SettingsSection
@@ -85,15 +94,51 @@ export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactEle
           <Button
             disabled={busy}
             onClick={() => {
-              void libraries.remove(root.id);
+              setRemoving(root);
             }}
             size="sm"
-            variant="ghost"
+            variant="danger"
           >
             {t("settings.libraries.remove")}
           </Button>
         </SettingsRow>
       ))}
+
+      {removing === null ? null : (
+        <Dialog
+          closeLabel={t("settings.libraries.removeConfirm.cancel")}
+          description={t("settings.libraries.removeConfirm.body", { path: removing.path })}
+          onClose={() => {
+            setRemoving(null);
+          }}
+          title={t("settings.libraries.removeConfirm.title")}
+        >
+          <div className="flex justify-end gap-2">
+            <Button
+              onClick={() => {
+                setRemoving(null);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t("settings.libraries.removeConfirm.cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                const target = removing;
+                setRemoving(null);
+                if (target !== null) {
+                  void libraries.remove(target.id);
+                }
+              }}
+              size="sm"
+              variant="danger"
+            >
+              {t("settings.libraries.removeConfirm.confirm")}
+            </Button>
+          </div>
+        </Dialog>
+      )}
 
       <SettingsRow
         description={t("settings.libraries.add.description")}
@@ -105,7 +150,7 @@ export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactEle
             void libraries.add(ADDED_KIND);
           }}
           size="sm"
-          variant="secondary"
+          variant="primary"
         >
           {t("settings.libraries.add.action")}
         </Button>

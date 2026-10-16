@@ -82,7 +82,7 @@ export function PlayerView({ playback, onClose }: PlayerViewProps): ReactElement
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <Button onClick={onClose} size="sm" variant="secondary">
+          <Button onClick={onClose} size="sm" variant="ghost">
             {t("player.back")}
           </Button>
           {/* Which reader is doing the work, said beside the picture rather than as a refusal: it is an

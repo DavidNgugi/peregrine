@@ -175,7 +175,9 @@ export function TitleHero({
               <Button
                 disabled={onAcquire === undefined || acquiring === true}
                 onClick={onAcquire}
-                variant="secondary"
+                // The surface has one affirmative action: while Play can run it is Play, and
+                // Download is the alternate; when there is nothing to play, Download is it.
+                variant={actions.play.kind === "play" ? "secondary" : "primary"}
               >
                 {t("title.hero.download")}
               </Button>

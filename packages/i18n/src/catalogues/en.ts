@@ -203,6 +203,12 @@ export const en = {
         cancel: "Cancel the job",
         refresh: "Refresh",
       },
+      cancelConfirm: {
+        title: "Cancel the running job?",
+        body: "The job stops at its next step. Work it has already finished is kept; it will not be resumed.",
+        confirm: "Cancel the job",
+        cancel: "Keep it running",
+      },
       progress: {
         label: "Job progress",
         idle: "No job has run in this session.",
@@ -500,6 +506,12 @@ export const en = {
         description:
           "The folders Peregrine is allowed to scan. Removing one stops it being scanned: nothing is deleted, and what you have watched stays.",
         remove: "Remove",
+        removeConfirm: {
+          title: "Remove this folder?",
+          body: "Peregrine stops scanning {{path}}. Nothing is deleted and what you have watched stays.",
+          confirm: "Remove folder",
+          cancel: "Keep folder",
+        },
         refused: {
           title: "That folder could not be added.",
         },
@@ -592,6 +604,12 @@ export const en = {
         start: "Start",
         starting: "Starting…",
         stop: "Stop",
+        stopConfirm: {
+          title: "Stop Prowlarr?",
+          body: "Managed Prowlarr will stop serving this machine immediately. Downloads already running continue; searching for new releases stops until you start it again.",
+          confirm: "Stop Prowlarr",
+          cancel: "Keep running",
+        },
         outcome: {
           installed: "Prowlarr is installed.",
           started: "Prowlarr is running and searching releases now works.",

@@ -201,6 +201,7 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
                 onClick={() => {
                   void downloads.refresh();
                 }}
+                variant="secondary"
               >
                 {t("shell.error.retry")}
               </Button>
@@ -237,7 +238,7 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
               onClick={() => {
                 setRemoving(null);
               }}
-              variant="secondary"
+              variant="ghost"
             >
               {t("downloads.remove.cancel")}
             </Button>

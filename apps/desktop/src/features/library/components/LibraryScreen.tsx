@@ -300,7 +300,7 @@ function queueColumnsOf(
                 match(row);
               }}
               size="sm"
-              variant="ghost"
+              variant="secondary"
             >
               {named === null
                 ? t("library.queue.match")
@@ -314,7 +314,7 @@ function queueColumnsOf(
                 choose(row);
               }}
               size="sm"
-              variant="ghost"
+              variant="secondary"
             >
               {t("library.queue.choose")}
             </Button>
@@ -363,7 +363,7 @@ function ruleColumnsOf(
             ask(row);
           }}
           size="sm"
-          variant="ghost"
+          variant="danger"
         >
           {t("library.rules.forget")}
         </Button>
@@ -458,7 +458,7 @@ export function LibraryScreen({
                         onView(option);
                       }}
                       size="sm"
-                      variant={view === option ? "primary" : "ghost"}
+                      variant={view === option ? "secondary" : "ghost"}
                     >
                       {t(option === "list" ? "library.view.list" : "library.view.grid")}
                     </Button>
@@ -596,7 +596,7 @@ export function LibraryScreen({
                 setForgetting(null);
               }}
               size="sm"
-              variant="secondary"
+              variant="ghost"
             >
               {t("common.cancel")}
             </Button>
