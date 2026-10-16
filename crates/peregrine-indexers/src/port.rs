@@ -36,6 +36,18 @@ pub enum TorrentSource {
     TorrentUrl(String),
 }
 
+/// What fetching a release's HTTP URL produced.
+///
+/// Prowlarr's proxy URL answers 301 with a `magnet:` Location for a torrent indexer -- a scheme an
+/// HTTP client cannot follow -- and the .torrent body for one that serves a file directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchedTorrent {
+    /// The .torrent file's own bytes.
+    Bytes(Vec<u8>),
+    /// The magnet the proxy redirected to.
+    Magnet(String),
+}
+
 /// One release an indexer found, in this application's vocabulary.
 ///
 /// The title is carried twice on purpose: `raw_title` is what the indexer said, which is what a
@@ -72,5 +84,5 @@ pub trait Indexer: Send + Sync {
     fn check<'a>(&'a self) -> IndexerFuture<'a, ()>;
 
     /// Fetches the .torrent bytes behind a TorrentSource::TorrentUrl.
-    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, Vec<u8>>;
+    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, FetchedTorrent>;
 }

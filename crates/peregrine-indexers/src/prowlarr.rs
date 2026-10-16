@@ -6,7 +6,9 @@ use peregrine_domain::ReleaseName;
 use serde::Deserialize;
 
 use crate::error::IndexerError;
-use crate::port::{Indexer, IndexerFuture, IndexerQuery, IndexerRelease, TorrentSource};
+use crate::port::{
+    FetchedTorrent, Indexer, IndexerFuture, IndexerQuery, IndexerRelease, TorrentSource,
+};
 
 /// The most bytes this adapter will read from a search answer.
 ///
@@ -153,17 +155,34 @@ impl Indexer for Prowlarr {
         })
     }
 
-    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, Vec<u8>> {
+    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, FetchedTorrent> {
         Box::pin(async move {
-            // Prowlarr's proxy URL already carries its api key, so no header is added here; the
-            // body is the .torrent, read under the same cap as a search answer.
+            // Prowlarr's proxy URL already carries its api key, so no header is added here. For a
+            // torrent indexer it answers 301 with a magnet: Location -- a scheme an HTTP client
+            // cannot follow -- and for one that serves a file, the .torrent body, capped like a
+            // search answer. Verified live against 2.6.5.5623: the 301 Location is the magnet.
             let response = self
                 .client
                 .get(url)
                 .send()
                 .await
                 .map_err(|_| IndexerError::Transport)?;
-            self.read_capped(response).await
+            if response.status().is_redirection() {
+                let location = response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default();
+                if location
+                    .trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("magnet:")
+                {
+                    return Ok(FetchedTorrent::Magnet(location.to_owned()));
+                }
+                return Err(IndexerError::Status(response.status().as_u16()));
+            }
+            Ok(FetchedTorrent::Bytes(self.read_capped(response).await?))
         })
     }
 

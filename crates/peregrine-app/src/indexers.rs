@@ -245,6 +245,6 @@ pub async fn remove_indexer_async(
 pub async fn fetch_torrent_async(
     store: Arc<dyn SecretStore>,
     url: String,
-) -> Result<Vec<u8>, IndexerConfigError> {
+) -> Result<peregrine_indexers::FetchedTorrent, IndexerConfigError> {
     Ok(configured_adapter(store).await?.fetch_torrent(&url).await?)
 }

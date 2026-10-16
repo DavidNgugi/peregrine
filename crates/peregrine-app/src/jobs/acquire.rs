@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use peregrine_domain::rank::{Candidate, best_candidate};
 use peregrine_domain::{AccountScope, Clock, NonEmptyText, ReleaseName};
-use peregrine_indexers::{IndexerRelease, TorrentSource as IndexerSource};
+use peregrine_indexers::{FetchedTorrent, IndexerRelease, TorrentSource as IndexerSource};
 use peregrine_secrets::SecretStore;
 use peregrine_storage::{
     AddedBy, Database, DownloadSource, JobChange, JobPhase, MagnetUri, NewDownloadJob,
@@ -229,14 +229,24 @@ impl AcquireJob {
                 })?)
             }
             IndexerSource::TorrentUrl(url) => {
-                let bytes = indexers::fetch_torrent_async(Arc::clone(&self.store), url.clone())
+                let fetched = indexers::fetch_torrent_async(Arc::clone(&self.store), url.clone())
                     .await
                     .map_err(|error| {
                         JobError::failed(format!(
                             "the release's torrent could not be fetched: {error}"
                         ))
                     })?;
-                EngineSource::TorrentFile(bytes)
+                match fetched {
+                    FetchedTorrent::Bytes(bytes) => EngineSource::TorrentFile(bytes),
+                    // The proxy answered 301 with a magnet, which is the source the engine wanted
+                    // all along; the row keeps it, so nothing has to be re-derived from bytes.
+                    FetchedTorrent::Magnet(uri) => {
+                        magnet_uri = uri.clone();
+                        EngineSource::Magnet(NonEmptyText::new(&uri).map_err(|error| {
+                            JobError::failed(format!("the release's magnet is not usable: {error}"))
+                        })?)
+                    }
+                }
             }
         };
 

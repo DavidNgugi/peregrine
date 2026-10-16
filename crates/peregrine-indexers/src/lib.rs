@@ -28,7 +28,9 @@ mod port;
 mod prowlarr;
 
 pub use error::IndexerError;
-pub use port::{Indexer, IndexerFuture, IndexerQuery, IndexerRelease, TorrentSource};
+pub use port::{
+    FetchedTorrent, Indexer, IndexerFuture, IndexerQuery, IndexerRelease, TorrentSource,
+};
 pub use prowlarr::{
     ConfiguredIndexer, IndexerDefinition, IndexerField, IndexerOption, NewIndexer, Prowlarr,
 };
