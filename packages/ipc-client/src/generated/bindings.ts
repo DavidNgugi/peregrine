@@ -471,6 +471,14 @@ export const commands = {
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
 	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
+	/**  Reads the managed indexer manager's state. */
+	prowlarrStatus: () => typedError<ProwlarrStatusDto, AppError_Serialize>(__TAURI_INVOKE("prowlarr_status")),
+	/**  Downloads and verifies the pinned Prowlarr pack, and answers the job doing it. */
+	installProwlarr: () => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("install_prowlarr")),
+	/**  Starts the installed Prowlarr and stores the endpoint and key it generated. */
+	startProwlarr: () => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("start_prowlarr")),
+	/**  Stops the managed Prowlarr, and answers the state after the stop. */
+	stopProwlarr: () => typedError<ProwlarrStatusDto, AppError_Serialize>(__TAURI_INVOKE("stop_prowlarr")),
 };
 
 /* Types */
@@ -1185,6 +1193,20 @@ export type ProviderStatusDto = {
 	known: ProviderDto[],
 	/**  What the last read of the credential store answered. */
 	store: CredentialStoreDto,
+};
+
+/**  The managed indexer manager's state, as a settings screen draws it. Never the key. */
+export type ProwlarrStatusDto = {
+	/**  Whether this build has a pinned Prowlarr for the running platform. */
+	supported: boolean,
+	/**  Whether the verified pack is on disk. */
+	installed: boolean,
+	/**  Whether a managed instance is running. */
+	running: boolean,
+	/**  The pinned version this build installs. */
+	version: string,
+	/**  The loopback endpoint, when one is running. */
+	baseUrl: string | null,
 };
 
 /**  One title in a rail, as the screen draws it. */

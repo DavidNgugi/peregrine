@@ -27,6 +27,7 @@ import {
 import {
   SettingsScreen,
   useIndexers,
+  useProwlarr,
   useLibraryRoots,
   useProviders,
   useShortcutDispatch,
@@ -147,6 +148,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const libraries = useLibraryRoots();
   const providers = useProviders();
   const indexers = useIndexers();
+  const prowlarr = useProwlarr();
   const library = useLibraryTitles();
   const downloads = useDownloads();
   const scan = useScan();
@@ -255,6 +257,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           {route.kind === "settings" ? (
             <SettingsScreen
               indexers={indexers}
+              prowlarr={prowlarr}
               libraries={libraries}
               providers={providers}
               shortcuts={shortcuts}

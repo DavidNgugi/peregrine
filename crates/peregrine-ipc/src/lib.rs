@@ -25,6 +25,7 @@ pub mod indexers;
 pub mod jobs;
 pub mod library;
 pub mod providers;
+pub mod prowlarr;
 pub mod runtime;
 pub mod shortcuts;
 pub mod system;
@@ -107,6 +108,10 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::remove_download,
             watch::continue_watching,
             watch::record_progress,
+            prowlarr::prowlarr_status,
+            prowlarr::install_prowlarr,
+            prowlarr::start_prowlarr,
+            prowlarr::stop_prowlarr,
         ])
         .events(collect_events![])
 }

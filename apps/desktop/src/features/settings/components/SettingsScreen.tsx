@@ -12,10 +12,12 @@ import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
 import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
+import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
+import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
 
 interface SettingsScreenProps {
@@ -50,6 +52,14 @@ interface SettingsScreenProps {
    * here could disagree with the indexer the acquire job is working from.
    */
   readonly indexers: IndexerSettings;
+
+  /**
+   * The managed Prowlarr instance, as the shell read it.
+   *
+   * Passed in for the same reason the indexer read is: the shell owns the read, and a second one
+   * here could disagree with the instance the search path is using.
+   */
+  readonly prowlarr: ManagedProwlarr;
 }
 
 /**
@@ -70,6 +80,7 @@ export function SettingsScreen({
   libraries,
   providers,
   indexers,
+  prowlarr,
 }: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
   const autoStart = useAutoStart();
@@ -114,6 +125,8 @@ export function SettingsScreen({
       <LibrariesSection libraries={libraries} />
 
       <ProvidersSection providers={providers} />
+
+      <ManagedProwlarrSection prowlarr={prowlarr} />
 
       <IndexersSection indexers={indexers} />
     </Screen>

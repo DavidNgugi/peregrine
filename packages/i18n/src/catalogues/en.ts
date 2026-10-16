@@ -578,6 +578,32 @@ export const en = {
           body: "Peregrine's core did not answer, so this is unknown rather than empty.",
         },
       },
+      prowlarr: {
+        title: "Managed Prowlarr",
+        description:
+          "Let Peregrine install and run Prowlarr for you. It downloads the official release, checks it against a pinned checksum, and runs it on this machine only; the API key it generates is stored in your keychain.",
+        state: "State",
+        version: "Version",
+        notInstalled: "Not installed",
+        installed: "Installed, not running",
+        runningAt: "Running at {{url}}",
+        install: "Install Prowlarr",
+        start: "Start",
+        stop: "Stop",
+        outcome: {
+          installed: "Prowlarr is installed.",
+          started: "Prowlarr is running and searching releases now works.",
+          stopped: "Prowlarr is stopped.",
+        },
+        unsupported:
+          "This platform has no pinned Prowlarr build, so point Peregrine at a remote instance below instead.",
+        customHint:
+          "Use the fields below instead to point at your own Prowlarr — a remote box, a homelab server, or an existing instance.",
+        unavailable: {
+          title: "The managed Prowlarr could not be read.",
+          body: "Peregrine's core did not answer, so this is unknown rather than not installed.",
+        },
+      },
       providers: {
         title: "Metadata providers",
         description:

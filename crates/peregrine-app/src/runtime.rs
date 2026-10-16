@@ -750,12 +750,30 @@ pub struct Runtime {
     metadata_fetch: Option<Arc<dyn TorrentMetadataFetch>>,
     /// The acquisition service built over [`Runtime::torrent_engine`], and `None` with it.
     acquisition: Option<Arc<AcquisitionService>>,
+    /// The managed indexer manager (docs/adr/0024). Installed and started only when asked, so a
+    /// launch that never opens Settings pays for neither.
+    prowlarr: Arc<crate::jobs::prowlarr::Managed>,
 }
 
 /// A job the runtime can still cancel.
 struct LiveJob {
     handle: JobHandle,
     journal_id: i64,
+}
+
+/// What a settings screen draws about the managed indexer manager. Never the key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProwlarrStatus {
+    /// Whether this build has a pinned Prowlarr for the running platform.
+    pub supported: bool,
+    /// Whether the verified pack is on disk.
+    pub installed: bool,
+    /// Whether a managed instance is running.
+    pub running: bool,
+    /// The pinned version this build installs.
+    pub version: &'static str,
+    /// The loopback endpoint, when one is running.
+    pub base_url: Option<String>,
 }
 
 impl Runtime {
@@ -897,6 +915,10 @@ impl Runtime {
             },
         }
 
+        let prowlarr = Arc::new(crate::jobs::prowlarr::Managed::discover(
+            config.data_directory(),
+        ));
+
         Ok(Self {
             config,
             database,
@@ -921,6 +943,7 @@ impl Runtime {
             torrent_engine,
             metadata_fetch,
             acquisition,
+            prowlarr,
         })
     }
 
@@ -961,6 +984,150 @@ impl Runtime {
         self.metadata_fetch
             .clone()
             .ok_or(RuntimeError::TorrentEngineUnavailable)
+    }
+
+    /// The managed indexer manager's state, for a settings screen. Never the key.
+    ///
+    /// Infallible on purpose: a screen asks this before deciding what to offer, and an error here
+    /// would leave it with nothing to draw.
+    #[must_use]
+    pub fn prowlarr_status(&self) -> ProwlarrStatus {
+        ProwlarrStatus {
+            supported: crate::prowlarr::is_supported(),
+            installed: self.prowlarr.is_installed(),
+            running: self.prowlarr.is_running(),
+            version: crate::prowlarr::VERSION,
+            base_url: self.prowlarr.base_url(),
+        }
+    }
+
+    /// Downloads, verifies, and unpacks the pinned Prowlarr pack, as a job.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the journal cannot be written, and
+    /// [`RuntimeError::Scheduler`] when the queue refuses the job.
+    pub async fn start_prowlarr_install(&self) -> Result<StartedJob, RuntimeError> {
+        let now = self.clock.now().as_millisecond();
+        let kind = crate::jobs::prowlarr::INSTALL_KIND;
+        let priority = crate::jobs::prowlarr::PRIORITY;
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: kind.to_owned(),
+                priority,
+                dedupe_key: Some(kind.to_owned()),
+                payload_json: json!({ "version": crate::prowlarr::VERSION }).to_string(),
+                max_attempts: 1,
+                created_at: now,
+            })
+            .await?;
+        let spec = JobSpec {
+            kind: kind.to_owned(),
+            priority,
+            dedupe_key: Some(kind.to_owned()),
+            max_attempts: 1,
+        };
+        let job = crate::jobs::prowlarr::ProwlarrInstallJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.prowlarr),
+            self.config.data_directory().to_path_buf(),
+            journal_id,
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                    coalesced: false,
+                };
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some("INTERNAL".to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
+    }
+
+    /// Starts the installed Prowlarr and stores the endpoint and key it generated, as a job.
+    ///
+    /// # Errors
+    ///
+    /// The same two as [`Runtime::start_prowlarr_install`].
+    pub async fn start_prowlarr(&self) -> Result<StartedJob, RuntimeError> {
+        let now = self.clock.now().as_millisecond();
+        let kind = crate::jobs::prowlarr::START_KIND;
+        let priority = crate::jobs::prowlarr::PRIORITY;
+        let journal_id = self
+            .database
+            .insert_job(NewJob {
+                kind: kind.to_owned(),
+                priority,
+                dedupe_key: Some(kind.to_owned()),
+                payload_json: json!({ "version": crate::prowlarr::VERSION }).to_string(),
+                max_attempts: 1,
+                created_at: now,
+            })
+            .await?;
+        let spec = JobSpec {
+            kind: kind.to_owned(),
+            priority,
+            dedupe_key: Some(kind.to_owned()),
+            max_attempts: 1,
+        };
+        let job = crate::jobs::prowlarr::ProwlarrStartJob::new(
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.prowlarr),
+            Arc::clone(&self.secrets),
+            self.config.data_directory().to_path_buf(),
+            journal_id,
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                    coalesced: false,
+                };
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        JobChange::Finished {
+                            at: now,
+                            phase: JobPhase::Failed,
+                            error_code: Some("INTERNAL".to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
+    }
+
+    /// Stops the managed Prowlarr, if one is running. Idempotent.
+    pub fn stop_prowlarr(&self) {
+        self.prowlarr.stop();
     }
 
     /// Starts the hello job (`PG-E0-19`) and returns its identities.
@@ -2920,6 +3087,7 @@ impl Runtime {
     /// Idempotent.
     pub async fn shutdown(&self) {
         info!("the runtime is stopping");
+        self.prowlarr.stop();
         self.scheduler.shutdown().await;
         self.bus.shutdown().await;
 

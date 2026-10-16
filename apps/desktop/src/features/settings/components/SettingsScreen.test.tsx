@@ -5,6 +5,7 @@ import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
+import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { SettingsScreen } from "./SettingsScreen.js";
@@ -82,17 +83,34 @@ function noIndexers(): IndexerSettings {
  * shows what it drew; the login-item hook's effect does not run, which is what keeps this
  * test off the IPC bridge.
  */
+/** The managed Prowlarr read as a resolved, unsupported one: this suite is about the shortcut list. */
+function noProwlarr(): ManagedProwlarr {
+  return {
+    status: null,
+    loading: false,
+    failed: false,
+    busy: false,
+    outcome: null,
+    error: null,
+    install: () => Promise.resolve(),
+    start: () => Promise.resolve(),
+    stop: () => Promise.resolve(),
+  };
+}
+
 function markup(
   shortcuts: ShortcutRegistry,
   libraries: LibraryRoots = noLibraries(),
   providers: ProviderSettings = noProviders(),
   indexers: IndexerSettings = noIndexers(),
+  prowlarr: ManagedProwlarr = noProwlarr(),
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <SettingsScreen
         indexers={indexers}
         libraries={libraries}
+        prowlarr={prowlarr}
         providers={providers}
         shortcuts={shortcuts}
       />

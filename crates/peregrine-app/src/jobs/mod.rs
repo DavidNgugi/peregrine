@@ -12,6 +12,7 @@ pub mod hello;
 pub mod library_scan;
 pub mod provider_credential;
 pub mod provider_refresh;
+pub mod prowlarr;
 
 use peregrine_storage::JobPhase;
 use serde_json::{Value, json};

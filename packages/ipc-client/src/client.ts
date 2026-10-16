@@ -32,6 +32,7 @@ import type {
   LibraryTitleDto,
   MatchAsDto,
   PlaybackSessionDto,
+  ProwlarrStatusDto,
   MatchRuleDto,
   TitleDetailDto,
   TitleMatchDto,
@@ -135,6 +136,26 @@ export async function testIndexer(baseUrl: string, apiKey: string): Promise<bool
 /** Removes the stored indexer configuration. */
 export async function clearIndexer(): Promise<IndexerStatusDto> {
   return unwrap(commands.clearIndexer());
+}
+
+/** The managed Prowlarr pack's state: supported, installed, running, and its loopback URL. */
+export async function prowlarrStatus(): Promise<ProwlarrStatusDto> {
+  return unwrap(commands.prowlarrStatus());
+}
+
+/** Downloads and verifies the pinned Prowlarr pack; answers the job doing it. */
+export async function installProwlarr(): Promise<JobStarted> {
+  return unwrap(commands.installProwlarr());
+}
+
+/** Starts the installed Prowlarr; answers the job doing it. */
+export async function startProwlarr(): Promise<JobStarted> {
+  return unwrap(commands.startProwlarr());
+}
+
+/** Stops the managed Prowlarr; answers the state after the stop. */
+export async function stopProwlarr(): Promise<ProwlarrStatusDto> {
+  return unwrap(commands.stopProwlarr());
 }
 
 /** What the account is part-way through, most recently updated first. */

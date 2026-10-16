@@ -44,8 +44,8 @@ pub use peregrine_storage::{
 };
 pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,
-    RailsState, Recommendations, Runtime, RuntimeConfig, RuntimeError, SessionId, ShellStatus,
-    StartedCapture, StartedJob, StartedPlayback, TitleEpisodeDetail, TitlePlayback,
+    ProwlarrStatus, RailsState, Recommendations, Runtime, RuntimeConfig, RuntimeError, SessionId,
+    ShellStatus, StartedCapture, StartedJob, StartedPlayback, TitleEpisodeDetail, TitlePlayback,
     TitleSeasonDetail,
 };
 // What one rail holds, for the reason the block above gives: the command surface answers a DTO

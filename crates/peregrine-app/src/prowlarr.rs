@@ -98,6 +98,15 @@ fn platform() -> Result<Artifact, ProwlarrError> {
     Err(ProwlarrError::UnsupportedPlatform)
 }
 
+/// Whether this build has a pinned Prowlarr for the running platform.
+///
+/// A settings screen asks before it offers an Install button, so an unsupported OS is a fact the
+/// user is told rather than a button that fails.
+#[must_use]
+pub fn is_supported() -> bool {
+    platform().is_ok()
+}
+
 /// Why the managed Prowlarr could not be installed or started.
 ///
 /// No variant carries a key, a path into a secret, or a URL: the release URL is public, but the
@@ -244,6 +253,17 @@ pub async fn install(data_dir: &Path) -> Result<Installed, ProwlarrError> {
         return Err(ProwlarrError::MissingExecutable);
     }
     Ok(installed)
+}
+
+/// The pack already on disk under `data_dir`, if a complete one is there.
+///
+/// A runtime discovers this at start-up so a restart shows an installed pack as installed without
+/// re-downloading anything; the install job is idempotent for the same reason.
+#[must_use]
+pub fn installed(data_dir: &Path) -> Option<Installed> {
+    let root = data_dir.join("sidecars").join("prowlarr").join(VERSION);
+    let installed = Installed { root };
+    installed.is_ready().then_some(installed)
 }
 
 /// Streams the release to destination, rejecting the first byte past the pinned size and comparing
