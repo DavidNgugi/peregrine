@@ -491,12 +491,145 @@ IPs.append(ifaceAddr);
 
 ---
 
+---
+
+## 6. Prowlarr (Prowlarr/Prowlarr)
+
+### Identity and role
+- GPL-3.0-or-later (declared in `sidecars.toml`, ADR 0024; licence text not re-verified here). Snapshot: `develop` at `b8d04898207b16070c010c8d74b4cc218ff84b8f`; wiki <https://wiki.servarr.com/prowlarr>.
+- Role: **indexer manager and aggregator**. It owns indexer definitions, credentials, categories, health/backoff and one search API. It has no library, no quality profile, no release decision, and no download client of its own — its optional download clients exist only to serve its own `POST /search` grab.
+
+### Indexer definitions are data (Cardigann YAML)
+- One YAML file per indexer: `id/name/description/language/type/encoding`, `requestDelay`, `followredirect`, `testlinktorrent`, `links/legacylinks`, `certificates`, `caps`, `settings`, `login`, `search`, `download` ([CardigannDefinition.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Indexers/Definitions/Cardigann/CardigannDefinition.cs#L30-L210), [wiki](https://wiki.servarr.com/prowlarr/cardigann-yml-definition)).
+- `caps`: `categorymappings` (tracker category → Newznab cat) and `modes` (`search:q` mandatory; tv/movie/music/book-search). `type` is public/semi-private/private.
+- `settings` are the UI fields the user fills (default username/password when omitted); `search` gives `paths`/`rows`/`fields` against HTML, JSON or XML; `download` exists only when the `.torrent` is not on the search page, needs POST, or a pre-request.
+- Built-ins ship from `indexers.prowlarr.com/master/12` (list + `package.zip`) into AppData `Definitions/`; custom `*.yml` live in `Definitions/Custom/`.
+
+### The search API
+- `GET /api/v1/search` — `query`, `type` (default `search`), `indexerIds`, `categories`, `limit`, `offset`; none hard-required, empty `indexerIds` means every enabled indexer, and `-1`/\`-2\` are the Usenet/torrent pseudo-ids.
+- `ReleaseResource`: `guid, indexerId, indexer, title, size, publishDate, downloadUrl, magnetUrl, infoHash, infoUrl, categories, protocol, seeders, leechers, files, ...` ([ReleaseResource.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/Prowlarr.Api.V1/Search/ReleaseResource.cs#L14-L57)).
+- Categories are Newznab numeric ids 1000-8000 plus `100000 Custom`, as a tree.
+
+### The download proxy: 301 to a magnet, or 200 with the .torrent
+**This is the behaviour Peregrine's acquire job hit and had to fix.**
+- `/api/v1/search` returns **no raw URLs**: both `downloadUrl` and `magnetUrl` are rewritten to
+  `{serverUrl}/{indexerId}/download?apikey=KEY&link=<AES-encrypted base64url>&file=<title>`
+  where `link` is encrypted with Prowlarr's persisted `DownloadProtectionKey` (tamper and open-proxy defence) and `file` is display only ([SearchController.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/Prowlarr.Api.V1/Search/SearchController.cs#L189-L200), [DownloadMappingService.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Download/DownloadMappingService.cs#L30-L41)). A null field stays null.
+- `GET /{indexerId}/download` decrypts `link`, then enforces enabled (**410**), backing-off (**429** + `Retry-After`) and over-grab-limit (**429**) before resolving ([NewznabController.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/Prowlarr.Api.V1/Indexers/NewznabController.cs#L209-L263)):
+  - normal Cardigann torrent (`SupportsRedirect => false`): a `magnet:` link is validated and returned as bytes **with no network call**, and the controller answers **301 `Location: magnet:...`**; an http `.torrent` is fetched (redirects followed, a magnet hop handled) and answered **200 `application/x-bittorrent`** ([NewznabController.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/Prowlarr.Api.V1/Indexers/NewznabController.cs#L296-L314), [HttpIndexerBase.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Indexers/HttpIndexerBase.cs#L227-L260)).
+  - Usenet or a redirect-capable indexer: a plain **301** to the decrypted URL.
+- So this URL is a **"resolve to torrent-file-or-magnet" primitive**, and a client must follow the redirect. An HTTP client that cannot follow a non-HTTP scheme sees only a bare 301 — exactly the failure that left our acquire job at 500 permille.
+- Sonarr/Radarr consume it as a synced Torznab indexer (`baseUrl={ProwlarrUrl}/{indexerId}/`, `apiPath=/api`), storing the proxy link as the download URL and following the 301 at grab time.
+
+### App sync is dead weight without Sonarr/Radarr
+- `SyncLevel` is `Disabled | AddOnly | FullSync`; tags choose which indexers an app receives; **Sync Profiles** (`AppSyncProfile`: per-indexer `EnableRss/EnableAutomaticSearch/EnableInteractiveSearch/MinimumSeeders` via `AppProfileId`) are a different mechanism from tags ([ApplicationService.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Applications/ApplicationService.cs#L161-L234), [AppSyncProfile.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Profiles/AppSyncProfile.cs)).
+- All of it exists to push indexers over Torznab/Newznab into *arr. With no *arr, bypass `ApplicationService`/`AppIndexerMap`/`SyncLevel`/`/api/v1/applications`, the Torznab XML, and `POST /api/v1/search` (which needs a Prowlarr download client and a 30-minute cache hit).
+
+### Health, backoff and limits — the model to copy (R24)
+- `IndexerStatus` = `EscalationLevel`, `InitialFailure`, `MostRecentFailure`, `DisabledTill`, cookies; disabled ⇔ `DisabledTill > now` ([IndexerStatus.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Indexers/IndexerStatus.cs)).
+- Backoff periods `[0, 60, 300, 900, 1800, 3600, 3h, 6h, 12h, 24h]`; a **429 uses `Retry-After` (1 h floor) and jumps at least to that level**; a **connection failure does not escalate**; a success decrements one level; a 15-minute startup grace caps it ([ProviderStatusServiceBase.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/ThingiProvider/Status/ProviderStatusServiceBase.cs#L53-L150), [EscalationBackOff.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/ThingiProvider/Status/EscalationBackOff.cs)).
+- Per-definition `requestDelay`; per-indexer query/grab limits counted over an hour/day window, with `Retry-After` computed from the oldest in-window event ([IndexerLimitService.cs](https://github.com/Prowlarr/Prowlarr/blob/b8d04898207b16070c010c8d74b4cc218ff84b8f/src/NzbDrone.Core/Indexers/IndexerLimitService.cs)).
+- A blocked indexer drops out of the enabled set, so it silently stops appearing in searches.
+
+### Auth
+- One API key in `config.xml`, accepted as `X-Api-Key`, `?apikey=`, or `Authorization: Bearer`. The download proxy embeds it in the query string because clients fetch a URL without headers.
+
+### Concrete lessons to steal
+1. Indexer health is **persisted state with an escalating, 429-aware backoff** — that table is the design `PG-E12-01`'s rate declarations should match, and it is the R24 work currently owed.
+2. `{id}/download` is a **resolver, not a file path**: one URL legitimately answers 200 bytes or 301 magnet. Model it as one typed outcome (our `FetchedTorrent`), never as "a magnet".
+3. Definitions are **data, not code** (YAML + a selector engine), which is how one sidecar covers hundreds of trackers. If Peregrine ever bundles definitions, pin the set and never self-update from a remote — the contrast with qBittorrent's unsigned Python plugin loader is instructive.
+
+### Concrete mistakes / limits to avoid
+- The search API hides the raw magnet behind an encrypted proxy hop, so any client that assumes `magnetUrl` is a magnet is wrong by construction.
+- Do not port the app-sync surface "for later": with no *arr it has no user and no behaviour (R3).
+
+### Verification status
+- **Verified by reading source at `b8d04898`:** every file path, line range and behaviour above, including the proxy rewrite, both download branches, the backoff table, the limit service and the app-sync gating.
+- **Not verified:** which HTTP stack inside *arr or a download client performs the 301 follow (Sonarr only stores the URL); the licence text (taken from our own `sidecars.toml`/ADR 0024).
+
+---
+
+## 7. Sonarr and Radarr (Sonarr/Sonarr, Radarr/Radarr)
+
+### Identity and role
+- **The brain.** They own the library, the release decision, the download-client configuration, the queue, the import, and history/blocklist. They own **no** indexer of their own when Prowlarr/Jackett feeds them (see §6) and no transfer engine (see §5). Licence not re-verified here.
+
+### What actually triggers a search
+- **Neither app routinely searches the back catalogue.** Both poll indexers for newly posted releases and diff against wanted/missing/cutoff-unmet items: Sonarr RSS every 10-120 min, Radarr every 15-60 min ([Sonarr FAQ](https://wiki.servarr.com/sonarr/faq#how-does-sonarr-find-episodes), [Radarr FAQ](https://wiki.servarr.com/radarr/faq#how-does-radarr-work)).
+- Active (API) searches happen only for a user/API search, "Add and Search", Wanted → Missing / Cutoff Unmet bulk, and "Recent Episodes".
+- Each indexer toggles **Enable RSS / Enable Automatic Search / Enable Interactive Search** independently.
+- Every release carries its origin in code — `Rss`, `ReleasePush`, `Search`, `UserInvokedSearch`, `InteractiveSearch` ([DownloadDecisionMaker.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs)).
+- An external manager can push into `POST /api/v3/release/push`, which runs the **same decision engine synchronously** ([ReleasePushController.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/Sonarr.Api.V3/Indexers/ReleasePushController.cs)).
+
+### The decision engine — the part worth copying
+- Per release: parse the title → map to series/movie + episodes → compute custom formats → score → run the specification list ([DownloadDecisionMaker.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs)).
+- **The comparer is an ordered key list, not one opaque score** — Sonarr: Quality → Custom Format score → Protocol → Episode Count → Episode Number → Indexer Priority → Seeders/Peers → Age → Size; Radarr: Quality → CF score → Protocol → Indexer Priority → Indexer Flags → Seeds/Peers → Age → Size. REPACK/PROPER rank above the same quality ([Sonarr FAQ](https://wiki.servarr.com/sonarr/faq#how-are-possible-downloads-compared), [DownloadDecisionComparer.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadDecisionComparer.cs)).
+- **Quality profile** fields: `Name`, `UpgradeAllowed`, `Cutoff`, `MinFormatScore`, `CutoffFormatScore`, `MinUpgradeFormatScore`, `FormatItems`, `Items` ([QualityProfile.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Profiles/Qualities/QualityProfile.cs)).
+- **Quality definitions** carry `Weight`, `MinSize`/`MaxSize`/`PreferredSize` in MB/min ([QualityDefinition.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Qualities/QualityDefinition.cs)); `AcceptableSizeSpecification` **scales the bound by total runtime**, skips unknown-size releases and specials, and falls back to series runtime (45 min for a pilot). A separate global maximum caps everything ([AcceptableSizeSpecification.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/Specifications/AcceptableSizeSpecification.cs)).
+- **Custom formats** are conditions — Release Title (regex, matched against the release title *and* the post-download filename), Language, Source, Resolution, Size, Release Group, Indexer Flag, Release Type (Radarr adds Edition). Different condition types **AND**; multiple conditions of one type **OR** unless *Required*. Matches are computed on the fly and not persisted; the score is the sum of the matching formats' profile scores, and **`MinFormatScore` is a hard grab gate** ([CustomFormatCalculationService.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/CustomFormats/CustomFormatCalculationService.cs), [CustomFormatAllowedByProfileSpecification.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/Specifications/CustomFormatAllowedByProfileSpecification.cs)).
+- **Upgrades** are one function with a documented check order: `UpgradableSpecification.IsUpgradable` returns `BetterQuality | BetterRevision | QualityCutoff | CustomFormatScore | CustomFormatCutoff | MinCustomFormatScore | UpgradesNotAllowed` ([UpgradableSpecification.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/Specifications/UpgradableSpecification.cs)).
+- **Minimum availability** (Radarr): `Announced | InCinemas | Released`, where Released is `min(Digital, Physical)`, falling back to `InCinemas + 90 days`, shifted by the Availability Delay setting ([Movie.cs](https://github.com/Radarr/Radarr/blob/develop/src/NzbDrone.Core/Movies/Movie.cs)).
+- **Rejections are first-class.** Each spec returns `Accept()` or `Reject(reason, message)` with a `Priority` and a **Permanent/Temporary** type; the engine evaluates specs grouped by priority ascending and **stops at the first group that rejects**, so cheap checks short-circuit disk/database ones; a thrown error becomes a `DecisionError` rejection ([DownloadSpecDecision.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadSpecDecision.cs), [SpecificationPriority.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/SpecificationPriority.cs)). `DownloadRejectionReason` is a ~80-value enum (`QualityNotWanted`, `CustomFormatMinimumScore`, `Blocklisted`, `BelowMinimumSize`, `UpgradesNotAllowed`, `MinimumSeeders`, ...) ([DownloadRejectionReason.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadRejectionReason.cs)).
+- Surfaced as `ReleaseResource { Approved, TemporarilyRejected, Rejected, Rejections[], CustomFormatScore, QualityWeight, ReleaseWeight }`, and the UI draws the reason per row ([ReleaseResource.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/Sonarr.Api.V3/Indexers/ReleaseResource.cs)).
+
+### The download-client abstraction — mostly server scaffolding
+- Port `IDownloadClient` (`Protocol`, `Download(...)`, `GetItems`, `GetFiles`, `GetImportItem`, `RemoveItem`, `GetStatus`, `MarkItemAsImported`); `DownloadClientBase<TSettings>` adds HTTP 5xx/timeout retry and remote path mapping; `TorrentClientBase` has `AddFromMagnetLink`/`AddFromTorrentFile` ([IDownloadClient.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/IDownloadClient.cs), [TorrentClientBase.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/TorrentClientBase.cs)).
+- Generic definition: `Protocol`, `Priority` (1-50, round-robin within priority), `RemoveCompletedDownloads` (default true), `RemoveFailedDownloads` (default true) ([DownloadClientDefinition.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/DownloadClientDefinition.cs)).
+- The qBittorrent adapter's settings are the interesting part: `TvCategory` (default `tv-sonarr`), `TvImportedCategory`, `RecentTvPriority`/`OlderTvPriority`, `InitialState`, `SequentialOrder`, `FirstAndLast`, `ContentLayout`, `AddSeriesTags`, plus host/credentials ([QBittorrentSettings.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/Clients/QBittorrent/QBittorrentSettings.cs)).
+- Hand-off: pick clients by protocol + indexer + series/movie tags (or an explicit override), **try each in order and fall back on failure**, rate-limit grabs (~2/s), then publish a *grabbed* event carrying the client and download id ([DownloadService.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/DownloadService.cs)).
+
+### Queue, import, history, blocklist
+- `TrackedDownload` states: `Downloading → ImportBlocked/ImportPending → Importing → Imported`, plus `FailedPending`, `Failed`, `Ignored`; the per-download snapshot is `DownloadClientItem` (progress, sizes, ratio, output path, encrypted, removable) ([TrackedDownload.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownload.cs), [DownloadClientItem.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/DownloadClientItem.cs)).
+- The app **polls the client** and reconciles (Radarr's finished-download interval is min 1 minute) — an embedded engine can emit events instead.
+- Import resolves the target by parsing the download title and **falls back to the series id recorded at grab time**, else it is `ImportBlocked` ([CompletedDownloadService.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/CompletedDownloadService.cs)).
+- Transfer: Usenet moves atomically; torrents **hardlink-or-copy so seeding continues** ([TransferMode.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Common/Disk/TransferMode.cs)).
+- **History is an append-only event log** (`Grabbed`, `DownloadFolderImported`, `DownloadFailed`, ...), each row carrying the download id and a key/value data bag (client, size, indexer, release group, match type, release source) ([EpisodeHistory.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/History/EpisodeHistory.cs)).
+- **Blocklist rows are keyed by info hash** and the decision engine rejects any future match of one via `BlocklistSpecification` (`Blocklisted`) ([Blocklist.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Blocklisting/Blocklist.cs)).
+- Failed handling: a failure moves to `FailedPending`, publishes `DownloadFailedEvent`, then optionally removes from the client, redownloads, and blocklists. **Both wikis say this is Usenet-only; Radarr states it does not apply to torrents** ([FailedDownloadService.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Download/FailedDownloadService.cs)).
+- Queue removal: `DELETE /api/v3/queue/{id}?removeFromClient=&blocklist=&skipRedownload=&changeCategory=` ([QueueController.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/Sonarr.Api.V3/Queue/QueueController.cs)).
+
+### The API surface a caller uses
+- Trigger: `POST /api/v3/command {name:"MissingEpisodeSearch", seriesId}` / `{name:"MoviesSearch", movieIds:[id]}`.
+- Add: `POST /api/v3/series` / `POST|PUT /api/v3/movie`, lookup `GET /series/lookup?term=tvdb:ID` / `GET /movie/lookup?term=tmdb:ID`.
+- Monitor: `GET /api/v3/queue?includeEpisode=true` → `status, trackedDownloadStatus, trackedDownloadState, downloadId, protocol, downloadClient, indexer, size, sizeleft, timeleft`.
+- Reference: `GET /system/status`, `/qualityProfile`, `/tag`, `POST /tag`, `/rootFolder`.
+- Manual: `GET /api/v3/release?...` (returns `ReleaseResource` with rejections) and `POST /api/v3/release` to grab a cached result, with `ShouldOverride` to force.
+- Seerr itself was observed using only `/command`, `/queue`, and add/lookup (`/release` was not seen in its servarr clients).
+
+### Concrete lessons to steal
+1. **Specification list + typed rejection reasons**: small pure predicates, each accepting or rejecting with a reason, a priority order, and permanent-vs-temporary semantics. Ours is the domain's ranking with per-rule reasons — keep the shape and surface it (`PG-E12-10`).
+2. **A deterministic ordered comparer**, not a single opaque score, so ties and upgrades are explainable.
+3. **Size limits scaled by runtime**, with explicit unknown-size and unknown-runtime branches and a global maximum — an edge case we must not skip.
+4. **Custom-format scoring as a stateless matcher** (AND across condition types, OR within, `Required` overrides) with a hard minimum-score gate.
+5. **Tracked-download state machine** (`Downloading → ImportPending/ImportBlocked → Importing → Imported` + `Failed`/`Ignored`), because our current job states are thinner than the real lifecycle.
+6. **History as an append-only event log** and a **blocklist keyed by info hash** that the decision engine consults automatically — this is the retry loop we are missing.
+7. **Hardlink-or-copy import with seeding left in place.**
+
+### Concrete mistakes / limits to avoid
+- The download-client abstraction, multi-client failover, remote path mapping, client-specific seed-goal capability tables and push ingestion all exist because Sonarr babysits an external process; an embedded engine collapses them to internal settings.
+- Polling the client to infer completion is a workaround for not owning the engine.
+- **Do not copy Usenet-only failed-download handling onto torrents** — Radarr says explicitly it does not apply, and treating a stalled torrent as a failed Usenet download would blocklist healthy releases.
+
+### Verification status
+- **Verified by reading source + wiki:** the comparer orders, quality-profile fields, size specifications, custom-format matching and scoring, the upgrade check order, the specification priority/stop-at-first-rejecting-group behaviour, the rejection enum and `ReleaseResource`, the download-client port/settings, the tracked-download states, import fallback, transfer modes, history/blocklist shapes, and the queue API.
+- **Not verified:** the SPDX licence of Sonarr/Radarr (not read here); whether any Seerr code path other than the servarr clients uses `/release`.
+
 ## Cross-cutting recommendations for Peregrine
 1. `peregrine-providers` should be a Rust trait returning our own normalized types (not a borrowed TMDB shape), with a cache-aside layer and per-provider key ceilings — seerr's structure without seerr's type leak.
 2. `peregrine-torrent` needs what none of Peeri, torlink, or qBittorrent has: explicit piece-level scheduling (sequential plus head/tail priority), deadline-driven readahead tied to the demuxer's next-needed byte range, and a byte-range HTTP server that can answer for *in-flight* data. qBittorrent returns zero hits for `set_piece_deadline`/`add_piece` across its source, so this is a genuine gap in the state of the art rather than a refinement. Steal VLC's `stream_t` semantics as the interface.
 3. Prefer spawning a sidecar for anything GPL (aria2) or LGPL-linked (libvlc); keep the Rust core MIT/Apache so the licensing surface stays clean.
 4. Copy the operational hygiene, which is where these codebases are strongest: bootguard safe mode, seed reaper with a duration grammar, watchdog/restart around child processes, token+Host checks on any loopback server, bencode/size validation on uploads, range parsing with 416 handling, `pipeline`-style cancellation on client disconnect.
 5. Ship notification and subtitle pipelines as trait + registry designs from day one (seerr's agents; VLC's `spu decoder` capability), because both are additive features that rot into god objects otherwise.
+6. **The four systems draw the same four seams — and the seams are not essential.** Prowlarr (indexer aggregation), Sonarr/Radarr (decision + lifecycle), qBittorrent (transfer), Jellyseerr (request/discovery UX) are separate processes because each has a different owner and lifetime, not because the responsibilities cannot live together. Peregrine keeps the four as **ports** (ADR 0008) and deletes the HTTP between them: `Indexer` (`PG-E12-01/02`), the domain decision engine (`PG-E4-05/06`, `PG-E12-07/08`), `AcquisitionService` (`PG-E10-19`) over `TorrentEngine` (librqbit), and the title/discover surface with `TitleOffer`. The architecture is already the all-in-one version of the reference stack; what is missing is inside two of the boxes.
+7. **Adopt the specification-list + typed-rejection shape as the decision model.** Sonarr/Radarr evaluate small pure predicates, each accept/reject with a typed reason, grouped by priority, **stopping at the first rejecting group**, with permanent-vs-temporary semantics and a stable reason enum surfaced on every result. Our ranking already returns typed per-rule reasons; make that the durable model and persist it for `PG-E12-10`'s "why this release" panel. This is the single highest-value import.
+8. **Add the two loops we lack.** (a) A **blocklist keyed by info hash** that the decision engine consults automatically, so a failed release is never re-grabbed but can be forced; (b) an **upgrade policy** — cutoff plus a minimum increment — so a better release replaces a worse one (`PG-E12-09`). Without them a bad grab is permanent and a good upgrade never happens.
+9. **Model the download lifecycle properly.** Our `download_job` states are thinner than the real one: `Downloading → ImportPending/ImportBlocked → Importing → Imported`, plus `Failed`/`Ignored`. Import must resolve its target by parsing the release title and **falling back to the target recorded at grab time**, and must prefer **hardlink-or-copy so seeding continues** (`PG-E14-19`).
+10. **Size limits are runtime-scaled**, with explicit unknown-size and unknown-runtime branches and a separate global maximum. That edge case belongs in the quality-definition model (`PG-E4-05/06`), not in a later patch.
+11. **Availability is a reconciliation job, not only a read.** Jellyseerr recomputes from the library *and* the acquisition queue on a timer and flips content to `DELETED` when it disappears; keeping a derived read for the UI is fine at our scale, but the reconciliation pass is what stops the projection drifting.
+12. **Request granularity is the season.** Jellyseerr's request body has `seasons: number[] | 'all'` and **no episode field at all** — each season carries its own state, and episode detail exists only in availability. When the owed season/episode/multi-selection work lands, make the request record season-level and keep episodes in the availability projection; do not put per-episode state on the request.
+13. **Indexer health is persisted state with an escalating, 429-aware backoff** (§6). That is the concrete design for the per-host rate limiting R24 currently owes (`PG-E12-01`).
+14. **Do not port the seams themselves.** Prowlarr's app-sync, `/applications`, SyncLevel/AppSyncProfile and Torznab XML; Sonarr's download-client abstraction, multi-client failover, remote path mapping and Usenet-only failed-download handling; Jellyseerr's quota/approval layer unless we add multi-user. Each is scaffolding for a separate process (R3).
+15. **The pre-write safety gate is ours alone.** None of the four inspects a torrent before writing; Sonarr hands bytes to a client and imports afterwards. Peregrine's gate runs *before* the engine is handed the torrent (FLOWS F6), which is exactly why acquisition is a job with a persisted report rather than an immediate add. Nothing in the reference architecture weakens that, and no lesson above should be allowed to move it after the add.
 
 ## Verification status
 - Verified by reading source: all file paths, excerpts, enums, entity/column lists, LOC counts, license header classifications, Peeri's lack of search/streaming/subtitles, torlink's lack of sequential download/subtitles, VLC's removal of the libvlc event API.
