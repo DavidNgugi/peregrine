@@ -325,7 +325,7 @@ export const en = {
         // system's own decoder may well take it. Saying nothing would make a failure look like a bug.
         unnamedContainer:
           "Peregrine does not recognise this file's format. Playing it may not work.",
-        acquire: "Acquiring is not built yet, so Download is shown disabled rather than offered.",
+        acquire: "Peregrine will find the best release for this title and add it to your downloads.",
       },
       // The switcher. `{{number}}` is the only thing a chip needs for a season a provider named the
       // way it names every season — "Season 4" — and the provider's own name is used only when it says

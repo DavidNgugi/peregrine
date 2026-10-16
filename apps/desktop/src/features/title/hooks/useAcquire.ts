@@ -33,11 +33,15 @@ export interface AcquireControl {
   readonly failure: string | null;
   /** What the start itself refused with, or `null`. */
   readonly error: IpcError | null;
+  /** The title this state belongs to, or `null` before the first start. A control held by the shell
+   * would otherwise show one title's job on every other title's page. */
+  readonly titleId: number | null;
   /** Asks the core to acquire the title. */
   readonly start: (titleId: number) => Promise<void>;
 }
 
 interface AcquireState {
+  titleId: number | null;
   jobId: string | null;
   journalId: number | null;
   phase: JobState | null;
@@ -49,6 +53,7 @@ interface AcquireState {
 }
 
 const IDLE: AcquireState = {
+  titleId: null,
   jobId: null,
   journalId: null,
   phase: null,
@@ -64,14 +69,20 @@ export function useAcquire(): AcquireControl {
   const [state, setState] = useState<AcquireState>(IDLE);
 
   const start = useCallback(async (titleId: number): Promise<void> => {
-    setState({ ...IDLE, starting: true });
+    setState({ ...IDLE, titleId, starting: true });
     try {
       const started = await acquire(titleId);
-      setState({ ...IDLE, jobId: started.jobId, journalId: started.journalId, phase: "queued" });
+      setState({
+        ...IDLE,
+        titleId,
+        jobId: started.jobId,
+        journalId: started.journalId,
+        phase: "queued",
+      });
     } catch (caught: unknown) {
       const error = normalizeIpcError(caught);
       logUiError("acquire", error);
-      setState({ ...IDLE, error });
+      setState({ ...IDLE, titleId, error });
     }
   }, []);
 

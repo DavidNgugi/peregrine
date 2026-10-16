@@ -129,7 +129,10 @@ export function TitleScreen({
               onPlay={() => {
                 onNavigate({ kind: "player", id: title.id });
               }}
-              acquiring={(acquire?.starting ?? false) || (acquire?.running ?? false)}
+              acquiring={
+                acquire?.titleId === title.id &&
+                ((acquire?.starting ?? false) || (acquire?.running ?? false))
+              }
               onAcquire={
                 acquire === undefined
                   ? undefined
@@ -144,7 +147,9 @@ export function TitleScreen({
               released={detail.released}
               seasons={seasons.seasons.length}
             />
-            {acquire === undefined || (acquire.outcome === null && !acquire.running) ? null : (
+            {acquire === undefined ||
+            acquire.titleId !== title.id ||
+            (acquire.outcome === null && !acquire.running) ? null : (
               <div className="flex items-center gap-3" role="status">
                 <p className="text-caption text-text-secondary">
                   {acquire.running
@@ -166,7 +171,7 @@ export function TitleScreen({
                 </Button>
               </div>
             )}
-            {acquire === undefined || acquire.error === null ? null : (
+            {acquire === undefined || acquire.titleId !== title.id || acquire.error === null ? null : (
               <p className="text-caption text-state-danger" role="status">
                 {messageOf(acquire.error)}
               </p>
