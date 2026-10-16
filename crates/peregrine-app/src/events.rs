@@ -119,12 +119,25 @@ pub const JOB_PROGRESS: Topic = Topic::new("job://progress", 1);
 /// One job's lifecycle phase.
 pub const JOB_STATE: Topic = Topic::new("job://state", 1);
 
+/// One download's transfer statistics.
+///
+/// Moved here from `acquisition.rs` when the manifest became the gate for the generated
+/// TypeScript: a topic the backend publishes has to be a topic the UI can name, or the Downloads
+/// screen can only poll. It is a move, not a redesign.
+pub const DOWNLOAD_STATS: Topic = Topic::new("download://stats", 1);
+
+/// A notification was recorded in the centre.
+///
+/// A trigger to re-read, never a source of truth: the payload carries no copy, so a subscriber
+/// cannot render a row the centre has not answered with.
+pub const NOTIFICATION_RAISED: Topic = Topic::new("notification://raised", 1);
+
 /// Every topic this build emits, declared once.
 ///
 /// `cargo xtask gen-ipc` writes this list into the generated TypeScript, so a topic the
 /// backend emits is a topic the UI can name, and the drift gate fails the build when the
 /// two disagree. `topics_are_pinned` fails when one is renamed, added, or renumbered.
-pub const TOPICS: &[Topic] = &[JOB_PROGRESS, JOB_STATE];
+pub const TOPICS: &[Topic] = &[JOB_PROGRESS, JOB_STATE, DOWNLOAD_STATS, NOTIFICATION_RAISED];
 
 /// One value on one topic.
 #[derive(Debug, Clone, PartialEq)]
@@ -426,7 +439,12 @@ mod tests {
             .collect();
         assert_eq!(
             rendered,
-            vec![("job://progress", 1), ("job://state", 1)],
+            vec![
+                ("job://progress", 1),
+                ("job://state", 1),
+                ("download://stats", 1),
+                ("notification://raised", 1),
+            ],
             "the event manifest changed; regenerate the bindings in the same commit"
         );
 

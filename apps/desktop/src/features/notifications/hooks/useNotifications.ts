@@ -8,14 +8,17 @@
 
 import {
   dismissNotification,
+  eventTopics,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   normalizeIpcError,
   type NotificationDto,
 } from "@peregrine/ipc-client";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
+import { eventPayload } from "../../../lib/job-events.js";
 
 /** The recent centre rows and the operation that re-reads them. */
 export interface Notifications {
@@ -57,6 +60,34 @@ export function useNotifications(): Notifications {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  // A recorded row is a trigger to re-read, never a row to render: the payload carries no copy, so
+  // the bell can only show what the centre answers with. Without this the count waited for the next
+  // open, which is the behaviour this replaces.
+  useEffect(() => {
+    const unlisteners: UnlistenFn[] = [];
+    let cancelled = false;
+
+    void listen<unknown>(eventTopics.notificationRaised.name, (event) => {
+      if (eventPayload(event.payload) === null) {
+        return;
+      }
+      void refresh();
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlisteners.push(unlisten);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      for (const unlisten of unlisteners) {
+        unlisten();
+      }
+    };
   }, [refresh]);
 
   // Every mutation re-reads rather than patching local state: whether a row is read is the

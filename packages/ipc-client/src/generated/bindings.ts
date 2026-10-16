@@ -1883,6 +1883,8 @@ async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; dat
 export const eventTopics = {
 	jobProgress: { name: "job://progress", version: 1 },
 	jobState: { name: "job://state", version: 1 },
+	downloadStats: { name: "download://stats", version: 1 },
+	notificationRaised: { name: "notification://raised", version: 1 },
 } as const;
 
 /** The wire name of an event topic. */

@@ -106,15 +106,7 @@ use peregrine_torrent::{
 };
 use thiserror::Error;
 
-use crate::events::{Event, EventBus, Topic};
-
-/// The progress topic `FLOWS` F6 and `ARCHITECTURE` §7 name.
-///
-/// Declared here rather than in `crate::events::TOPICS` because the generated TypeScript is written
-/// from that manifest and the consumer of this topic is `PG-E13-01`'s screen; adding it to the
-/// manifest now would regenerate a file this slice does not own. Moving the constant into the
-/// manifest is that task's, and it is a move rather than a redesign.
-pub const DOWNLOAD_STATS: Topic = Topic::new("download://stats", 1);
+use crate::events::{DOWNLOAD_STATS, Event, EventBus};
 
 /// How often one job's statistics may reach the database (`ARCHITECTURE` §6).
 ///

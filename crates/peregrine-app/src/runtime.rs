@@ -52,7 +52,7 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 use ulid::Ulid;
 
-use crate::events::{EventBus, EventSink, EventStats};
+use crate::events::{Event, EventBus, EventSink, EventStats, NOTIFICATION_RAISED};
 use crate::jobs::hello::{self, HelloJob};
 use crate::jobs::{CANCELLED_CODE, INTERNAL_CODE};
 use crate::observability::{LogConfig, Observability};
@@ -778,7 +778,10 @@ type Notifications = NotificationService<
 ///
 /// A job holds this rather than the service so it does not have to name four generic ports, and
 /// so what it can do is one capability rather than the whole service.
-struct OfferNotifier(Arc<Notifications>);
+struct OfferNotifier {
+    service: Arc<Notifications>,
+    bus: Arc<EventBus>,
+}
 
 impl NotifyOffers for OfferNotifier {
     fn offers_available<'a>(
@@ -790,8 +793,8 @@ impl NotifyOffers for OfferNotifier {
         Box::pin(async move {
             // The centre row is the record and the toast is a bonus (R31), so a failure here is
             // logged and never changes the acquire job's outcome.
-            if let Err(error) = self
-                .0
+            match self
+                .service
                 .notify(
                     scope,
                     NotificationEvent::ReleaseAlternatives,
@@ -801,7 +804,17 @@ impl NotifyOffers for OfferNotifier {
                 )
                 .await
             {
-                warn!(%error, "the alternatives notification could not be recorded");
+                Ok(_) => {
+                    // A trigger to re-read rather than the row itself: the bell asks the centre,
+                    // so a subscriber can never render copy the repository has not validated.
+                    // Published only on success, because a row that was not written is not news.
+                    self.bus.publish(Event::new(
+                        NOTIFICATION_RAISED,
+                        title_id.to_string(),
+                        serde_json::json!({ "event": "release.alternatives" }),
+                    ));
+                }
+                Err(error) => warn!(%error, "the alternatives notification could not be recorded"),
             }
         })
     }
@@ -1003,15 +1016,17 @@ impl Runtime {
         // adapters. The OS notifier is the placeholder until PG-E1-14 and the preferences answer the
         // catalogue defaults until PG-E20-01; the centre row is written either way, which is R31's
         // order and the reason a refused toast is not an error.
-        let notifications: Arc<dyn NotifyOffers> =
-            Arc::new(OfferNotifier(Arc::new(NotificationService::new(
+        let notifications: Arc<dyn NotifyOffers> = Arc::new(OfferNotifier {
+            service: Arc::new(NotificationService::new(
                 NotificationRepository::new(Arc::clone(&database)),
                 CataloguePreferences,
                 NoOsNotifier,
                 NotificationRepository::new(Arc::clone(&database)),
                 Box::new(SharedClock(Arc::clone(&clock))),
                 Platform::current(),
-            ))));
+            )),
+            bus: Arc::clone(&bus),
+        });
 
         let runtime = Self {
             config,
