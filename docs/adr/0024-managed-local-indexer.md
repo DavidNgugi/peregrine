@@ -17,15 +17,17 @@ Finding a release needs an indexer, and today that means the user installs and w
 3. **The application reads Prowlarr's own `config.xml` for the API key and port**, and stores the key in the keyring. It never mints or guesses a key — the key is Prowlarr's to generate.
 4. **A user may instead point at their own Prowlarr** (remote, homelab, or the future media server) with a URL and key. The managed instance is a convenience, not a requirement.
 5. **Licence obligations are explicit.** `sidecars.toml` declares Prowlarr's GPL-3.0-or-later, `THIRD_PARTY.md` carries the licence text and a written offer of source, and `SIDECAR_LICENCES` gains that licence deliberately (`docs/DEPENDENCIES.md` §5).
+6. **The managed instance is seeded with a small set of public indexers.** When it is running and reports no indexers at all, the app adds a curated public set through Prowlarr's own API — today `1337x`, `The Pirate Bay`, `YTS`, `EZTV`, and `Nyaa.si`. The list is one constant, every entry is removable in Settings, a failure (a tracker that is down) is skipped rather than fatal, and **a Prowlarr the user points at themselves is never seeded.** This deliberately crosses [ADR 0009](./0009-licensing-and-redistribution.md) decision 9's "indexes nothing by default", and it is recorded here rather than left implicit: Peregrine's own built-in providers still ship disabled, so what changes is the *managed instance's* first-run state, not the client's defaults.
 
 ## Consequences
 
 Positive: indexing works with no manual install, and the key is obtained automatically; the same pack mechanism later carries ffmpeg's on-demand pack.
 
-Negative and accepted: we distribute a GPL binary and therefore owe a source offer and published build configuration per release; we run a managed HTTP listener that `SECURITY.md` must threat-model; we pin and update per-OS binaries; and we take on the component-pack mechanism's verification work. Minisign signing is owed until a release key exists — SHA-256 pinning compiled into the binary is the floor, and [ADR 0009](./0009-licensing-and-redistribution.md) still owes the project a licence review before 1.0.
+Negative and accepted: **a fresh install searches public trackers before the user has added one**, which is a product stance this record owns and a reviewer can reverse by editing the one list; we distribute a GPL binary and therefore owe a source offer and published build configuration per release; we run a managed HTTP listener that `SECURITY.md` must threat-model; we pin and update per-OS binaries; and we take on the component-pack mechanism's verification work. Minisign signing is owed until a release key exists — SHA-256 pinning compiled into the binary is the floor, and [ADR 0009](./0009-licensing-and-redistribution.md) still owes the project a licence review before 1.0.
 
 ## Alternatives
 
 - **Bundle Prowlarr in the installer.** Rejected: larger installs, slower updates, a worse licence posture, and every user pays for a component most may not want.
 - **Require the user to install Prowlarr themselves (status quo).** Rejected: this is exactly the friction the decision removes.
 - **Native indexers only (`PG-E12-05`).** Kept as the long-term route; it does not preclude the pack, and the pack does not replace it.
+- **Ship no default indexers and make the user add each one.** Rejected as too much friction for a first run; the seed is bounded, visible in Settings, and removable, and decision 6 is where to reverse it.
