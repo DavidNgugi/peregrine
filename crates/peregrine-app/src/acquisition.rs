@@ -377,7 +377,8 @@ impl AcquisitionService {
         // 3. The gate, over the description the caller already has. Its caps come from the same
         //    floor admission uses, so a torrent too large for the volume is refused by inspection
         //    rather than after it.
-        let report = TorrentInspector::new(self.limits_for(&save_path)).inspect(
+        let limits = self.limits_for(&save_path);
+        let report = TorrentInspector::new(limits).inspect(
             &request.description,
             &self.destination,
             OptIn::NotGranted,
@@ -404,6 +405,11 @@ impl AcquisitionService {
         //    answering "free some space" would send the user to do that for a download that still
         //    cannot start.
         if verdict == Verdict::Allowed {
+            self.admit_space(&save_path, request.description.total_bytes())?;
+        } else if report.total_bytes() > limits.max_total_bytes() {
+            // The cap is the volume's own room, so a size refusal is the same fact admission
+            // reports with numbers; \`DiskFull\` is the reason a person can act on, and it leaves
+            // the row \`queued\` rather than parked in \`blocked\`.
             self.admit_space(&save_path, request.description.total_bytes())?;
         }
 
@@ -470,8 +476,14 @@ impl AcquisitionService {
     /// reports the refusal instead of this gate inventing a number.
     fn limits_for(&self, save_path: &SafePath) -> InspectionLimits {
         match self.volume.available_bytes(save_path.as_path()) {
-            Ok(available) => InspectionLimits::with_available(available, self.free_space_floor),
-            Err(_) => InspectionLimits::new(InspectionLimits::DEFAULT_MAX_FILES, u64::MAX),
+            // A volume with room above its reservation caps a release at exactly that room. One at
+            // or below the reservation is admission's to refuse with `DiskFull`: a size cap of
+            // zero here would answer a question the volume has already answered, and with the
+            // wrong reason.
+            Ok(available) if available > self.free_space_floor => {
+                InspectionLimits::with_available(available, self.free_space_floor)
+            }
+            Ok(_) | Err(_) => InspectionLimits::new(InspectionLimits::DEFAULT_MAX_FILES, u64::MAX),
         }
     }
 
@@ -615,11 +627,12 @@ impl AcquisitionService {
             .destination
             .resolve(std::path::Path::new(row.save_path.as_str()))
             .map_err(|source| AcquisitionError::SavePath { source })?;
-        let report = TorrentInspector::new(self.limits_for(&save_path)).inspect(
-            description,
-            &self.destination,
-            OptIn::Granted,
-        );
+        let limits = self.limits_for(&save_path);
+        let report =
+            TorrentInspector::new(limits).inspect(description, &self.destination, OptIn::Granted);
+        if report.total_bytes() > limits.max_total_bytes() {
+            self.admit_space(&save_path, description.total_bytes())?;
+        }
         match report.verdict() {
             Verdict::Allowed => {}
             Verdict::OptInRequired => return Err(AcquisitionError::OptInStillRequired),
