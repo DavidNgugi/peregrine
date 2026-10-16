@@ -25,6 +25,7 @@
 //! its only caller (I14).
 
 use crate::account::AccountScope;
+use crate::catalogue::TitleKind;
 use crate::notify::{DeepLink, NotificationText, Severity, SuppressionReason};
 use crate::stored_enum;
 use thiserror::Error;
@@ -149,6 +150,14 @@ pub struct CentreEntry {
     pub read: bool,
     /// Whether the user dismissed it.
     pub dismissed: bool,
+    /// The subject's row id, when the event named one.
+    ///
+    /// With [`Self::title_kind`] this is what the app's title route needs. The stored deep link
+    /// carries no kind, so a route built from it alone would have to guess -- and a guessed kind
+    /// opens the wrong screen, which is worse than opening nothing.
+    pub subject_id: Option<i64>,
+    /// The media kind of the subject, when the subject is a title.
+    pub title_kind: Option<TitleKind>,
 }
 
 /// A keyset cursor: the `(created_at, id)` of the last row a page ended on.

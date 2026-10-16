@@ -1,17 +1,29 @@
 /**
  * The notification centre's bell: a count, and the rows behind it.
  *
- * It exists because a centre row written and never shown is not a notification. The panel is
- * read-only for now: the rows carry title and body, and the dismiss/read actions are the centre
- * repository's, which no command exposes yet.
+ * It exists because a centre row written and never shown is not a notification. A row whose
+ * event named a title opens that title: the core sends the title's kind and id because the stored
+ * deep link carries no kind, and a guessed kind would open the wrong screen. The dismiss and read
+ * actions still belong to the centre repository, which exposes no command for either yet.
  */
 
 import { Button } from "@peregrine/ui";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { Route, TitleKind } from "../../../app/routes.js";
 import { useNotifications } from "../hooks/useNotifications.js";
 
-export function NotificationCentre() {
+/** The bell's dependencies: the one thing a row can do is open its title. */
+interface NotificationCentreProps {
+  readonly onNavigate: (route: Route) => void;
+}
+
+/** Narrowing rather than a cast: a kind this build does not know must not become a route. */
+function isTitleKind(value: string | null): value is TitleKind {
+  return value === "movie" || value === "show";
+}
+
+export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
   const { t } = useTranslation();
   const notifications = useNotifications();
   const [open, setOpen] = useState(false);
@@ -27,6 +39,17 @@ export function NotificationCentre() {
   }, [notifications]);
 
   const unread = notifications.rows.filter((row) => !row.read).length;
+
+  const openTitle = useCallback(
+    (kind: string | null, subjectId: number | null): void => {
+      if (!isTitleKind(kind) || subjectId === null) {
+        return;
+      }
+      onNavigate({ kind: "title", titleKind: kind, id: subjectId });
+      setOpen(false);
+    },
+    [onNavigate],
+  );
 
   return (
     <div className="relative">
@@ -50,14 +73,26 @@ export function NotificationCentre() {
             <p className="px-1 py-2 text-caption text-text-secondary">{t("shell.notifications.empty")}</p>
           ) : (
             <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
-              {notifications.rows.map((row) => (
-                <li className="rounded-sm px-1 py-1" key={row.id}>
-                  <p className="text-caption text-text-primary">{row.title}</p>
-                  {row.body === null ? null : (
-                    <p className="text-caption text-text-secondary">{row.body}</p>
-                  )}
-                </li>
-              ))}
+              {notifications.rows.map((row) => {
+                const opens = isTitleKind(row.titleKind) && row.subjectId !== null;
+                return (
+                  <li className="rounded-sm" key={row.id}>
+                    <button
+                      className="flex w-full flex-col items-start rounded-sm px-1 py-1 text-start enabled:hover:bg-surface-2 disabled:cursor-default"
+                      disabled={!opens}
+                      onClick={() => {
+                        openTitle(row.titleKind, row.subjectId);
+                      }}
+                      type="button"
+                    >
+                      <p className="text-caption text-text-primary">{row.title}</p>
+                      {row.body === null ? null : (
+                        <p className="text-caption text-text-secondary">{row.body}</p>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

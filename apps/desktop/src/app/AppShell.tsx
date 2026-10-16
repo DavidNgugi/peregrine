@@ -141,7 +141,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         // The centre lives in the shell so a notification can reach the user from any screen; it
         // is hidden on the rail, where there is no room for a label.
         <div className="ms-auto">
-          <NotificationCentre />
+          <NotificationCentre onNavigate={setRoute} />
         </div>
       )}
     </div>

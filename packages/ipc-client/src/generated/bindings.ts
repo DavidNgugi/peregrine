@@ -1267,6 +1267,15 @@ export type NotificationDto = {
 	createdAt: number,
 	/**  Whether the user has read it. */
 	read: boolean,
+	/**
+	 *  The subject title's kind (`movie` or `show`), when the notification names a title.
+	 * 
+	 *  Carried explicitly because the stored deep link has no kind, and the app's title route
+	 *  needs one: guessing would open the wrong screen.
+	 */
+	titleKind: string | null,
+	/**  The subject title's row id, when the notification names a title. */
+	subjectId: number | null,
 };
 
 /**  A release offer's id, as a listing returned it. */

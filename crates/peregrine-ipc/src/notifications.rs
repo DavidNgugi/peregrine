@@ -38,6 +38,14 @@ pub struct NotificationDto {
     pub created_at: i64,
     /// Whether the user has read it.
     pub read: bool,
+    /// The subject title's kind (`movie` or `show`), when the notification names a title.
+    ///
+    /// Carried explicitly because the stored deep link has no kind, and the app's title route
+    /// needs one: guessing would open the wrong screen.
+    pub title_kind: Option<String>,
+    /// The subject title's row id, when the notification names a title.
+    #[specta(type = Option<Number>)]
+    pub subject_id: Option<i64>,
 }
 
 impl NotificationDto {
@@ -54,6 +62,8 @@ impl NotificationDto {
             deep_link: entry.deep_link,
             created_at: entry.created_at,
             read: entry.read,
+            title_kind: entry.title_kind.map(|kind| kind.as_str().to_owned()),
+            subject_id: entry.subject_id,
         }
     }
 }

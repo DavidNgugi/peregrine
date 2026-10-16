@@ -31,7 +31,7 @@ use peregrine_domain::centre::{
     SubjectKind, SubjectNaming,
 };
 use peregrine_domain::notify::{NotificationText, SuppressionReason};
-use peregrine_domain::{AccountScope, DeepLink};
+use peregrine_domain::{AccountScope, DeepLink, TitleKind};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnection;
 
@@ -296,7 +296,12 @@ async fn list(
     let rows = sqlx::query_as::<_, CentreRow>(
         "SELECT n.id, n.event, n.severity, n.title, n.body, n.deep_link, n.delivery_state, \
          n.suppressed_reason, n.native_id, n.delivered_at, n.delivery_error, n.created_at, \
-         n.read_at, n.dismissed_at FROM notification n \
+         n.read_at, n.dismissed_at, n.subject_id, \
+         (SELECT t2.kind FROM title t2 \
+           WHERE (n.subject_kind = 'title' AND t2.id = n.subject_id) \
+              OR (n.subject_kind = 'episode' AND t2.id = \
+                    (SELECT e.title_id FROM episode e WHERE e.id = n.subject_id))) \
+           AS subject_title_kind FROM notification n \
          WHERE n.dismissed_at IS NULL \
            AND (?1 = 0 OR n.subject_kind IS NULL OR n.subject_kind NOT IN ('title','episode') \
                 OR EXISTS (SELECT 1 FROM title t \
@@ -441,6 +446,8 @@ struct CentreRow {
     created_at: i64,
     read_at: Option<i64>,
     dismissed_at: Option<i64>,
+    subject_id: Option<i64>,
+    subject_title_kind: Option<String>,
 }
 
 impl TryFrom<CentreRow> for CentreEntry {
@@ -464,6 +471,8 @@ impl TryFrom<CentreRow> for CentreEntry {
             created_at: row.created_at,
             read: row.read_at.is_some(),
             dismissed: row.dismissed_at.is_some(),
+            subject_id: row.subject_id,
+            title_kind: row.subject_title_kind.as_deref().and_then(TitleKind::parse),
         })
     }
 }
