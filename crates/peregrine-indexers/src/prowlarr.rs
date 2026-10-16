@@ -153,6 +153,20 @@ impl Indexer for Prowlarr {
         })
     }
 
+    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, Vec<u8>> {
+        Box::pin(async move {
+            // Prowlarr's proxy URL already carries its api key, so no header is added here; the
+            // body is the .torrent, read under the same cap as a search answer.
+            let response = self
+                .client
+                .get(url)
+                .send()
+                .await
+                .map_err(|_| IndexerError::Transport)?;
+            self.read_capped(response).await
+        })
+    }
+
     fn search<'a>(&'a self, query: &'a IndexerQuery) -> IndexerFuture<'a, Vec<IndexerRelease>> {
         Box::pin(async move {
             let mut url = reqwest::Url::parse(&self.endpoint("/api/v1/search"))
@@ -214,10 +228,16 @@ impl WireRelease {
             }
         }
         let raw_title = stated(self.title)?;
+        // Prowlarr calls the field magnetUrl, but for several indexers it is that indexer's own
+        // proxy download URL -- an http(s) address for the .torrent -- and passing it to the engine
+        // as a magnet asks the engine to GET it and fail. Classify on what it actually is.
         let source = match (stated(self.magnet_url), stated(self.info_hash)) {
-            (Some(magnet), _) => TorrentSource::Magnet(magnet),
-            (None, Some(hash)) => TorrentSource::InfoHash(hash),
-            (None, None) => return None,
+            (Some(uri), _) if uri.starts_with("magnet:") => TorrentSource::Magnet(uri),
+            (Some(url), _) if url.starts_with("http://") || url.starts_with("https://") => {
+                TorrentSource::TorrentUrl(url)
+            }
+            (_, Some(hash)) => TorrentSource::InfoHash(hash),
+            _ => return None,
         };
         Some(IndexerRelease {
             title: ReleaseName::parse(&raw_title),

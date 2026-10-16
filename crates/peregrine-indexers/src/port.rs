@@ -30,6 +30,10 @@ pub enum TorrentSource {
     Magnet(String),
     /// A bare info hash.
     InfoHash(String),
+    /// An HTTP(S) URL for the .torrent file itself. Prowlarr's magnetUrl is frequently its own
+    /// proxy download URL rather than a magnet; a caller fetches the bytes before handing them to
+    /// the engine, because treating the URL as a magnet asks the engine to GET it and fail.
+    TorrentUrl(String),
 }
 
 /// One release an indexer found, in this application's vocabulary.
@@ -66,4 +70,7 @@ pub trait Indexer: Send + Sync {
 
     /// Asks whether the configured endpoint and credential work.
     fn check<'a>(&'a self) -> IndexerFuture<'a, ()>;
+
+    /// Fetches the .torrent bytes behind a TorrentSource::TorrentUrl.
+    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, Vec<u8>>;
 }

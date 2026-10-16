@@ -73,6 +73,7 @@ impl From<IndexerRelease> for ReleaseCandidateDto {
         let source = match value.source {
             TorrentSource::Magnet(_) => "magnet",
             TorrentSource::InfoHash(_) => "infoHash",
+            TorrentSource::TorrentUrl(_) => "torrentUrl",
         };
         Self {
             title: value.raw_title,

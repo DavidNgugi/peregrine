@@ -11,7 +11,9 @@ use peregrine_domain::rank::{Candidate, best_candidate};
 use peregrine_domain::{AccountScope, Clock, NonEmptyText, ReleaseName};
 use peregrine_indexers::{IndexerRelease, TorrentSource as IndexerSource};
 use peregrine_secrets::SecretStore;
-use peregrine_storage::{AddedBy, Database, DownloadSource, JobChange, MagnetUri, NewDownloadJob};
+use peregrine_storage::{
+    AddedBy, Database, DownloadSource, JobChange, JobPhase, MagnetUri, NewDownloadJob,
+};
 use peregrine_sync::{Job, JobContext, JobError, JobFuture};
 use peregrine_torrent::{TorrentMetadataFetch, TorrentSource as EngineSource};
 use tokio_util::sync::CancellationToken;
@@ -109,6 +111,38 @@ impl AcquireJob {
         ));
     }
 
+    /// Records the typed failure on this job's own row, so the page that follows it can read the
+    /// reason back. The scheduler's journal line carries only "failed", which is not a sentence a
+    /// person can act on.
+    async fn record_failure(&self, error: &JobError) {
+        let cancelled = matches!(error, JobError::Cancelled);
+        let phase = if cancelled {
+            JobPhase::Canceled
+        } else {
+            JobPhase::Failed
+        };
+        let code = if cancelled {
+            "cancelled".to_owned()
+        } else {
+            "acquisition_failed".to_owned()
+        };
+        if let Err(update) = self
+            .database
+            .update_job(
+                self.journal_id,
+                JobChange::Finished {
+                    at: self.clock.now().as_millisecond(),
+                    phase,
+                    error_code: Some(code),
+                    error: Some(error.to_string()),
+                },
+            )
+            .await
+        {
+            debug!(%update, "the acquire job's failure could not be journalled");
+        }
+    }
+
     /// The work, owning everything it borrows.
     async fn acquire(
         &mut self,
@@ -177,16 +211,34 @@ impl AcquireJob {
 
         self.phase(job, attempt, 500).await;
 
-        // A magnet is what the metadata fetch and the engine both take; an info hash is completed
-        // into one, because every indexer that reports a bare hash means the same urn:btih form.
-        let magnet_uri = match &chosen.source {
-            IndexerSource::Magnet(uri) => uri.clone(),
-            IndexerSource::InfoHash(hash) => format!("magnet:?xt=urn:btih:{hash}"),
+        // What the engine is handed: a magnet when the indexer gave one, an info hash completed into
+        // the same urn:btih form, or the .torrent bytes fetched from the URL Prowlarr serves as its
+        // magnetUrl -- a proxy download URL, not a magnet, which the engine would try to GET.
+        let mut magnet_uri = String::new();
+        let engine_source = match &chosen.source {
+            IndexerSource::Magnet(uri) => {
+                magnet_uri = uri.clone();
+                EngineSource::Magnet(NonEmptyText::new(uri).map_err(|error| {
+                    JobError::failed(format!("the release's magnet is not usable: {error}"))
+                })?)
+            }
+            IndexerSource::InfoHash(hash) => {
+                magnet_uri = format!("magnet:?xt=urn:btih:{hash}");
+                EngineSource::Magnet(NonEmptyText::new(&magnet_uri).map_err(|error| {
+                    JobError::failed(format!("the release's magnet is not usable: {error}"))
+                })?)
+            }
+            IndexerSource::TorrentUrl(url) => {
+                let bytes = indexers::fetch_torrent_async(Arc::clone(&self.store), url.clone())
+                    .await
+                    .map_err(|error| {
+                        JobError::failed(format!(
+                            "the release's torrent could not be fetched: {error}"
+                        ))
+                    })?;
+                EngineSource::TorrentFile(bytes)
+            }
         };
-        let engine_source =
-            EngineSource::Magnet(NonEmptyText::new(&magnet_uri).map_err(|error| {
-                JobError::failed(format!("the release's magnet is not usable: {error}"))
-            })?);
 
         let fetched = self
             .metadata
@@ -203,6 +255,12 @@ impl AcquireJob {
         }
 
         self.phase(job, attempt, 900).await;
+
+        // The row's source is always a magnet: a .torrent file carries no trackers once it is bytes
+        // on disk, and the fetched info hash is what the engine and the safety gate both key on.
+        if magnet_uri.is_empty() {
+            magnet_uri = format!("magnet:?xt=urn:btih:{}", fetched.info_hash().to_hex());
+        }
 
         let save_path = NonEmptyText::new(&folder_for(&identity.name)).map_err(|error| {
             JobError::failed(format!("the destination folder is not usable: {error}"))
@@ -261,6 +319,7 @@ impl Job for AcquireJob {
             // built to carry no secret, magnet, or path.
             if let Err(error) = &outcome {
                 warn!(%error, "the acquire job failed");
+                self.record_failure(error).await;
             }
             outcome
         })

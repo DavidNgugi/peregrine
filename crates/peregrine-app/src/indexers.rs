@@ -211,3 +211,12 @@ pub async fn remove_indexer_async(
 ) -> Result<(), IndexerConfigError> {
     Ok(configured_adapter(store).await?.remove_indexer(id).await?)
 }
+
+/// Fetches the .torrent bytes behind a release's HTTP source, for the releases whose Prowlarr
+/// magnetUrl is a proxy download URL rather than a magnet.
+pub async fn fetch_torrent_async(
+    store: Arc<dyn SecretStore>,
+    url: String,
+) -> Result<Vec<u8>, IndexerConfigError> {
+    Ok(configured_adapter(store).await?.fetch_torrent(&url).await?)
+}
