@@ -6,8 +6,8 @@
 //! hand-edited file from widening a preference order the constructor would have refused.
 
 use peregrine_domain::{
-    AudioCodec, GroupRules, QualityProfile, QualityRank, QualityRules, ReleaseSource, Resolution,
-    SizeCaps, VideoCodec,
+    AudioCodec, DEFAULT_HD_CEILING_BYTES, GroupRules, QualityProfile, QualityRank, QualityRules,
+    ReleaseSource, Resolution, SizeCaps, VideoCodec,
 };
 use sqlx::{SqliteConnection, SqlitePool};
 
@@ -60,7 +60,8 @@ pub(crate) fn default_rules() -> QualityRules {
             AudioCodec::Mp3,
             AudioCodec::Pcm,
         ],
-        SizeCaps::new(None, None).expect("an unset floor cannot exceed an unset ceiling"),
+        SizeCaps::new(None, Some(DEFAULT_HD_CEILING_BYTES))
+            .expect("an unset floor cannot exceed any ceiling"),
         GroupRules::new(Vec::new(), Vec::new()).expect("no group is listed twice"),
     )
     .expect("the built-in lists spell each value once")

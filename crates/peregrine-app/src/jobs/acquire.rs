@@ -7,8 +7,10 @@
 
 use std::sync::Arc;
 
-use peregrine_domain::rank::{Candidate, best_candidate};
-use peregrine_domain::{AccountScope, Clock, NonEmptyText, ReleaseName};
+use peregrine_domain::rank::{Candidate, ranked_candidates};
+use peregrine_domain::{
+    AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, ReleaseName, Verdict,
+};
 use peregrine_indexers::{FetchedTorrent, IndexerRelease, TorrentSource as IndexerSource};
 use peregrine_secrets::SecretStore;
 use peregrine_storage::{
@@ -32,6 +34,13 @@ pub const PRIORITY: i32 = 5;
 
 /// How many indexer results a search asks for.
 const SEARCH_LIMIT: u32 = 100;
+
+/// How many ranked candidates one acquire will try before it reports the last refusal.
+///
+/// Each try costs a metadata fetch over BitTorrent — seconds to a minute — so this bounds one user
+/// action while still stepping past a handful of releases the gate refuses: a size the profile
+/// allowed but the volume cannot hold, a name the guard refuses, a swarm with no peers left.
+const MAX_CANDIDATES_TRIED: usize = 5;
 
 /// Which title to acquire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,34 +195,96 @@ impl AcquireJob {
             return Err(JobError::Cancelled);
         }
 
-        // The seeder floor and the parse happen here, before the pure ranking rule sees anything: a
-        // result with too few seeds is not a candidate, and one whose name will not parse is not one
-        // either.
+        // The seeder floor, the size ceiling, and the parse happen here, before the pure ranking
+        // rule sees anything: a result with too few seeds is not a candidate, one whose name will
+        // not parse is not one either, and one the profile's own ceiling refuses — or the built-in
+        // HD ceiling when the profile sets none — cannot win a decision the inspection cap would
+        // then reverse.
+        let effective_ceiling = profile
+            .rules()
+            .size_caps()
+            .ceiling()
+            .unwrap_or(DEFAULT_HD_CEILING_BYTES);
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut kept: Vec<&IndexerRelease> = Vec::new();
         for release in &releases {
             if release.seeders.unwrap_or(0) < self.min_seeders {
                 continue;
             }
+            let size_bytes = release.size_bytes.unwrap_or(0);
+            if size_bytes > effective_ceiling {
+                continue;
+            }
             candidates.push(Candidate::new(
                 ReleaseName::parse(&release.raw_title),
-                release.size_bytes.unwrap_or(0),
+                size_bytes,
             ));
             kept.push(release);
         }
 
-        let Some(index) = best_candidate(&candidates, &profile) else {
+        let ranked = ranked_candidates(&candidates, &profile);
+        if ranked.is_empty() {
             return Err(JobError::failed(
-                "no release the quality profile accepts met the seeder floor",
+                "no release the quality profile accepts met the seeder floor and size ceiling",
             ));
-        };
-        let chosen = kept[index];
+        }
 
         self.phase(job, attempt, 500).await;
 
-        // What the engine is handed: a magnet when the indexer gave one, an info hash completed into
-        // the same urn:btih form, or the .torrent bytes fetched from the URL Prowlarr serves as its
-        // magnetUrl -- a proxy download URL, not a magnet, which the engine would try to GET.
+        // A candidate the gate refuses must not end the attempt while another accepted candidate
+        // exists: the ranker knows a release's name and stated size, and the gate knows the
+        // destination and the volume, so only the gate can refuse what the ranker chose. Walk the
+        // ranked list — the search runs once — and gate each candidate before `start` persists
+        // anything.
+        let mut refused: Option<StartRequest> = None;
+        let mut last_error: Option<JobError> = None;
+        for index in ranked.into_iter().take(MAX_CANDIDATES_TRIED) {
+            if cancellation.is_cancelled() {
+                return Err(JobError::Cancelled);
+            }
+            let chosen = kept[index];
+            let request = match self.prepare(chosen, &identity.name).await {
+                Ok(request) => request,
+                Err(error) => {
+                    // One release whose metadata will not arrive is one candidate lost, not the
+                    // attempt: its swarm may be dead while the next release is seeded.
+                    debug!(%error, "a ranked candidate could not be prepared");
+                    last_error = Some(error);
+                    continue;
+                }
+            };
+            let verdict = self
+                .acquisition
+                .verdict_for(request.job.save_path.as_str(), &request.description)
+                .map_err(|error| JobError::failed(error.to_string()))?;
+            if verdict == Verdict::Blocked {
+                refused = Some(request);
+                continue;
+            }
+            return self.start_candidate(job, attempt, request).await;
+        }
+
+        // Every tried candidate was refused: persist the last verdict, so the queue shows one
+        // blocked row with its reasons rather than the page showing nothing happened.
+        if let Some(request) = refused {
+            return self.start_candidate(job, attempt, request).await;
+        }
+        Err(last_error.unwrap_or_else(|| {
+            JobError::failed("no release the quality profile accepts could be prepared")
+        }))
+    }
+
+    /// One ranked candidate as a start request: its source, its metadata, and the destination
+    /// folder. A metadata failure belongs to that candidate, so the caller decides whether to step
+    /// on to the next.
+    async fn prepare(
+        &self,
+        chosen: &IndexerRelease,
+        title_name: &str,
+    ) -> Result<StartRequest, JobError> {
+        // What the engine is handed: a magnet when the indexer gave one, an info hash completed
+        // into the same urn:btih form, or the .torrent bytes fetched from the URL Prowlarr serves
+        // as its magnetUrl -- a proxy download URL, not a magnet, which the engine would try to GET.
         let mut magnet_uri = String::new();
         let engine_source = match &chosen.source {
             IndexerSource::Magnet(uri) => {
@@ -260,19 +331,13 @@ impl AcquireJob {
                 ))
             })?;
 
-        if cancellation.is_cancelled() {
-            return Err(JobError::Cancelled);
-        }
-
-        self.phase(job, attempt, 900).await;
-
         // The row's source is always a magnet: a .torrent file carries no trackers once it is bytes
         // on disk, and the fetched info hash is what the engine and the safety gate both key on.
         if magnet_uri.is_empty() {
             magnet_uri = format!("magnet:?xt=urn:btih:{}", fetched.info_hash().to_hex());
         }
 
-        let save_path = NonEmptyText::new(&folder_for(&identity.name)).map_err(|error| {
+        let save_path = NonEmptyText::new(&folder_for(title_name)).map_err(|error| {
             JobError::failed(format!("the destination folder is not usable: {error}"))
         })?;
         let row_source =
@@ -299,19 +364,27 @@ impl AcquireJob {
             added_at: self.clock.now(),
         };
 
-        let request = StartRequest {
+        Ok(StartRequest {
             account: self.account,
             job: job_row,
             description: fetched.description().clone(),
             info_hash: fetched.info_hash(),
-        };
+        })
+    }
 
+    /// Hands one prepared candidate to the acquisition service, which persists the row and either
+    /// starts the transfer or parks a refusal the queue can show.
+    async fn start_candidate(
+        &self,
+        job: ulid::Ulid,
+        attempt: u32,
+        request: StartRequest,
+    ) -> peregrine_sync::JobResult {
         let started = self
             .acquisition
             .start(request)
             .await
             .map_err(|error| JobError::failed(error.to_string()))?;
-
         self.phase(job, attempt, 1000).await;
         Ok(Box::new(started.job.id))
     }

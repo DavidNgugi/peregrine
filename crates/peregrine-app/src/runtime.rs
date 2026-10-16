@@ -85,7 +85,7 @@ const DOWNLOAD_DIRECTORY: &str = "downloads";
 ///
 /// A settings-registry entry (`PG-E20-01`) will own it; until then it is one constant here rather
 /// than a number spelled at a call site with none of the reasoning.
-const FREE_SPACE_FLOOR: u64 = 2 * 1024 * 1024 * 1024;
+const FREE_SPACE_FLOOR: u64 = 5 * 1024 * 1024 * 1024;
 
 /// The directives the runtime logs with when the caller does not choose.
 const DEFAULT_DIRECTIVES: &str = "info";

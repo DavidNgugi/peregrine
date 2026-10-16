@@ -40,6 +40,12 @@ const FINISHED_STATES: ReadonlySet<string> = new Set([
   "removed",
 ]);
 
+/** A state nothing may leave, so the row offers no move at all.
+ *
+ * `blocked` is deliberately absent: the domain gives it a dismissal edge, so Remove is the move
+ * that clears a block rather than a terminal no-op. */
+const TERMINAL_STATES: ReadonlySet<string> = new Set(["completed", "failed", "removed"]);
+
 /** Bytes as a row shows them, in whole units. */
 function sizeLabel(bytes: number, t: Translate): string {
   if (bytes <= 0) {
@@ -194,16 +200,18 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
                 {t("downloads.action.resume")}
               </Button>
             ) : null}
-            <Button
-              disabled={busy}
-              onClick={() => {
-                setRemoving(row);
-              }}
-              size="sm"
-              variant="danger"
-            >
-              {t("downloads.action.remove")}
-            </Button>
+            {TERMINAL_STATES.has(row.state) ? null : (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setRemoving(row);
+                }}
+                size="sm"
+                variant="danger"
+              >
+                {t("downloads.action.remove")}
+              </Button>
+            )}
           </div>
         );
       },

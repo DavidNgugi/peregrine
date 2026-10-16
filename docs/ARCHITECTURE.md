@@ -468,7 +468,7 @@ graph TB
 | DB writers | Exactly one write connection, serialized through a channel. Readers use a pool sized to `min(4, cores)`. `busy_timeout = 5s`, WAL, `synchronous = NORMAL`. |
 | Network | Global concurrency cap (default 8) plus per-host token buckets (metadata 8 rps, images 12 rps, subtitle 1 rps). A 429 or `Retry-After` parks the bucket; it never retries into a wall. |
 | CPU | `desired_cpu_budget` setting (default: leave one core free) drives hashing threads, image decode concurrency, torrent hashing threads, and ffmpeg `-threads`. |
-| Disk | Free-space floor (default 5 GB) blocks new downloads and pauses image-cache growth. Writes are `fsync`-batched by SQLite itself; torrent piece flushing uses librqbit's own policy. |
+| Disk | Free-space floor (default 5 GiB) blocks new downloads and pauses image-cache growth. Writes are `fsync`-batched by SQLite itself; torrent piece flushing uses librqbit's own policy. |
 | Bandwidth | Global down/up caps, per-job caps, and a "pause all when playing" setting that reserves headroom for streaming. |
 | Child processes | Reaped on drop via a guard; orphans killed at startup by PID+start-time match recorded in the journal (never `pkill` by name). |
 | Cancellation | Every job carries a `CancellationToken`; services check it between steps; adapters accept it in their IO calls. |
@@ -506,7 +506,7 @@ Full threat model, controls, and test plan: [../SECURITY.md](../SECURITY.md). Ar
 
 | Area | Commitment |
 | --- | --- |
-| Torrent ingestion | Sniff metadata → validate every file path → extension allowlist → cap file count (default 500) and total size (default 2× free-space floor) → reject symlinks, absolute paths, `..`, Windows reserved names, and unicode-spoofed executable extensions → produce a `SafetyReport`. Executables and scripts are blocked with no override; nested archives and disk-image files are blocked by default with an explicit advanced opt-in. |
+| Torrent ingestion | Sniff metadata → validate every file path → extension allowlist → cap file count (default 500) and total size (the volume's free space above the floor) → reject symlinks, absolute paths, `..`, Windows reserved names, and unicode-spoofed executable extensions → produce a `SafetyReport`. Executables and scripts are blocked with no override; nested archives and disk-image files are blocked by default with an explicit advanced opt-in. |
 | Content execution | Downloaded media is never opened with the OS default handler. Playback goes through mpv with a hardened flag set (`--no-config`, `--load-scripts=no`, `--no-ytdl`, `--sub-auto=no`, empty `--script-opts`). |
 | Path handling | All filesystem operations go through `PathGuard::resolve`, which canonicalizes, rejects symlink escapes, requires containment within a configured root, and returns a typed `SafePath` that the fs layer accepts. There is no other way to obtain a writable path. |
 | Secrets | OS keyring for all API keys and tokens; `Secret<T>` wrapper with no `Debug`/`Display`; a `tracing` layer that redacts known key shapes and any value registered as a secret. |

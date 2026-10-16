@@ -4,9 +4,9 @@
 //! size, and link kind of every entry — and returns a [`SafetyReport`]. It is
 //! pure. `peregrine-domain` has no filesystem (AGENTS R6), so it never stats a
 //! path and cannot see how much space the volume has; the free-space floor enters
-//! as the documented default total-size cap ([`InspectionLimits::with_defaults`]),
-//! and the acquisition service compares the total plus the floor against the real
-//! free space when it resolves the save path (`docs/FLOWS.md` F6).
+//! as the total-size cap ([`InspectionLimits::with_available`]), which the acquisition
+//! service computes from the volume's real free space above the reservation when it
+//! resolves the save path (`docs/FLOWS.md` F6).
 //!
 //! The split with [`PathGuard`] is deliberate, and neither half repeats the other.
 //! `PathGuard` owns what path *text* can decide: containment, `..`, drive forms,
@@ -206,17 +206,19 @@ impl InspectionLimits {
     /// Entries a torrent may describe before it is refused.
     pub const DEFAULT_MAX_FILES: usize = 500;
 
-    /// The documented defaults for a volume that reserves `free_space_floor`
-    /// bytes: [`DEFAULT_MAX_FILES`](Self::DEFAULT_MAX_FILES) entries and a total
-    /// of twice the floor (`docs/ARCHITECTURE.md` §12). The floor is a setting
-    /// about the volume, not a property of the torrent, so it is an argument
-    /// here rather than a constant.
-    pub fn with_defaults(free_space_floor: u64) -> Self {
+    /// The caps for a volume with `available` bytes free that reserves
+    /// `free_space_floor` bytes: [`DEFAULT_MAX_FILES`](Self::DEFAULT_MAX_FILES)
+    /// entries and a total of everything above the reservation
+    /// (`docs/ARCHITECTURE.md` §12). Both numbers are properties of the volume,
+    /// not of the torrent, so they are arguments here rather than constants.
+    ///
+    /// The reservation is what protects the disk. A multiple of it — the earlier
+    /// `2 × floor` — was a size policy wearing a disk guard's clothes: on a 200 GB
+    /// volume it refused a 30 GB remux outright.
+    pub fn with_available(available: u64, free_space_floor: u64) -> Self {
         Self {
             max_files: Self::DEFAULT_MAX_FILES,
-            // A floor near `u64::MAX` is nonsense, but finding that out must not
-            // panic a debug build.
-            max_total_bytes: free_space_floor.saturating_mul(2),
+            max_total_bytes: available.saturating_sub(free_space_floor),
         }
     }
 
@@ -1045,7 +1047,7 @@ mod tests {
 
     #[test]
     fn the_file_count_cap_defaults_to_500_and_admits_exactly_500() {
-        let limits = InspectionLimits::with_defaults(1_000_000);
+        let limits = InspectionLimits::with_available(2_000_000, 1_000_000);
         assert_eq!(limits.max_files(), InspectionLimits::DEFAULT_MAX_FILES);
         assert_eq!(limits.max_files(), 500);
 
@@ -1077,8 +1079,8 @@ mod tests {
     }
 
     #[test]
-    fn the_total_size_cap_defaults_to_twice_the_floor_and_admits_exactly_the_cap() {
-        let limits = InspectionLimits::with_defaults(1_000);
+    fn the_total_size_cap_is_the_space_above_the_reservation_and_admits_exactly_the_cap() {
+        let limits = InspectionLimits::with_available(3_000, 1_000);
         assert_eq!(limits.max_total_bytes(), 2_000);
 
         let inspector = TorrentInspector::new(limits);
@@ -1131,7 +1133,7 @@ mod tests {
         assert_eq!(report.findings(), []);
         assert_eq!(report.verdict(), Verdict::Allowed);
         assert_eq!(
-            InspectionLimits::with_defaults(u64::MAX).max_total_bytes(),
+            InspectionLimits::with_available(u64::MAX, 0).max_total_bytes(),
             u64::MAX
         );
     }

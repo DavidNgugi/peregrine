@@ -469,7 +469,19 @@ impl Candidate {
 /// reaches this, so the ranking is one rule in one place.
 #[must_use]
 pub fn best_candidate(candidates: &[Candidate], profile: &QualityProfile) -> Option<usize> {
-    candidates
+    ranked_candidates(candidates, profile).into_iter().next()
+}
+
+/// The indices of every candidate the profile accepts, best first.
+///
+/// [`best_candidate`] is this function's first element, kept under its own name because most
+/// callers want exactly one answer. A caller that has to step past a release the *inspection*
+/// gate will refuse — a rule the ranker cannot evaluate, because it needs the destination and
+/// the volume — walks this list instead, so one refusal costs one candidate rather than the
+/// attempt.
+#[must_use]
+pub fn ranked_candidates(candidates: &[Candidate], profile: &QualityProfile) -> Vec<usize> {
+    let mut scored: Vec<(usize, u64)> = candidates
         .iter()
         .enumerate()
         .filter_map(|(index, candidate)| {
@@ -477,8 +489,11 @@ pub fn best_candidate(candidates: &[Candidate], profile: &QualityProfile) -> Opt
                 .score()
                 .map(|score| (index, score))
         })
-        .max_by_key(|&(_, score)| score)
-        .map(|(index, _)| index)
+        .collect();
+    // Ties resolve to the later index, which is what `max_by_key` chose before this existed, so
+    // `best_candidate` keeps its exact former answer.
+    scored.sort_by(|left, right| right.1.cmp(&left.1).then(right.0.cmp(&left.0)));
+    scored.into_iter().map(|(index, _)| index).collect()
 }
 
 /// The scoring policy: a pure function from a candidate and a profile to a

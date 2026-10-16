@@ -95,10 +95,12 @@ pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
 pub use playback::LocalPlayback;
 pub use ports::{Clock, IdGenerator, SessionToken, SessionTokenError, TokenSource};
 pub use quality::{
-    GroupRules, QualityProfile, QualityProfileError, QualityRank, QualityRules, SizeCaps,
+    DEFAULT_HD_CEILING_BYTES, GroupRules, QualityProfile, QualityProfileError, QualityRank,
+    QualityRules, SizeCaps,
 };
 pub use rank::{
     Candidate, MAX_SCORE, Position, RankReason, Ranking, ReasonKind, Rejection, ReleaseRanker,
+    ranked_candidates,
 };
 pub use redaction::{RedactionError, check_elements, check_text, is_safe};
 pub use release::{

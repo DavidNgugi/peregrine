@@ -377,8 +377,11 @@ impl AcquisitionService {
         // 3. The gate, over the description the caller already has. Its caps come from the same
         //    floor admission uses, so a torrent too large for the volume is refused by inspection
         //    rather than after it.
-        let report = TorrentInspector::new(InspectionLimits::with_defaults(self.free_space_floor))
-            .inspect(&request.description, &self.destination, OptIn::NotGranted);
+        let report = TorrentInspector::new(self.limits_for(&save_path)).inspect(
+            &request.description,
+            &self.destination,
+            OptIn::NotGranted,
+        );
         let verdict = report.verdict();
         let selection: Vec<usize> = (0..request.description.entries().len()).collect();
 
@@ -459,6 +462,40 @@ impl AcquisitionService {
             }
             Err(DownloadTransitionError::Storage(error)) => Err(AcquisitionError::Storage(error)),
         }
+    }
+
+    /// The inspection caps for a destination: the volume's free space above the reservation.
+    ///
+    /// An unreadable volume cannot answer a size question, so it gets no size cap and admission
+    /// reports the refusal instead of this gate inventing a number.
+    fn limits_for(&self, save_path: &SafePath) -> InspectionLimits {
+        match self.volume.available_bytes(save_path.as_path()) {
+            Ok(available) => InspectionLimits::with_available(available, self.free_space_floor),
+            Err(_) => InspectionLimits::new(InspectionLimits::DEFAULT_MAX_FILES, u64::MAX),
+        }
+    }
+
+    /// The gate's verdict for a candidate, without creating a job.
+    ///
+    /// `start` persists a row even for a refusal, so a caller walking several candidates asks
+    /// this first: a release the gate will not pass then costs a candidate rather than a blocked
+    /// row.
+    ///
+    /// # Errors
+    ///
+    /// [`AcquisitionError::SavePath`] when the destination does not resolve.
+    pub fn verdict_for(
+        &self,
+        save_path: &str,
+        description: &TorrentDescription,
+    ) -> Result<Verdict, AcquisitionError> {
+        let resolved = self
+            .destination
+            .resolve(std::path::Path::new(save_path))
+            .map_err(|source| AcquisitionError::SavePath { source })?;
+        Ok(TorrentInspector::new(self.limits_for(&resolved))
+            .inspect(description, &self.destination, OptIn::NotGranted)
+            .verdict())
     }
 
     /// Checks the free-space floor before an add.
@@ -573,19 +610,22 @@ impl AcquisitionService {
         id: i64,
         description: &TorrentDescription,
     ) -> Result<DownloadState, AcquisitionError> {
-        let report = TorrentInspector::new(InspectionLimits::with_defaults(self.free_space_floor))
-            .inspect(description, &self.destination, OptIn::Granted);
+        let row = self.reload(id).await?;
+        let save_path = self
+            .destination
+            .resolve(std::path::Path::new(row.save_path.as_str()))
+            .map_err(|source| AcquisitionError::SavePath { source })?;
+        let report = TorrentInspector::new(self.limits_for(&save_path)).inspect(
+            description,
+            &self.destination,
+            OptIn::Granted,
+        );
         match report.verdict() {
             Verdict::Allowed => {}
             Verdict::OptInRequired => return Err(AcquisitionError::OptInStillRequired),
             Verdict::Blocked => return Err(AcquisitionError::NoOverride),
         }
 
-        let row = self.reload(id).await?;
-        let save_path = self
-            .destination
-            .resolve(std::path::Path::new(row.save_path.as_str()))
-            .map_err(|source| AcquisitionError::SavePath { source })?;
         self.admit_space(&save_path, description.total_bytes())?;
 
         self.apply(id, DownloadEvent::Consented(report.clone()))
