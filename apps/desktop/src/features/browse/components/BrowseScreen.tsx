@@ -26,6 +26,11 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route, type TitleKind } from "../../../app/routes.js";
+import {
+  downloadCardProps,
+  rankByDownload,
+  type DownloadMarks,
+} from "../../../lib/download-status.js";
 import { imageUrl } from "../../../lib/media.js";
 import { useBrowse, type BrowseData, type BrowseFilters } from "../hooks/useBrowse.js";
 import { useBrowseGenres } from "../hooks/useBrowseGenres.js";
@@ -35,6 +40,9 @@ const SORTS = ["popularity", "rating", "newest", "oldest"] as const;
 
 /** The score floors the toolbar offers, out of ten. */
 const FLOORS = [5, 6, 7, 8, 9] as const;
+
+/** Nothing downloading, for the view drawn from synthetic props in a test. */
+const NO_DOWNLOADS: DownloadMarks = new Map();
 
 /**
  * A `lg` tile's width, from §4's ladder, and the row height that goes with it.
@@ -60,6 +68,11 @@ export interface BrowseViewProps {
   readonly genres: readonly GenreDto[];
   readonly onKind: (kind: TitleKind) => void;
   readonly onNavigate: (route: Route) => void;
+  /** A download status per title, so a tile wears the mark of a transfer in flight. */
+  readonly downloads?: DownloadMarks | undefined;
+  /** The shell's back control, present only when there is somewhere behind this screen. */
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
 }
 
 /** The screen as it is drawn, from answers. */
@@ -69,8 +82,12 @@ export function BrowseView({
   genres,
   onKind,
   onNavigate,
+  downloads,
+  onBack,
+  backLabel,
 }: BrowseViewProps): ReactElement {
   const { t } = useTranslation();
+  const marks = downloads ?? NO_DOWNLOADS;
 
   const routeFor = (item: RailItemDto): Route => ({
     id: item.titleId,
@@ -162,10 +179,15 @@ export function BrowseView({
     </div>
   );
 
-  const nothing = data.items.length === 0;
+  // **A transfer in flight comes first, and only among what is loaded.** A stable partition of
+  // the provider's order: the titles already downloading are what a reader came back for, and
+  // the rest keep the order they asked for. It cannot lift a title the provider has not sent yet
+  // — global ordering belongs in the core's read, and this is the slice the page holds.
+  const items = rankByDownload(data.items, marks);
+  const nothing = items.length === 0;
 
   return (
-    <Screen title={t("browse.title")}>
+    <Screen backLabel={backLabel} onBack={onBack} title={t("browse.title")}>
       {toolbar}
 
       {data.failed === null ? null : (
@@ -192,7 +214,7 @@ export function BrowseView({
             <Grid
               endThreshold={8}
               itemKey={(item) => item.titleId}
-              items={data.items}
+              items={items}
               label={t("browse.grid.label")}
               // **The placeholders are tiles, in the grid's own flow.** A reader who has scrolled to
               // the end of what is loaded has to be able to tell "there is nothing more" from "the
@@ -217,6 +239,7 @@ export function BrowseView({
               renderItem={(item) => (
                 <TitleCard
                   detailsLabel={t("card.details")}
+                  {...downloadCardProps(marks, item.titleId, t)}
                   href={routePath(routeFor(item))}
                   meta={
                     item.year === null ? kindFor(item) : `${String(item.year)} · ${kindFor(item)}`
@@ -260,10 +283,16 @@ export function BrowseView({
 export function BrowseScreen({
   onNavigate,
   titleKind,
+  downloads,
+  onBack,
+  backLabel,
 }: {
   readonly onNavigate: (route: Route) => void;
   /** The kind the route names, or `undefined` for the default — see `BrowseView`'s toolbar. */
   readonly titleKind?: TitleKind | undefined;
+  readonly downloads?: DownloadMarks | undefined;
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
 }): ReactElement {
   // The map spells the row `/browse/:type?`, so the parameter is optional; what it defaults to is
   // the one kind a provider's queried list can be drawn for. A bare `/browse` is therefore Films,
@@ -275,9 +304,12 @@ export function BrowseScreen({
 
   return (
     <BrowseView
+      backLabel={backLabel}
       data={data}
+      downloads={downloads}
       genres={genres}
       kind={kind}
+      onBack={onBack}
       onKind={(selected) => {
         onNavigate({ kind: "browse", titleKind: selected });
       }}

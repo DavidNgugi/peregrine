@@ -19,11 +19,12 @@ const iconButtonVariants = cva(
         ghost: "text-text-secondary hover:bg-surface-2 hover:text-text-primary",
       },
       size: {
-        // 28 px and 32 px, both above the pointer minimum of §4. The icon scales with
-        // the box rather than being chosen separately, so a 24 px mark can never end up
-        // in a 28 px target.
+        // 28 px, 32 px, and 44 px, all above the pointer minimum of §4. The icon scales with
+        // the box rather than being chosen separately, so a mark can never end up in a target
+        // smaller than it, and the 44 px size is the one a screen's own primary control wants.
         sm: "size-7",
         md: "size-8",
+        lg: "size-11",
       },
     },
     defaultVariants: { variant: "ghost", size: "md" },
@@ -68,7 +69,7 @@ export function IconButton({
       type={type}
       {...rest}
     >
-      <Icon name={icon} size={size === "sm" ? 16 : 20} />
+      <Icon name={icon} size={size === "sm" ? 16 : size === "lg" ? 24 : 20} />
     </button>
   );
 }

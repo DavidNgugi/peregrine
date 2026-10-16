@@ -46,6 +46,7 @@ import { messageOf } from "../../../lib/ipc-message.js";
 import { imageUrl } from "../../../lib/media.js";
 import { usePosterBackfill } from "../../player/index.js";
 import { routePath, type Route } from "../../../app/routes.js";
+import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
 import { TitlePicker } from "./TitlePicker.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
@@ -64,6 +65,9 @@ import type { LibraryView } from "../hooks/useLibraryView.js";
 const TILE_WIDTH = 176;
 const TILE_POSTER_HEIGHT = TILE_WIDTH * 1.5;
 const TILE_ROW_HEIGHT = TILE_POSTER_HEIGHT + 12;
+
+/** Nothing downloading, for a caller that draws the screen without a queue. */
+const NO_DOWNLOADS: DownloadMarks = new Map();
 
 interface LibraryScreenProps {
   /** The titles as the shell read them. */
@@ -109,6 +113,11 @@ interface LibraryScreenProps {
   readonly view: LibraryView;
   /** Changes which drawing is on screen. */
   readonly onView: (view: LibraryView) => void;
+  /** A download status per title, so a tile wears the mark of a transfer in flight. */
+  readonly downloads?: DownloadMarks | undefined;
+  /** The shell's back control, present only when there is somewhere behind this screen. */
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
 }
 
 /** What `useTranslation` hands a component, so the column builder can take it by name. */
@@ -381,8 +390,12 @@ export function LibraryScreen({
   rules,
   view,
   onView,
+  downloads,
+  onBack,
+  backLabel,
 }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
+  const marks = downloads ?? NO_DOWNLOADS;
   const columns = useMemo(() => columnsOf(t, onNavigate), [t, onNavigate]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
   // **The library is where the wall of placeholders is, so it is where the frames are asked for.** A
@@ -410,7 +423,7 @@ export function LibraryScreen({
   }, [finished, refresh]);
 
   return (
-    <Screen title={t("library.title")}>
+    <Screen backLabel={backLabel} onBack={onBack} title={t("library.title")}>
       <Section description={t("library.description")} title={t("library.section")}>
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -499,6 +512,7 @@ export function LibraryScreen({
               label={t("library.grid.label")}
               renderItem={(row) => (
                 <TitleCard
+                  {...downloadCardProps(marks, row.id, t)}
                   detailsLabel={t("card.details")}
                   href={routePath(routeFor(row))}
                   meta={tileMeta(row, t)}

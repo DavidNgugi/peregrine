@@ -13,6 +13,8 @@ export const en = {
         collapse: "Hide the sidebar",
         expand: "Show the sidebar",
       },
+      // The shell's back control, on every screen that has somewhere behind it.
+      back: "Back",
       theme: {
         switchToLight: "Switch to the light theme",
         switchToDark: "Switch to the dark theme",
@@ -100,6 +102,13 @@ export const en = {
         failed: "Failed",
         blocked: "Blocked",
         removed: "Removed",
+      },
+      // The three words a card's top edge can mean. They are the app's view vocabulary, not
+      // the state machine's: one word per tone, so the colour is never the only signal.
+      status: {
+        active: "Downloading",
+        done: "Downloaded",
+        failed: "Failed",
       },
       // One sentence per `Reason` spelling in peregrine-domain's safety report. A code with no
       // entry here falls back to the code itself rather than rendering blank, so a new reason is a

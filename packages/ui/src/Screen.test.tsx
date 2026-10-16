@@ -71,4 +71,27 @@ describe("Screen", () => {
     expect(ids).toHaveLength(2);
     expect(ids[0]).not.toBe(ids[1]);
   });
+
+  it("draws a labelled back control when it is given somewhere to go", () => {
+    const markup = renderToStaticMarkup(
+      <Screen backLabel="Back" onBack={() => {}} title="Diagnostics">
+        <p />
+      </Screen>,
+    );
+    expect(markup).toContain('aria-label="Back"');
+    // The angle-left mark's own geometry, and the large box the shell's primary control uses.
+    expect(markup).toContain("M15 5l-7 7 7 7");
+    expect(markup).toContain("size-11");
+  });
+
+  it("draws no back control without a label, rather than an unnamed one", () => {
+    // A callback with no word is a control a screen reader cannot name; the same rule the
+    // availability chip follows applies to it.
+    const markup = renderToStaticMarkup(
+      <Screen onBack={() => {}} title="Diagnostics">
+        <p />
+      </Screen>,
+    );
+    expect(markup).not.toContain("<button");
+  });
 });

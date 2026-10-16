@@ -119,6 +119,29 @@ const AVAILABILITY_SIGNALS: Readonly<Record<CardAvailability, string | null>> = 
 };
 
 /**
+ * What a title's download is doing, as the card draws it.
+ *
+ * The three states are the app's view vocabulary rather than the domain's ten (see
+ * `apps/desktop/src/lib/download-status.ts`); the *tone* is the kit's, because a status colour is
+ * a token and a caller that picked its own would be the second place the palette lives.
+ */
+export type CardDownloadStatus = "active" | "done" | "failed";
+
+/**
+ * The border each download status draws across the tile's top edge.
+ *
+ * A border rather than a second chip because it is a glanceable signal over a wall of posters: a
+ * reader scanning Browse can see which titles are already coming without reading each tile. The
+ * rule that colour never carries a state alone still holds — the caller's word goes into the
+ * tile's accessible name below, and the border itself is decorative.
+ */
+const DOWNLOAD_SIGNALS: Readonly<Record<CardDownloadStatus, string>> = {
+  active: "bg-accent",
+  done: "bg-state-ok",
+  failed: "bg-state-danger",
+};
+
+/**
  * Whether the image layer is drawn at all.
  *
  * A pure function because the failing half cannot be reached from a static render and a rule with no
@@ -345,6 +368,16 @@ export interface TitleCardProps {
   readonly availability?: CardAvailability;
   /** The chip's word, localized by the caller. Without it the state draws no chip. */
   readonly availabilityLabel?: string;
+  /**
+   * The title's download state, drawn as a border across the tile's top edge.
+   *
+   * Absent, `null`, or without {@link TitleCardProps.downloadLabel} draws nothing: the kit holds no
+   * copy, and a colour with no word beside it would carry the state alone (§2.2). The two travel
+   * together so a status cannot be shown without the name a screen reader reads.
+   */
+  readonly downloadStatus?: CardDownloadStatus | null;
+  /** The status's word, localized by the caller. Drawn only in the accessible name. */
+  readonly downloadLabel?: string | null;
   readonly size?: CardSize;
   /**
    * Loads eagerly and at high priority.
@@ -378,6 +411,8 @@ export function TitleCard({
   showTitle = false,
   availability,
   availabilityLabel,
+  downloadStatus,
+  downloadLabel,
   size,
   priority = false,
   tabIndex,
@@ -462,8 +497,23 @@ export function TitleCard({
   const chip = said(availabilityLabel);
   const showsChip = signal !== null && chip !== null;
 
+  // A download mark is drawn only when a status and its word are both present, for the reason the
+  // chip is: a colour alone would carry the state, and the kit refuses to invent the word.
+  const downloadSignal =
+    downloadStatus === undefined || downloadStatus === null
+      ? null
+      : DOWNLOAD_SIGNALS[downloadStatus];
+  const downloadWord = said(downloadLabel);
+  const showsDownload = downloadSignal !== null && downloadWord !== null;
+
   const metaLine = said(meta);
-  const spoken = [title, metaLine, said(ratingLabel), showsChip ? chip : null]
+  const spoken = [
+    title,
+    metaLine,
+    said(ratingLabel),
+    showsChip ? chip : null,
+    showsDownload ? downloadWord : null,
+  ]
     .filter((part): part is string => part !== null)
     .join(", ");
 
@@ -524,6 +574,15 @@ export function TitleCard({
       {...(onNavigate === undefined ? {} : { onNavigate })}
     >
       <span className="sr-only">{spoken}</span>
+      {showsDownload ? (
+        <span
+          aria-hidden="true"
+          className={clsx(
+            "absolute inset-x-0 top-0 z-10 h-1.5 rounded-t-[inherit]",
+            downloadSignal,
+          )}
+        />
+      ) : null}
       <span
         className="relative block aspect-[2/3] w-full overflow-hidden rounded-[inherit] bg-surface-2"
         {...(placeholder === undefined ? {} : { style: { backgroundColor: placeholder } })}

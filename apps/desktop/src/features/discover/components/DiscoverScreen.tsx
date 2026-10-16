@@ -14,6 +14,7 @@ import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
+import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
 import { imageUrl } from "../../../lib/media.js";
 import {
   MIN_QUERY_CHARS,
@@ -24,6 +25,9 @@ import { useContinueWatching, type ContinueWatchingView } from "../hooks/useCont
 import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
 import { DiscoverHero, DiscoverHeroSkeleton, type HeroSlide } from "./DiscoverHero.js";
 import { heroSlides } from "./hero-rotation.js";
+
+/** Nothing downloading, for the view drawn from synthetic props in a test. */
+const NO_DOWNLOADS: DownloadMarks = new Map();
 
 /**
  * Discover: the search box, a hero, and the rails the providers publish.
@@ -105,6 +109,8 @@ export interface DiscoverViewProps {
    */
   readonly onPlay?: (slide: HeroSlide) => void;
   readonly onNavigate: (route: Route) => void;
+  /** A download status per title, so a rail's tiles wear the mark of a transfer in flight. */
+  readonly downloads?: DownloadMarks | undefined;
   /**
    * The selected type, or `undefined` for **All**.
    *
@@ -256,11 +262,13 @@ export function DiscoverView({
   search,
   onPlay,
   onNavigate,
+  downloads,
   titleKind,
   onKindChange,
   trailing,
 }: DiscoverViewProps): ReactElement {
   const { t } = useTranslation();
+  const marks = downloads ?? NO_DOWNLOADS;
 
   const routeFor = (item: RailItemDto): Route => ({
     id: item.titleId,
@@ -449,6 +457,7 @@ export function DiscoverView({
               items={watching}
               renderItem={(row, tabIndex) => (
                 <TitleCard
+                  {...downloadCardProps(marks, row.titleId, t)}
                   detailsLabel={t("card.details")}
                   href={routePath({ kind: "player", id: row.titleId })}
                   meta={t("discover.continue.percent", {
@@ -490,6 +499,7 @@ export function DiscoverView({
               {...(firstFetch ? { skeleton: "lg" as const } : {})}
               renderItem={(item, tabIndex) => (
                 <TitleCard
+                  {...downloadCardProps(marks, item.titleId, t)}
                   detailsLabel={t("card.details")}
                   href={routePath(routeFor(item))}
                   meta={itemMeta(item, kindFor(item))}
@@ -519,11 +529,13 @@ export function DiscoverScreen({
   onNavigate,
   titleKind,
   trailing,
+  downloads,
 }: {
   readonly onNavigate: (route: Route) => void;
   /** The selected type, or `undefined` for **All** — which is also what a bare `/` means. */
   readonly titleKind?: RailKindDto | undefined;
   readonly trailing?: ReactNode;
+  readonly downloads?: DownloadMarks | undefined;
 }): ReactElement {
   const rails = useHomeRails(titleKind);
   // What this account watched most recently, drawn above the provider rails; one read per visit,
@@ -536,6 +548,7 @@ export function DiscoverScreen({
 
   return (
     <DiscoverView
+      downloads={downloads}
       onNavigate={onNavigate}
       titleKind={titleKind}
       {...(trailing === undefined ? {} : { trailing })}

@@ -39,6 +39,9 @@ describe("IconButton", () => {
     expect(
       classesOf(renderToStaticMarkup(<IconButton icon="sun" label="Theme" size="md" />)),
     ).toContain("size-8");
+    expect(
+      classesOf(renderToStaticMarkup(<IconButton icon="sun" label="Theme" size="lg" />)),
+    ).toContain("size-11");
   });
 
   it("scales the mark with the box rather than drawing a fixed one", () => {
@@ -46,6 +49,9 @@ describe("IconButton", () => {
       'height="16"',
     );
     expect(renderToStaticMarkup(<IconButton icon="sun" label="Theme" />)).toContain('height="20"');
+    expect(renderToStaticMarkup(<IconButton icon="sun" label="Theme" size="lg" />)).toContain(
+      'height="24"',
+    );
   });
 
   it("renders the token focus ring and the reduced-motion branch", () => {

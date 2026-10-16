@@ -35,7 +35,14 @@ const STEPS = 300;
  * surface, and `EmptyState`/`ErrorState` own the two ways a region can have nothing to show.
  * What is left here is copy and state.
  */
-export function JobsScreen(): ReactElement {
+export function JobsScreen({
+  onBack,
+  backLabel,
+}: {
+  /** The shell's back control, present only when there is somewhere behind this screen. */
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
+}): ReactElement {
   const { t } = useTranslation();
   const { live, journal, health, logLines, error, starting, cancelling, refreshing } = useJobs();
   const { start, cancel, refresh, clearError } = useJobs();
@@ -75,7 +82,7 @@ export function JobsScreen(): ReactElement {
   ];
 
   return (
-    <Screen subtitle={t("jobs.subtitle")} title={t("jobs.title")}>
+    <Screen backLabel={backLabel} onBack={onBack} subtitle={t("jobs.subtitle")} title={t("jobs.title")}>
       {errorCopy !== null ? (
         <ErrorState
           action={

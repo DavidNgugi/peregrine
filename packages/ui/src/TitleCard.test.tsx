@@ -177,6 +177,39 @@ describe("TitleCard badges", () => {
   });
 });
 
+describe("TitleCard download mark", () => {
+  it("draws a top border whose tone is the status's", () => {
+    expect(everyClass(card({ downloadStatus: "active", downloadLabel: "Downloading" }))).toContain(
+      "bg-accent",
+    );
+    expect(everyClass(card({ downloadStatus: "done", downloadLabel: "Downloaded" }))).toContain(
+      "bg-state-ok",
+    );
+    expect(everyClass(card({ downloadStatus: "failed", downloadLabel: "Failed" }))).toContain(
+      "bg-state-danger",
+    );
+  });
+
+  it("holds no copy of its own for a download", () => {
+    // A status with no caller's word draws nothing, rather than guessing at English.
+    const markup = card({ downloadStatus: "active" });
+    expect(markup).not.toContain("Downloading");
+    expect(everyClass(markup)).not.toContain("bg-accent");
+  });
+
+  it("draws no border for an empty word, which would be colour alone", () => {
+    expect(everyClass(card({ downloadStatus: "done", downloadLabel: "" }))).not.toContain(
+      "bg-state-ok",
+    );
+  });
+
+  it("adds the download's word to the accessible name exactly once", () => {
+    const markup = card({ downloadStatus: "active", downloadLabel: "Downloading" });
+    expect(markup).toContain('<span class="sr-only">Alien, Downloading</span>');
+    expect(markup.match(/Downloading/gu)).toHaveLength(1);
+  });
+});
+
 describe("TitleCard accessible name", () => {
   it("names itself from the parts it was given, and announces each once", () => {
     const markup = card({

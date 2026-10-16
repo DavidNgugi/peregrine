@@ -15,6 +15,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Link,
   Progress,
   Screen,
   Section,
@@ -25,6 +26,7 @@ import type { DownloadJobDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { routePath, type Route } from "../../../app/routes.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import { useDownloadActions } from "../hooks/useDownloadActions.js";
 import type { Downloads } from "../hooks/useDownloads.js";
@@ -91,7 +93,19 @@ function etaLabel(seconds: number | null, t: Translate): string {
 }
 
 /** The Downloads screen. */
-export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }): ReactElement {
+export function DownloadsScreen({
+  downloads,
+  onNavigate,
+  onBack,
+  backLabel,
+}: {
+  readonly downloads: Downloads;
+  /** Opens the title a row is filling, through the same route a tile uses. */
+  readonly onNavigate: (route: Route) => void;
+  /** The shell's back control, present only when there is somewhere behind this screen. */
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
+}): ReactElement {
   const { t } = useTranslation();
   const actions = useDownloadActions(downloads.refresh);
   // One dialog serves the three destructive moves: removing a running job, dismissing a finished
@@ -121,7 +135,27 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
     {
       id: "title",
       header: t("downloads.column.title"),
-      cell: (row) => row.title ?? row.releaseTitle,
+      // **The title a transfer fills is a link, and the release name is what is left when the
+      // library cannot name one.** A row whose title resolves carries the kind the route needs, so
+      // opening it is the same move a poster makes; a row that resolves nothing stays text rather
+      // than a link to a guessed route.
+      cell: (row) => {
+        const label = row.title ?? row.releaseTitle;
+        if (row.titleKind === null) {
+          return label;
+        }
+        const route: Route = { id: row.titleId, kind: "title", titleKind: row.titleKind };
+        return (
+          <Link
+            href={routePath(route)}
+            onNavigate={() => {
+              onNavigate(route);
+            }}
+          >
+            {label}
+          </Link>
+        );
+      },
     },
     {
       id: "state",
@@ -274,7 +308,7 @@ export function DownloadsScreen({ downloads }: { readonly downloads: Downloads }
             };
 
   return (
-    <Screen subtitle={t("downloads.subtitle")} title={t("downloads.title")}>
+    <Screen backLabel={backLabel} onBack={onBack} subtitle={t("downloads.subtitle")} title={t("downloads.title")}>
       <Section description={t("downloads.description")} title={t("downloads.section")}>
         {downloads.failed ? (
           <ErrorState

@@ -755,6 +755,14 @@ export type DownloadJobDto = {
 	titleId: number,
 	/**  The title's display name, when the library can answer it. */
 	title: string | null,
+	/**
+	 *  Which of the two the title is, when the library can answer it.
+	 * 
+	 *  The Downloads screen opens the title's own route from a row, and that route carries the kind
+	 *  because the page names itself before its read answers. `null` is a title neither the library
+	 *  nor a provider can resolve, and such a row opens nothing rather than a route that guesses.
+	 */
+	titleKind: DownloadTitleKind | null,
 	/**  The release the indexer advertised. */
 	releaseTitle: string,
 	/**  The state machine's current state, as its stored spelling. */
@@ -791,6 +799,19 @@ export type DownloadRef = {
 	/**  The download job's row id. */
 	id: number,
 };
+
+/**
+ *  Which of the two a download's title is, as the title route spells it.
+ * 
+ *  The route names the kind because the page names itself from the address before its read answers
+ *  (`PG-E7-02`), so a screen that opens a title needs it. It is the domain's `TitleKind` as the wire
+ *  spells it: `movie` and `show`, not the library root's `movies` and `shows`.
+ */
+export type DownloadTitleKind = 
+/**  A film. */
+"movie" | 
+/**  A series. */
+"show";
 
 /**
  *  One episode of a title, as its card draws it.

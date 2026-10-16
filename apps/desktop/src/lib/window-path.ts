@@ -7,6 +7,10 @@
  * and a reload — which a webview does on its own for reasons it does not announce — would take the
  * user somewhere they were not.
  *
+ * **It mirrors the current screen and builds no history of its own.** The places a user can go back
+ * to are the shell's (`app/navigation.ts`), so a browser entry that grew with every sidebar click
+ * would be a second, disagreeing stack — and the OS's own back gesture would walk it.
+ *
  * The guard is not defensive noise: a Node test environment has no window, and the shell's tests
  * render the shell without one. Absence means there is no path to write, which is a fact rather than
  * a failure.

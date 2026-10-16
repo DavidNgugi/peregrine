@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { useId } from "react";
 import type { ReactElement, ReactNode } from "react";
+import { IconButton } from "./IconButton.js";
 import { twMerge } from "./merge.js";
 
 /**
@@ -25,11 +26,30 @@ export interface ScreenProps {
    * would otherwise have to build its props conditionally to express the same thing.
    */
   readonly subtitle?: string | undefined;
+  /**
+   * Takes the user back to where they came from, drawn as a large angle-left mark at the heading's
+   * start.
+   *
+   * Present only when there is somewhere to go: the shell, which owns the history, passes it for a
+   * screen that has a place behind it and leaves it absent on the first one. The label travels with
+   * it because the kit holds no copy (§9), and a callback without a label draws nothing rather
+   * than an unnamed control — the same rule the availability chip follows.
+   */
+  readonly onBack?: (() => void) | undefined;
+  /** The back control's accessible name and tooltip, localized by the caller. */
+  readonly backLabel?: string | undefined;
   readonly children: ReactNode;
   readonly className?: string | undefined;
 }
 
-export function Screen({ title, subtitle, children, className }: ScreenProps): ReactElement {
+export function Screen({
+  title,
+  subtitle,
+  onBack,
+  backLabel,
+  children,
+  className,
+}: ScreenProps): ReactElement {
   const titleId = useId();
 
   return (
@@ -47,12 +67,25 @@ export function Screen({ title, subtitle, children, className }: ScreenProps): R
         className,
       )}
     >
-      <header className="flex items-baseline justify-between gap-4">
-        <h1 className="text-title-1 text-text-primary" id={titleId}>
-          {title}
-        </h1>
+      <header className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-2">
+          {onBack === undefined || backLabel === undefined ? null : (
+            <IconButton
+              className="-ms-1 shrink-0"
+              icon="chevron-left"
+              label={backLabel}
+              onClick={onBack}
+              size="lg"
+              title={backLabel}
+              variant="ghost"
+            />
+          )}
+          <h1 className="truncate text-title-1 text-text-primary" id={titleId}>
+            {title}
+          </h1>
+        </div>
         {subtitle === undefined ? null : (
-          <p className="text-caption text-text-tertiary">{subtitle}</p>
+          <p className="shrink-0 text-caption text-text-tertiary">{subtitle}</p>
         )}
       </header>
       {children}

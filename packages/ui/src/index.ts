@@ -58,4 +58,9 @@ export { CARD_SIZES, TitleCard } from "./TitleCard.js";
 // draws are the card's own decisions rather than primitives, so they are not exported as ones: the
 // card's tests import them from the module, the way the link's do. The ladder itself is
 // `hover-preview.ts`'s, for the same reason.
-export type { CardAvailability, CardSize, TitleCardProps } from "./TitleCard.js";
+export type {
+  CardAvailability,
+  CardDownloadStatus,
+  CardSize,
+  TitleCardProps,
+} from "./TitleCard.js";

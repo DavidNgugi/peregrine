@@ -15,6 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 
+import type { DownloadMarks } from "../../../lib/download-status.js";
 import type { BrowseData } from "../hooks/useBrowse.js";
 import { DEFAULT_FILTERS } from "../hooks/useBrowse.js";
 import { BrowseView } from "./BrowseScreen.js";
@@ -57,11 +58,13 @@ function markup(
   overrides: Partial<BrowseData> = {},
   genres: readonly GenreDto[] = [],
   kind: "movie" | "show" = "movie",
+  downloads?: DownloadMarks,
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <BrowseView
         data={data(overrides)}
+        downloads={downloads}
         genres={genres}
         kind={kind}
         onKind={() => undefined}
@@ -72,6 +75,18 @@ function markup(
 }
 
 describe("BrowseView", () => {
+  it("brings a title whose transfer is running to the front of the list", () => {
+    // The provider's order survives inside each half; what moves is the transfer the reader
+    // came back for.
+    const html = markup(
+      { items: [item({ titleId: 1, name: "First" }), item({ titleId: 2, name: "Second" })] },
+      [],
+      "movie",
+      new Map([[2, "active" as const]]),
+    );
+    expect(html.indexOf("/title/movie/2")).toBeLessThan(html.indexOf("/title/movie/1"));
+  });
+
   it("draws one tile per title, linked to the title's own screen", () => {
     const html = markup({
       items: [item({ titleId: 1, name: "The Matrix" }), item({ titleId: 2, name: "Inception" })],

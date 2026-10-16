@@ -2,7 +2,7 @@ import { NowPlayingBar } from "@peregrine/player-ui";
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
 import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrowseScreen } from "../features/browse/index.js";
 import { DiscoverScreen } from "../features/discover/index.js";
@@ -34,8 +34,15 @@ import {
   useShortcutDispatch,
   useShortcuts,
 } from "../features/settings/index.js";
+import { downloadMarks } from "../lib/download-status.js";
 import type { Platform } from "../lib/platform.js";
 import { writePath } from "../lib/window-path.js";
+import {
+  back as goBackHistory,
+  canGoBack,
+  navigate as navigateTo,
+  startHistory,
+} from "./navigation.js";
 import { ROUTE_FOR_ACTION, routePath, type Route } from "./routes.js";
 import { SCREENS } from "./screens.js";
 import { useFullscreen } from "./useFullscreen.js";
@@ -74,8 +81,30 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const { t } = useTranslation();
   const { resolved, setPreference } = useTheme();
   // Where the user is, which the sidebar, the shortcut dispatcher, and the screen switch all read
-  // from one value. It starts where the window opened and only this shell moves it.
-  const [route, setRoute] = useState<Route>(initialRoute);
+  // from one value. It starts where the window opened, and only this shell moves it — through the
+  // history, so every screen except the first has somewhere to go back to (`./navigation.js`).
+  const [history, setHistory] = useState(() => startHistory(initialRoute));
+  const route = history.current;
+  const navigate = useCallback((next: Route) => {
+    setHistory((current) => navigateTo(current, next));
+  }, []);
+  const goBack = useCallback(() => {
+    setHistory(goBackHistory);
+  }, []);
+  const canBack = canGoBack(history);
+  // Leaving the player is Back when there is a place behind it, and the title it was opened for
+  // when the window opened straight onto the player — a reload keeps the path but not the stack.
+  const playerId = route.kind === "player" ? route.id : null;
+  const leavePlayer = useCallback(() => {
+    setHistory((current) => {
+      if (canGoBack(current)) {
+        return goBackHistory(current);
+      }
+      return playerId === null
+        ? current
+        : navigateTo(current, { kind: "title", titleKind: "movie", id: playerId });
+    });
+  }, [playerId]);
 
   // And the window's path follows it, so the two cannot drift: a reload — which a webview performs
   // for reasons it does not announce — returns the user to the screen they were on rather than to
@@ -141,7 +170,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         // The centre lives in the shell so a notification can reach the user from any screen; it
         // is hidden on the rail, where there is no room for a label.
         <div className="ms-auto">
-          <NotificationCentre onNavigate={setRoute} />
+          <NotificationCentre onNavigate={navigate} />
         </div>
       )}
     </div>
@@ -190,6 +219,9 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   }, [managedProwlarrRunning, configuredIndexers, refreshIndexers]);
   const library = useLibraryTitles();
   const downloads = useDownloads();
+  // One status per title, from the queue read the shell already holds. A screen hands a card the
+  // mark for its own id rather than each subscribing to the queue: one read, one answer.
+  const marks = useMemo(() => downloadMarks(downloads.downloads), [downloads.downloads]);
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
   const rules = useMatchRules();
@@ -214,12 +246,15 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
     route.kind === "title" ? route.id : null,
     route.kind === "title" ? route.titleKind : "movie",
   );
-  const openScreen = useCallback((action: string) => {
-    const target = ROUTE_FOR_ACTION[action];
-    if (target !== undefined) {
-      setRoute(target);
-    }
-  }, []);
+  const openScreen = useCallback(
+    (action: string) => {
+      const target = ROUTE_FOR_ACTION[action];
+      if (target !== undefined) {
+        navigate(target);
+      }
+    },
+    [navigate],
+  );
   useShortcutDispatch(shortcuts.bindings, openScreen);
 
   return (
@@ -238,7 +273,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               key={entry.route.kind}
               label={t(entry.labelKey)}
               onSelect={() => {
-                setRoute(entry.route);
+                navigate(entry.route);
               }}
             />
           ))}
@@ -255,7 +290,8 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
             /* A bare `/` is All, which is the default the toolbar starts on and what `parseRoute`
                answers when the URL carries no `type`. */
             <DiscoverScreen
-              onNavigate={setRoute}
+              downloads={marks}
+              onNavigate={navigate}
               titleKind={route.titleKind}
               trailing={
                 /* The theme control, which used to live in the title bar. Same shape as the toolbar's
@@ -278,11 +314,20 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
             /* The kind is the route's, so the toolbar's switch is a navigation and the window's
                path says which category is on screen. A route naming none is the default kind — see
                `BrowseScreen`. */
-            <BrowseScreen onNavigate={setRoute} titleKind={route.titleKind} />
+            <BrowseScreen
+              backLabel={t("shell.back")}
+              downloads={marks}
+              onBack={canBack ? goBack : undefined}
+              onNavigate={navigate}
+              titleKind={route.titleKind}
+            />
           ) : null}
           {route.kind === "library" ? (
             <LibraryScreen
-              onNavigate={setRoute}
+              backLabel={t("shell.back")}
+              downloads={marks}
+              onBack={canBack ? goBack : undefined}
+              onNavigate={navigate}
               onView={libraryView.setView}
               rules={rules}
               scan={scan}
@@ -291,13 +336,24 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               view={libraryView.view}
             />
           ) : null}
-          {route.kind === "downloads" ? <DownloadsScreen downloads={downloads} /> : null}
-          {route.kind === "diagnostics" ? <JobsScreen /> : null}
+          {route.kind === "downloads" ? (
+            <DownloadsScreen
+              backLabel={t("shell.back")}
+              downloads={downloads}
+              onBack={canBack ? goBack : undefined}
+              onNavigate={navigate}
+            />
+          ) : null}
+          {route.kind === "diagnostics" ? (
+            <JobsScreen backLabel={t("shell.back")} onBack={canBack ? goBack : undefined} />
+          ) : null}
           {route.kind === "settings" ? (
             <SettingsScreen
+              backLabel={t("shell.back")}
               indexers={indexers}
               prowlarr={prowlarr}
               libraries={libraries}
+              onBack={canBack ? goBack : undefined}
               providers={providers}
               shortcuts={shortcuts}
             />
@@ -309,9 +365,10 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                long as this component does (ADR 0023, SECURITY.md T10). */
             <PlayerScreen
               id={route.id}
-              onClose={() => {
-                setRoute({ kind: "title", titleKind: "movie", id: route.id });
-              }}
+              /* Back rather than a route of the shell's own: the player was opened from a title,
+                 so the place behind it is that title, and going back is what keeps the history
+                 rather than pushing a second copy of the same page. */
+              onClose={leavePlayer}
             />
           ) : null}
           {route.kind === "title" ? (
@@ -330,7 +387,10 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                  title was left on. */
               key={`${route.titleKind}:${String(route.id)}`}
               acquire={acquire}
-              onNavigate={setRoute}
+              backLabel={t("shell.back")}
+              downloads={marks}
+              onBack={canBack ? goBack : undefined}
+              onNavigate={navigate}
               seasons={seasons}
             />
           ) : null}

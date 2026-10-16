@@ -35,6 +35,7 @@ import type { TitleSeasons } from "../hooks/useSeasons.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
 import { TitleFeedList } from "./TitleFeedList.js";
 import type { Route, TitleKind } from "../../../app/routes.js";
+import type { DownloadMarks } from "../../../lib/download-status.js";
 
 interface TitleScreenProps {
   /** Which of the two the route says this is, which is what the page can say immediately. */
@@ -65,6 +66,11 @@ interface TitleScreenProps {
    * action left. The page does not decide that — `detail.offer` is the core's answer (R7).
    */
   readonly acquire?: AcquireControl;
+  /** A download status per title, forwarded to the feed's tiles. */
+  readonly downloads?: DownloadMarks | undefined;
+  /** The shell's back control, present only when there is somewhere behind this screen. */
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
 }
 
 /** What `useTranslation` hands a component. */
@@ -94,6 +100,9 @@ export function TitleScreen({
   seasons,
   acquire,
   onNavigate,
+  downloads,
+  onBack,
+  backLabel,
 }: TitleScreenProps): ReactElement {
   const { t } = useTranslation();
   const title: LibraryTitleDto | null = detail.title;
@@ -110,7 +119,7 @@ export function TitleScreen({
         : t("library.kind.series");
 
   return (
-    <Screen title={title?.name ?? kindLabel}>
+    <Screen backLabel={backLabel} onBack={onBack} title={title?.name ?? kindLabel}>
       <Section description={kindLabel} title={t("title.section")}>
         {detail.loading ? null : detail.failed ? (
           <ErrorState body={t("title.unavailable.body")} title={t("title.unavailable.title")} />
@@ -290,7 +299,7 @@ export function TitleScreen({
         </Section>
       )}
 
-      <TitleFeedList feed={feed} onNavigate={onNavigate} />
+      <TitleFeedList downloads={downloads} feed={feed} onNavigate={onNavigate} />
     </Screen>
   );
 }

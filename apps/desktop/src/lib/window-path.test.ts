@@ -16,9 +16,9 @@ describe("writePath", () => {
   });
 
   it("replaces the path without adding a history entry", () => {
-    // Replace rather than push: the shell's navigation is not a browser's back stack — there is no
-    // back affordance in the chrome — and a stack that grows with every sidebar click would make the
-    // OS's own back gesture walk through them.
+    // Replace rather than push: the shell keeps its own history (`app/navigation.ts`), and a
+    // browser stack that grew with every sidebar click would make the OS's own back gesture walk
+    // through them.
     const replaceState = vi.fn();
     vi.stubGlobal("window", { history: { replaceState } });
 

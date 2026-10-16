@@ -65,6 +65,9 @@ interface SettingsScreenProps {
    * here could disagree with the instance the search path is using.
    */
   readonly prowlarr: ManagedProwlarr;
+  /** The shell's back control, present only when there is somewhere behind this screen. */
+  readonly onBack?: (() => void) | undefined;
+  readonly backLabel?: string | undefined;
 }
 
 /**
@@ -86,13 +89,15 @@ export function SettingsScreen({
   providers,
   indexers,
   prowlarr,
+  onBack,
+  backLabel,
 }: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
   const autoStart = useAutoStart();
   const quality = usePreferredQuality();
 
   return (
-    <Screen title={t("settings.title")}>
+    <Screen backLabel={backLabel} onBack={onBack} title={t("settings.title")}>
       <SettingsSection
         description={t("settings.shortcuts.description")}
         title={t("settings.shortcuts.title")}

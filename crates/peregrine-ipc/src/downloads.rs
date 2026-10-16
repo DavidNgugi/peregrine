@@ -42,6 +42,20 @@ pub struct SafetyFindingDto {
     pub entry: Option<String>,
 }
 
+/// Which of the two a download's title is, as the title route spells it.
+///
+/// The route names the kind because the page names itself from the address before its read answers
+/// (`PG-E7-02`), so a screen that opens a title needs it. It is the domain's `TitleKind` as the wire
+/// spells it: `movie` and `show`, not the library root's `movies` and `shows`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadTitleKind {
+    /// A film.
+    Movie,
+    /// A series.
+    Show,
+}
+
 /// One download job, as the Downloads screen draws it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +68,12 @@ pub struct DownloadJobDto {
     pub title_id: i64,
     /// The title's display name, when the library can answer it.
     pub title: Option<String>,
+    /// Which of the two the title is, when the library can answer it.
+    ///
+    /// The Downloads screen opens the title's own route from a row, and that route carries the kind
+    /// because the page names itself before its read answers. `null` is a title neither the library
+    /// nor a provider can resolve, and such a row opens nothing rather than a route that guesses.
+    pub title_kind: Option<DownloadTitleKind>,
     /// The release the indexer advertised.
     pub release_title: String,
     /// The state machine's current state, as its stored spelling.
@@ -90,12 +110,17 @@ pub struct DownloadJobDto {
 }
 
 impl DownloadJobDto {
-    /// The row, plus the title name a read supplied when it could.
-    fn of(row: &DownloadJobRow, title: Option<String>) -> Self {
+    /// The row, plus the title name and kind a read supplied when it could.
+    fn of(
+        row: &DownloadJobRow,
+        title: Option<String>,
+        title_kind: Option<DownloadTitleKind>,
+    ) -> Self {
         Self {
             id: row.id,
             title_id: row.title_id,
             title,
+            title_kind,
             release_title: row.release_title.clone(),
             state: row.state.as_str().to_owned(),
             progress_permille: row.progress_permille,
@@ -126,14 +151,27 @@ impl DownloadJobDto {
     }
 }
 
-/// The title's display name, when the library can answer it; a missing name is not a failed list.
-async fn title_name(runtime: &peregrine_app::runtime::Runtime, title_id: i64) -> Option<String> {
-    runtime
-        .library_title(title_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|detail| detail.entry.row.title.name)
+/// The title's display name and kind, when the library can answer them; a missing title is not a
+/// failed list.
+///
+/// One `library_title` call answers both, and its `LEFT JOIN` is what lets a title the library holds
+/// nothing of — a download that has not landed yet — still resolve: without it a queued row would
+/// have no name and no route to open.
+async fn title_ref(
+    runtime: &peregrine_app::runtime::Runtime,
+    title_id: i64,
+) -> (Option<String>, Option<DownloadTitleKind>) {
+    match runtime.library_title(title_id).await.ok().flatten() {
+        Some(detail) => {
+            let title = detail.entry.row.title;
+            let kind = match title.kind {
+                peregrine_app::TitleKind::Movie => DownloadTitleKind::Movie,
+                peregrine_app::TitleKind::Show => DownloadTitleKind::Show,
+            };
+            (Some(title.name), Some(kind))
+        }
+        None => (None, None),
+    }
 }
 
 /// Maps an acquisition refusal onto the wire error.
@@ -205,10 +243,8 @@ pub async fn list_downloads(
     let rows = runtime.download_jobs().await?;
     let mut downloads = Vec::with_capacity(rows.len());
     for row in &rows {
-        downloads.push(DownloadJobDto::of(
-            row,
-            title_name(runtime, row.title_id).await,
-        ));
+        let (title, title_kind) = title_ref(runtime, row.title_id).await;
+        downloads.push(DownloadJobDto::of(row, title, title_kind));
     }
     Ok(guard_response("downloads::list", downloads))
 }
@@ -227,10 +263,10 @@ pub async fn pause_download(
         .await
         .map_err(acquisition_error)?;
     let row = row_after(runtime, download.id).await?;
-    let title = title_name(runtime, row.title_id).await;
+    let (title, title_kind) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::pause",
-        DownloadJobDto::of(&row, title),
+        DownloadJobDto::of(&row, title, title_kind),
     ))
 }
 
@@ -248,10 +284,10 @@ pub async fn resume_download(
         .await
         .map_err(acquisition_error)?;
     let row = row_after(runtime, download.id).await?;
-    let title = title_name(runtime, row.title_id).await;
+    let (title, title_kind) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::resume",
-        DownloadJobDto::of(&row, title),
+        DownloadJobDto::of(&row, title, title_kind),
     ))
 }
 
@@ -269,10 +305,10 @@ pub async fn remove_download(
         .await
         .map_err(acquisition_error)?;
     let row = row_after(runtime, download.id).await?;
-    let title = title_name(runtime, row.title_id).await;
+    let (title, title_kind) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::remove",
-        DownloadJobDto::of(&row, title),
+        DownloadJobDto::of(&row, title, title_kind),
     ))
 }
 

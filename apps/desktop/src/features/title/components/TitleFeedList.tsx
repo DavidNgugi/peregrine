@@ -27,6 +27,7 @@ import { useEffect, useRef, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
+import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
 import { imageUrl } from "../../../lib/media.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
 
@@ -70,11 +71,21 @@ function FeedSentinel({ onReached }: { readonly onReached: () => void }): ReactE
 export interface TitleFeedListProps {
   readonly feed: TitleFeed;
   readonly onNavigate: (route: Route) => void;
+  /** A download status per title, so a tile wears the mark of a transfer in flight. */
+  readonly downloads?: DownloadMarks | undefined;
 }
 
+/** Nothing downloading, for a caller that draws the feed without a queue. */
+const NO_DOWNLOADS: DownloadMarks = new Map();
+
 /** One title's feed, drawn into whatever scrolls it. */
-export function TitleFeedList({ feed, onNavigate }: TitleFeedListProps): ReactElement | null {
+export function TitleFeedList({
+  feed,
+  onNavigate,
+  downloads,
+}: TitleFeedListProps): ReactElement | null {
   const { t } = useTranslation();
+  const marks = downloads ?? NO_DOWNLOADS;
 
   if (feed.items.length === 0) {
     // Nothing to draw and nothing wrong: a title no provider can be asked about has no feed, and the
@@ -113,6 +124,7 @@ export function TitleFeedList({ feed, onNavigate }: TitleFeedListProps): ReactEl
         {feed.items.map((item) => (
           <li key={item.titleId}>
             <TitleCard
+              {...downloadCardProps(marks, item.titleId, t)}
               detailsLabel={t("card.details")}
               href={routePath(routeFor(item))}
               meta={meta(item)}
