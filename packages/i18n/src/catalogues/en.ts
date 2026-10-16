@@ -602,7 +602,7 @@ export const en = {
           added: "Added to Prowlarr.",
           none: "Prowlarr offered no indexer definitions.",
           noMatches: "No indexer matches that filter.",
-          change: "Change",
+          change: "Change indexer",
         },
         confirm: {
           title: "Remove the indexer?",

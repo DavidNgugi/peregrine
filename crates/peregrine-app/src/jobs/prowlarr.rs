@@ -12,7 +12,7 @@ use peregrine_secrets::SecretStore;
 use peregrine_storage::{Database, JobChange};
 use peregrine_sync::{Job, JobContext, JobError, JobFuture};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use crate::events::{Event, EventBus, JOB_PROGRESS};
 use crate::prowlarr::{self, Installed, Supervisor};
@@ -307,6 +307,7 @@ impl ProwlarrStartJob {
             ))
         })?;
         self.managed.set_supervisor(supervisor);
+        self.seed_default_indexers().await;
         phase(
             &self.database,
             &self.bus,
@@ -318,6 +319,75 @@ impl ProwlarrStartJob {
         .await;
         Ok(Box::new(()))
     }
+
+    /// The public indexers an empty Prowlarr is seeded with.
+    ///
+    /// PRODUCT DECISION, and a deliberate departure from ADR 0009 decision 9 (Peregrine ships
+    /// every built-in indexer disabled and indexes nothing by default): the app now enables these
+    /// unless the user removes them. They are public trackers, no account is needed, and this one
+    /// constant is the whole list, so it is trivial to change or drop.
+    const PUBLIC_DEFAULTS: [&'static str; 5] =
+        ["1337x", "The Pirate Bay", "YTS", "EZTV", "Nyaa.si"];
+
+    /// Adds the curated public indexers when Prowlarr has none configured. Best effort: a tracker
+    /// that is down or refuses the add is logged and skipped, and never fails the start.
+    async fn seed_default_indexers(&self) {
+        let store = Arc::clone(&self.store);
+        let configured = match crate::indexers::list_indexers_async(Arc::clone(&store)).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                warn!(%error, "could not read the configured indexers to seed defaults");
+                return;
+            }
+        };
+        if !configured.is_empty() {
+            return;
+        }
+        let catalog = match crate::indexers::catalog_async(Arc::clone(&store)).await {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                warn!(%error, "could not read the indexer catalog to seed defaults");
+                return;
+            }
+        };
+        for target in Self::PUBLIC_DEFAULTS {
+            let Some(definition) = catalog
+                .iter()
+                .find(|definition| matches_seed_name(definition, target))
+            else {
+                debug!(target, "no catalog definition matched a seed name");
+                continue;
+            };
+            let name = definition.name.clone();
+            let key = definition.key.clone();
+            match crate::indexers::add_indexer_async(
+                Arc::clone(&store),
+                key,
+                name.clone(),
+                Vec::new(),
+            )
+            .await
+            {
+                Ok(_) => info!(indexer = %name, "seeded a public indexer"),
+                Err(error) => warn!(indexer = %name, %error, "could not seed a public indexer"),
+            }
+        }
+    }
+}
+
+/// Whether a catalog definition is the one a seed name means, comparing the definition's name and
+/// its implementation with case and punctuation removed, because Prowlarr spells them differently
+/// ("Nyaa.si" against an implementation of "Nyaa").
+fn matches_seed_name(definition: &peregrine_indexers::IndexerDefinition, target: &str) -> bool {
+    fn normalized(text: &str) -> String {
+        text.chars()
+            .filter(char::is_ascii_alphanumeric)
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+    let wanted = normalized(target);
+    let implementation = definition.key.split("::").next().unwrap_or_default();
+    normalized(&definition.name) == wanted || normalized(implementation) == wanted
 }
 
 impl Job for ProwlarrStartJob {

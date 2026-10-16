@@ -285,6 +285,11 @@ pub struct IndexerDefinition {
     pub name: String,
     /// Its one-line description.
     pub description: Option<String>,
+    /// The base URLs the definition lists. Prowlarr serves these at runtime for a `select`
+    /// whose choices are not in the schema (`selectOptionsProviderAction: "getUrls"`), which is
+    /// why the form would otherwise submit an empty Base Url and Prowlarr would answer
+    /// "Invalid URI: The URI is empty."
+    pub indexer_urls: Vec<String>,
     /// Its fields, in the order Prowlarr lists them.
     pub fields: Vec<IndexerField>,
 }
@@ -320,6 +325,8 @@ struct WireIndexer {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
+    indexer_urls: Vec<String>,
+    #[serde(default)]
     fields: Vec<WireField>,
 }
 
@@ -338,6 +345,8 @@ struct WireField {
     advanced: Option<bool>,
     #[serde(default)]
     privacy: Option<String>,
+    #[serde(default)]
+    select_options_provider_action: Option<String>,
     #[serde(default)]
     select_options: Vec<WireSelectOption>,
 }
@@ -380,6 +389,7 @@ impl WireIndexer {
         let implementation = stated(self.implementation)?;
         let contract = stated(self.config_contract)?;
         let name = stated(self.definition_name).or_else(|| stated(self.name))?;
+        let indexer_urls = self.indexer_urls;
         Some(IndexerDefinition {
             key: format!("{implementation}::{contract}"),
             name,
@@ -387,19 +397,20 @@ impl WireIndexer {
             fields: self
                 .fields
                 .into_iter()
-                .filter_map(WireField::into_field)
+                .filter_map(|field| WireField::into_field(field, &indexer_urls))
                 .collect(),
+            indexer_urls,
         })
     }
 }
 
 impl WireField {
-    fn into_field(self) -> Option<IndexerField> {
+    fn into_field(self, indexer_urls: &[String]) -> Option<IndexerField> {
         let name = stated(self.name)?;
         let label = stated(self.label).unwrap_or_else(|| name.clone());
         let kind = stated(self.kind).unwrap_or_else(|| "textbox".to_owned());
         let secret = matches!(self.privacy.as_deref(), Some("apiKey" | "password"));
-        let options = self
+        let mut options: Vec<IndexerOption> = self
             .select_options
             .into_iter()
             .filter_map(|option| {
@@ -408,11 +419,35 @@ impl WireField {
                 Some(IndexerOption { value, label })
             })
             .collect();
+        // A select whose choices Prowlarr serves at runtime (selectOptionsProviderAction:
+        // getUrls) arrives with no options, and its required Base Url is then submitted empty.
+        // The definition lists the URLs itself, so they become the choices.
+        let serves_urls = matches!(
+            self.select_options_provider_action.as_deref(),
+            Some("getUrls")
+        );
+        if options.is_empty() && kind == "select" && (serves_urls || !indexer_urls.is_empty()) {
+            options = indexer_urls
+                .iter()
+                .map(|url| IndexerOption {
+                    value: url.clone(),
+                    label: url.clone(),
+                })
+                .collect();
+        }
+        // A field with no stated value takes its first choice, so the form never opens (or
+        // submits) a required select as empty. Verified: this is 1337x's Base Url.
+        let mut value = self.value.and_then(json_text);
+        if value.as_deref().is_none_or(str::is_empty)
+            && let Some(first) = options.first()
+        {
+            value = Some(first.value.clone());
+        }
         Some(IndexerField {
             name,
             label,
             kind,
-            value: self.value.and_then(json_text),
+            value,
             options,
             advanced: self.advanced.unwrap_or(false),
             secret,
@@ -531,6 +566,15 @@ impl Prowlarr {
                 "appProfileId".to_owned(),
                 serde_json::Value::from(app_profile_id),
             );
+            let indexer_urls: Vec<String> = object
+                .get("indexerUrls")
+                .and_then(serde_json::Value::as_array)
+                .map(|urls| {
+                    urls.iter()
+                        .filter_map(|url| url.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
             if let Some(fields) = object
                 .get_mut("fields")
                 .and_then(serde_json::Value::as_array_mut)
@@ -550,6 +594,42 @@ impl Prowlarr {
                         field_object
                             .insert("value".to_owned(), serde_json::Value::String(value.clone()));
                     }
+                    // A select whose choices Prowlarr serves at runtime arrives empty; fill it
+                    // from the first schema option, or from the definition's own URLs, so a
+                    // required Base Url is never posted empty. 1337x is the case that proved it.
+                    let empty = field.get("value").is_none_or(|value| {
+                        value.is_null() || value.as_str().is_none_or(str::is_empty)
+                    });
+                    if empty {
+                        let first_option = field
+                            .get("selectOptions")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|options| options.first())
+                            .and_then(|option| option.get("value").cloned())
+                            .and_then(json_text);
+                        let serves_urls = field
+                            .get("selectOptionsProviderAction")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("getUrls");
+                        let from_urls = (serves_urls || field_name.eq_ignore_ascii_case("baseUrl"))
+                            .then(|| indexer_urls.first().cloned())
+                            .flatten();
+                        if let Some(value) = first_option.or(from_urls)
+                            && let Some(field_object) = field.as_object_mut()
+                        {
+                            field_object
+                                .insert("value".to_owned(), serde_json::Value::String(value));
+                        }
+                    }
+                }
+                let base_missing = fields.iter().any(|field| {
+                    field.get("name").and_then(serde_json::Value::as_str) == Some("baseUrl")
+                        && field.get("value").is_none_or(|value| {
+                            value.is_null() || value.as_str().is_none_or(str::is_empty)
+                        })
+                });
+                if base_missing {
+                    return Err(IndexerError::MissingField("Base Url".to_owned()));
                 }
             }
         }

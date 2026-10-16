@@ -222,14 +222,14 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
                   ) : null}
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3 rounded-md border border-border-subtle bg-surface-2 px-3 py-2">
                   <span className="text-body text-text-primary">{chosenName}</span>
                   <Button
                     onClick={() => {
                       setChosenKey("");
                     }}
                     size="sm"
-                    variant="ghost"
+                    variant="secondary"
                   >
                     {t("settings.indexers.add.change")}
                   </Button>

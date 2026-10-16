@@ -29,4 +29,7 @@ pub enum IndexerError {
     /// No credential is configured, so no request was made.
     #[error("no indexer credential is configured")]
     Unconfigured,
+    /// A field Prowlarr needs a value for, which the definition and the form both left empty.
+    #[error("the indexer needs a value for {0}")]
+    MissingField(String),
 }
