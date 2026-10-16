@@ -85,6 +85,8 @@ describe("BrowseView", () => {
       new Map([[2, "active" as const]]),
     );
     expect(html.indexOf("/title/movie/2")).toBeLessThan(html.indexOf("/title/movie/1"));
+    // The tile that moved also wears the mark: ordering and the border are one fact.
+    expect(html).toContain("bg-accent");
   });
 
   it("draws one tile per title, linked to the title's own screen", () => {

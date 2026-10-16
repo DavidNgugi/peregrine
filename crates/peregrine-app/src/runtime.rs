@@ -1056,6 +1056,13 @@ impl Runtime {
             notifications,
         };
 
+        // The engine is pull-only: it transfers without telling anyone, so a queue row and the
+        // download mark on a tile only move because something asks. The pump is started here,
+        // after the engine exists, and stopped with the bus in `Runtime::shutdown`.
+        if let Some(service) = &runtime.acquisition {
+            service.start_pump();
+        }
+
         // An installed managed Prowlarr starts with the app (docs/adr/0024), so the user does not
         // press Start on every launch. Submitting is a journal row and a channel send; the 90 s
         // health wait belongs to the job, not to this path. A submit that fails is logged and
@@ -3420,6 +3427,10 @@ impl Runtime {
         info!("the runtime is stopping");
         self.prowlarr.stop();
         self.scheduler.shutdown().await;
+        // Before the bus: a last tick published into a stopped bus is a delivery nobody hears.
+        if let Some(service) = &self.acquisition {
+            service.stop_pump().await;
+        }
         self.bus.shutdown().await;
 
         let live: Vec<(Ulid, i64)> = {

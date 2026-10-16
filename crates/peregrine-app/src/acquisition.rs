@@ -89,6 +89,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use jiff::Timestamp;
 use peregrine_domain::{
@@ -105,6 +106,10 @@ use peregrine_torrent::{
     TorrentSource,
 };
 use thiserror::Error;
+use tokio::task::JoinHandle;
+use tokio::time::{Instant, MissedTickBehavior};
+use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
 use crate::events::{DOWNLOAD_STATS, Event, EventBus};
 
@@ -113,6 +118,13 @@ use crate::events::{DOWNLOAD_STATS, Event, EventBus};
 /// The UI's 4 Hz is the [`EventBus`]'s tick, so one budget serves both: a tick this discards
 /// publishes nothing either.
 const TICK_INTERVAL_MILLIS: i64 = 1_000;
+
+/// How often the pump asks every live engine for its statistics.
+///
+/// The polling interval and the coalescing budget are one number: a faster pump would be
+/// discarded by [`AcquisitionService::statistics`] without even reading the engine, and a
+/// slower one would leave the queue behind the transfer it is describing.
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(TICK_INTERVAL_MILLIS as u64);
 
 /// Why an acquisition operation could not be carried out.
 ///
@@ -299,6 +311,23 @@ pub struct AcquisitionService {
     /// The last instant each job's statistics reached the database, which is the whole of the
     /// coalescing state.
     written_at: Mutex<HashMap<i64, Timestamp>>,
+    /// The statistics pump, started by [`AcquisitionService::start_pump`] and `None` until then.
+    ///
+    /// The engine is pull-only: it transfers without telling anyone, so without this a live
+    /// transfer writes nothing — the row stays at zero and `download://stats` never fires. The
+    /// composition root starts it once a real engine exists and stops it before the bus; a test
+    /// that drives [`AcquisitionService::statistics`] directly never starts one.
+    pump: Mutex<Option<Pump>>,
+}
+
+/// The task that asks every live engine for its statistics on a tick.
+///
+/// The shape [`EventBus`] uses for its own tick: a token to stop it and the handle to await,
+/// both owned by the thing that started it, so a stopped service cannot leave a task publishing
+/// into a bus that has already shut down.
+struct Pump {
+    shutdown: CancellationToken,
+    task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl AcquisitionService {
@@ -328,6 +357,7 @@ impl AcquisitionService {
             bus,
             handles: Mutex::new(HashMap::new()),
             written_at: Mutex::new(HashMap::new()),
+            pump: Mutex::new(None),
         }
     }
 
@@ -338,6 +368,81 @@ impl AcquisitionService {
     #[must_use]
     pub fn handle_for(&self, job_id: i64) -> Option<TorrentHandle> {
         self.handles.lock().ok()?.get(&job_id).copied()
+    }
+
+    /// Starts the statistics pump, once, for this service.
+    ///
+    /// [`AcquisitionService::statistics`] is a pull: it reads the engine and writes the row, and
+    /// nothing calls it on its own. An engine transfers in silence, so a session that never polls
+    /// shows `downloading` at 0 % while the bytes move. The composition root starts this only
+    /// after a real engine is built, so a unit test that calls `statistics` directly is
+    /// unaffected. Idempotent.
+    pub fn start_pump(self: &Arc<Self>) {
+        let mut slot = match self.pump.lock() {
+            Ok(slot) => slot,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if slot.is_some() {
+            return;
+        }
+        let service = Arc::clone(self);
+        let shutdown = CancellationToken::new();
+        let token = shutdown.clone();
+        let mut ticker =
+            tokio::time::interval_at(Instant::now() + SAMPLE_INTERVAL, SAMPLE_INTERVAL);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = token.cancelled() => break,
+                    _ = ticker.tick() => service.sample().await,
+                }
+            }
+        });
+        *slot = Some(Pump {
+            shutdown,
+            task: Mutex::new(Some(task)),
+        });
+    }
+
+    /// Stops the statistics pump. Idempotent, and safe from a shared reference.
+    pub async fn stop_pump(&self) {
+        let pump = match self.pump.lock() {
+            Ok(mut slot) => slot.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        let Some(pump) = pump else {
+            return;
+        };
+        pump.shutdown.cancel();
+        let task = match pump.task.lock() {
+            Ok(mut slot) => slot.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some(task) = task {
+            let _ = task.await;
+        }
+    }
+
+    /// Asks every job this session holds for one statistics tick.
+    ///
+    /// The ids are taken under the lock and the lock is released before any await, so a slow
+    /// engine read never blocks a pause or an add. A tick the domain refuses — a job that went
+    /// terminal between the read and the sample — is logged and skipped rather than ending the
+    /// sweep: one finished job must not stop every other transfer's progress.
+    async fn sample(&self) {
+        let ids: Vec<i64> = {
+            let handles = match self.handles.lock() {
+                Ok(handles) => handles,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            handles.keys().copied().collect()
+        };
+        for id in ids {
+            if let Err(error) = self.statistics(id).await {
+                debug!(%error, job = id, "a download statistics tick was refused");
+            }
+        }
     }
 
     /// Inspects one release and, if the gate allows it, hands it to the engine.
@@ -1734,6 +1839,37 @@ mod tests {
             harness.sink.delivered().len(),
             0,
             "delivery is the bus's 250 ms tick, not this call's"
+        );
+    }
+
+    /// The pump sweeps every live job in one pass, so a queue of two transfers advances together
+    /// rather than one of them waiting for the other to stop.
+    #[tokio::test]
+    async fn sample_reads_every_live_job() {
+        let harness = harness().await;
+        let first = harness
+            .start(17, description())
+            .await
+            .expect("the first job starts");
+        let second = harness
+            .start(18, description())
+            .await
+            .expect("the second job starts");
+
+        harness.service.sample().await;
+
+        let reads = harness
+            .engine
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, EngineCall::Stats(_)))
+            .count();
+        assert_eq!(reads, 2, "the sweep asks each live job once");
+        let rows = harness.rows().await;
+        assert!(
+            rows.iter().any(|row| row.id == first.job.id)
+                && rows.iter().any(|row| row.id == second.job.id),
+            "both jobs are still queued"
         );
     }
 
