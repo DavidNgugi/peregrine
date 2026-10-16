@@ -18,8 +18,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use peregrine_secrets::{Secret, SecretStore, SecretStoreError};
+use peregrine_secrets::{Secret, SecretStore};
 use sha2::{Digest, Sha256};
+
+use tracing::warn;
 
 use crate::indexers::{api_key_key, endpoint_key};
 
@@ -158,18 +160,6 @@ pub enum ProwlarrError {
     /// Prowlarr's config.xml had no readable API key.
     #[error("Prowlarr's config.xml did not hold a key")]
     Config,
-    /// The keyring refused the key.
-    #[error("the keyring refused the Prowlarr key")]
-    Secret(#[source] SecretStoreError),
-    /// The blocking keyring write did not finish.
-    #[error("the keyring write did not finish")]
-    Task,
-}
-
-impl From<SecretStoreError> for ProwlarrError {
-    fn from(source: SecretStoreError) -> Self {
-        Self::Secret(source)
-    }
 }
 
 /// A verified, unpacked Prowlarr under the data directory.
@@ -476,8 +466,8 @@ impl Supervisor {
     /// # Errors
     ///
     /// MissingExecutable when the pack is not installed; NotReady when it does not answer within
-    /// the timeout, with the child stopped before that is returned; and the config and keyring
-    /// variants for a key that could not be read or stored.
+    /// the timeout, with the child stopped before that is returned; and the config variant for a
+    /// key that could not be read.
     pub async fn start(
         installed: &Installed,
         store: Arc<dyn SecretStore>,
@@ -505,12 +495,18 @@ impl Supervisor {
             let base_url = format!("http://127.0.0.1:{}", config.port);
             let endpoint = base_url.clone();
             let key = config.api_key;
-            tokio::task::spawn_blocking(move || {
+            let stored = tokio::task::spawn_blocking(move || {
                 store.set(&endpoint_key(), &Secret::new(endpoint))?;
                 store.set(&api_key_key(), &Secret::new(key))
             })
-            .await
-            .map_err(|_| ProwlarrError::Task)??;
+            .await;
+            // The instance is up either way: a keyring that refuses the write must not fail the
+            // start, because search falls back to this same config.xml (indexers::managed_credentials).
+            if !matches!(stored, Ok(Ok(()))) {
+                warn!(
+                    "the managed Prowlarr key could not be stored; search will read it from config.xml"
+                );
+            }
             return Ok(Self {
                 child: None,
                 base_url,
@@ -568,12 +564,18 @@ impl Supervisor {
         let endpoint = base_url.clone();
         let key = config.api_key;
         let store = Arc::clone(store);
-        tokio::task::spawn_blocking(move || {
+        let stored = tokio::task::spawn_blocking(move || {
             store.set(&endpoint_key(), &Secret::new(endpoint))?;
             store.set(&api_key_key(), &Secret::new(key))
         })
-        .await
-        .map_err(|_| ProwlarrError::Task)??;
+        .await;
+        // Best effort: the instance is running and its config.xml holds the key, so a keychain that
+        // refuses the write must not fail the start.
+        if !matches!(stored, Ok(Ok(()))) {
+            warn!(
+                "the managed Prowlarr key could not be stored; search will read it from config.xml"
+            );
+        }
         Ok(base_url)
     }
 
@@ -602,6 +604,18 @@ impl Drop for Supervisor {
 struct Config {
     port: u16,
     api_key: String,
+}
+
+/// The managed instance's endpoint and key, read from the app's own `config.xml`.
+///
+/// The keyring can refuse to hand the managed key back — a locked keychain, or an update prompt a
+/// background process cannot answer — and the app owns this file, so search reads it here rather
+/// than depending on the keychain. Only the managed instance has such a file; a custom Prowlarr's
+/// key lives in the keyring and nowhere else.
+#[must_use]
+pub fn managed_credentials(data_dir: &Path) -> Option<(String, String)> {
+    let config = read_config(&data_dir.join("prowlarr-data"))?;
+    Some((format!("http://127.0.0.1:{}", config.port), config.api_key))
 }
 
 /// Reads config_dir/config.xml, or None when it is not there or not readable yet.

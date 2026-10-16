@@ -4,7 +4,8 @@
 //! credential; SecretKey::endpoint names the first and SecretKey::provider the second, which is the
 //! shape a metadata provider key already uses. Nothing here logs, formats, or returns a key.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use peregrine_indexers::{
     ConfiguredIndexer, Indexer, IndexerDefinition, IndexerError, IndexerQuery, IndexerRelease,
@@ -56,14 +57,41 @@ pub fn api_key_key() -> SecretKey {
     SecretKey::provider(PROWLARR)
 }
 
+/// The app's data directory, so the managed instance's own `config.xml` can be read as a
+/// keychain fallback. Set once by the composition root.
+static MANAGED_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Records where the managed instance keeps its data. Called once, by `Runtime::start`.
+pub fn set_managed_data_dir(data_dir: PathBuf) {
+    let _ = MANAGED_DATA_DIR.set(data_dir);
+}
+
+/// The managed instance's key from its own `config.xml`, or None when this build has none.
+fn managed_credentials() -> Option<(String, String)> {
+    let data_dir = MANAGED_DATA_DIR.get()?;
+    crate::prowlarr::managed_credentials(data_dir)
+}
+
 fn load(store: &dyn SecretStore) -> Result<Option<(String, Secret)>, SecretStoreError> {
-    let Some(endpoint) = store.get(&endpoint_key())? else {
-        return Ok(None);
-    };
-    let Some(key) = store.get(&api_key_key())? else {
-        return Ok(None);
-    };
-    Ok(Some((endpoint.expose_secret().to_owned(), key)))
+    let stored = store.get(&endpoint_key()).and_then(|endpoint| {
+        endpoint.map_or(Ok(None), |endpoint| {
+            store
+                .get(&api_key_key())
+                .map(|key| key.map(|key| (endpoint, key)))
+        })
+    });
+    // The managed instance's key can be refused by the keyring — a locked keychain, or an update
+    // prompt a background process cannot answer — and the app owns that config.xml, so search reads
+    // it here rather than depending on the keychain. A custom Prowlarr's key is in the keyring and
+    // nowhere else, so a refusal with no managed file still surfaces as a store error.
+    match stored {
+        Ok(Some((endpoint, key))) => Ok(Some((endpoint.expose_secret().to_owned(), key))),
+        Ok(None) => Ok(managed_credentials().map(|(url, key)| (url, Secret::new(key)))),
+        Err(error) => match managed_credentials() {
+            Some((url, key)) => Ok(Some((url, Secret::new(key)))),
+            None => Err(error),
+        },
+    }
 }
 
 /// Reads whether an indexer is configured. Blocking; a caller on the async runtime wraps it.

@@ -302,6 +302,9 @@ impl ProwlarrStartJob {
         let started = Supervisor::start(&installed, Arc::clone(&self.store), &self.data_dir).await;
         self.managed.set_phase(Phase::Idle);
         let supervisor = started.map_err(|error| {
+            // The scheduler logs only "failed" and leaves the row queued, so without this the
+            // reason a managed start refused is invisible outside a debugger.
+            warn!(%error, "the managed Prowlarr could not be started");
             JobError::failed(format!(
                 "the managed Prowlarr could not be started: {error}"
             ))

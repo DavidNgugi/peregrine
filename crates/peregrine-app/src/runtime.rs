@@ -804,6 +804,11 @@ impl Runtime {
                 source,
             })?;
 
+        // The managed Prowlarr keeps its key in the app's own `prowlarr-data/config.xml`, and the
+        // keyring can refuse to hand it back; recording the directory here is what lets search read
+        // that file as a fallback (crate::indexers).
+        crate::indexers::set_managed_data_dir(config.data_directory().to_path_buf());
+
         // A recovery is logged where it happens, in `Database::open`; the runtime carries
         // the signal on to health.
         let database = Arc::new(Database::open(config.database_path()).await?);

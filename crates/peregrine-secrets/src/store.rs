@@ -133,7 +133,17 @@ impl SecretStore for KeyringStore {
     }
 
     fn set(&self, key: &SecretKey, secret: &Secret) -> Result<(), SecretStoreError> {
-        self.entry(key)?
+        let entry = self.entry(key)?;
+        // Updating an OS keychain item can raise an authorization prompt that a background process
+        // cannot answer, and it fails as NoStorageAccess. Writing a value the keychain already holds
+        // is a no-op the user should not be asked about, so it is skipped.
+        match entry.get_password() {
+            Ok(existing) if existing == secret.expose_secret() => return Ok(()),
+            Ok(_) | Err(keyring::Error::NoEntry) => {}
+            // A read that failed for another reason must not stop the write the caller asked for.
+            Err(_) => {}
+        }
+        entry
             .set_password(secret.expose_secret())
             .map_err(|error| classify(&error))
     }
