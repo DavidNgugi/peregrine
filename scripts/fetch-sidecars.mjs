@@ -168,7 +168,8 @@ for (const component of components) {
 
   const isMacMpv = component === "mpv" && key.startsWith("macos");
   const directory = isMacMpv ? join(stage, "mpv.app") : join(stage, component);
-  const staged = component === "mpv" ? join(directory, isMacMpv ? "Contents/MacOS/mpv" : "mpv.exe") : directory;
+  const staged =
+    component === "mpv" ? join(directory, isMacMpv ? "Contents/MacOS/mpv" : "mpv.exe") : directory;
   if (existsSync(staged) && !force) {
     console.log(`${component}: present at ${directory}`);
     continue;
@@ -184,7 +185,9 @@ for (const component of components) {
   const digest = sha256(cache);
   if (digest !== entry.sha256) {
     rmSync(cache);
-    throw new Error(`${component}: digest mismatch\n expected ${entry.sha256}\n actual   ${digest}`);
+    throw new Error(
+      `${component}: digest mismatch\n expected ${entry.sha256}\n actual   ${digest}`,
+    );
   }
 
   const staging = mkdtempSync(join(tmpdir(), "peregrine-sidecar-"));
