@@ -2,7 +2,7 @@
 
 Peregrine is a cross-platform desktop application for media discovery, library management, torrent acquisition, and playback. This document is the architectural source of truth. Data structures live in [DATA_MODEL.md](./DATA_MODEL.md), dynamic behaviour in [FLOWS.md](./FLOWS.md), decisions and their rejected alternatives in [adr/](./adr/), the backlog in [TASKS.md](./TASKS.md).
 
-Status: target architecture, partially implemented. [TASKS.md](./TASKS.md#implementation-status) records the code inventory and remaining runtime integration. The behaviours below are requirements, not claims that every subsystem is available. Every load-bearing claim that still needs empirical confirmation is tagged `SPIKE-n` and listed in [§21](#21-open-spikes).
+Status: target architecture, partly built. What works today is in the [README](../README.md); [TASKS.md](./TASKS.md#implementation-status) records what each task still owes. The behaviours below are requirements, not claims that every subsystem is available. Every load-bearing claim that still needs empirical confirmation is tagged `SPIKE-n` and listed in [§21](#21-open-spikes).
 
 ---
 

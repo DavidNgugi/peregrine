@@ -1,6 +1,6 @@
 # Peregrine — Delivery Plan
 
-Scope, sequencing, exit criteria, and the risk register. The granular backlog and [current implementation status](./TASKS.md#implementation-status) are in [TASKS.md](./TASKS.md); the architectural constraints that make the sequencing necessary are in [ARCHITECTURE.md](./ARCHITECTURE.md).
+Scope, sequencing, exit criteria, and the risk register. The granular backlog, and what each task still owes, is in [TASKS.md](./TASKS.md); what works today is in the [README](../README.md). The architectural constraints that make the sequencing necessary are in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 

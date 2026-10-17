@@ -58,7 +58,7 @@ A Tauri v2 shell, a Rust core, and a React front end. The core owns all state an
 | [DATA_MODEL.md](docs/DATA_MODEL.md) | Schema, indices, invariants, migrations, retention |
 | [FLOWS.md](docs/FLOWS.md) | End-to-end sequence diagrams and state machines |
 | [PLAN.md](docs/PLAN.md) | Phases, exit criteria, effort model, risk register |
-| [TASKS.md](docs/TASKS.md) | The backlog, with acceptance criteria and current status |
+| [TASKS.md](docs/TASKS.md) | The backlog: what each task still owes, and its acceptance criteria |
 | [SECURITY.md](SECURITY.md) | Threat model, controls, accepted risks, reporting policy |
 | [AGENTS.md](AGENTS.md) | The engineering contract, for human and AI contributors alike |
 
