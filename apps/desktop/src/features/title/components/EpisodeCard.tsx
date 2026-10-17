@@ -126,7 +126,10 @@ export function EpisodeCard({
           <p className="line-clamp-3 text-caption text-text-secondary">{episode.overview}</p>
         )}
 
-        {onDownload === undefined ? null : (
+        {/* A card the library already holds offers no Download: the chip says it is here, and a
+            second button would be an offer to fetch what is on disk. While this episode's own
+            transfer is in flight the button stays, saying so. */}
+        {onDownload === undefined || (availability !== "wanted" && !downloading) ? null : (
           <div className="mt-auto pt-1">
             <Button
               aria-label={t("title.episode.downloadLabel", {

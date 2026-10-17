@@ -287,7 +287,22 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       : title.title.kind === "shows"
         ? "show"
         : "movie";
-  const seasons = useSeasons(route.kind === "title" ? route.id : null, titleKind, title.refreshes);
+  // A finished acquisition writes the library rows the episode cards read, so the season read runs
+  // again once the job settles. Without it the card that was just downloaded kept saying
+  // "Not acquired" until the reader left the page and came back.
+  const [acquiredRevision, setAcquiredRevision] = useState(0);
+  const acquiredTitle =
+    acquire.outcome === "queued" && !acquire.running && !acquire.starting ? acquire.titleId : null;
+  useEffect(() => {
+    if (acquiredTitle !== null) {
+      setAcquiredRevision((current) => current + 1);
+    }
+  }, [acquiredTitle]);
+  const seasons = useSeasons(
+    route.kind === "title" ? route.id : null,
+    titleKind,
+    title.refreshes + acquiredRevision,
+  );
   const openScreen = useCallback(
     (action: string) => {
       const target = ROUTE_FOR_ACTION[action];
