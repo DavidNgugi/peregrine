@@ -13,9 +13,10 @@
  * card's comment calls the half that carries the state — and extracting the chip into a `packages/ui`
  * primitive is recorded as owed rather than half-done here.
  *
- * **Nothing here is interactive.** An episode is not a link: playback is `PG-E15`'s and does not exist,
- * and a card that looked clickable and did nothing would be the enabled-control-that-fires-nothing
- * failure the hero's actions exist to avoid.
+ * **The card is not a link.** Playback is `PG-E15`'s and does not exist, and a card that looked
+ * clickable and did nothing would be the enabled-control-that-fires-nothing failure the hero's
+ * actions exist to avoid. The one control it can draw is the Download button a page passes in, and
+ * that button acts on the episode rather than on the card.
  *
  * **The card fills its cell, and a synopsis is a clamped block rather than a document.** A season holds
  * episodes a provider described and episodes it did not, so two cards in one row carry different
@@ -25,6 +26,7 @@
  */
 
 import type { EpisodeDto } from "@peregrine/ipc-client";
+import { Button } from "@peregrine/ui";
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -42,10 +44,15 @@ const STILL_HEIGHT = 169;
 
 export interface EpisodeCardProps {
   readonly episode: EpisodeDto;
+  /**
+   * Asks the page to acquire this episode. Omitted where the page has no acquisition control, and
+   * then the card draws no button at all rather than a disabled one.
+   */
+  readonly onDownload?: ((episode: EpisodeDto) => void) | undefined;
 }
 
 /** One episode's card. */
-export function EpisodeCard({ episode }: EpisodeCardProps): ReactElement {
+export function EpisodeCard({ episode, onDownload }: EpisodeCardProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: moving to another season has to give the next still
   // its own chance, and a boolean would keep the previous season's refusal forever.
@@ -108,6 +115,24 @@ export function EpisodeCard({ episode }: EpisodeCardProps): ReactElement {
 
         {episode.overview === null ? null : (
           <p className="line-clamp-3 text-caption text-text-secondary">{episode.overview}</p>
+        )}
+
+        {onDownload === undefined ? null : (
+          <div className="mt-auto pt-1">
+            <Button
+              aria-label={t("title.episode.downloadLabel", {
+                number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                name: episode.name ?? t("title.unnamedEpisode"),
+              })}
+              onClick={() => {
+                onDownload(episode);
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              {t("title.episode.download")}
+            </Button>
+          </div>
         )}
       </div>
     </article>

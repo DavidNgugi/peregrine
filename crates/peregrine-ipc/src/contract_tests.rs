@@ -718,6 +718,14 @@ fn fails_internal(command: &'static str, drive: Drive) -> ContractCase {
 fn download_cases() -> Vec<ContractCase> {
     vec![
         fails_internal("acquire", acquire_dead),
+        ContractCase {
+            command: "acquire",
+            expected: Expected::Fails {
+                code: ErrorCode::InvalidInput,
+                retryable: false,
+            },
+            drive: acquire_with_half_an_episode,
+        },
         fails_internal("list_downloads", list_downloads_dead),
         fails_internal("pause_download", pause_download_dead),
         fails_internal("resume_download", resume_download_dead),
@@ -739,6 +747,23 @@ fn acquire_dead(harness: &Harness) -> Invocation<'_> {
         crate::downloads::acquire(
             harness.dead_state(),
             crate::library::TitleRef { id: 1 },
+            None,
+            None,
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `acquire` refuses half an episode reference before it looks for a runtime.
+fn acquire_with_half_an_episode(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::acquire(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
+            Some(1),
             None,
         )
         .await

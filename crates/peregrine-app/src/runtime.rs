@@ -1782,6 +1782,9 @@ impl Runtime {
 
     /// Finds one title's best release and queues its download, as a job.
     ///
+    /// When `episode` names one, the search is narrowed to that episode and only a release that is
+    /// exactly it can be chosen; `None` acquires the title as a whole.
+    ///
     /// # Errors
     ///
     /// `RuntimeError::Storage` when the journal cannot be written, `RuntimeError::Scheduler` when the
@@ -1791,12 +1794,14 @@ impl Runtime {
         &self,
         account: peregrine_domain::AccountScope,
         title_id: i64,
+        episode: Option<crate::jobs::acquire::EpisodePick>,
         min_seeders: u32,
     ) -> Result<StartedJob, RuntimeError> {
         self.submit_acquire(
             account,
             crate::jobs::acquire::Target {
                 title_id,
+                episode,
                 chosen: None,
             },
             min_seeders,
@@ -1833,6 +1838,7 @@ impl Runtime {
             account,
             crate::jobs::acquire::Target {
                 title_id: chosen.title_id,
+                episode: None,
                 chosen: Some(crate::jobs::acquire::ChosenOffer {
                     raw_title: chosen.release_title,
                     indexer: chosen.indexer,
@@ -1884,7 +1890,7 @@ impl Runtime {
     ) -> Result<StartedJob, RuntimeError> {
         let title_id = target.title_id;
         let now = self.clock.now().as_millisecond();
-        let key = crate::jobs::acquire::dedupe_key(title_id);
+        let key = crate::jobs::acquire::dedupe_key(title_id, target.episode);
         let journal_id = self
             .database
             .insert_job(NewJob {

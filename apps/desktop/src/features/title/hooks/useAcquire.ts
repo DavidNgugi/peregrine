@@ -8,7 +8,6 @@
  */
 
 import {
-  acquire,
   commands,
   eventTopics,
   listDownloads,
@@ -23,6 +22,14 @@ import { eventPayload, isTerminal, jobPhase } from "../../../lib/job-events.js";
 
 /** How the last acquire ended, or `null` while it has not. */
 export type AcquireOutcome = "queued" | "blocked" | "failed" | null;
+
+/** One episode a page asked to acquire, which narrows the search from the title to that episode. */
+export interface EpisodePick {
+  /** The season the episode belongs to. */
+  readonly season: number;
+  /** The episode's number within that season. */
+  readonly episode: number;
+}
 
 /** What the title page's Download control reads. */
 export interface AcquireControl {
@@ -45,8 +52,8 @@ export interface AcquireControl {
   /** The title this state belongs to, or `null` before the first start. A control held by the shell
    * would otherwise show one title's job on every other title's page. */
   readonly titleId: number | null;
-  /** Asks the core to acquire the title. */
-  readonly start: (titleId: number) => Promise<void>;
+  /** Asks the core to acquire the title, or one episode of it when one is given. */
+  readonly start: (titleId: number, episode?: EpisodePick) => Promise<void>;
 }
 
 interface AcquireState {
@@ -82,10 +89,12 @@ const IDLE: AcquireState = {
 export function useAcquire(): AcquireControl {
   const [state, setState] = useState<AcquireState>(IDLE);
 
-  const start = useCallback(async (titleId: number): Promise<void> => {
+  const start = useCallback(async (titleId: number, episode?: EpisodePick): Promise<void> => {
     setState({ ...IDLE, titleId, starting: true });
     try {
-      const started = await acquire(titleId);
+      const started = await unwrap(
+        commands.acquire({ id: titleId }, null, episode?.season ?? null, episode?.episode ?? null),
+      );
       setState({
         ...IDLE,
         titleId,

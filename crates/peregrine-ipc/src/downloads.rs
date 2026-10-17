@@ -11,6 +11,7 @@ use peregrine_app::DownloadJobRow;
 use peregrine_app::PreferredQuality;
 use peregrine_app::TrashError;
 use peregrine_app::acquisition::AcquisitionError;
+use peregrine_app::jobs::acquire::EpisodePick;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Number;
@@ -263,24 +264,49 @@ fn acquisition_error(error: &AcquisitionError) -> AppError {
     }
 }
 
-/// Starts an automatic acquisition for one title, and answers the job doing it.
+/// Reads an episode reference, refusing one half of it rather than guessing the other.
+///
+/// A season without an episode would acquire the whole season and an episode without one has no
+/// season to be an episode of, so neither is a request the job can honour.
+fn episode_pick(
+    season: Option<u32>,
+    episode: Option<u32>,
+) -> Result<Option<EpisodePick>, AppError> {
+    match (season, episode) {
+        (Some(season), Some(episode)) => Ok(Some(EpisodePick { season, episode })),
+        (None, None) => Ok(None),
+        _ => Err(AppError::new(ErrorCode::InvalidInput)
+            .with_detail("A season and an episode must be given together, or neither.")),
+    }
+}
+
+/// Starts an automatic acquisition for one title, or for one episode of it, and answers the job
+/// doing it.
+///
+/// `season` and `episode` are given together to acquire a single episode; both omitted acquires
+/// the title as a whole. Giving one without the other is refused rather than guessed.
 ///
 /// # Errors
 ///
-/// `ErrorCode::Internal` when the runtime is not running or the journal refuses the row, and
-/// `ErrorCode::Unsupported` when the torrent session did not start.
+/// `ErrorCode::InvalidInput` when only one of the two is given, `ErrorCode::Internal` when the
+/// runtime is not running or the journal refuses the row, and `ErrorCode::Unsupported` when the
+/// torrent session did not start.
 #[tauri::command]
 #[specta::specta]
 pub async fn acquire(
     state: State<'_, RuntimeState>,
     title: TitleRef,
     min_seeders: Option<u32>,
+    season: Option<u32>,
+    episode: Option<u32>,
 ) -> Result<JobStarted, AppError> {
+    let episode = episode_pick(season, episode)?;
     let started = state
         .runtime()?
         .start_acquire(
             peregrine_app::runtime::installation_scope(),
             title.id,
+            episode,
             min_seeders.unwrap_or(1),
         )
         .await?;

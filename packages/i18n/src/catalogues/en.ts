@@ -433,6 +433,8 @@ export const en = {
         },
         aired: "Aired {{date}}",
         runtime: "{{minutes}} min",
+        download: "Download",
+        downloadLabel: "Download episode {{number}} ({{name}})",
         // The word and not the dot: a card's state is carried by its word (§2.2), and the dot's colour
         // mapping belongs to `TitleCard`, which owns the one copy of it.
         availability: {
@@ -818,6 +820,112 @@ export const en = {
           failed:
             "The key could not be confirmed. Try again, and check the provider's own status if it keeps happening.",
         },
+      },
+    },
+    setup: {
+      label: "Set up Peregrine",
+      progress: {
+        label: "Setup progress",
+        stepOf: "Step {{current}} of {{total}}",
+        steps: {
+          welcome: "Welcome",
+          provider: "Provider",
+          indexers: "Indexers",
+          library: "Library",
+          done: "Done",
+        },
+      },
+      back: "Back",
+      next: "Continue",
+      welcome: {
+        title: "Welcome to Peregrine",
+        body: "Peregrine finds films and series, keeps a library of what is already on this machine, and plays it — and it sends nothing off this machine unless you ask it to.",
+        start: "Get started",
+      },
+      provider: {
+        title: "Connect a metadata provider",
+        body: "Peregrine asks TMDB about films and series. The key is stored in your operating system's keychain, not in Peregrine's database.",
+        label: "API key",
+        placeholder: "Paste the key",
+        save: "Save and test",
+        test: "Test connection",
+        configured: "{{provider}} is connected.",
+        checking: "Asking {{provider}} whether that key works…",
+        required: "Save a key to continue.",
+        skip: "Skip for now — Discover and Browse will stay empty.",
+        loading: "Checking your keychain…",
+        retry: "Try again",
+        builtIn: "Use the built-in key",
+        empty: "This build has no metadata provider to configure.",
+        store: {
+          unread: "Peregrine has not finished reading your keychain.",
+          denied: "Peregrine cannot read your keychain. Allow the request, then try again.",
+          unavailable: "This system has no keychain, so a key cannot be stored here.",
+        },
+        unavailable: {
+          title: "Your provider could not be read.",
+          body: "Peregrine's core did not answer, so this step cannot configure a provider. You can continue and add one in Settings later.",
+        },
+      },
+      indexers: {
+        title: "Set up indexers",
+        body: "Peregrine uses Prowlarr to find releases. Peregrine can install and run the official Prowlarr on this machine; the key it generates is stored in your keychain.",
+        install: "Install Prowlarr",
+        installed: "Prowlarr is installed. Start it to search.",
+        start: "Start Prowlarr",
+        starting: "Starting Prowlarr…",
+        installing: "Installing Prowlarr…",
+        running: "Prowlarr is running. Search works.",
+        progress: "Prowlarr install progress",
+        required: "Install Prowlarr to continue.",
+        skip: "Skip — search will be unavailable.",
+        unsupported:
+          "This platform has no managed Prowlarr build, so search will be unavailable. You can point Peregrine at a remote Prowlarr in Settings later.",
+        loading: "Reading the managed Prowlarr…",
+        unavailable: {
+          title: "The managed Prowlarr could not be read.",
+          body: "Peregrine's core did not answer. You can continue and set it up in Settings later.",
+        },
+      },
+      library: {
+        title: "Choose your library",
+        body: "Pick the folder your films or series are in. Peregrine scans it where it is and moves nothing.",
+        choose: "Choose folder…",
+        adding: "Adding the folder…",
+        another: "Add another folder…",
+        empty: "No folder chosen yet.",
+        loading: "Looking for folders already added…",
+        required: "Add a folder to continue.",
+        scanStarted: "Scan started. Titles appear as the scan finds them.",
+        scanFailed: {
+          title: "The folder was added, but the scan could not start.",
+          body: "The folder is still in your library. Scan again here, or from Settings once you are in.",
+          action: "Scan now",
+        },
+        refused: {
+          title: "That folder could not be added.",
+        },
+        unavailable: {
+          title: "Your folders could not be read.",
+          body: "Peregrine's core did not answer, so this is unknown rather than empty. Choosing a folder still tries the add.",
+        },
+      },
+      done: {
+        title: "You're all set",
+        body: "Peregrine is ready. You can change any of this in Settings.",
+        provider: {
+          configured: "Metadata provider: connected.",
+          skipped: "Metadata provider: not configured. Discover and Browse will stay empty.",
+        },
+        indexers: {
+          ready: "Search: Prowlarr is ready.",
+          unsupported:
+            "Search: this platform has no managed Prowlarr. You can point at a remote instance in Settings.",
+          skipped: "Search: not set up. You can add it in Settings.",
+        },
+        library_one: "Library: {{count}} folder.",
+        library_other: "Library: {{count}} folders.",
+        open: "Open Peregrine",
       },
     },
     ipc: {

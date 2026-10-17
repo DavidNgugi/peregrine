@@ -500,14 +500,19 @@ export const commands = {
 	/**  Removes one indexer and answers the refreshed list. */
 	removeIndexer: (indexer: IndexerRef) => typedError<ConfiguredIndexerDto[], AppError_Serialize>(__TAURI_INVOKE("remove_indexer", { indexer })),
 	/**
-	 *  Starts an automatic acquisition for one title, and answers the job doing it.
+	 *  Starts an automatic acquisition for one title, or for one episode of it, and answers the job
+	 *  doing it.
+	 * 
+	 *  `season` and `episode` are given together to acquire a single episode; both omitted acquires
+	 *  the title as a whole. Giving one without the other is refused rather than guessed.
 	 * 
 	 *  # Errors
 	 * 
-	 *  `ErrorCode::Internal` when the runtime is not running or the journal refuses the row, and
-	 *  `ErrorCode::Unsupported` when the torrent session did not start.
+	 *  `ErrorCode::InvalidInput` when only one of the two is given, `ErrorCode::Internal` when the
+	 *  runtime is not running or the journal refuses the row, and `ErrorCode::Unsupported` when the
+	 *  torrent session did not start.
 	 */
-	acquire: (title: TitleRef, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire", { title, minSeeders })),
+	acquire: (title: TitleRef, minSeeders: number | null, season: number | null, episode: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire", { title, minSeeders, season, episode })),
 	/**  The download queue, newest first. */
 	listDownloads: () => typedError<DownloadJobDto[], AppError_Serialize>(__TAURI_INVOKE("list_downloads")),
 	/**  Pauses one download and answers its row as it stands after the move. */

@@ -61,19 +61,37 @@ pub struct ChosenOffer {
     pub source: IndexerSource,
 }
 
-/// Which title to acquire, and the release to acquire when the user has chosen one.
+/// One episode to acquire rather than the whole title.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpisodePick {
+    /// The season the episode belongs to.
+    pub season: u32,
+    /// The episode's number within that season.
+    pub episode: u32,
+}
+
+/// Which title to acquire, which episode of it, and the release to acquire when the user has chosen
+/// one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     /// The catalogue row.
     pub title_id: i64,
+    /// The one episode to acquire, or None to acquire the title as a whole.
+    pub episode: Option<EpisodePick>,
     /// The release the user picked, or None to search.
     pub chosen: Option<ChosenOffer>,
 }
 
-/// The dedupe key: one live acquire per title.
+/// The dedupe key: one live acquire per title, and per episode when one is named.
 #[must_use]
-pub fn dedupe_key(title_id: i64) -> String {
-    format!("acquisition.acquire:{title_id}")
+pub fn dedupe_key(title_id: i64, episode: Option<EpisodePick>) -> String {
+    match episode {
+        Some(pick) => format!(
+            "acquisition.acquire:{title_id}:s{:02}e{:02}",
+            pick.season, pick.episode
+        ),
+        None => format!("acquisition.acquire:{title_id}"),
+    }
 }
 
 /// Finds one title's best release and hands it to the acquisition service.
@@ -226,15 +244,18 @@ impl AcquireJob {
 
         self.phase(job, attempt, 200).await;
 
-        let releases =
-            indexers::search_async(Arc::clone(&self.store), identity.name.clone(), SEARCH_LIMIT)
-                .await
-                .map_err(|error| match error {
-                    indexers::IndexerConfigError::Unconfigured => {
-                        JobError::failed("no indexer is configured")
-                    }
-                    other => JobError::failed(format!("the indexer search failed: {other}")),
-                })?;
+        let releases = indexers::search_async(
+            Arc::clone(&self.store),
+            search_query(&identity.name, self.target.episode),
+            SEARCH_LIMIT,
+        )
+        .await
+        .map_err(|error| match error {
+            indexers::IndexerConfigError::Unconfigured => {
+                JobError::failed("no indexer is configured")
+            }
+            other => JobError::failed(format!("the indexer search failed: {other}")),
+        })?;
 
         if cancellation.is_cancelled() {
             return Err(JobError::Cancelled);
@@ -260,10 +281,17 @@ impl AcquireJob {
             if size_bytes > effective_ceiling {
                 continue;
             }
-            candidates.push(Candidate::new(
-                ReleaseName::parse(&release.raw_title),
-                size_bytes,
-            ));
+            let name = ReleaseName::parse(&release.raw_title);
+            // An episode acquire takes only a release that names exactly that episode: a season
+            // pack or a multi-episode span is a different download, not a substitute for one.
+            if self
+                .target
+                .episode
+                .is_some_and(|pick| !name.is_single_episode(pick.season, pick.episode))
+            {
+                continue;
+            }
+            candidates.push(Candidate::new(name, size_bytes));
             kept.push(release);
         }
 
@@ -533,6 +561,14 @@ impl Job for AcquireJob {
     }
 }
 
+/// The indexer query for a title, narrowed to one episode when the target names one.
+fn search_query(name: &str, episode: Option<EpisodePick>) -> String {
+    match episode {
+        Some(pick) => format!("{name} S{:02}E{:02}", pick.season, pick.episode),
+        None => name.to_owned(),
+    }
+}
+
 /// A safe single-segment folder for a release, derived from the title's name.
 ///
 /// The guard would reject a traversal, but a title whose name contains a separator should not decide
@@ -574,4 +610,61 @@ fn summarise_alternatives(candidates: &[Candidate], alternatives: &[usize]) -> S
         .map(|(resolution, count)| format!("{} x{count}", resolution.as_str()))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_title_query_is_the_title_name() {
+        assert_eq!(search_query("Breaking Bad", None), "Breaking Bad");
+    }
+
+    #[test]
+    fn an_episode_query_pads_its_markers_to_two_digits() {
+        assert_eq!(
+            search_query(
+                "Breaking Bad",
+                Some(EpisodePick {
+                    season: 1,
+                    episode: 2
+                })
+            ),
+            "Breaking Bad S01E02"
+        );
+        assert_eq!(
+            search_query(
+                "Breaking Bad",
+                Some(EpisodePick {
+                    season: 12,
+                    episode: 103,
+                })
+            ),
+            "Breaking Bad S12E103",
+            "a number wider than two digits is not truncated"
+        );
+    }
+
+    #[test]
+    fn an_episode_gets_its_own_dedupe_key() {
+        let episode_two = EpisodePick {
+            season: 1,
+            episode: 2,
+        };
+        let episode_three = EpisodePick {
+            season: 1,
+            episode: 3,
+        };
+        assert_eq!(dedupe_key(7, None), "acquisition.acquire:7");
+        assert_eq!(
+            dedupe_key(7, Some(episode_two)),
+            "acquisition.acquire:7:s01e02"
+        );
+        assert_ne!(
+            dedupe_key(7, Some(episode_two)),
+            dedupe_key(7, Some(episode_three))
+        );
+        assert_ne!(dedupe_key(7, None), dedupe_key(7, Some(episode_two)));
+    }
 }

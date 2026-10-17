@@ -301,7 +301,19 @@ export function TitleScreen({
                   className="h-full"
                   key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
                 >
-                  <EpisodeCard episode={episode} />
+                  <EpisodeCard
+                    episode={episode}
+                    onDownload={
+                      acquire === undefined
+                        ? undefined
+                        : (chosen) => {
+                            void acquire.start(title.id, {
+                              season: chosen.seasonNumber,
+                              episode: chosen.episodeNumber,
+                            });
+                          }
+                    }
+                  />
                 </li>
               ))}
             </ul>

@@ -94,13 +94,21 @@ export async function listShortcuts(): Promise<ShortcutBinding[]> {
 }
 
 /**
- * Asks the core to find and queue a release for a title.
+ * Asks the core to find and queue a release for a title, or for one episode of it.
  *
  * Answers the job, not the download: the search, the metadata fetch, and the safety gate all leave
- * the machine, so the caller watches the job rather than waiting for one (PG-E13).
+ * the machine, so the caller watches the job rather than waiting for one (PG-E13). `season` and
+ * `episode` travel together or not at all, which the command itself enforces.
  */
-export async function acquire(titleId: number, minSeeders?: number): Promise<JobStarted> {
-  return unwrap(commands.acquire({ id: titleId }, minSeeders ?? null));
+export async function acquire(
+  titleId: number,
+  minSeeders?: number,
+  season?: number,
+  episode?: number,
+): Promise<JobStarted> {
+  return unwrap(
+    commands.acquire({ id: titleId }, minSeeders ?? null, season ?? null, episode ?? null),
+  );
 }
 
 /** The transfer queue, newest first. */

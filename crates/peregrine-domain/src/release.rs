@@ -500,6 +500,19 @@ impl ReleaseName {
     pub const fn is_season_pack(&self) -> bool {
         self.season_pack
     }
+
+    /// True when the release is exactly one episode of `season`.
+    ///
+    /// A season pack names no episode and a multi-episode span names several, so neither
+    /// satisfies a request for a single episode.
+    pub const fn is_single_episode(&self, season: u32, episode: u32) -> bool {
+        match (self.season, self.episodes) {
+            (Some(release_season), Some(span)) => {
+                release_season == season && !span.is_multi() && span.first() == episode
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1486,6 +1499,39 @@ mod tests {
         let release = parsed("Show.Name.S01E01E02.COMPLETE.1080p.WEB-DL.x264-GROUP");
         assert!(!release.is_season_pack());
         assert_eq!(release.episodes().map(EpisodeSpan::first), Some(1));
+    }
+
+    #[test]
+    fn a_single_episode_matches_only_its_own_season_and_number() {
+        let release = parsed("Show.Name.S01E02.1080p.WEB-DL.DDP5.1.H.264-NTb");
+        assert!(release.is_single_episode(1, 2));
+        assert!(
+            !release.is_single_episode(2, 2),
+            "another season is not this episode"
+        );
+        assert!(
+            !release.is_single_episode(1, 3),
+            "another episode is not this one"
+        );
+    }
+
+    #[test]
+    fn a_season_pack_is_not_a_single_episode() {
+        let release = parsed("Show.Name.S01.1080p.BluRay.x264-GROUP");
+        assert!(release.is_season_pack());
+        assert!(!release.is_single_episode(1, 1));
+    }
+
+    #[test]
+    fn a_multi_episode_span_is_not_a_single_episode() {
+        let release = parsed("Show.S01E01-E03.1080p.WEB-DL.x264-GROUP");
+        assert!(!release.is_single_episode(1, 1));
+        assert!(!release.is_single_episode(1, 2));
+    }
+
+    #[test]
+    fn an_unparsed_release_is_not_a_single_episode() {
+        assert!(!parsed("Some Random File Name").is_single_episode(1, 1));
     }
 
     #[test]
