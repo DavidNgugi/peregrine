@@ -323,17 +323,18 @@ impl ProwlarrStartJob {
         Ok(Box::new(()))
     }
 
-    /// The public indexers an empty Prowlarr is seeded with.
+    /// The example indexers an empty Prowlarr is seeded with.
     ///
     /// PRODUCT DECISION, and a deliberate departure from ADR 0009 decision 9 (Peregrine ships
-    /// every built-in indexer disabled and indexes nothing by default): the app now enables these
-    /// unless the user removes them. They are public trackers, no account is needed, and this one
-    /// constant is the whole list, so it is trivial to change or drop.
+    /// every built-in indexer disabled and indexes nothing by default): the app adds these unless
+    /// the user removes them. They are public trackers that need no account, offered as examples
+    /// rather than a catalogue; this one constant is the whole list, so it is trivial to change or
+    /// drop.
     const PUBLIC_DEFAULTS: [&'static str; 5] =
         ["1337x", "The Pirate Bay", "YTS", "EZTV", "Nyaa.si"];
 
-    /// Adds the curated public indexers when Prowlarr has none configured. Best effort: a tracker
-    /// that is down or refuses the add is logged and skipped, and never fails the start.
+    /// Adds the example indexers when Prowlarr has none configured. Best effort: a tracker that is
+    /// down or refuses the add is logged and skipped, and never fails the start.
     async fn seed_default_indexers(&self) {
         let store = Arc::clone(&self.store);
         let configured = match crate::indexers::list_indexers_async(Arc::clone(&store)).await {

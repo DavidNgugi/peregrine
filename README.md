@@ -27,7 +27,7 @@ After that, a headless server with a browser client, installable with Docker or 
 
 ## Scope
 
-Peregrine hosts and distributes nothing. It is not a streaming site, and it is not a headless server yet.
+Peregrine hosts and distributes nothing. The indexers it searches are examples or sources you configure yourself, and what you download and keep is your responsibility. It is not a streaming site, and it is not a headless server yet.
 
 ## Build from source
 
