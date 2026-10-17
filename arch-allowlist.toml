@@ -334,6 +334,8 @@ runtime = [
   "jiff",
   "raw-window-handle",
   "serde",
+  # One JSON event per line from the mpv IPC socket (PG-E16-03).
+  "serde_json",
   "thiserror",
   "tokio",
   "tokio-util",

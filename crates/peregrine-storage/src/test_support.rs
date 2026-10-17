@@ -162,8 +162,8 @@ fn catalogue_rows() -> Vec<String> {
     let old = days_before(400);
     vec![
         format!(
-            "INSERT INTO account (id, name, kind, is_default, created_at) VALUES (1, 'Adult', \
-             'adult', 1, {old})"
+            "INSERT OR REPLACE INTO account (id, name, kind, is_default, created_at) VALUES (1, \
+             'Adult', 'adult', 1, {old})"
         ),
         format!(
             "INSERT INTO title (id, kind, name, sort_name, content_rating, metadata_state, \

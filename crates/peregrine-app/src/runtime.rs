@@ -704,6 +704,20 @@ fn playable_file(
     })
 }
 
+/// Hands a player's position to the task that writes it.
+///
+/// A channel rather than a direct write because the sink is called from the player's own reader
+/// thread and the repository is async; the receiving task owns the storage edge.
+#[derive(Debug)]
+struct ChannelSink(tokio::sync::mpsc::UnboundedSender<(i64, Option<i64>)>);
+
+impl peregrine_domain::PositionSink for ChannelSink {
+    fn position(&self, position_ms: i64, duration_ms: Option<i64>) {
+        // A closed receiver means the app is shutting down; dropping the sample is correct then.
+        let _ = self.0.send((position_ms, duration_ms));
+    }
+}
+
 /// The running application.
 pub struct Runtime {
     config: RuntimeConfig,
@@ -2963,8 +2977,41 @@ impl Runtime {
         }
 
         let (_file, safe) = self.playable(title_id).await?;
+        // The app's own watch progress is the resume rule; mpv's watch_later is disabled.
+        let resume_ms = self
+            .database
+            .watch_progress(installation_scope(), title_id, None)
+            .await?
+            .map(|progress| progress.position_ms());
+
+        // The child reports over its IPC socket; this sink hands each position to a task that writes
+        // it through the same progress path the in-page player uses.
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let database = Arc::clone(&self.database);
+        let clock = Arc::clone(&self.clock);
+        tokio::spawn(async move {
+            while let Some((position_ms, duration_ms)) = receiver.recv().await {
+                let Ok(position) = PlaybackPosition::new(position_ms, duration_ms) else {
+                    continue;
+                };
+                let progress = WatchProgress::record(
+                    installation_scope().account(),
+                    title_id,
+                    None,
+                    position,
+                    ProgressSource::Local,
+                    clock.now(),
+                    None,
+                );
+                if let Err(error) = database.record_watch_progress(progress).await {
+                    warn!(%error, title = title_id, "an external player position could not be recorded");
+                }
+            }
+        });
+
         let player = Arc::clone(&self.external_player);
-        tokio::task::spawn_blocking(move || player.play(&safe))
+        let positions: Arc<dyn peregrine_domain::PositionSink> = Arc::new(ChannelSink(sender));
+        tokio::task::spawn_blocking(move || player.play(&safe, resume_ms, positions))
             .await
             .map_err(|_| peregrine_domain::PlayerError::Spawn)??;
         Ok(())
@@ -3758,25 +3805,41 @@ mod tests {
     }
 
     /// An external player that records what it was asked to open, so the hand-off can be asserted
-    /// without a window.
+    /// without a window. It reports a fixed position, which is what makes the progress write
+    /// observable.
     #[derive(Default)]
-    struct RecordingPlayer(Mutex<Vec<PathBuf>>);
+    struct RecordingPlayer {
+        opened: Mutex<Vec<PathBuf>>,
+        start: Mutex<Option<i64>>,
+    }
 
     impl RecordingPlayer {
         fn opened(&self) -> Vec<PathBuf> {
-            self.0
+            self.opened
                 .lock()
                 .expect("the player log is not poisoned")
                 .clone()
         }
+
+        fn start(&self) -> Option<i64> {
+            *self.start.lock().expect("the player start is not poisoned")
+        }
     }
 
     impl peregrine_domain::PlayerBackend for RecordingPlayer {
-        fn play(&self, file: &SafePath) -> Result<(), peregrine_domain::PlayerError> {
-            self.0
+        fn play(
+            &self,
+            file: &SafePath,
+            start_ms: Option<i64>,
+            positions: Arc<dyn peregrine_domain::PositionSink>,
+        ) -> Result<(), peregrine_domain::PlayerError> {
+            self.opened
                 .lock()
                 .expect("the player log is not poisoned")
                 .push(file.as_path().to_path_buf());
+            *self.start.lock().expect("the player start is not poisoned") = start_ms;
+            // The position a real mpv would report over its socket, so the write path runs.
+            positions.position(84_000, Some(7_200_000));
             Ok(())
         }
 
@@ -5636,6 +5699,125 @@ mod tests {
             .await
             .expect("the player is handed the file");
         assert_eq!(player.opened(), vec![film.clone()]);
+        runtime.shutdown().await;
+    }
+
+    /// A downloaded title: a file under the app's own download root and the library rows the
+    /// import would have written, which is the shape `start_external_playback` must reach.
+    async fn downloaded_title(runtime: &Runtime, directory: &TempDir) -> (i64, PathBuf) {
+        use peregrine_domain::{MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText};
+
+        let folder = directory.path().join("downloads").join("Interstellar");
+        std::fs::create_dir_all(&folder).expect("the download folder");
+        let film = folder.join("Interstellar (2014).mkv");
+        std::fs::write(&film, vec![1_u8; 16]).expect("the fixture file");
+
+        let at = jiff::Timestamp::from_millisecond(0).expect("in range");
+        let title_id = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "Interstellar".to_owned(),
+                original_name: None,
+                sort_name: "interstellar".to_owned(),
+                at: 0,
+            })
+            .await
+            .expect("the title");
+        let item_id = runtime
+            .database
+            .insert_media_item(MediaItem {
+                id: 0,
+                title_id,
+                episode_id: None,
+                state: MediaItemState::Available,
+                origin: MediaOrigin::Torrent,
+                preferred_file_id: None,
+                quality_label: None,
+                created_at: at,
+                updated_at: at,
+            })
+            .await
+            .expect("the item");
+        runtime
+            .database
+            .insert_media_file(MediaFile {
+                id: 0,
+                media_item_id: item_id,
+                path: NonEmptyText::new(film.to_string_lossy().as_ref()).expect("fixture text"),
+                root_id: None,
+                size_bytes: 16,
+                mtime_ms: at,
+                added_at: at,
+                missing_since: None,
+                container: None,
+                duration_ms: None,
+                video_codec: None,
+                video_profile: None,
+                width: None,
+                height: None,
+                bit_depth: None,
+                hdr_format: None,
+                frame_rate: None,
+                bitrate_kbps: None,
+                audio_codec: None,
+                audio_channels: None,
+                audio_layout: None,
+                audio_languages: None,
+                subtitle_format: None,
+                probe_version: None,
+                probe_json: None,
+                quality_label: None,
+                updated_at: at,
+            })
+            .await
+            .expect("the file");
+        (title_id, film)
+    }
+
+    /// The external player resumes from the app's own watch progress, and the position it reports
+    /// is written through the same row the in-page player writes.
+    #[tokio::test]
+    async fn an_external_playback_resumes_and_reports_progress() {
+        let directory = TempDir::new().unwrap();
+        let player = Arc::new(RecordingPlayer::default());
+        let (runtime, _sink) = runtime_with_player(&directory, Arc::clone(&player)).await;
+        let (title_id, _film) = downloaded_title(&runtime, &directory).await;
+
+        runtime
+            .record_progress(title_id, None, 42_000, Some(7_200_000))
+            .await
+            .expect("the seed position is written");
+        runtime
+            .start_external_playback(title_id)
+            .await
+            .expect("the player starts");
+        assert_eq!(
+            player.start(),
+            Some(42_000),
+            "the stored position is where mpv starts"
+        );
+
+        // The fake reports 84 s over the sink; the consumer task writes it. Wait for the row rather
+        // than assuming the task has run by the time `start` returns.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                // The raw row rather than the rail: Continue Watching hides a position under 2 %,
+                // and this fixture is a two-hour film at 84 s.
+                let progress = runtime
+                    .database
+                    .watch_progress(installation_scope(), title_id, None)
+                    .await
+                    .expect("the read");
+                if progress.is_some_and(|progress| progress.position_ms() == 84_000) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the external position reaches the progress row");
         runtime.shutdown().await;
     }
     /// A second press replaces the first session rather than opening a second listener.

@@ -70,3 +70,7 @@ sha256 = "c539998763f59b6fd0228c9702927f56ac08d7a41c57eb64f2e4928fda40e7b6"
 [[migration]]
 file = "0017_release_offer_source.sql"
 sha256 = "efc65ec853eb37c94528e609ffd5d66adc3c2c83bd8baa61c131b00220ad0477"
+
+[[migration]]
+file = "0018_installation_account.sql"
+sha256 = "8daaacf3e8fb36e318634cf8ae94b659d345e11144ba6d3a2bcce0b2fe605311"

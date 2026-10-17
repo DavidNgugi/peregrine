@@ -12,6 +12,8 @@ publish = false
 [dependencies]
 peregrine-domain = { workspace = true }
 peregrine-stream = { workspace = true }
+# One JSON event per line from the mpv IPC socket (PG-E16-03).
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

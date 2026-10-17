@@ -19,6 +19,8 @@
 //! still carry a video stream the platform's decoder refuses, and no name distinguishes those. That
 //! is the `Webview` answer's honest caveat: it means "this build will try", not "this will play".
 
+use std::sync::Arc;
+
 use crate::path::SafePath;
 use thiserror::Error;
 
@@ -119,6 +121,15 @@ pub enum PlayerError {
     Spawn,
 }
 
+/// Where a player reports how far it has got.
+///
+/// The same pair the in-page player sends the progress write: a position in milliseconds and the
+/// media duration when the player knows one. A backend that cannot report simply never calls it.
+pub trait PositionSink: Send + Sync {
+    /// The current position and the media duration, in milliseconds.
+    fn position(&self, position_ms: i64, duration_ms: Option<i64>);
+}
+
 /// The player that handles containers the webview cannot demux.
 ///
 /// A port rather than a direct spawn because launching an external process is an adapter concern
@@ -126,11 +137,19 @@ pub enum PlayerError {
 pub trait PlayerBackend: Send + Sync {
     /// Starts a file in the shared external player, replacing whatever it was showing.
     ///
+    /// `start_ms` is where the app's own watch progress says to resume, or `None` for the
+    /// beginning. `positions` is where the player reports its position as it advances.
+    ///
     /// # Errors
     ///
     /// [PlayerError::NotInstalled] when there is no binary, and [PlayerError::Spawn] when the
     /// operating system refused to start one.
-    fn play(&self, file: &SafePath) -> Result<(), PlayerError>;
+    fn play(
+        &self,
+        file: &SafePath,
+        start_ms: Option<i64>,
+        positions: Arc<dyn PositionSink>,
+    ) -> Result<(), PlayerError>;
 
     /// Stops the player this backend started, if any. Idempotent.
     fn stop(&self);

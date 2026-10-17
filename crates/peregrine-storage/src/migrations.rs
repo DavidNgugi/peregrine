@@ -680,6 +680,12 @@ mod tests {
         ("chosen", "INTEGER", 1, Some("0"), 0),
         ("reasons_json", "TEXT", 1, None, 0),
         ("created_at", "INTEGER", 1, None, 0),
+        // Migration 0017: the offer's source and the size/seeder figures the chooser shows, and
+        // the dismissal the rail keeps a row for.
+        ("source_json", "TEXT", 0, None, 0),
+        ("size_bytes", "INTEGER", 0, None, 0),
+        ("seeders", "INTEGER", 0, None, 0),
+        ("dismissed", "INTEGER", 1, Some("0"), 0),
     ];
 
     // Migration 0007.
@@ -1480,7 +1486,7 @@ mod tests {
     /// can name them: one adult account, a movie and a show, one season and episode, a
     /// person and a company, a library root, one movie media item, and one cast device.
     const BASE_FIXTURES: &[&str] = &[
-        "INSERT INTO account (id, name, kind, created_at) VALUES (1, 'Ada', 'adult', 0)",
+        "INSERT OR REPLACE INTO account (id, name, kind, created_at) VALUES (1, 'Ada', 'adult', 0)",
         "INSERT INTO title (id, kind, name, sort_name, created_at, updated_at) \
          VALUES (1, 'movie', 'Alien', 'alien', 0, 0)",
         "INSERT INTO title (id, kind, name, sort_name, created_at, updated_at) \

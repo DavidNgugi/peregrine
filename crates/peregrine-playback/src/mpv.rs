@@ -6,14 +6,29 @@
 //! scripts, ytdl, and automatic subtitle loading, and an environment reduced to the set a window
 //! needs. The binary is resolved by name rather than by a user-supplied string.
 //!
+//! **The position comes back over mpv's IPC socket.** A child started with `--input-ipc-server`
+//! gets one JSON event per line; this module observes `time-pos` and `duration` and reports the
+//! former through [`PositionSink`] at the same five-second media cadence the in-page player uses.
+//! The socket is a file under the temp directory (a named pipe on Windows), one per play, and it
+//! dies with the child.
+//!
 //! mpv opens its own window; the process is this session and is replaced when another file is
 //! played. A player the user closes is reaped on the next press, and the app stops it on shutdown.
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use peregrine_domain::{PlayerBackend, PlayerError, SafePath};
+use peregrine_domain::{PlayerBackend, PlayerError, PositionSink, SafePath};
+
+/// How much media time must pass between two position reports.
+const REPORT_EVERY_SECONDS: f64 = 5.0;
+/// How long to wait for mpv to create its IPC socket before giving up.
+const CONNECT_ATTEMPTS: u32 = 40;
+const CONNECT_RETRY: Duration = Duration::from_millis(50);
 
 /// The flags every spawn carries (SECURITY.md T5, ARCHITECTURE §510).
 ///
@@ -72,12 +87,20 @@ const COMMON: &[&str] = &[
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const COMMON: &[&str] = &["/usr/bin/mpv", "/usr/local/bin/mpv"];
 
+/// The child this player started, and the socket a reader uses to hear its position.
+struct Session {
+    child: Child,
+    socket: PathBuf,
+    stop: Arc<AtomicBool>,
+}
+
 /// The shipping [`PlayerBackend`]: mpv, in a window of its own.
 pub struct MpvPlayer {
-    child: Mutex<Option<Child>>,
+    session: Mutex<Option<Session>>,
     /// Overrides the resolved binary, which is what a test uses to exercise the spawn path without
     /// a player on the machine. `None` resolves at each press, so installing mpv is picked up.
     binary: Option<PathBuf>,
+    next_socket: AtomicU64,
 }
 
 impl MpvPlayer {
@@ -85,8 +108,9 @@ impl MpvPlayer {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            child: Mutex::new(None),
+            session: Mutex::new(None),
             binary: None,
+            next_socket: AtomicU64::new(1),
         }
     }
 
@@ -94,13 +118,14 @@ impl MpvPlayer {
     #[must_use]
     pub fn with_binary(binary: impl Into<PathBuf>) -> Self {
         Self {
-            child: Mutex::new(None),
+            session: Mutex::new(None),
             binary: Some(binary.into()),
+            next_socket: AtomicU64::new(1),
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Child>> {
-        self.child
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Session>> {
+        self.session
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -113,7 +138,12 @@ impl Default for MpvPlayer {
 }
 
 impl PlayerBackend for MpvPlayer {
-    fn play(&self, file: &SafePath) -> Result<(), PlayerError> {
+    fn play(
+        &self,
+        file: &SafePath,
+        start_ms: Option<i64>,
+        positions: Arc<dyn PositionSink>,
+    ) -> Result<(), PlayerError> {
         // Replacing the player is the same act as stopping the old one, and doing it first means a
         // spawn that fails still leaves no zombie behind.
         self.stop();
@@ -121,30 +151,51 @@ impl PlayerBackend for MpvPlayer {
             Some(path) => path.clone(),
             None => resolve_mpv().ok_or(PlayerError::NotInstalled)?,
         };
-        let mut command = command_for(&binary, file.as_path());
+        let serial = self.next_socket.fetch_add(1, Ordering::Relaxed);
+        let socket = control_path(serial);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut command = command_for(&binary, file.as_path(), &socket, start_ms);
         let child = command.spawn().map_err(|_| PlayerError::Spawn)?;
-        *self.lock() = Some(child);
+        *self.lock() = Some(Session {
+            child,
+            socket: socket.clone(),
+            stop: Arc::clone(&stop),
+        });
+        if std::thread::Builder::new()
+            .name("peregrine-mpv-ipc".to_owned())
+            .spawn(move || read_positions(&socket, &stop, positions.as_ref()))
+            .is_err()
+        {
+            self.stop();
+            return Err(PlayerError::Spawn);
+        }
         Ok(())
     }
 
     fn stop(&self) {
-        let child = self.lock().take();
-        if let Some(mut child) = child {
+        let session = self.lock().take();
+        if let Some(session) = session {
+            session.stop.store(true, Ordering::Relaxed);
+            let mut child = session.child;
             // A player the user already closed has exited; a failed kill is not a refusal to report.
             let _ = child.kill();
             let _ = child.wait();
+            #[cfg(unix)]
+            let _ = std::fs::remove_file(&session.socket);
         }
     }
 }
 
 impl Drop for MpvPlayer {
     fn drop(&mut self) {
-        let child = self
-            .child
+        let session = self
+            .session
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some(mut child) = child {
+        if let Some(session) = session {
+            session.stop.store(true, Ordering::Relaxed);
+            let mut child = session.child;
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -152,9 +203,13 @@ impl Drop for MpvPlayer {
 }
 
 /// The command for one file, with the fixed flags and the file behind `--`.
-fn command_for(binary: &Path, file: &Path) -> Command {
+fn command_for(binary: &Path, file: &Path, socket: &Path, start_ms: Option<i64>) -> Command {
     let mut command = Command::new(binary);
     command.args(HARDENED);
+    command.arg(format!("--input-ipc-server={}", socket.display()));
+    if let Some(milliseconds) = start_ms.filter(|value| *value > 0) {
+        command.arg(format!("--start={:.3}", milliseconds as f64 / 1000.0));
+    }
     // The end of option parsing. A canonical path begins with a separator on every platform this
     // build runs on, so this is belt and braces; it is also the rule SECURITY.md T5 states.
     command.arg("--");
@@ -169,6 +224,115 @@ fn command_for(binary: &Path, file: &Path) -> Command {
         }
     }
     command
+}
+
+/// One socket per play, so a stale reader cannot hear the next session.
+#[cfg(windows)]
+fn control_path(serial: u64) -> PathBuf {
+    PathBuf::from(format!(
+        r"\\.\pipe\peregrine-mpv-{}-{serial}",
+        std::process::id()
+    ))
+}
+#[cfg(not(windows))]
+fn control_path(serial: u64) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "peregrine-mpv-{}-{serial}.sock",
+        std::process::id()
+    ))
+}
+
+/// The read/write pair a control socket needs, without a platform-specific type in the signature.
+trait Control: std::io::Read + std::io::Write + Send {}
+impl<T: std::io::Read + std::io::Write + Send> Control for T {}
+
+fn connect(socket: &Path, stop: &AtomicBool) -> Option<Box<dyn Control>> {
+    for _ in 0..CONNECT_ATTEMPTS {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        if let Some(control) = connect_once(socket) {
+            return Some(control);
+        }
+        std::thread::sleep(CONNECT_RETRY);
+    }
+    None
+}
+
+#[cfg(unix)]
+fn connect_once(socket: &Path) -> Option<Box<dyn Control>> {
+    std::os::unix::net::UnixStream::connect(socket)
+        .ok()
+        .map(|stream| Box::new(stream) as Box<dyn Control>)
+}
+#[cfg(windows)]
+fn connect_once(socket: &Path) -> Option<Box<dyn Control>> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(socket)
+        .ok()
+        .map(|file| Box::new(file) as Box<dyn Control>)
+}
+
+/// Reads mpv's position events until the socket closes or the session is stopped.
+fn read_positions(socket: &Path, stop: &AtomicBool, sink: &dyn PositionSink) {
+    let Some(mut control) = connect(socket, stop) else {
+        return;
+    };
+    let request = concat!(
+        "{\"command\":[\"observe_property\",1,\"time-pos\"]}\n",
+        "{\"command\":[\"observe_property\",2,\"duration\"]}\n"
+    );
+    if control.write_all(request.as_bytes()).is_err() || control.flush().is_err() {
+        return;
+    }
+    let mut reader = BufReader::new(control);
+    let mut position: Option<f64> = None;
+    let mut duration: Option<f64> = None;
+    let mut last_reported = f64::NEG_INFINITY;
+    let mut line = String::new();
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        match event.get("event").and_then(serde_json::Value::as_str) {
+            Some("property-change") => {
+                let data = event.get("data").and_then(serde_json::Value::as_f64);
+                match event.get("id").and_then(serde_json::Value::as_i64) {
+                    Some(1) => {
+                        if let Some(value) = data {
+                            position = Some(value);
+                            if (value - last_reported).abs() >= REPORT_EVERY_SECONDS {
+                                last_reported = value;
+                                sink.position(millis(value), duration.map(millis));
+                            }
+                        }
+                    }
+                    Some(2) => duration = data,
+                    _ => {}
+                }
+            }
+            Some("end-file") => break,
+            _ => {}
+        }
+    }
+    // The last position, so leaving the player is recorded even if no tick landed since the last one.
+    if let Some(value) = position {
+        sink.position(millis(value), duration.map(millis));
+    }
+}
+
+fn millis(seconds: f64) -> i64 {
+    (seconds * 1000.0).round().clamp(0.0, i64::MAX as f64) as i64
 }
 
 /// mpv on PATH, or in a place a desktop install puts it. A missing binary is the caller's to report.
@@ -192,6 +356,12 @@ mod tests {
     use super::*;
     use peregrine_domain::PathGuard;
 
+    struct Noop;
+
+    impl PositionSink for Noop {
+        fn position(&self, _position_ms: i64, _duration_ms: Option<i64>) {}
+    }
+
     fn file(directory: &tempfile::TempDir) -> SafePath {
         let path = directory.path().join("film.mkv");
         std::fs::write(&path, b"fixture").expect("the fixture is written");
@@ -204,7 +374,12 @@ mod tests {
     #[test]
     fn the_flags_disable_config_scripts_ytdl_and_subtitle_autoload() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let command = command_for(Path::new("/usr/bin/true"), file(&directory).as_path());
+        let command = command_for(
+            Path::new("/usr/bin/true"),
+            file(&directory).as_path(),
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            None,
+        );
         let args: Vec<&std::ffi::OsStr> = command.get_args().collect();
         for flag in [
             "--no-config",
@@ -224,6 +399,11 @@ mod tests {
                 "{flag}"
             );
         }
+        assert!(
+            args.iter()
+                .any(|arg| arg.to_string_lossy().starts_with("--input-ipc-server=")),
+            "the position listener needs a socket"
+        );
         // The file comes after the end-of-options marker, so a name beginning with a hyphen is a
         // path rather than a flag.
         let terminator = args
@@ -234,15 +414,50 @@ mod tests {
     }
 
     #[test]
+    fn a_resume_position_is_passed_as_whole_and_millisecond_seconds() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let command = command_for(
+            Path::new("/usr/bin/true"),
+            file(&directory).as_path(),
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            Some(90_500),
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.iter().any(|arg| arg == "--start=90.500"));
+    }
+
+    #[test]
+    fn a_zero_start_is_not_passed_at_all() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let command = command_for(
+            Path::new("/usr/bin/true"),
+            file(&directory).as_path(),
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            Some(0),
+        );
+        assert!(
+            !command
+                .get_args()
+                .any(|arg| arg.to_string_lossy().starts_with("--start=")),
+            "the beginning is the default, not a flag"
+        );
+    }
+
+    #[test]
     fn a_file_is_spawned_and_the_previous_child_is_replaced() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let safe = file(&directory);
         // `/usr/bin/true` ignores the flags and exits, which is enough to prove the spawn path and
         // the replacement without a player installed.
         let player = MpvPlayer::with_binary("/usr/bin/true");
-        player.play(&safe).expect("the binary spawns");
         player
-            .play(&safe)
+            .play(&safe, None, Arc::new(Noop))
+            .expect("the binary spawns");
+        player
+            .play(&safe, None, Arc::new(Noop))
             .expect("a second press replaces the first");
         player.stop();
     }
@@ -251,7 +466,9 @@ mod tests {
     fn a_missing_binary_is_reported_rather_than_silently_doing_nothing() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let player = MpvPlayer::with_binary("/nonexistent/peregrine-mpv");
-        let error = player.play(&file(&directory)).expect_err("no such binary");
+        let error = player
+            .play(&file(&directory), None, Arc::new(Noop))
+            .expect_err("no such binary");
         assert_eq!(error, PlayerError::Spawn);
     }
 }
