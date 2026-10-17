@@ -1,0 +1,104 @@
+{
+  "$comment": "Pinned sidecar artefacts. scripts/fetch-sidecars.mjs is the only downloader and refuses a digest mismatch. Entries with a 'build' key are produced by CI and pinned in the release manifest instead of here. Sizes are bytes as measured on 2026-10-17.",
+  "mpv": {
+    "macos-arm64": {
+      "version": "v0.41.0",
+      "url": "https://github.com/mpv-player/mpv/releases/download/v0.41.0/mpv-v0.41.0-macos-14-arm.zip",
+      "sha256": "5c96f9b21355fc0a11d2e2161ad65f33031070e9fb3f6bd9865fb459b94587e6",
+      "size": 43693888,
+      "archive": "zip",
+      "binary": "mpv.app/Contents/MacOS/mpv",
+      "licence": "GPL-3.0-or-later",
+      "notes": "Official upstream build, ad-hoc signed, minos 14.0. Re-sign every dylib before notarising."
+    },
+    "macos-x86_64": {
+      "version": "v0.41.0",
+      "url": "https://github.com/mpv-player/mpv/releases/download/v0.41.0/mpv-v0.41.0-macos-15-intel.zip",
+      "sha256": "41003617ab4f7784394b5ddea7ce51b3e0838e8cfc8166ad1a378b2eda3b583c",
+      "size": 49288843,
+      "archive": "zip",
+      "binary": "mpv.app/Contents/MacOS/mpv",
+      "licence": "GPL-3.0-or-later",
+      "notes": "Official upstream build, minos 15.0."
+    },
+    "windows-x86_64": {
+      "version": "v0.41.0",
+      "url": "https://github.com/mpv-player/mpv/releases/download/v0.41.0/mpv-v0.41.0-x86_64-w64-mingw32.zip",
+      "sha256": "a49811c0752c108b8260636f9c6f6fcb97406641c98b30f1e7b500dfb20177de",
+      "size": 39002683,
+      "archive": "zip",
+      "binary": "mpv/mpv.exe",
+      "licence": "GPL-3.0-or-later",
+      "notes": "Official upstream build; mpv.exe plus DLLs."
+    },
+    "linux-x86_64": {
+      "build": "mpv-build",
+      "licence": "GPL-2.0-or-later",
+      "notes": "No official Linux binary exists. Built in CI; commit and digest are recorded in the release manifest and source offer."
+    }
+  },
+  "ffmpeg": {
+    "linux-x86_64": {
+      "version": "n9.0.2-28-g669f5ab083",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-shared-9.0.tar.xz",
+      "sha256": "d744ff75c12a26b8404da11573c6a7293d2bdd85f2d7c56e808d95bb2977d4c4",
+      "size": 63514136,
+      "archive": "tar.xz",
+      "binary": "bin/ffmpeg",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "BtbN shared LGPL build: bin plus lib. glibc 2.28."
+    },
+    "windows-x86_64": {
+      "version": "n9.0.2-28-g669f5ab083",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-win64-lgpl-9.0.zip",
+      "sha256": "fe7aab7fb1e83b4be657ae46d949a01812cabc60d35766d51fad8dcf97c69319",
+      "size": 171479798,
+      "archive": "zip",
+      "binary": "bin/ffmpeg.exe",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "BtbN static LGPL build; UCRT only."
+    },
+    "macos-arm64": {
+      "build": "ffmpeg-lgpl",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "No redistributable macOS build exists. Built in CI with --enable-version3 and without --enable-gpl/--enable-nonfree."
+    },
+    "macos-x86_64": {
+      "build": "ffmpeg-lgpl",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "Same build as arm64, cross-compiled."
+    }
+  },
+  "ffprobe": {
+    "linux-x86_64": {
+      "version": "n9.0.2-28-g669f5ab083",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-shared-9.0.tar.xz",
+      "sha256": "d744ff75c12a26b8404da11573c6a7293d2bdd85f2d7c56e808d95bb2977d4c4",
+      "size": 63514136,
+      "archive": "tar.xz",
+      "binary": "bin/ffprobe",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "Same archive as ffmpeg."
+    },
+    "windows-x86_64": {
+      "version": "n9.0.2-28-g669f5ab083",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-win64-lgpl-9.0.zip",
+      "sha256": "fe7aab7fb1e83b4be657ae46d949a01812cabc60d35766d51fad8dcf97c69319",
+      "size": 171479798,
+      "archive": "zip",
+      "binary": "bin/ffprobe.exe",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "Same archive as ffmpeg."
+    },
+    "macos-arm64": {
+      "build": "ffmpeg-lgpl",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "Same build as ffmpeg."
+    },
+    "macos-x86_64": {
+      "build": "ffmpeg-lgpl",
+      "licence": "LGPL-3.0-or-later",
+      "notes": "Same build as ffmpeg."
+    }
+  }
+}
