@@ -293,7 +293,9 @@ jobs:
             https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
           echo "${MINISIGN_SHA256}  ${RUNNER_TEMP}/minisign.tar.gz" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign
-          install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$HOME/.local/bin/minisign"
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$RUNNER_TEMP/bin/minisign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       # PG-E0-18 also covers the third-party attribution file. It is not called
       # here: this job has no bundle to inspect, and `bundle` already called it
       # before anything was archived.
