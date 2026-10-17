@@ -235,7 +235,11 @@ export function ProfileEditor({
                   }}
                   type="button"
                 >
-                  <ProfileImage profile={{ ...preview, avatar: choice }} size={64} />
+                  <ProfileImage
+                    className="rounded-md"
+                    profile={{ ...preview, avatar: choice }}
+                    size={64}
+                  />
                 </button>
               </li>
             );

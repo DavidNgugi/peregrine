@@ -134,7 +134,7 @@ export function ProfileSwitcher({
                     }}
                     type="button"
                   >
-                    <ProfileImage profile={profile} size={56} />
+                    <ProfileImage className="rounded-md" profile={profile} size={56} />
                   </button>
                   <span
                     className={`min-w-0 flex-1 truncate text-sm ${current ? "font-medium text-white" : "text-white/60"}`}

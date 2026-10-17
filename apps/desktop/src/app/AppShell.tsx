@@ -397,6 +397,8 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                         setProfileOpen(true);
                       }}
                       profile={active}
+                      shape="circle"
+                      size="toolbar"
                     />
                   </>
                 }

@@ -26,7 +26,7 @@ export function ProfileImage({ profile, size, className }: ProfileImageProps): R
 
   return (
     <span
-      className={`inline-grid shrink-0 place-items-center overflow-hidden rounded-md ${className ?? ""}`}
+      className={`inline-grid shrink-0 place-items-center overflow-hidden ${className ?? ""}`}
       style={{ backgroundColor: `hsl(${String(profile.hue)} 52% 42%)`, height: size, width: size }}
     >
       {src === null ? (
