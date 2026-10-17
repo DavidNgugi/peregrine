@@ -15,6 +15,7 @@ function session(overrides: Partial<PlaybackSessionDto> = {}): PlaybackSessionDt
     // session it means (see `usePlayback`).
     sessionId: 1,
     titleId: 7,
+    episodeId: null,
     mediaFileId: 42,
     support: "webview",
     // The shape the core builds: loopback, an ephemeral port, and the session token in the path.

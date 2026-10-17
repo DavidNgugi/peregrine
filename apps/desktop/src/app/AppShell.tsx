@@ -3,7 +3,7 @@ import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
 import { ProfileAvatar, ProfileSwitcher, useProfiles } from "../features/profiles/index.js";
 import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrowseScreen } from "../features/browse/index.js";
 import { DiscoverScreen } from "../features/discover/index.js";
@@ -298,6 +298,15 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       setAcquiredRevision((current) => current + 1);
     }
   }, [acquiredTitle]);
+  // Coming back from the player is the moment the watched bar has something new to say: progress is
+  // written while the player is open, and this screen was not re-reading behind it.
+  const leavingPlayer = useRef(route.kind === "player");
+  useEffect(() => {
+    if (leavingPlayer.current && route.kind === "title") {
+      setAcquiredRevision((current) => current + 1);
+    }
+    leavingPlayer.current = route.kind === "player";
+  }, [route.kind]);
   const seasons = useSeasons(
     route.kind === "title" ? route.id : null,
     titleKind,

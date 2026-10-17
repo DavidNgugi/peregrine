@@ -45,6 +45,19 @@ pub struct WatchProgressRow {
     pub progress: WatchProgress,
 }
 
+/// One episode's watch state, keyed by the numbers a season list draws.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpisodeProgressRow {
+    /// The season the episode sits in.
+    pub season_number: u32,
+    /// Its number within that season.
+    pub episode_number: u32,
+    /// Whether the viewer finished it.
+    pub watched: bool,
+    /// How far through they are, as a fraction in `0.0..=1.0`.
+    pub percent: f64,
+}
+
 /// One row of `watchlist_entry`.
 ///
 /// There is no separate row id to carry: the table's identity is `(account_id, title_id)`, and
@@ -160,6 +173,62 @@ pub(crate) async fn progress_for(
     row.map(WatchProgressRow::try_from)
         .transpose()
         .map(|row| row.map(|row| row.progress))
+}
+
+/// Every episode of one title the account has progress for, in season and episode order.
+///
+/// A single title's rows rather than a page: a season list draws all of its episodes at once, and a
+/// cursor would make the screen responsible for stitching pages of a set it already bounds by its
+/// own limit.
+pub(crate) async fn list_progress_for_title(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    title_id: i64,
+) -> Result<Vec<EpisodeProgressRow>, StorageError> {
+    let rows = sqlx::query_as::<_, EpisodeProgressQueryRow>(
+        "SELECT e.season_number, e.episode_number, p.watched, p.percent \
+           FROM watch_progress p \
+           JOIN episode e ON e.id = p.episode_id \
+           JOIN title t ON t.id = p.title_id \
+          WHERE p.account_id = ?1 AND p.title_id = ?2 AND p.episode_id IS NOT NULL \
+            AND (?3 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+          ORDER BY e.season_number ASC, e.episode_number ASC",
+    )
+    .bind(scope.account().get())
+    .bind(title_id)
+    .bind(hidden_by_scope(scope))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(EpisodeProgressRow {
+                season_number: u32::try_from(row.season_number).map_err(|_| {
+                    StorageError::UnexpectedValue {
+                        column: "season_number",
+                        found: row.season_number.to_string(),
+                    }
+                })?,
+                episode_number: u32::try_from(row.episode_number).map_err(|_| {
+                    StorageError::UnexpectedValue {
+                        column: "episode_number",
+                        found: row.episode_number.to_string(),
+                    }
+                })?,
+                watched: row.watched != 0,
+                percent: row.percent,
+            })
+        })
+        .collect()
+}
+
+/// The columns [`EpisodeProgressRow`] is built from.
+#[derive(sqlx::FromRow)]
+struct EpisodeProgressQueryRow {
+    season_number: i64,
+    episode_number: i64,
+    watched: i64,
+    percent: f64,
 }
 
 /// Reads a page of one account's progress, most recently updated first.

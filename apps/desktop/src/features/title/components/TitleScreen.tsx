@@ -297,45 +297,54 @@ export function TitleScreen({
               className="grid auto-rows-fr list-none gap-3"
               style={{ gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}
             >
-              {seasons.episodes.map((episode) => (
-                // The season and the number together, because an episode's number is only unique
-                // within its season — and a title can hold the same number in two of them.
-                <li
-                  className="h-full"
-                  key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
-                >
-                  <EpisodeCard
-                    downloadPercent={
-                      acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
-                    }
-                    downloading={
-                      acquire?.titleId === title.id &&
-                      acquire.episode?.season === episode.seasonNumber &&
-                      acquire.episode?.episode === episode.episodeNumber &&
-                      ((acquire.starting ?? false) || (acquire.running ?? false))
-                    }
-                    episode={episode}
-                    onPlay={(chosen) => {
-                      onNavigate({
-                        kind: "player",
-                        id: title.id,
-                        season: chosen.seasonNumber,
-                        episode: chosen.episodeNumber,
-                      });
-                    }}
-                    onDownload={
-                      acquire === undefined
-                        ? undefined
-                        : (chosen) => {
-                            void acquire.start(title.id, {
-                              season: chosen.seasonNumber,
-                              episode: chosen.episodeNumber,
-                            });
-                          }
-                    }
-                  />
-                </li>
-              ))}
+              {seasons.episodes.map((episode) => {
+                const nextUp = seasons.episodes.find((row) => !row.watched);
+                return (
+                  // The season and the number together, because an episode's number is only unique
+                  // within its season — and a title can hold the same number in two of them.
+                  <li
+                    className="h-full"
+                    key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
+                  >
+                    <EpisodeCard
+                      downloadPercent={
+                        acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
+                      }
+                      downloading={
+                        acquire?.titleId === title.id &&
+                        acquire.episode?.season === episode.seasonNumber &&
+                        acquire.episode?.episode === episode.episodeNumber &&
+                        ((acquire.starting ?? false) || (acquire.running ?? false))
+                      }
+                      episode={episode}
+                      nextUp={
+                        nextUp?.seasonNumber === episode.seasonNumber &&
+                        nextUp?.episodeNumber === episode.episodeNumber
+                      }
+                      progress={episode.progress ?? 0}
+                      watched={episode.watched}
+                      onPlay={(chosen) => {
+                        onNavigate({
+                          kind: "player",
+                          id: title.id,
+                          season: chosen.seasonNumber,
+                          episode: chosen.episodeNumber,
+                        });
+                      }}
+                      onDownload={
+                        acquire === undefined
+                          ? undefined
+                          : (chosen) => {
+                              void acquire.start(title.id, {
+                                season: chosen.seasonNumber,
+                                episode: chosen.episodeNumber,
+                              });
+                            }
+                      }
+                    />
+                  </li>
+                );
+              })}
             </ul>
 
             {seasons.loading || seasons.episodes.length > 0 || seasons.failed !== null ? null : (

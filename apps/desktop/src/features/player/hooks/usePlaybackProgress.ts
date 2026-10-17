@@ -54,7 +54,7 @@ export function usePlaybackProgress(
     const report = (positionSeconds: number, durationSeconds: number): void => {
       void recordProgress({
         titleId,
-        episodeId: null,
+        episodeId: session.episodeId,
         positionMs: Math.max(0, Math.round(positionSeconds * 1000)),
         durationMs: Number.isFinite(durationSeconds) ? Math.round(durationSeconds * 1000) : null,
       }).catch((caught: unknown) => {

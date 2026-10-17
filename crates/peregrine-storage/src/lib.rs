@@ -72,5 +72,5 @@ pub use retention::{
     RetentionPolicyEntry, RetentionRule, TableRemoval, TimeWindow,
 };
 pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
-pub use watch::{WatchProgressRow, WatchlistRow};
+pub use watch::{EpisodeProgressRow, WatchProgressRow, WatchlistRow};
 pub use writer::NewEvent;

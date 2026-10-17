@@ -305,6 +305,9 @@ pub struct PlaybackSessionDto {
     /// The title this session belongs to, so a screen can confirm it is drawing the one it asked for.
     #[specta(type = Number)]
     pub title_id: i64,
+    /// The episode this session opened, or `null` for a whole title.
+    #[specta(type = Option<Number>)]
+    pub episode_id: Option<i64>,
     /// The library file being served.
     #[specta(type = Number)]
     pub media_file_id: i64,
@@ -339,6 +342,7 @@ impl From<peregrine_app::StartedPlayback> for PlaybackSessionDto {
         Self {
             session_id: started.session_id.get(),
             title_id: started.title_id,
+            episode_id: started.episode_id,
             media_file_id: started.media_file_id,
             support: LocalPlaybackDto::from(started.support),
             url: started.url,
@@ -470,6 +474,10 @@ pub struct EpisodeDto {
     /// How many of them the last scan could not find.
     #[specta(type = Number)]
     pub missing_files: i64,
+    /// Whether the account finished it.
+    pub watched: bool,
+    /// How far through the account is, as a fraction in `0.0..=1.0`; `0.0` when unstarted.
+    pub progress: f64,
 }
 
 impl From<peregrine_app::TitleEpisodeDetail> for EpisodeDto {
@@ -495,6 +503,8 @@ impl From<peregrine_app::TitleEpisodeDetail> for EpisodeDto {
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
+            watched: false,
+            progress: 0.0,
         }
     }
 }
@@ -989,12 +999,47 @@ pub async fn list_episodes(
     season: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Vec<EpisodeDto>, AppError> {
-    let episodes = state
-        .runtime()?
-        .title_episodes(title.id, season, limit.unwrap_or(500))
-        .await?;
-    let episodes = episodes.into_iter().map(EpisodeDto::from).collect();
+    let episodes =
+        episodes_with_watch(state.runtime()?, title.id, season, limit.unwrap_or(500)).await?;
     Ok(guard_response("library::list_episodes", episodes))
+}
+
+/// The episodes with each one's watch state merged in.
+///
+/// A second read rather than a heavier episode query: the season list and the player's progress are
+/// different tables, and a join would make every season read drag the account's progress with it.
+async fn episodes_with_watch(
+    runtime: &peregrine_app::Runtime,
+    title_id: i64,
+    season: Option<u32>,
+    limit: u32,
+) -> Result<Vec<EpisodeDto>, AppError> {
+    let episodes = runtime.title_episodes(title_id, season, limit).await?;
+    let progress = runtime
+        .title_watch_progress(title_id)
+        .await
+        .unwrap_or_default();
+    let watched: std::collections::HashMap<(u32, u32), (bool, f64)> = progress
+        .into_iter()
+        .map(|row| {
+            (
+                (row.season_number, row.episode_number),
+                (row.watched, row.percent),
+            )
+        })
+        .collect();
+    Ok(episodes
+        .into_iter()
+        .map(|detail| {
+            let mut dto = EpisodeDto::from(detail);
+            if let Some((finished, percent)) = watched.get(&(dto.season_number, dto.episode_number))
+            {
+                dto.watched = *finished;
+                dto.progress = *percent;
+            }
+            dto
+        })
+        .collect())
 }
 
 /// The seasons a title has, in the order its switcher lists them.

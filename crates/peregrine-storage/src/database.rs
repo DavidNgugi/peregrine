@@ -1674,6 +1674,15 @@ impl Database {
         crate::watch::list_progress(&self.readers, scope, request).await
     }
 
+    /// One title's per-episode watch state, for the season list.
+    pub async fn list_progress_for_title(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+    ) -> Result<Vec<crate::watch::EpisodeProgressRow>, StorageError> {
+        crate::watch::list_progress_for_title(&self.readers, scope, title_id).await
+    }
+
     /// Writes one watchlist entry.
     pub async fn add_to_watchlist(&self, entry: WatchlistEntry) -> Result<(), StorageError> {
         match self

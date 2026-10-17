@@ -59,6 +59,8 @@ function episode(overrides: Partial<EpisodeDto> = {}): EpisodeDto {
     files: 1,
     bytes: 2 * 1024 * 1024 * 1024,
     missingFiles: 0,
+    watched: false,
+    progress: null,
     ...overrides,
   };
 }

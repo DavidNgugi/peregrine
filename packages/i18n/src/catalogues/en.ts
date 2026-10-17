@@ -462,6 +462,7 @@ export const en = {
         downloading: "Downloading… {{percent}}%",
         play: "Play",
         playLabel: "Play episode {{number}} ({{name}})",
+        nextUp: "Next up",
         downloadLabel: "Download episode {{number}} ({{name}})",
         // The word and not the dot: a card's state is carried by its word (§2.2), and the dot's colour
         // mapping belongs to `TitleCard`, which owns the one copy of it.

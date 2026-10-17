@@ -55,6 +55,12 @@ export interface EpisodeCardProps {
   readonly downloading?: boolean | undefined;
   /** How far that transfer has got, 0-100. */
   readonly downloadPercent?: number | undefined;
+  /** Whether the account finished this episode; the bar under the still fills when it did. */
+  readonly watched?: boolean | undefined;
+  /** How far through the episode is, as a fraction in `0..=1`, for a partially watched one. */
+  readonly progress?: number | undefined;
+  /** The first episode the account has not finished, drawn with its own border and word. */
+  readonly nextUp?: boolean | undefined;
 }
 
 /** One episode's card. */
@@ -64,6 +70,9 @@ export function EpisodeCard({
   onPlay,
   downloading = false,
   downloadPercent,
+  watched = false,
+  progress = 0,
+  nextUp = false,
 }: EpisodeCardProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: moving to another season has to give the next still
@@ -74,8 +83,12 @@ export function EpisodeCard({
   const availability = episodeAvailability(episode);
 
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-surface-1 transition-colors hover:border-accent focus-within:border-accent">
-      <div className="aspect-video w-full shrink-0 bg-surface-2">
+    <article
+      className={`flex h-full flex-col overflow-hidden rounded-md border bg-surface-1 transition-colors hover:border-accent focus-within:border-accent ${
+        nextUp ? "border-accent ring-1 ring-accent" : "border-border-subtle"
+      }`}
+    >
+      <div className="relative aspect-video w-full shrink-0 bg-surface-2">
         {source === null ? (
           <p className="flex h-full items-center justify-center px-4 text-center text-caption text-text-tertiary">
             {t("title.episode.still.none")}
@@ -95,6 +108,16 @@ export function EpisodeCard({
             width={STILL_WIDTH}
           />
         )}
+        {/* The bar Netflix puts along the bottom of a still: filled means finished, partial means
+            part-way. It is aria-hidden because the chip already carries the state in words. */}
+        {watched || progress > 0 ? (
+          <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-1 bg-black/55">
+            <div
+              className="h-full bg-accent"
+              style={{ width: `${String(watched ? 100 : Math.round(progress * 100))}%` }}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-3">
@@ -107,6 +130,11 @@ export function EpisodeCard({
               <span className="text-text-tertiary">{t("title.unnamedEpisode")}</span>
             )}
           </h3>
+          {nextUp ? (
+            <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-caption font-medium text-[var(--text-on-accent)]">
+              {t("title.episode.nextUp")}
+            </span>
+          ) : null}
           <span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-caption text-text-secondary">
             {t(`title.episode.availability.${availability}`)}
           </span>

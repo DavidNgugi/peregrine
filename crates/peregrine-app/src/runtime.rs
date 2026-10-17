@@ -352,6 +352,8 @@ pub struct StartedPlayback {
     pub session_id: SessionId,
     /// The title the session belongs to.
     pub title_id: i64,
+    /// The episode this session opened, or `None` for a whole title.
+    pub episode_id: Option<i64>,
     /// The library file being served.
     pub media_file_id: i64,
     /// What this build is doing with the file's container.
@@ -3137,6 +3139,7 @@ impl Runtime {
         Ok(StartedPlayback {
             session_id,
             title_id,
+            episode_id,
             media_file_id,
             support,
             url,
@@ -3267,6 +3270,21 @@ impl Runtime {
         Ok(self
             .database
             .list_continue_watching(installation_scope(), PageRequest::first(20))
+            .await?)
+    }
+
+    /// One title's per-episode watch state, which the season list draws.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn title_watch_progress(
+        &self,
+        title_id: i64,
+    ) -> Result<Vec<peregrine_storage::EpisodeProgressRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_progress_for_title(installation_scope(), title_id)
             .await?)
     }
 

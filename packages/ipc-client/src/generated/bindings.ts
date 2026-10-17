@@ -933,6 +933,10 @@ export type EpisodeDto = {
 	bytes: number,
 	/**  How many of them the last scan could not find. */
 	missingFiles: number,
+	/**  Whether the account finished it. */
+	watched: boolean,
+	/**  How far through the account is, as a fraction in `0.0..=1.0`; `0.0` when unstarted. */
+	progress: number | null,
 };
 
 /**
@@ -1426,6 +1430,8 @@ export type PlaybackSessionDto = {
 	sessionId: number,
 	/**  The title this session belongs to, so a screen can confirm it is drawing the one it asked for. */
 	titleId: number,
+	/**  The episode this session opened, or `null` for a whole title. */
+	episodeId: number | null,
 	/**  The library file being served. */
 	mediaFileId: number,
 	/**  What this build is doing with the file's container. */
