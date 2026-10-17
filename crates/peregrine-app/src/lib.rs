@@ -60,6 +60,10 @@ pub use peregrine_secrets::Secret;
 // keychain — which `AGENTS R14` forbids and which measured as a stalled read on macOS the first
 // time a rebuilt binary asked (PG-E5-12).
 pub use peregrine_secrets::{SecretKey, SecretStore, SecretStoreError};
+// The debug build's file-backed store, for the shell to compose without a second dependency edge;
+// release builds do not compile it.
+#[cfg(debug_assertions)]
+pub use peregrine_secrets::DevFileStore;
 // The command surface speaks these too, and `peregrine-ipc` may depend on this crate and not
 // on `peregrine-domain` (AGENTS R6): re-exported rather than duplicated so a kind added to the
 // domain cannot reach the wire in a form the domain does not have. `TitleSubtype` is here for the

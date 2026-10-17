@@ -111,11 +111,19 @@ fn start<R: tauri::Runtime>(
     data_directory: PathBuf,
     artwork_directory: PathBuf,
 ) -> Result<Arc<Runtime>, StartupError> {
+    // A debug build keeps provider secrets in a 0600 file under the app's data directory: macOS
+    // binds a keychain item to the binary's code signature, and a dev rebuild is a new signature,
+    // so three providers meant three login-password prompts on every launch. The store migrates a
+    // value from the keyring once, then answers from the file; release builds keep the keyring.
+    #[cfg(debug_assertions)]
+    let dev_secrets = data_directory.join("secrets.dev.json");
     let config = RuntimeConfig::new(
         data_directory,
         artwork_directory,
         Arc::new(TauriSink { app: app.clone() }),
     );
+    #[cfg(debug_assertions)]
+    let config = config.with_secrets(Arc::new(peregrine_app::DevFileStore::new(dev_secrets)));
     let logging = Observability::install(&config.log_config())?;
     let runtime = tauri::async_runtime::block_on(Runtime::start(config, logging))?;
     Ok(Arc::new(runtime))

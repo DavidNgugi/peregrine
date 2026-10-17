@@ -373,6 +373,9 @@ may_depend_on = [
 ]
 runtime = [
   "keyring",
+  # The debug-only file-backed store keeps its entries as JSON; a release build compiles neither
+  # the store nor this use of the dependency (SECURITY.md records the dev-only trade).
+  "serde_json",
   "secrecy",
   "thiserror",
   "tracing",
