@@ -33,7 +33,13 @@ describe("frameSeekMs", () => {
   it("answers zero rather than a nonsense time for a duration it cannot use", () => {
     // A seek to `NaN` is a seek that never completes, and the element's own first frame is a better answer
     // than a capture that hangs until its timeout.
-    for (const duration of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    for (const duration of [
+      0,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    ]) {
       expect(frameSeekMs(duration)).toBe(0);
     }
   });

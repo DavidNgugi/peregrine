@@ -213,7 +213,9 @@ export function TitleScreen({
                 </Button>
               </div>
             )}
-            {acquire === undefined || acquire.titleId !== title.id || acquire.error === null ? null : (
+            {acquire === undefined ||
+            acquire.titleId !== title.id ||
+            acquire.error === null ? null : (
               <p className="text-caption text-state-danger" role="status">
                 {messageOf(acquire.error)}
               </p>

@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  back,
-  canGoBack,
-  MAX_HISTORY,
-  navigate,
-  sameRoute,
-  startHistory,
-} from "./navigation.js";
+import { back, canGoBack, MAX_HISTORY, navigate, sameRoute, startHistory } from "./navigation.js";
 import { HOME, type Route } from "./routes.js";
 
 const settings: Route = { kind: "settings" };

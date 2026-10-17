@@ -247,7 +247,11 @@ describe("TitleCard accessible name", () => {
     // nothing, and the meta line beside it is long enough to wrap and push the action out of the panel on
     // its own. Both lines are `truncate` for that reason, and this is the assertion that they are.
     const named = renderToStaticMarkup(
-      <TitlePreviewPanel detailsLabel="View More" meta="Film · 3 GB · No metadata yet" name="Alien" />,
+      <TitlePreviewPanel
+        detailsLabel="View More"
+        meta="Film · 3 GB · No metadata yet"
+        name="Alien"
+      />,
     );
     const unnamed = renderToStaticMarkup(
       <TitlePreviewPanel detailsLabel="View More" meta="Film · 3 GB · No metadata yet" />,

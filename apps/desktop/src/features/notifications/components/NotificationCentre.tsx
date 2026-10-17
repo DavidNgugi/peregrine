@@ -57,13 +57,10 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
 
   return (
     <div className="relative">
-      <Button
-        aria-expanded={open}
-        onClick={toggle}
-        size="sm"
-        variant="ghost"
-      >
-        {unread > 0 ? t("shell.notifications.labelWithCount", { count: unread }) : t("shell.notifications.label")}
+      <Button aria-expanded={open} onClick={toggle} size="sm" variant="ghost">
+        {unread > 0
+          ? t("shell.notifications.labelWithCount", { count: unread })
+          : t("shell.notifications.label")}
       </Button>
       {open ? (
         <div
@@ -85,9 +82,13 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
             ) : null}
           </div>
           {notifications.failed ? (
-            <p className="px-1 py-2 text-caption text-state-danger">{t("shell.notifications.failed")}</p>
+            <p className="px-1 py-2 text-caption text-state-danger">
+              {t("shell.notifications.failed")}
+            </p>
           ) : notifications.rows.length === 0 ? (
-            <p className="px-1 py-2 text-caption text-text-secondary">{t("shell.notifications.empty")}</p>
+            <p className="px-1 py-2 text-caption text-text-secondary">
+              {t("shell.notifications.empty")}
+            </p>
           ) : (
             <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
               {notifications.rows.map((row) => (

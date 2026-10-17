@@ -92,14 +92,17 @@ export function useNotifications(): Notifications {
 
   // Every mutation re-reads rather than patching local state: whether a row is read is the
   // repository's answer, and a second source of truth would drift from it.
-  const markRead = useCallback(async (id: number): Promise<void> => {
-    try {
-      await markNotificationRead(id);
-      await refresh();
-    } catch (caught: unknown) {
-      logUiError("notifications.markRead", normalizeIpcError(caught));
-    }
-  }, [refresh]);
+  const markRead = useCallback(
+    async (id: number): Promise<void> => {
+      try {
+        await markNotificationRead(id);
+        await refresh();
+      } catch (caught: unknown) {
+        logUiError("notifications.markRead", normalizeIpcError(caught));
+      }
+    },
+    [refresh],
+  );
 
   const markAllRead = useCallback(async (): Promise<void> => {
     try {
@@ -110,14 +113,17 @@ export function useNotifications(): Notifications {
     }
   }, [refresh]);
 
-  const dismiss = useCallback(async (id: number): Promise<void> => {
-    try {
-      await dismissNotification(id);
-      await refresh();
-    } catch (caught: unknown) {
-      logUiError("notifications.dismiss", normalizeIpcError(caught));
-    }
-  }, [refresh]);
+  const dismiss = useCallback(
+    async (id: number): Promise<void> => {
+      try {
+        await dismissNotification(id);
+        await refresh();
+      } catch (caught: unknown) {
+        logUiError("notifications.dismiss", normalizeIpcError(caught));
+      }
+    },
+    [refresh],
+  );
 
   return { rows, loading, failed, refresh, markRead, markAllRead, dismiss };
 }

@@ -82,7 +82,12 @@ export function JobsScreen({
   ];
 
   return (
-    <Screen backLabel={backLabel} onBack={onBack} subtitle={t("jobs.subtitle")} title={t("jobs.title")}>
+    <Screen
+      backLabel={backLabel}
+      onBack={onBack}
+      subtitle={t("jobs.subtitle")}
+      title={t("jobs.title")}
+    >
       {errorCopy !== null ? (
         <ErrorState
           action={

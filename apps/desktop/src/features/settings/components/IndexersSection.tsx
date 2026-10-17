@@ -16,14 +16,7 @@
  * marked secret renders as a password, and a definition that needs no input adds in one click.
  */
 
-import {
-  Button,
-  Dialog,
-  ErrorState,
-  SettingsRow,
-  SettingsSection,
-  TextInput,
-} from "@peregrine/ui";
+import { Button, Dialog, ErrorState, SettingsRow, SettingsSection, TextInput } from "@peregrine/ui";
 import type { ConfiguredIndexerDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
@@ -147,9 +140,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
         <>
           {indexers.indexers.length === 0 ? (
             <SettingsRow label={t("settings.indexers.list.title")}>
-              <p className="text-body text-text-secondary">
-                {t("settings.indexers.list.empty")}
-              </p>
+              <p className="text-body text-text-secondary">{t("settings.indexers.list.empty")}</p>
             </SettingsRow>
           ) : (
             indexers.indexers.map((row) => (

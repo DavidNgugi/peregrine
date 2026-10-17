@@ -32,7 +32,14 @@ describe("parseRoute", () => {
     expect(parseRoute("/player/7")).toEqual({ kind: "player", id: 7 });
     expect(routePath({ kind: "player", id: 7 })).toBe("/player/7");
 
-    for (const path of ["/player/", "/player/0", "/player/-1", "/player/7.5", "/player/abc", "/player"]) {
+    for (const path of [
+      "/player/",
+      "/player/0",
+      "/player/-1",
+      "/player/7.5",
+      "/player/abc",
+      "/player",
+    ]) {
       expect(parseRoute(path)).toBeNull();
     }
   });

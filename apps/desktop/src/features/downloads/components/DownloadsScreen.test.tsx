@@ -44,7 +44,12 @@ function markup(rows: readonly DownloadJobDto[]): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <DownloadsScreen
-        downloads={{ downloads: rows, loading: false, failed: false, refresh: () => Promise.resolve() }}
+        downloads={{
+          downloads: rows,
+          loading: false,
+          failed: false,
+          refresh: () => Promise.resolve(),
+        }}
         onNavigate={() => undefined}
       />
     </I18nextProvider>,

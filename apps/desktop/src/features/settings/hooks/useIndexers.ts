@@ -37,13 +37,7 @@ import { messageOf } from "../../../lib/ipc-message.js";
 
 /** What the last completed action left behind, for the sentence under the controls. */
 export type IndexerOutcome =
-  | "saved"
-  | "tested"
-  | "testFailed"
-  | "removed"
-  | "added"
-  | "deleted"
-  | null;
+  "saved" | "tested" | "testFailed" | "removed" | "added" | "deleted" | null;
 
 /** The configured indexer, the indexers Prowlarr holds, and the operations the section offers. */
 export interface IndexerSettings {

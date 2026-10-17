@@ -63,8 +63,7 @@ const MAX_FRAME_EDGE = 640;
 
 /** What a capture produced, or why it produced nothing. */
 export type CaptureOutcome =
-  | { readonly kind: "captured"; readonly blob: Blob }
-  | { readonly kind: "refused" };
+  { readonly kind: "captured"; readonly blob: Blob } | { readonly kind: "refused" };
 
 /**
  * Draws one frame of `url` onto a canvas and answers it as a JPEG.
@@ -77,10 +76,7 @@ export type CaptureOutcome =
  * creates has read the same header by the time it is used, so a caller with nothing to pass — the poster
  * backfill, which has no player on screen — passes `null` and gets the same answer.
  */
-export async function captureFrame(
-  url: string,
-  hintMs: number | null,
-): Promise<CaptureOutcome> {
+export async function captureFrame(url: string, hintMs: number | null): Promise<CaptureOutcome> {
   const video = document.createElement("video");
   // The response has to be CORS-readable or the canvas is tainted and `toBlob` refuses; the session's
   // listener sends `Access-Control-Allow-Origin` for exactly this reason.

@@ -59,11 +59,7 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
   }, []);
 
   const move = useCallback(
-    async (
-      id: number,
-      call: (id: number) => Promise<unknown>,
-      label: string,
-    ): Promise<void> => {
+    async (id: number, call: (id: number) => Promise<unknown>, label: string): Promise<void> => {
       setState({ busyId: id, clearing: false, planningId: null, error: null });
       try {
         await call(id);

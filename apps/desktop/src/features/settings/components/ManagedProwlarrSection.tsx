@@ -18,9 +18,7 @@ interface ManagedProwlarrSectionProps {
 }
 
 /** The managed Prowlarr section of the settings screen. */
-export function ManagedProwlarrSection({
-  prowlarr,
-}: ManagedProwlarrSectionProps): ReactElement {
+export function ManagedProwlarrSection({ prowlarr }: ManagedProwlarrSectionProps): ReactElement {
   const { t } = useTranslation();
   const status = prowlarr.status;
   const [confirmingStop, setConfirmingStop] = useState(false);

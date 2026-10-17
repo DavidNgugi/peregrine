@@ -167,9 +167,7 @@ describe("downloadsFirst", () => {
   it("keeps the provider row for a title that is both and does not draw it twice", () => {
     const merged = downloadsFirst(
       items,
-      [
-        { titleId: 2, title: "two", titleKind: "movie", poster: null, state: "downloading" },
-      ],
+      [{ titleId: 2, title: "two", titleKind: "movie", poster: null, state: "downloading" }],
       "movie",
       make,
     );

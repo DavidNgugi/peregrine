@@ -190,4 +190,3 @@ export function downloadCardProps(
     ? {}
     : { downloadStatus: status, downloadLabel: t(downloadStatusLabelKey(status)) };
 }
-

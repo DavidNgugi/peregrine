@@ -36,12 +36,7 @@ import type { Downloads } from "../hooks/useDownloads.js";
 type Translate = ReturnType<typeof useTranslation>["t"];
 
 /** A state from which no move is left to make. */
-const FINISHED_STATES: ReadonlySet<string> = new Set([
-  "completed",
-  "failed",
-  "blocked",
-  "removed",
-]);
+const FINISHED_STATES: ReadonlySet<string> = new Set(["completed", "failed", "blocked", "removed"]);
 
 /** A state nothing may leave, so the row offers no move at all.
  *
@@ -53,11 +48,7 @@ const TERMINAL_STATES: ReadonlySet<string> = new Set(["completed", "failed", "re
  *
  * `completed` is here because a completed payload is no longer seeding: the core stops the torrent
  * when it finishes, so clearing the row removes a record and changes nothing on the swarm. */
-const CLEARABLE_STATES: ReadonlySet<string> = new Set([
-  "completed",
-  "failed",
-  "removed",
-]);
+const CLEARABLE_STATES: ReadonlySet<string> = new Set(["completed", "failed", "removed"]);
 
 /** Bytes as a row shows them, in whole units. */
 function sizeLabel(bytes: number, t: Translate): string {
@@ -364,7 +355,12 @@ export function DownloadsScreen({
               };
 
   return (
-    <Screen backLabel={backLabel} onBack={onBack} subtitle={t("downloads.subtitle")} title={t("downloads.title")}>
+    <Screen
+      backLabel={backLabel}
+      onBack={onBack}
+      subtitle={t("downloads.subtitle")}
+      title={t("downloads.title")}
+    >
       <Section description={t("downloads.description")} title={t("downloads.section")}>
         {downloads.failed ? (
           <ErrorState
@@ -383,7 +379,11 @@ export function DownloadsScreen({
           />
         ) : downloads.loading && downloads.downloads.length === 0 ? null : downloads.downloads
             .length === 0 ? (
-          <EmptyState body={t("downloads.empty.body")} size="page" title={t("downloads.empty.title")} />
+          <EmptyState
+            body={t("downloads.empty.body")}
+            size="page"
+            title={t("downloads.empty.title")}
+          />
         ) : (
           <>
             {actions.error === null ? null : (

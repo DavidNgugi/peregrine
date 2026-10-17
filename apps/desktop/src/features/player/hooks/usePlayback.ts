@@ -75,9 +75,7 @@ export function usePlayback(titleId: number): Playback {
   const close = useCallback(async (): Promise<void> => {
     const session = opened.current;
     opened.current = null;
-    setState((current) =>
-      current.session === null ? current : { ...current, session: null },
-    );
+    setState((current) => (current.session === null ? current : { ...current, session: null }));
     if (session === null) {
       return;
     }
