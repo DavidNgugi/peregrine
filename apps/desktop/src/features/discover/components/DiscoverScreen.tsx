@@ -15,7 +15,7 @@ import type {
   RailKindDto,
   TitleMatchDto,
 } from "@peregrine/ipc-client";
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
@@ -122,6 +122,13 @@ export interface DiscoverViewProps {
    */
   readonly onPlay?: (slide: HeroSlide) => void;
   readonly onNavigate: (route: Route) => void;
+  /**
+   * The featured title's backdrop, when the hero has one.
+   *
+   * The profile selector draws the same picture at full window, so it reads the hero's answer
+   * rather than fetching a second catalogue for decoration.
+   */
+  readonly onBackdrop?: ((url: string | null) => void) | undefined;
   /** A download status per title, so a rail's tiles wear the mark of a transfer in flight. */
   readonly downloads?: DownloadMarks | undefined;
   /**
@@ -276,6 +283,7 @@ export function DiscoverView({
   search,
   onPlay,
   onNavigate,
+  onBackdrop,
   downloads,
   titleKind,
   onKindChange,
@@ -323,6 +331,13 @@ export function DiscoverView({
     scoreLabel: ratingLabel(item),
     playable: item.playable,
   }));
+
+  // The selector paints the hero's backdrop at full window. Reported from here because this screen
+  // already holds the answer, and a second catalogue read for decoration would be a second query.
+  const featuredBackdrop = slides[0]?.backdrop ?? null;
+  useEffect(() => {
+    onBackdrop?.(featuredBackdrop);
+  }, [featuredBackdrop, onBackdrop]);
 
   // The Discover kind filter applies to the two rails this screen owns as well as to the provider
   // ones: a film must not appear under TV shows, and a series must not appear under Films.
@@ -594,12 +609,15 @@ export function DiscoverView({
 /** Discover, wired to the core. */
 export function DiscoverScreen({
   onNavigate,
+  onBackdrop,
   titleKind,
   trailing,
   downloads,
   recentDownloads,
 }: {
   readonly onNavigate: (route: Route) => void;
+  /** The featured title's backdrop, reported so the profile selector can draw the same picture. */
+  readonly onBackdrop?: (url: string | null) => void;
   /** The selected type, or `undefined` for **All** — which is also what a bare `/` means. */
   readonly titleKind?: RailKindDto | undefined;
   readonly trailing?: ReactNode;
@@ -619,6 +637,7 @@ export function DiscoverScreen({
   return (
     <DiscoverView
       downloads={downloads}
+      onBackdrop={onBackdrop}
       onNavigate={onNavigate}
       titleKind={titleKind}
       {...(recentDownloads === undefined ? {} : { recentDownloads })}

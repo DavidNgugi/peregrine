@@ -87,7 +87,11 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // history, so every screen except the first has somewhere to go back to (`./navigation.js`).
   const [history, setHistory] = useState(() => startHistory(initialRoute));
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileBackdrop, setProfileBackdrop] = useState<string | null>(null);
   const { profile } = useProfile();
+  const reportBackdrop = useCallback((url: string | null) => {
+    setProfileBackdrop(url);
+  }, []);
   const route = history.current;
   const navigate = useCallback((next: Route) => {
     setHistory((current) => navigateTo(current, next));
@@ -334,6 +338,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                answers when the URL carries no `type`. */
             <DiscoverScreen
               downloads={marks}
+              onBackdrop={reportBackdrop}
               onNavigate={navigate}
               recentDownloads={downloads.downloads}
               titleKind={route.titleKind}
@@ -455,6 +460,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         onClose={() => {
           setProfileOpen(false);
         }}
+        backdrop={profileBackdrop}
         open={profileOpen}
         posters={profilePosters}
         profile={profile}
