@@ -40,13 +40,13 @@
   "ffmpeg": {
     "linux-x86_64": {
       "version": "n9.0.2-28-g669f5ab083",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-shared-9.0.tar.xz",
-      "sha256": "d744ff75c12a26b8404da11573c6a7293d2bdd85f2d7c56e808d95bb2977d4c4",
-      "size": 63514136,
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0.tar.xz",
+      "sha256": "5e90ecce92a64495345f7d92c3238ca579483e54c20671c0a9e1eac6096a6882",
+      "size": 137914692,
       "archive": "tar.xz",
       "binary": "bin/ffmpeg",
       "licence": "LGPL-3.0-or-later",
-      "notes": "BtbN shared LGPL build: bin plus lib. glibc 2.28."
+      "notes": "BtbN static LGPL build; one binary, glibc 2.28. Static because the shared build's symlinked libs are not resource-safe."
     },
     "windows-x86_64": {
       "version": "n9.0.2-28-g669f5ab083",
@@ -72,13 +72,13 @@
   "ffprobe": {
     "linux-x86_64": {
       "version": "n9.0.2-28-g669f5ab083",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-shared-9.0.tar.xz",
-      "sha256": "d744ff75c12a26b8404da11573c6a7293d2bdd85f2d7c56e808d95bb2977d4c4",
-      "size": 63514136,
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-16-13-04/ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0.tar.xz",
+      "sha256": "5e90ecce92a64495345f7d92c3238ca579483e54c20671c0a9e1eac6096a6882",
+      "size": 137914692,
       "archive": "tar.xz",
       "binary": "bin/ffprobe",
       "licence": "LGPL-3.0-or-later",
-      "notes": "Same archive as ffmpeg."
+      "notes": "BtbN static LGPL build; one binary, glibc 2.28. Static because the shared build's symlinked libs are not resource-safe."
     },
     "windows-x86_64": {
       "version": "n9.0.2-28-g669f5ab083",

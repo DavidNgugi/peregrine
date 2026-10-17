@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// Downloads the pinned sidecars for this host into vendor/sidecars, verifying every digest.
+// Downloads the pinned sidecars for this host and stages them beside the Tauri config, verifying
+// every digest. The lock file is the source of truth; this is the only thing that downloads.
 //
-// The lock file is the source of truth; this script is the only thing that downloads. An entry
-// with a build key has no redistributable artefact and is produced by CI instead, so a local run
-// skips it with a note rather than failing.
+// A component whose lock entry has a build key has no redistributable artefact and is produced by
+// CI instead, so a local run skips it with a note rather than failing.
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   cpSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -21,7 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -65,7 +65,13 @@ async function download(url, destination) {
 function extract(archive, destination, kind) {
   if (kind === "zip") {
     if (process.platform === "win32") {
-      execFileSync("tar", ["-xf", archive, "-C", destination]);
+      // bsdtar reads "D:\\..." as a remote host:path, so Windows must not see the path in tar.
+      execFileSync("powershell", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${destination}' -Force`,
+      ]);
     } else {
       execFileSync("unzip", ["-q", archive, "-d", destination]);
     }
@@ -82,15 +88,10 @@ function hoist(directory) {
     if (entries.length === 1 && NESTED.test(entries[0])) {
       const nested = join(directory, entries[0]);
       const kind = entries[0].endsWith(".zip") ? "zip" : "tar.xz";
-      if (kind === "tar.xz" || entries[0].endsWith(".tar.gz")) {
-        execFileSync("tar", [
-          entries[0].endsWith(".tar.gz") ? "-xzf" : "-xJf",
-          nested,
-          "-C",
-          directory,
-        ]);
+      if (entries[0].endsWith(".tar.gz")) {
+        execFileSync("tar", ["-xzf", nested, "-C", directory]);
       } else {
-        extract(nested, directory, "zip");
+        extract(nested, directory, kind);
       }
       rmSync(nested);
       continue;
@@ -100,25 +101,29 @@ function hoist(directory) {
   return directory;
 }
 
+function walk(directory) {
+  const found = [];
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) found.push(...walk(path));
+    else found.push(path);
+  }
+  return found;
+}
+
+/** The first file whose path ends with one of the suffixes, with either separator. */
+function findBinary(directory, suffix) {
+  const wanted = suffix.replaceAll("\\", "/");
+  const match = walk(directory).find((path) => path.replaceAll("\\", "/").endsWith(wanted));
+  if (match === undefined) throw new Error(`${suffix} is missing after extraction`);
+  return match;
+}
+
 function ensureDirectory(path) {
   mkdirSync(path, { recursive: true });
 }
 
-// Adds owner-write to every entry under `path`.
-//
-// **Not cosmetic: it is what makes a second build possible.** Tauri copies `bundle.resources` into
-// `target/` with `fs::copy`, and that copies the source's permission bits onto the destination. The
-// upstream mpv bundle ships `Contents/Frameworks/libMoltenVK.dylib` as 0444, so the first build
-// leaves a read-only file in `target/` and the second one dies opening it for writing with
-// "Permission denied (os error 13)" — for ever, until the stale tree is deleted by hand.
-function makeWritable(path) {
-  const stats = lstatSync(path);
-  if (stats.isSymbolicLink()) return;
-  chmodSync(path, stats.mode | 0o200);
-  if (stats.isDirectory()) {
-    for (const entry of readdirSync(path)) makeWritable(join(path, entry));
-  }
-}
+const stage = join(root, "apps/desktop/src-tauri/sidecars");
 
 for (const component of components) {
   const key = targetKey();
@@ -129,18 +134,16 @@ for (const component of components) {
     continue;
   }
 
-  const stage = join(root, "apps/desktop/src-tauri/sidecars");
   const isMacMpv = component === "mpv" && key.startsWith("macos");
-  const destination = isMacMpv ? join(stage, "mpv.app") : join(stage, component);
-  const binary = isMacMpv
-    ? join(destination, "Contents/MacOS/mpv")
-    : join(destination, entry.binary);
-  if (existsSync(binary) && !force) {
-    console.log(`${component}: present at ${destination}`);
+  const directory = isMacMpv ? join(stage, "mpv.app") : join(stage, component);
+  const staged = component === "mpv" ? join(directory, isMacMpv ? "Contents/MacOS/mpv" : "mpv.exe") : directory;
+  if (existsSync(staged) && !force) {
+    console.log(`${component}: present at ${directory}`);
     continue;
   }
 
-  const cache = join(root, "vendor/cache", `${entry.sha256}-${key}-${component}`);
+  // One cache entry per digest: ffmpeg and ffprobe share an archive on each platform.
+  const cache = join(root, "vendor/cache", entry.sha256);
   ensureDirectory(dirname(cache));
   if (!existsSync(cache) || force) {
     console.log(`${component}: downloading ${entry.url}`);
@@ -149,38 +152,33 @@ for (const component of components) {
   const digest = sha256(cache);
   if (digest !== entry.sha256) {
     rmSync(cache);
-    throw new Error(
-      `${component}: digest mismatch\n expected ${entry.sha256}\n actual   ${digest}`,
-    );
+    throw new Error(`${component}: digest mismatch\n expected ${entry.sha256}\n actual   ${digest}`);
   }
 
   const staging = mkdtempSync(join(tmpdir(), "peregrine-sidecar-"));
   try {
     extract(cache, staging, archiveKind(entry.url));
-    // The macOS archive's top level *is* the app bundle, so the bundle is what gets copied; every
-    // other component wraps its payload in one directory this descends into. Copying the staging
-    // directory instead put the bundle one level too deep (`mpv.app/mpv.app/Contents`), which is a
-    // path `existsSync` then reported as a missing binary.
-    let source;
+    const content = hoist(staging);
     if (component === "mpv") {
-      source = join(hoist(staging), "mpv.app");
+      rmSync(directory, { recursive: true, force: true });
+      if (isMacMpv) {
+        const app = walk(content).find((path) => basename(path) === "mpv.app");
+        if (app === undefined) throw new Error("mpv.app is missing after extraction");
+        cpSync(app, directory, { recursive: true });
+      } else {
+        const binary = findBinary(content, "mpv.exe");
+        cpSync(dirname(binary), directory, { recursive: true });
+      }
+      if (!existsSync(staged)) throw new Error(`${component}: ${staged} is missing after staging`);
+      chmodSync(staged, 0o755);
     } else {
-      const content = hoist(staging);
-      const entries = readdirSync(content);
-      source =
-        entries.length === 1 && statSync(join(content, entries[0])).isDirectory()
-          ? join(content, entries[0])
-          : content;
+      const binary = findBinary(content, entry.binary);
+      rmSync(directory, { recursive: true, force: true });
+      ensureDirectory(dirname(directory));
+      copyFileSync(binary, directory);
+      chmodSync(directory, 0o755);
     }
-    rmSync(destination, { recursive: true, force: true });
-    ensureDirectory(destination);
-    cpSync(source, destination, { recursive: true });
-    if (!existsSync(binary)) {
-      throw new Error(`${component}: ${entry.binary} is missing after extraction`);
-    }
-    makeWritable(destination);
-    chmodSync(binary, 0o755);
-    console.log(`${component}: ${key} ready at ${destination}`);
+    console.log(`${component}: ${key} ready at ${directory}`);
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
