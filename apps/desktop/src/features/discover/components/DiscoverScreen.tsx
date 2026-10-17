@@ -542,23 +542,36 @@ export function DiscoverView({
               empty={null}
               itemKey={(row) => String(row.titleId)}
               items={watching}
-              renderItem={(row, tabIndex) => (
-                <TitleCard
-                  {...downloadCardProps(marks, row.titleId, t, progress)}
-                  detailsLabel={t("card.details")}
-                  href={routePath({ kind: "player", id: row.titleId })}
-                  meta={t("discover.continue.percent", {
-                    percent: Math.round((row.percent ?? 0) * 100),
-                  })}
-                  onNavigate={() => {
-                    onNavigate({ kind: "player", id: row.titleId });
-                  }}
-                  poster={imageUrl(row.poster)}
-                  size="lg"
-                  tabIndex={tabIndex}
-                  title={row.title ?? t("discover.rail.unknown")}
-                />
-              )}
+              renderItem={(row, tabIndex) => {
+                // Resume the episode the row names, now that a series row carries both numbers;
+                // a whole-title row still opens the title's own file.
+                const target =
+                  row.seasonNumber !== null && row.episodeNumber !== null
+                    ? {
+                        kind: "player" as const,
+                        id: row.titleId,
+                        season: row.seasonNumber,
+                        episode: row.episodeNumber,
+                      }
+                    : { kind: "player" as const, id: row.titleId };
+                return (
+                  <TitleCard
+                    {...downloadCardProps(marks, row.titleId, t, progress)}
+                    detailsLabel={t("card.details")}
+                    href={routePath(target)}
+                    meta={t("discover.continue.percent", {
+                      percent: Math.round((row.percent ?? 0) * 100),
+                    })}
+                    onNavigate={() => {
+                      onNavigate(target);
+                    }}
+                    poster={imageUrl(row.poster)}
+                    size="lg"
+                    tabIndex={tabIndex}
+                    title={row.title ?? t("discover.rail.unknown")}
+                  />
+                );
+              }}
               title={t("discover.rail.continueWatching")}
             />
           )}

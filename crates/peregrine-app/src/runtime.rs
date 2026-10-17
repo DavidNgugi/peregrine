@@ -3288,6 +3288,18 @@ impl Runtime {
             .await?)
     }
 
+    /// One episode's season and number, which a resume row needs to address the player.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn episode_numbers(
+        &self,
+        episode_id: i64,
+    ) -> Result<Option<(u32, u32)>, RuntimeError> {
+        Ok(self.database.episode_numbers(episode_id).await?)
+    }
+
     /// Records where the player is in a title or episode.
     ///
     /// The value is the domain's, so the percentage is one derivation (I6) and a position reported

@@ -31,6 +31,12 @@ pub struct ContinueWatchingDto {
     /// The episode, for a series; `null` for a film or a whole-title row.
     #[specta(type = Option<Number>)]
     pub episode_id: Option<i64>,
+    /// The episode's season, when the row names one and the episode still exists.
+    #[specta(type = Option<Number>)]
+    pub season_number: Option<u32>,
+    /// The episode's number within that season.
+    #[specta(type = Option<Number>)]
+    pub episode_number: Option<u32>,
     /// Where the account left off, in milliseconds.
     #[specta(type = Number)]
     pub position_ms: i64,
@@ -51,6 +57,7 @@ impl ContinueWatchingDto {
         title: Option<String>,
         poster: Option<String>,
         kind: Option<DownloadTitleKind>,
+        episode: Option<(u32, u32)>,
     ) -> Self {
         let progress = row.progress;
         Self {
@@ -59,6 +66,8 @@ impl ContinueWatchingDto {
             poster,
             kind,
             episode_id: progress.episode_id(),
+            season_number: episode.map(|(season, _)| season),
+            episode_number: episode.map(|(_, number)| number),
             position_ms: progress.position_ms(),
             duration_ms: progress.duration_ms(),
             percent: progress.percent(),
@@ -123,7 +132,11 @@ pub async fn continue_watching(
     let mut watching = Vec::with_capacity(rows.len());
     for row in rows {
         let (title, poster, kind) = title_art(runtime, row.progress.title_id()).await;
-        watching.push(ContinueWatchingDto::of(row, title, poster, kind));
+        let episode = match row.progress.episode_id() {
+            Some(id) => runtime.episode_numbers(id).await.unwrap_or(None),
+            None => None,
+        };
+        watching.push(ContinueWatchingDto::of(row, title, poster, kind, episode));
     }
     Ok(guard_response("watch::continue_watching", watching))
 }

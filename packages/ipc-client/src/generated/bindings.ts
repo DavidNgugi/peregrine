@@ -770,6 +770,10 @@ export type ContinueWatchingDto = {
 	kind: DownloadTitleKind | null,
 	/**  The episode, for a series; `null` for a film or a whole-title row. */
 	episodeId: number | null,
+	/**  The episode's season, when the row names one and the episode still exists. */
+	seasonNumber: number | null,
+	/**  The episode's number within that season. */
+	episodeNumber: number | null,
 	/**  Where the account left off, in milliseconds. */
 	positionMs: number,
 	/**  The runtime at that position, when the player knew it. */

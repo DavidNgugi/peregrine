@@ -222,6 +222,33 @@ pub(crate) async fn list_progress_for_title(
         .collect()
 }
 
+/// One episode's season and number, when the id still names a row.
+pub(crate) async fn episode_numbers(
+    pool: &sqlx::SqlitePool,
+    episode_id: i64,
+) -> Result<Option<(u32, u32)>, StorageError> {
+    let row = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT season_number, episode_number FROM episode WHERE id = ?1",
+    )
+    .bind(episode_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    row.map(|(season, episode)| {
+        Ok((
+            u32::try_from(season).map_err(|_| StorageError::UnexpectedValue {
+                column: "season_number",
+                found: season.to_string(),
+            })?,
+            u32::try_from(episode).map_err(|_| StorageError::UnexpectedValue {
+                column: "episode_number",
+                found: episode.to_string(),
+            })?,
+        ))
+    })
+    .transpose()
+}
+
 /// The columns [`EpisodeProgressRow`] is built from.
 #[derive(sqlx::FromRow)]
 struct EpisodeProgressQueryRow {

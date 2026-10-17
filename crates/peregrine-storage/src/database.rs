@@ -1683,6 +1683,14 @@ impl Database {
         crate::watch::list_progress_for_title(&self.readers, scope, title_id).await
     }
 
+    /// One episode's season and number, when the id still names a row.
+    pub async fn episode_numbers(
+        &self,
+        episode_id: i64,
+    ) -> Result<Option<(u32, u32)>, StorageError> {
+        crate::watch::episode_numbers(&self.readers, episode_id).await
+    }
+
     /// Writes one watchlist entry.
     pub async fn add_to_watchlist(&self, entry: WatchlistEntry) -> Result<(), StorageError> {
         match self
