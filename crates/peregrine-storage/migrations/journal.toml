@@ -78,3 +78,7 @@ sha256 = "8daaacf3e8fb36e318634cf8ae94b659d345e11144ba6d3a2bcce0b2fe605311"
 [[migration]]
 file = "0019_season_sync.sql"
 sha256 = "f1bf501a2f4a36c0bf0260efaef45d95c2f53f3d617b56f26911114434f98142"
+
+[[migration]]
+file = "0020_download_schedule.sql"
+sha256 = "1da45e3e24322a3bad9c059ff9b8ac45dc7d258b41b99ebf2f49940642df2bc7"

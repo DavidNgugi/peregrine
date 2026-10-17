@@ -349,6 +349,123 @@ pub async fn list_downloads(
     Ok(guard_response("downloads::list", downloads))
 }
 
+/// One scheduled download, as the queue draws it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledDownloadDto {
+    /// The schedule row id, which cancelling takes.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The title the download fills.
+    #[specta(type = Number)]
+    pub title_id: i64,
+    /// The title's display name, when the library can answer it.
+    pub title: Option<String>,
+    /// The episode's season, when the schedule names one.
+    #[specta(type = Option<Number>)]
+    pub season_number: Option<u32>,
+    /// The episode's number within that season.
+    #[specta(type = Option<Number>)]
+    pub episode_number: Option<u32>,
+    /// The first date it may be fetched, as YYYY-MM-DD.
+    pub release_on: String,
+    /// scheduled, started, or failed.
+    pub state: String,
+    /// Why the last attempt failed, when it did.
+    pub error: Option<String>,
+}
+
+/// One schedule a cancel names.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleRef {
+    /// The row id.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
+/// Schedules a download for the first date it may be fetched.
+#[tauri::command]
+#[specta::specta]
+pub async fn schedule_download(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+    season: Option<u32>,
+    episode: Option<u32>,
+    release_on: String,
+) -> Result<(), AppError> {
+    let episode = episode_pick(season, episode)?;
+    if !is_date(&release_on) {
+        return Err(AppError::new(ErrorCode::InvalidInput)
+            .with_detail("A schedule needs a date as YYYY-MM-DD."));
+    }
+    state
+        .runtime()?
+        .schedule_download(title.id, episode, release_on)
+        .await?;
+    Ok(())
+}
+
+/// Every schedule the account holds, soonest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn download_schedules(
+    state: State<'_, RuntimeState>,
+) -> Result<Vec<ScheduledDownloadDto>, AppError> {
+    let runtime = state.runtime()?;
+    let rows = runtime.download_schedules().await?;
+    let schedules = schedules_of(runtime, rows).await;
+    Ok(guard_response("downloads::schedules", schedules))
+}
+
+/// Resolves each row's title and episode into the list the queue draws.
+async fn schedules_of(
+    runtime: &peregrine_app::Runtime,
+    rows: Vec<peregrine_app::DownloadScheduleRow>,
+) -> Vec<ScheduledDownloadDto> {
+    let mut schedules = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (title, _, _) = title_ref(runtime, row.title_id).await;
+        let episode = match row.episode_id {
+            Some(id) => runtime.episode_numbers(id).await.unwrap_or(None),
+            None => None,
+        };
+        schedules.push(ScheduledDownloadDto {
+            id: row.id,
+            title_id: row.title_id,
+            title,
+            season_number: episode.map(|(season, _)| season),
+            episode_number: episode.map(|(_, number)| number),
+            release_on: row.release_on,
+            state: row.state,
+            error: row.error,
+        });
+    }
+    schedules
+}
+
+/// Cancels one schedule. A job it already started is cancelled from the queue.
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_download_schedule(
+    state: State<'_, RuntimeState>,
+    schedule: ScheduleRef,
+) -> Result<(), AppError> {
+    state.runtime()?.cancel_schedule(schedule.id).await?;
+    Ok(())
+}
+
+/// Whether a string is the date shape the schema stores.
+fn is_date(value: &str) -> bool {
+    value.len() == 10
+        && value.as_bytes()[4] == b'-'
+        && value.as_bytes()[7] == b'-'
+        && value
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+}
+
 /// Pauses one download and answers its row as it stands after the move.
 #[tauri::command]
 #[specta::specta]

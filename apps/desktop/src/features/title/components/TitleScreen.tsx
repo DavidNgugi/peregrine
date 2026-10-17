@@ -21,7 +21,7 @@
  */
 
 import { Button, EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
-import { normalizeIpcError, playExternally } from "@peregrine/ipc-client";
+import { normalizeIpcError, playExternally, scheduleDownload } from "@peregrine/ipc-client";
 import type { IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,6 +29,7 @@ import { TitleHero } from "./TitleHero.js";
 import { ReleaseOffers } from "./ReleaseOffers.js";
 import { EpisodeCard } from "./EpisodeCard.js";
 import { SeasonSwitcher } from "./SeasonSwitcher.js";
+import { logUiError } from "../../../lib/error-log.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import type { AcquireControl } from "../hooks/useAcquire.js";
 import type { TitleDetail } from "../hooks/useTitle.js";
@@ -110,6 +111,22 @@ export function TitleScreen({
   // The external player is a process launch rather than a route, so its refusal is this screen's to
   // say: a Play that opens nothing and explains nothing is the inert control PG-E1-07 forbids.
   const [playFailure, setPlayFailure] = useState<IpcError | null>(null);
+  const [scheduled, setScheduled] = useState<ReadonlySet<string>>(() => new Set());
+  const schedule = (
+    key: string,
+    season: number | null,
+    episode: number | null,
+    releaseOn: string,
+  ): void => {
+    if (title === null) return;
+    void scheduleDownload(title.id, season, episode, releaseOn)
+      .then(() => {
+        setScheduled((current) => new Set(current).add(key));
+      })
+      .catch((caught: unknown) => {
+        logUiError("scheduleDownload", normalizeIpcError(caught));
+      });
+  };
 
   // The route's kind is the fallback, so the page names itself before the read answers and keeps the
   // same heading after — a heading that changed once the core replied would be a visible flicker.
@@ -157,6 +174,14 @@ export function TitleScreen({
               acquiringPercent={
                 acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
               }
+              scheduled={scheduled.has("t")}
+              {...(detail.released === null
+                ? {}
+                : {
+                    onSchedule: () => {
+                      schedule("t", null, null, detail.released as string);
+                    },
+                  })}
               onAcquire={
                 acquire === undefined
                   ? undefined
@@ -317,6 +342,24 @@ export function TitleScreen({
                         ((acquire.starting ?? false) || (acquire.running ?? false))
                       }
                       episode={episode}
+                      onSchedule={
+                        episode.airDate === null
+                          ? undefined
+                          : (chosen) => {
+                              schedule(
+                                "e" +
+                                  String(chosen.seasonNumber) +
+                                  "-" +
+                                  String(chosen.episodeNumber),
+                                chosen.seasonNumber,
+                                chosen.episodeNumber,
+                                chosen.airDate ?? "",
+                              );
+                            }
+                      }
+                      scheduled={scheduled.has(
+                        "e" + String(episode.seasonNumber) + "-" + String(episode.episodeNumber),
+                      )}
                       nextUp={
                         nextUp?.seasonNumber === episode.seasonNumber &&
                         nextUp?.episodeNumber === episode.episodeNumber

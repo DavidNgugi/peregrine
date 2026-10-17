@@ -515,6 +515,12 @@ export const commands = {
 	acquire: (title: TitleRef, minSeeders: number | null, season: number | null, episode: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire", { title, minSeeders, season, episode })),
 	/**  The download queue, newest first. */
 	listDownloads: () => typedError<DownloadJobDto[], AppError_Serialize>(__TAURI_INVOKE("list_downloads")),
+	/**  Schedules a download for the first date it may be fetched. */
+	scheduleDownload: (title: TitleRef, season: number | null, episode: number | null, releaseOn: string) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("schedule_download", { title, season, episode, releaseOn })),
+	/**  Every schedule the account holds, soonest first. */
+	downloadSchedules: () => typedError<ScheduledDownloadDto[], AppError_Serialize>(__TAURI_INVOKE("download_schedules")),
+	/**  Cancels one schedule. A job it already started is cancelled from the queue. */
+	cancelDownloadSchedule: (schedule: ScheduleRef) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("cancel_download_schedule", { schedule })),
 	/**  Pauses one download and answers its row as it stands after the move. */
 	pauseDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("pause_download", { download })),
 	/**  Resumes one stopped download. */
@@ -1746,6 +1752,32 @@ export type SafetyFindingDto = {
 	reason: string,
 	/**  The entry the rule applies to, when it names one. */
 	entry: string | null,
+};
+
+/**  One schedule a cancel names. */
+export type ScheduleRef = {
+	/**  The row id. */
+	id: number,
+};
+
+/**  One scheduled download, as the queue draws it. */
+export type ScheduledDownloadDto = {
+	/**  The schedule row id, which cancelling takes. */
+	id: number,
+	/**  The title the download fills. */
+	titleId: number,
+	/**  The title's display name, when the library can answer it. */
+	title: string | null,
+	/**  The episode's season, when the schedule names one. */
+	seasonNumber: number | null,
+	/**  The episode's number within that season. */
+	episodeNumber: number | null,
+	/**  The first date it may be fetched, as YYYY-MM-DD. */
+	releaseOn: string,
+	/**  scheduled, started, or failed. */
+	state: string,
+	/**  Why the last attempt failed, when it did. */
+	error: string | null,
 };
 
 /**  The scheduler's counters. */

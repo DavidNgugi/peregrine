@@ -3300,6 +3300,100 @@ impl Runtime {
             .await?)
     }
 
+    /// Schedules a download for the first date it may be fetched.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the write fails.
+    pub async fn schedule_download(
+        &self,
+        title_id: i64,
+        episode: Option<crate::jobs::acquire::EpisodePick>,
+        release_on: String,
+    ) -> Result<(), RuntimeError> {
+        let episode_id = match episode {
+            Some(pick) => {
+                self.database
+                    .episode_id_for(title_id, pick.season, pick.episode)
+                    .await?
+            }
+            None => None,
+        };
+        let schedule = peregrine_storage::NewSchedule {
+            account_id: installation_scope().account().get(),
+            title_id,
+            episode_id,
+            release_on,
+            created_at: self.clock.now(),
+        };
+        self.database.upsert_schedule(schedule).await?;
+        Ok(())
+    }
+
+    /// Every schedule the account holds, soonest first.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn download_schedules(
+        &self,
+    ) -> Result<Vec<peregrine_storage::DownloadScheduleRow>, RuntimeError> {
+        Ok(self.database.list_schedules(installation_scope()).await?)
+    }
+
+    /// Cancels one schedule.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the delete fails.
+    pub async fn cancel_schedule(&self, id: i64) -> Result<(), RuntimeError> {
+        self.database.delete_schedule(id).await?;
+        Ok(())
+    }
+
+    /// Starts every schedule whose date has arrived and marks the outcome on its row.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when a read or a state write fails. A failed acquisition is
+    /// recorded on its schedule rather than returned, because one broken release must not stop
+    /// the rest.
+    pub async fn run_due_schedules(&self) -> Result<(), RuntimeError> {
+        let now = self.clock.now();
+        let stamp = now.to_string();
+        let today = stamp.get(..10).unwrap_or(stamp.as_str()).to_owned();
+        let due = self
+            .database
+            .due_schedules(installation_scope(), &today)
+            .await?;
+        for schedule in due {
+            self.database
+                .set_schedule_state(schedule.id, "started", None, now)
+                .await?;
+            let episode = match schedule.episode_id {
+                Some(id) => self
+                    .database
+                    .episode_numbers(id)
+                    .await?
+                    .map(|(season, episode)| crate::jobs::acquire::EpisodePick { season, episode }),
+                None => None,
+            };
+            match self
+                .start_acquire(installation_scope(), schedule.title_id, episode, 1)
+                .await
+            {
+                Ok(_) => {}
+                Err(error) => {
+                    let message = error.to_string();
+                    self.database
+                        .set_schedule_state(schedule.id, "failed", Some(&message), now)
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// One episode's season and number, which a resume row needs to address the player.
     ///
     /// # Errors

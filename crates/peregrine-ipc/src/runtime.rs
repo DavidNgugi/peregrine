@@ -102,6 +102,24 @@ pub fn serve<R: tauri::Runtime>(
         },
     };
     app.manage(state);
+    // The scheduler's clock is the app's own: a tick every five minutes, and one immediately so a
+    // schedule that came due while the app was closed is taken on the next start rather than six
+    // minutes later.
+    if let Ok(runtime) = &outcome {
+        // A dedicated thread rather than a task: the tick is one blocking read every five minutes,
+        // and this crate does not otherwise depend on the async runtime's timer surface. It runs
+        // once immediately so a schedule that came due while the app was closed is taken on the
+        // next start rather than five minutes later.
+        let runtime = Arc::clone(runtime);
+        std::thread::spawn(move || {
+            loop {
+                if let Err(error) = tauri::async_runtime::block_on(runtime.run_due_schedules()) {
+                    tracing::warn!(%error, "scheduled downloads could not run");
+                }
+                std::thread::sleep(std::time::Duration::from_secs(300));
+            }
+        });
+    }
     outcome.map(|_| ())
 }
 

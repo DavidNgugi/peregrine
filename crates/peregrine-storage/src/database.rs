@@ -25,6 +25,7 @@ use crate::pragmas;
 use crate::retention::{RetentionOutcome, RetentionPlan};
 use crate::usage::{DiskUsage, LibraryUsageRow};
 use crate::writer::{NewEvent, WriteRequest, WriteResponse, WriterHandle};
+use crate::{DownloadScheduleRow, NewSchedule};
 
 /// ARCHITECTURE §10: readers use a pool sized to `min(4, cores)`.
 const READER_POOL_MAX: u32 = 4;
@@ -1701,6 +1702,70 @@ impl Database {
             WriteResponse::Applied => Ok(()),
             other => Err(unexpected_response("add_to_watchlist", &other)),
         }
+    }
+
+    /// Writes one scheduled download, replacing an existing one for the same title or episode.
+    pub async fn upsert_schedule(&self, schedule: NewSchedule) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpsertSchedule(Box::new(schedule)))
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("upsert_schedule", &other)),
+        }
+    }
+
+    /// Records what the scheduler did with one schedule.
+    pub async fn set_schedule_state(
+        &self,
+        id: i64,
+        state: &str,
+        error: Option<&str>,
+        at: jiff::Timestamp,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetScheduleState {
+                id,
+                state: state.to_owned(),
+                error: error.map(str::to_owned),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("set_schedule_state", &other)),
+        }
+    }
+
+    /// Removes one schedule, which is how it is cancelled.
+    pub async fn delete_schedule(&self, id: i64) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::DeleteSchedule { id })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("delete_schedule", &other)),
+        }
+    }
+
+    /// Every schedule the account holds, soonest first.
+    pub async fn list_schedules(
+        &self,
+        scope: AccountScope,
+    ) -> Result<Vec<DownloadScheduleRow>, StorageError> {
+        crate::schedule::list(&self.readers, scope).await
+    }
+
+    /// The schedules whose date has arrived.
+    pub async fn due_schedules(
+        &self,
+        scope: AccountScope,
+        today: &str,
+    ) -> Result<Vec<DownloadScheduleRow>, StorageError> {
+        crate::schedule::due(&self.readers, scope, today).await
     }
 
     /// Removes one watchlist entry, reporting whether it was there.

@@ -36,6 +36,7 @@ import type {
   NotificationDto,
   ContinueWatchingDto,
   WatchHistoryDto,
+  ScheduledDownloadDto,
   ProgressReport,
   EpisodeDto,
   SeasonDto,
@@ -115,6 +116,26 @@ export async function acquire(
 /** The transfer queue, newest first. */
 export async function listDownloads(): Promise<DownloadJobDto[]> {
   return unwrap(commands.listDownloads());
+}
+
+/** Schedules a title or one episode for the first date it may be fetched. */
+export async function scheduleDownload(
+  titleId: number,
+  season: number | null,
+  episode: number | null,
+  releaseOn: string,
+): Promise<void> {
+  await unwrap(commands.scheduleDownload({ id: titleId }, season, episode, releaseOn));
+}
+
+/** Every schedule the account holds, soonest first. */
+export async function downloadSchedules(): Promise<ScheduledDownloadDto[]> {
+  return unwrap(commands.downloadSchedules());
+}
+
+/** Cancels one schedule; a job it already started is cancelled from the queue. */
+export async function cancelDownloadSchedule(id: number): Promise<void> {
+  await unwrap(commands.cancelDownloadSchedule({ id }));
 }
 
 /** The quality downloads prefer, as its wire spelling, or null when the stored list names none. */

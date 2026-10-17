@@ -34,6 +34,7 @@ mod page;
 mod pragmas;
 mod quality;
 mod retention;
+mod schedule;
 #[cfg(test)]
 mod test_support;
 mod usage;
@@ -71,6 +72,7 @@ pub use retention::{
     RETENTION_POLICY, Requirement, RetentionFailure, RetentionOutcome, RetentionPlan,
     RetentionPolicyEntry, RetentionRule, TableRemoval, TimeWindow,
 };
+pub use schedule::{DownloadScheduleRow, NewSchedule};
 pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
 pub use watch::{EpisodeProgressRow, WatchProgressRow, WatchlistRow};
 pub use writer::NewEvent;

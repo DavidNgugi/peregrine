@@ -5,6 +5,7 @@
 //! message on one channel. Callers therefore cannot contend for the lock, and a write
 //! is serialized behind the writer task instead of failing with `SQLITE_BUSY`.
 
+use jiff::Timestamp;
 use peregrine_domain::{AccountScope, Event, ScanMode};
 use sqlx::Connection as _;
 use tokio::sync::{mpsc, oneshot};
@@ -33,6 +34,24 @@ pub(crate) enum WriteRequest {
     /// enum's size is the size of its largest variant, and a job row is much larger than
     /// the alternative.
     InsertJob(Box<NewJob>),
+    /// Write a scheduled download, replacing any existing one for the same title or episode.
+    UpsertSchedule(Box<crate::schedule::NewSchedule>),
+    /// Record what the scheduler did with one schedule.
+    SetScheduleState {
+        /// The schedule row.
+        id: i64,
+        /// scheduled, started, or failed.
+        state: String,
+        /// Why it failed, when it did.
+        error: Option<String>,
+        /// Unix milliseconds.
+        at: Timestamp,
+    },
+    /// Remove one schedule, which is how it is cancelled.
+    DeleteSchedule {
+        /// The schedule row.
+        id: i64,
+    },
     /// Apply one change to a `job` row.
     UpdateJob {
         id: i64,
@@ -548,20 +567,9 @@ async fn apply_library_write(
             root_id,
             updated_at,
         } => refresh_file_stamp(connection, id, size_bytes, mtime_ms, root_id, updated_at).await,
-        WriteRequest::RecordImageCache(entry) => crate::image_cache::record(connection, &entry)
-            .await
-            .map(|()| WriteResponse::Applied)
-            .map_err(StorageError::from_sqlx),
-        WriteRequest::TouchImageCache { key, at } => {
-            crate::image_cache::touch(connection, &key, at)
-                .await
-                .map(|changed| WriteResponse::RowChanged { changed })
-                .map_err(StorageError::from_sqlx)
-        }
-        WriteRequest::RemoveImageCache { key } => crate::image_cache::remove(connection, &key)
-            .await
-            .map(|removed| WriteResponse::RowChanged { changed: removed })
-            .map_err(StorageError::from_sqlx),
+        other @ (WriteRequest::RecordImageCache(_)
+        | WriteRequest::TouchImageCache { .. }
+        | WriteRequest::RemoveImageCache { .. }) => apply_cache_write(connection, other).await,
         WriteRequest::SetDefaultQualityResolutions {
             resolutions_json,
             at,
@@ -681,6 +689,58 @@ async fn remove_unmatched_file(
 }
 
 /// Applies one request on the writer's connection.
+async fn apply_cache_write(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::RecordImageCache(entry) => crate::image_cache::record(connection, &entry)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::TouchImageCache { key, at } => {
+            crate::image_cache::touch(connection, &key, at)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+                .map_err(StorageError::from_sqlx)
+        }
+        WriteRequest::RemoveImageCache { key } => crate::image_cache::remove(connection, &key)
+            .await
+            .map(|removed| WriteResponse::RowChanged { changed: removed })
+            .map_err(StorageError::from_sqlx),
+        _ => Err(StorageError::UnexpectedValue {
+            column: "image_cache",
+            found: "a request that is not an image cache write".to_owned(),
+        }),
+    }
+}
+
+async fn apply_schedule(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::UpsertSchedule(schedule) => crate::schedule::upsert(connection, &schedule)
+            .await
+            .map(|()| WriteResponse::Applied),
+        WriteRequest::SetScheduleState {
+            id,
+            state,
+            error,
+            at,
+        } => crate::schedule::set_state(connection, id, &state, error.as_deref(), at)
+            .await
+            .map(|()| WriteResponse::Applied),
+        WriteRequest::DeleteSchedule { id } => crate::schedule::delete(connection, id)
+            .await
+            .map(|()| WriteResponse::Applied),
+        _ => Err(StorageError::UnexpectedValue {
+            column: "schedule",
+            found: "a request that is not a schedule".to_owned(),
+        }),
+    }
+}
+
 async fn apply(
     connection: &mut sqlx::SqliteConnection,
     request: WriteRequest,
@@ -690,6 +750,9 @@ async fn apply(
             .await
             .map(|id| WriteResponse::EventAppended { id })
             .map_err(StorageError::from_sqlx),
+        other @ (WriteRequest::UpsertSchedule(_)
+        | WriteRequest::SetScheduleState { .. }
+        | WriteRequest::DeleteSchedule { .. }) => apply_schedule(connection, other).await,
         WriteRequest::InsertJob(job) => crate::jobs::insert(connection, &job)
             .await
             .map(|id| WriteResponse::JobInserted { id })

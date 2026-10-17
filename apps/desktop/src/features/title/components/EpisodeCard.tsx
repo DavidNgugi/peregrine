@@ -61,6 +61,10 @@ export interface EpisodeCardProps {
   readonly progress?: number | undefined;
   /** The first episode the account has not finished, drawn with its own border and word. */
   readonly nextUp?: boolean | undefined;
+  /** Schedules an unaired episode instead of offering a download it cannot serve yet. */
+  readonly onSchedule?: ((episode: EpisodeDto) => void) | undefined;
+  /** Whether this episode is already scheduled. */
+  readonly scheduled?: boolean | undefined;
 }
 
 /** One episode's card. */
@@ -73,6 +77,8 @@ export function EpisodeCard({
   watched = false,
   progress = 0,
   nextUp = false,
+  onSchedule,
+  scheduled = false,
 }: EpisodeCardProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: moving to another season has to give the next still
@@ -170,9 +176,23 @@ export function EpisodeCard({
         {/* A card the library already holds offers no Download: the chip says it is here, and a
             second button would be an offer to fetch what is on disk. While this episode's own
             transfer is in flight the button stays, saying so. */}
-        {availability === null ||
-        (onPlay === undefined &&
-          (onDownload === undefined || (availability !== "wanted" && !downloading))) ? null : (
+        {availability === null ? (
+          onSchedule === undefined ? null : (
+            <div className="mt-auto flex gap-2 pt-1">
+              <Button
+                disabled={scheduled}
+                onClick={() => {
+                  onSchedule(episode);
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                {scheduled ? t("title.episode.scheduled") : t("title.episode.schedule")}
+              </Button>
+            </div>
+          )
+        ) : onPlay === undefined &&
+          (onDownload === undefined || (availability !== "wanted" && !downloading)) ? null : (
           <div className="mt-auto flex flex-wrap gap-2 pt-1">
             {onPlay !== undefined &&
             (availability === "available" || availability === "partial") ? (

@@ -30,6 +30,7 @@ import { routePath, type Route } from "../../../app/routes.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import { imageUrl } from "../../../lib/media.js";
 import { useDownloadActions } from "../hooks/useDownloadActions.js";
+import { ScheduledTransfers } from "./ScheduledTransfers.js";
 import type { Downloads } from "../hooks/useDownloads.js";
 
 /** What `useTranslation` hands a component. */
@@ -371,6 +372,8 @@ export function DownloadsScreen({
       subtitle={t("downloads.subtitle")}
       title={t("downloads.title")}
     >
+      <ScheduledTransfers />
+
       <Section description={t("downloads.description")} title={t("downloads.section")}>
         {downloads.failed ? (
           <ErrorState

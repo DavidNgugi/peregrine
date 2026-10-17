@@ -63,6 +63,19 @@ export const en = {
     downloads: {
       title: "Downloads",
       episode: "S{{season}}E{{episode}}",
+      scheduled: {
+        title: "Scheduled",
+        description: "Downloads waiting for their release date.",
+        failed: "The schedules could not be read.",
+        unknown: "Unknown title",
+        from: "from {{date}}",
+        cancel: "Cancel",
+        state: {
+          scheduled: "Waiting",
+          started: "Started",
+          failed: "Failed",
+        },
+      },
       subtitle: "Transfers this build is running, and the queue behind them.",
       section: "Transfer queue",
       description: "Progress updates while a transfer is active.",
@@ -419,6 +432,8 @@ export const en = {
       // offer the core derives, and each names the thing a reader can act on.
       hero: {
         released: "{{date}}",
+        schedule: "Schedule",
+        scheduled: "Scheduled",
         releases: "Releases {{date}}",
         seasons: "{{count}} season",
         seasons_other: "{{count}} seasons",
@@ -466,6 +481,8 @@ export const en = {
         play: "Play",
         playLabel: "Play episode {{number}} ({{name}})",
         nextUp: "Next up",
+        schedule: "Schedule",
+        scheduled: "Scheduled",
         downloadLabel: "Download episode {{number}} ({{name}})",
         // The word and not the dot: a card's state is carried by its word (§2.2), and the dot's colour
         // mapping belongs to `TitleCard`, which owns the one copy of it.

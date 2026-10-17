@@ -101,3 +101,5 @@ pub use peregrine_providers::provider::RailKind;
 // built by the command surface out of a screen's filters, so the command has to name the same type
 // the runtime takes rather than a second copy of it that could drift.
 pub use peregrine_providers::provider::{BrowseRequest, BrowseSort, GenreRef, ProviderPage};
+
+pub use peregrine_storage::DownloadScheduleRow;

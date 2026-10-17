@@ -43,6 +43,7 @@ export type {
   SafetyFindingDto,
   ContinueWatchingDto,
   WatchHistoryDto,
+  ScheduledDownloadDto,
   ProgressReport,
   OfferRef,
   ReleaseOfferDto,
@@ -127,6 +128,9 @@ export {
   continueWatching,
   recordProgress,
   viewingHistory,
+  scheduleDownload,
+  downloadSchedules,
+  cancelDownloadSchedule,
   unwrap,
 } from "./client.js";
 export type { CommandResult } from "./client.js";
