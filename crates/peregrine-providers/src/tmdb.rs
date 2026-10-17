@@ -1172,6 +1172,16 @@ fn read_date(value: Option<String>) -> Option<Date> {
 /// revalidate, so an image request carries no conditional header.
 pub const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
 
+/// A TMDB read token compiled into a release build, when CI supplied one.
+///
+/// The repository never holds a token. Release CI passes `PEREGRINE_TMDB_TOKEN` at compile time so
+/// a shipped binary works on first launch while the source stays clean, and a key the user stores
+/// still takes precedence. `None` means the setup screen must ask.
+#[must_use]
+pub fn builtin_token() -> Option<&'static str> {
+    option_env!("PEREGRINE_TMDB_TOKEN")
+}
+
 /// What TMDB answers a search with, as much of it as this adapter reads.
 ///
 /// No `deny_unknown_fields`: a provider that adds a field is not drifting, and refusing an answer

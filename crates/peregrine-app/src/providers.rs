@@ -347,7 +347,10 @@ pub fn status(
     let mut configured = Vec::new();
     for entry in MANIFEST {
         known.push(entry.provider);
-        if store.get(&SecretKey::provider(entry.provider))?.is_some() {
+        let stored = store.get(&SecretKey::provider(entry.provider))?.is_some();
+        let builtin =
+            entry.provider == "tmdb" && peregrine_providers::tmdb::builtin_token().is_some();
+        if stored || builtin {
             configured.push(entry.provider);
         }
     }
@@ -375,7 +378,16 @@ pub fn build(
 {
     let credential = store.get(&SecretKey::provider(entry.provider))?;
     let Some(credential) = credential else {
-        return Ok(None);
+        // A release build may carry a shared TMDB token. It is a fallback only: a stored key wins.
+        let builtin = if entry.provider == "tmdb" {
+            peregrine_providers::tmdb::builtin_token()
+        } else {
+            None
+        };
+        let Some(token) = builtin else {
+            return Ok(None);
+        };
+        return build_with(entry, &peregrine_secrets::Secret::new(token)).map(Some);
     };
     build_with(entry, &credential).map(Some)
 }

@@ -50,6 +50,8 @@ The honest limits: Peregrine is early, macOS-only, and has no installer yet, whi
 
 Prerequisites: Rust 1.95 or newer, Node 22 or newer, pnpm, and `mpv` on your `PATH` (`brew install mpv` on macOS). `ffprobe` is used for probing when present.
 
+Release builds are compiled with a shared TMDB token supplied as `PEREGRINE_TMDB_TOKEN` at build time, so a fresh install can search without a key. The token is never in the repository. A key saved in Settings takes precedence, and a local build without the variable simply asks for one.
+
 Nothing is packaged yet, so there is nothing to download and install.
 
 ```bash

@@ -85,7 +85,7 @@ jobs:
         with:
           # The version check reads the config as it is at the released commit,
           # not as it is on the branch the tag was cut from.
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -128,6 +128,9 @@ jobs:
           esac
       - name: Build the signed-or-not bundles
         shell: bash
+        env:
+          # Compiled in, never committed. When the secret is absent the app asks for a key.
+          PEREGRINE_TMDB_TOKEN: ${{ secrets.PEREGRINE_TMDB_TOKEN }}
         run: pnpm tauri build --target ${{ matrix.target }}
       # Runs after the build because this is the only place the assembled bundle
       # — with its sidecar executables and their notices — exists. A missing
@@ -164,7 +167,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: pnpm/setup@v3
         with:
@@ -230,7 +233,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
           # git-cliff walks the tag history; a shallow checkout would produce a
           # changelog for one commit.
           fetch-depth: 0
