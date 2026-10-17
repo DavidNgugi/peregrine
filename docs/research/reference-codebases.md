@@ -85,11 +85,11 @@ class Season {
 - Migrations: TypeORM, 55 files in `server/migration/sqlite/` (+ a `postgres/` twin) generated via `pnpm migration:generate`; `server/utils/DbColumnHelper.ts` (`DbAwareColumn`, `resolveDbType`) abstracts SQLite vs Postgres.
 - Settings are a single JSON file (`config/settings.json`) held in memory with a serialized `saveLock: Promise<void>` (`server/lib/settings/index.ts:397-402`), containing `main`, `plex`, `jellyfin`, `radarr[]`, `sonarr[]`, `notifications.agents`, `metadataSettings`, `public`.
 
-### Concrete lessons to steal
+### Concrete lessons to take
 - Model availability as `(media, season)` with two status columns (hd/4k) and never persist episodes; derive episode lists from the metadata provider at read time. Maps directly to a Rust `media`/`season` table plus a provider trait.
 - `ExternalAPI` + `CacheManager` + `ImageProxy` is a clean three-tier separation (HTTP semantics / JSON cache / binary cache). Port the shape, not the code: one trait `MetadataProvider` with cache-aside and rate limit wrapping.
 - Cache tiers keyed by provider with explicit *key* ceilings and a written rationale per tier is cheap insurance against unbounded growth; expose hit/miss/key counters.
-- Stale-while-revalidate for image and metadata reads keeps the UI instant; `getRolling` is ~20 lines and worth copying conceptually.
+- Stale-while-revalidate for image and metadata reads keeps the UI instant; `getRolling` is ~20 lines and worth taking conceptually.
 - Generic provider interface (`TvShowProvider`) with an adapter per backend is the right boundary — but note that seerr's interface leaks TMDB's types, which is why TVDB had to call TMDB internally.
 - Bitmask notification enums + a list of agents with `shouldSend()`/`send()` makes adding a channel a new file only. Peregrine's equivalent: a `Notifier` trait with a registry.
 - `X-Proxy-Cache: HIT|MISS`-style response headers (`OS-Cache-Status`) make cache behaviour observable from the client without a debugger.
@@ -159,7 +159,7 @@ libvlc_media_player_new( libvlc_instance_t *p_libvlc_instance,
   - Recommendation per area: libvlc embedding → **separate process, or optional runtime-loaded dependency (LGPL-compliant dynamic link) only**; demux/streaming, subtitle pipeline, decoder-device negotiation, chromecast/DLNA → **reference only, re-implement** (FFmpeg + Rust crates give us the same primitives under our own license terms); no VLC file may be copied, and nothing from `modules/gui/` or any GPL-header file may be read as a source of code to transplant.
 - Practical: also audit codec patent/royalty exposure separately from copyright — hw decode on macOS via VideoToolbox is the low-risk path VLC itself takes (`VLC_DECODER_DEVICE_VIDEOTOOLBOX`).
 
-### Concrete lessons to steal
+### Concrete lessons to take
 - Split the media path into explicit stages (access → stream → demux → es_out → decoder → out) and make each stage a trait with capability priorities; this is exactly how `demux` prio 240 vs HEIF prio 239 is resolved.
 - Model the byte source as `read / peek / seek / can_seek / can_pause / can_control_pace`. Torrent streaming needs all six concepts; VLC's `vlc_stream_Seek` peek-buffer fast path is a directly useful idea.
 - `demux_filter` as a capability (used by the Chromecast wrapper) is a neat way to insert a re-muxing stage without forking the demuxer.
@@ -245,7 +245,7 @@ Invoked with a machine-readable progress template (`--progress-template "downloa
 ### Subtitles
 **None.** Verified: no subtitle handling anywhere in the Swift sources. Nothing to reuse.
 
-### Concrete lessons to steal
+### Concrete lessons to take
 - Sidecar daemon + typed RPC client is a legitimate desktop architecture (crash isolation, mature BT engine); the tight version is what Peeri does: one `@Observable` model owning all state, one client, one poll loop.
 - Render config from typed settings and hand it to the daemon as a file (`toAria2ConfigString`), keeping the daemon stateless across app restarts; `--save-session` / `--input-file` / `--force-save` / `--save-session-interval=5` make restart survivable.
 - `--stop-with-process=<pid>` is a two-line fix for orphaned daemons when the GUI is force-quit — worth mirroring for any child process Peregrine spawns.
@@ -318,7 +318,7 @@ The repo's own WebTorrent type shim exposes no file selection or priority API (`
 ### Subtitles
 **None.** `.srt`/`.vtt` appear only as MIME types in the file server (`files.ts:38-39`) and as playlist neighbours in a test fixture (`download/playlist.test.ts:19`). No fetching, parsing, timing, or rendering. What it *does* have is media-folder hygiene: `buildPlaylists` generates `playlist.m3u` per folder (natural sort, refuses to overwrite a file shipped by the torrent, `./`-prefixed relative entries so `#` names are not comments, `src/download/playlist.ts:19-52`).
 
-### Concrete lessons to steal
+### Concrete lessons to take
 - A `Source` interface + registry makes "add a provider" a one-file change; per-source `SourceState {loading, error, code, count}` in the UI is what makes a multi-provider search debuggable (`useConcurrentSearch.ts:9-14`).
 - Coalesce streamed partial results (150 ms) instead of re-rendering per source — directly applicable to a React front-end fed by Tauri events.
 - Fold magnet trackers additively and byte-preservingly (`mergeMagnetTrackers`) rather than rebuilding the magnet; keep the source's own announce list authoritative and public trackers as fallback.
@@ -476,7 +476,7 @@ Read from the 5.0 wiki cross-checked against tag source, because the wiki is sta
   - **Reject outright:** the Python search-plugin loader (unauthenticated remote code execution in-process), and any dependency on a system Python.
 - Contamination flag: any Peregrine file derived from qBittorrent source is reached by GPL-2.0-or-later (§5(a) of `COPYING.GPLv2`) and by the distribution's GPLv3+ asset obligation. The sole permissive header found is the Qt Solutions BSD block on `src/app/localpeer.{cpp,h}`; treat it as third-party and still do not copy.
 
-### Concrete lessons to steal
+### Concrete lessons to take
 1. One abstract `Session` + one implementation + two front-ends (Qt and WebUI) is proof that an engine/GUI split survives a second UI; enforce it with an arch check that the engine crate cannot depend on the UI crate.
 2. Fail-closed binding: never substitute all-interfaces when the pinned interface or address is missing — pass the unresolved value to the engine, log critically, let the bind fail; and set `max_retry_port_bind = 0` when the user pinned a port so a silent port change is impossible.
 3. Atomic-by-construction state: write-temp-then-rename for every write, prefer a leftover `_new` file on load after an unclean exit, use monotonic integer schema versions (a `meta` table for the torrent store, one preferences key for config), migrate with additive `ALTER TABLE ADD COLUMN` steps, and isolate failures per item so one corrupt record is skipped rather than fatal.
@@ -546,7 +546,7 @@ Read from the 5.0 wiki cross-checked against tag source, because the wiki is sta
 ### Auth
 - One API key in `config.xml`, accepted as `X-Api-Key`, `?apikey=`, or `Authorization: Bearer`. The download proxy embeds it in the query string because clients fetch a URL without headers.
 
-### Concrete lessons to steal
+### Concrete lessons to take
 1. Indexer health is **persisted state with an escalating, 429-aware backoff** — that table is the design `PG-E12-01`'s rate declarations should match, and it is the R24 work currently owed.
 2. `{id}/download` is a **resolver, not a file path**: one URL legitimately answers 200 bytes or 301 magnet. Model it as one typed outcome (our `FetchedTorrent`), never as "a magnet".
 3. Definitions are **data, not code** (YAML + a selector engine), which is how one sidecar covers hundreds of trackers. If Peregrine ever bundles definitions, pin the set and never self-update from a remote — the contrast with qBittorrent's unsigned Python plugin loader is instructive.
@@ -573,7 +573,7 @@ Read from the 5.0 wiki cross-checked against tag source, because the wiki is sta
 - Every release carries its origin in code — `Rss`, `ReleasePush`, `Search`, `UserInvokedSearch`, `InteractiveSearch` ([DownloadDecisionMaker.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs)).
 - An external manager can push into `POST /api/v3/release/push`, which runs the **same decision engine synchronously** ([ReleasePushController.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/Sonarr.Api.V3/Indexers/ReleasePushController.cs)).
 
-### The decision engine — the part worth copying
+### The decision engine — the part worth adapting
 - Per release: parse the title → map to series/movie + episodes → compute custom formats → score → run the specification list ([DownloadDecisionMaker.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs)).
 - **The comparer is an ordered key list, not one opaque score** — Sonarr: Quality → Custom Format score → Protocol → Episode Count → Episode Number → Indexer Priority → Seeders/Peers → Age → Size; Radarr: Quality → CF score → Protocol → Indexer Priority → Indexer Flags → Seeds/Peers → Age → Size. REPACK/PROPER rank above the same quality ([Sonarr FAQ](https://wiki.servarr.com/sonarr/faq#how-are-possible-downloads-compared), [DownloadDecisionComparer.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/DecisionEngine/DownloadDecisionComparer.cs)).
 - **Quality profile** fields: `Name`, `UpgradeAllowed`, `Cutoff`, `MinFormatScore`, `CutoffFormatScore`, `MinUpgradeFormatScore`, `FormatItems`, `Items` ([QualityProfile.cs](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Profiles/Qualities/QualityProfile.cs)).
@@ -608,7 +608,7 @@ Read from the 5.0 wiki cross-checked against tag source, because the wiki is sta
 - Manual: `GET /api/v3/release?...` (returns `ReleaseResource` with rejections) and `POST /api/v3/release` to grab a cached result, with `ShouldOverride` to force.
 - Seerr itself was observed using only `/command`, `/queue`, and add/lookup (`/release` was not seen in its servarr clients).
 
-### Concrete lessons to steal
+### Concrete lessons to take
 1. **Specification list + typed rejection reasons**: small pure predicates, each accepting or rejecting with a reason, a priority order, and permanent-vs-temporary semantics. Ours is the domain's ranking with per-rule reasons — keep the shape and surface it (`PG-E12-10`).
 2. **A deterministic ordered comparer**, not a single opaque score, so ties and upgrades are explainable.
 3. **Size limits scaled by runtime**, with explicit unknown-size and unknown-runtime branches and a global maximum — an edge case we must not skip.
@@ -628,7 +628,7 @@ Read from the 5.0 wiki cross-checked against tag source, because the wiki is sta
 
 ## Cross-cutting recommendations for Peregrine
 1. `peregrine-providers` should be a Rust trait returning our own normalized types (not a borrowed TMDB shape), with a cache-aside layer and per-provider key ceilings — seerr's structure without seerr's type leak.
-2. `peregrine-torrent` needs what none of Peeri, torlink, or qBittorrent has: explicit piece-level scheduling (sequential plus head/tail priority), deadline-driven readahead tied to the demuxer's next-needed byte range, and a byte-range HTTP server that can answer for *in-flight* data. qBittorrent returns zero hits for `set_piece_deadline`/`add_piece` across its source, so this is a genuine gap in the state of the art rather than a refinement. Steal VLC's `stream_t` semantics as the interface.
+2. `peregrine-torrent` needs what none of Peeri, torlink, or qBittorrent has: explicit piece-level scheduling (sequential plus head/tail priority), deadline-driven readahead tied to the demuxer's next-needed byte range, and a byte-range HTTP server that can answer for *in-flight* data. qBittorrent returns zero hits for `set_piece_deadline`/`add_piece` across its source, so this is a genuine gap in the state of the art rather than a refinement. Adopt VLC's `stream_t` semantics as the interface.
 3. Prefer spawning a sidecar for anything GPL (aria2) or LGPL-linked (libvlc); keep the Rust core MIT/Apache so the licensing surface stays clean.
 4. Copy the operational hygiene, which is where these codebases are strongest: bootguard safe mode, seed reaper with a duration grammar, watchdog/restart around child processes, token+Host checks on any loopback server, bencode/size validation on uploads, range parsing with 416 handling, `pipeline`-style cancellation on client disconnect.
 5. Ship notification and subtitle pipelines as trait + registry designs from day one (seerr's agents; VLC's `spu decoder` capability), because both are additive features that rot into god objects otherwise.
