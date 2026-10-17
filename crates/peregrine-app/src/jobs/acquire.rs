@@ -497,9 +497,23 @@ impl AcquireJob {
                 |error| JobError::failed(format!("the release's magnet is not usable: {error}")),
             )?));
 
+        // The episode's own row, so a completed import links the file to the episode the card
+        // reads rather than to the title alone. That link is what makes a downloaded episode stop
+        // saying "Not acquired"; without it the file is in the library and the episode is not.
+        let episode_id = match self.target.episode {
+            Some(pick) => self
+                .database
+                .episode_id_for(self.target.title_id, pick.season, pick.episode)
+                .await
+                .map_err(|error| {
+                    JobError::failed(format!("the episode could not be read: {error}"))
+                })?,
+            None => None,
+        };
+
         let job_row = NewDownloadJob {
             title_id: self.target.title_id,
-            episode_id: None,
+            episode_id,
             release_title: chosen.raw_title.clone(),
             release_source: None,
             release_group: None,
