@@ -66,12 +66,15 @@ async function download(url, destination) {
 function extract(archive, destination, kind) {
   if (kind === "zip") {
     if (process.platform === "win32") {
-      // bsdtar reads "D:\\..." as a remote host:path, so Windows must not see the path in tar.
+      // Neither bsdtar nor Expand-Archive can take this path: the first reads "D:\\..." as a
+      // remote host, and the second demands a .zip extension the digest-keyed cache does not have.
+      // ZipFile takes any filename.
+      const quote = (value) => `'${value.replaceAll("'", "''")}'`;
       execFileSync("powershell", [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${destination}' -Force`,
+        `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory(${quote(archive)}, ${quote(destination)})`,
       ]);
     } else {
       execFileSync("unzip", ["-q", archive, "-d", destination]);
