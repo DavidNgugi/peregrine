@@ -268,7 +268,7 @@ fn acquisition_error(error: &AcquisitionError) -> AppError {
 ///
 /// A season without an episode would acquire the whole season and an episode without one has no
 /// season to be an episode of, so neither is a request the job can honour.
-fn episode_pick(
+pub(crate) fn episode_pick(
     season: Option<u32>,
     episode: Option<u32>,
 ) -> Result<Option<EpisodePick>, AppError> {

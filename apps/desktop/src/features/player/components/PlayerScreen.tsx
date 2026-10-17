@@ -182,13 +182,19 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
 export interface PlayerScreenProps {
   /** The title's id, which is what a session is opened for. */
   readonly id: number;
+  /** The episode to open, when the press named one; absent plays the title's own file. */
+  readonly season?: number | undefined;
+  readonly episode?: number | undefined;
   /** Leaves the player. */
   readonly onClose: () => void;
 }
 
 /** The player, wired to the core — including the poster it captures while it plays. */
-export function PlayerScreen({ id, onClose }: PlayerScreenProps): ReactElement {
-  const playback = usePlayback(id);
+export function PlayerScreen({ id, season, episode, onClose }: PlayerScreenProps): ReactElement {
+  const playback = usePlayback(
+    id,
+    season === undefined || episode === undefined ? undefined : { season, episode },
+  );
   // The capture is offered by the session and asked for by the core: `needsPoster` is the core's answer to
   // "has this title nothing to draw", which is the only case a film still is an improvement on. An
   // external session cannot be decoded by the webview, so a still is not on offer there.

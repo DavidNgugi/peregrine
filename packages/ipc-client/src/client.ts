@@ -448,8 +448,12 @@ export async function getTitle(id: number): Promise<TitleDetailDto | null> {
  * A refusal is a title that is not here, holds no copy on disk, holds a copy outside every configured
  * folder, or a file that cannot be served — each of them something the screen says beside the control.
  */
-export async function startPlayback(titleId: number): Promise<PlaybackSessionDto> {
-  return unwrap(commands.startPlayback({ id: titleId }));
+export async function startPlayback(
+  titleId: number,
+  season: number | null = null,
+  episode: number | null = null,
+): Promise<PlaybackSessionDto> {
+  return unwrap(commands.startPlayback({ id: titleId }, season, episode));
 }
 
 /**

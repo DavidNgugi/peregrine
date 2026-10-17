@@ -49,6 +49,8 @@ export interface EpisodeCardProps {
    * then the card draws no button at all rather than a disabled one.
    */
   readonly onDownload?: ((episode: EpisodeDto) => void) | undefined;
+  /** Opens the player for this episode, when the library holds a file of it. */
+  readonly onPlay?: ((episode: EpisodeDto) => void) | undefined;
   /** This episode's own transfer is in flight, so the button says so rather than offering it again. */
   readonly downloading?: boolean | undefined;
   /** How far that transfer has got, 0-100. */
@@ -59,6 +61,7 @@ export interface EpisodeCardProps {
 export function EpisodeCard({
   episode,
   onDownload,
+  onPlay,
   downloading = false,
   downloadPercent,
 }: EpisodeCardProps): ReactElement {
@@ -71,7 +74,7 @@ export function EpisodeCard({
   const availability = episodeAvailability(episode);
 
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-surface-1">
+    <article className="flex h-full flex-col overflow-hidden rounded-md border border-border-subtle bg-surface-1 transition-colors hover:border-accent focus-within:border-accent">
       <div className="aspect-video w-full shrink-0 bg-surface-2">
         {source === null ? (
           <p className="flex h-full items-center justify-center px-4 text-center text-caption text-text-tertiary">
@@ -129,24 +132,43 @@ export function EpisodeCard({
         {/* A card the library already holds offers no Download: the chip says it is here, and a
             second button would be an offer to fetch what is on disk. While this episode's own
             transfer is in flight the button stays, saying so. */}
-        {onDownload === undefined || (availability !== "wanted" && !downloading) ? null : (
-          <div className="mt-auto pt-1">
-            <Button
-              aria-label={t("title.episode.downloadLabel", {
-                number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
-                name: episode.name ?? t("title.unnamedEpisode"),
-              })}
-              disabled={downloading}
-              onClick={() => {
-                onDownload(episode);
-              }}
-              size="sm"
-              variant={downloading ? "primary" : "secondary"}
-            >
-              {downloading
-                ? t("title.episode.downloading", { percent: downloadPercent ?? 0 })
-                : t("title.episode.download")}
-            </Button>
+        {onPlay === undefined &&
+        (onDownload === undefined || (availability !== "wanted" && !downloading)) ? null : (
+          <div className="mt-auto flex flex-wrap gap-2 pt-1">
+            {onPlay !== undefined &&
+            (availability === "available" || availability === "partial") ? (
+              <Button
+                aria-label={t("title.episode.playLabel", {
+                  number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                  name: episode.name ?? t("title.unnamedEpisode"),
+                })}
+                onClick={() => {
+                  onPlay(episode);
+                }}
+                size="sm"
+                variant="primary"
+              >
+                {t("title.episode.play")}
+              </Button>
+            ) : null}
+            {onDownload === undefined || (availability !== "wanted" && !downloading) ? null : (
+              <Button
+                aria-label={t("title.episode.downloadLabel", {
+                  number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                  name: episode.name ?? t("title.unnamedEpisode"),
+                })}
+                disabled={downloading}
+                onClick={() => {
+                  onDownload(episode);
+                }}
+                size="sm"
+                variant={downloading ? "primary" : "secondary"}
+              >
+                {downloading
+                  ? t("title.episode.downloading", { percent: downloadPercent ?? 0 })
+                  : t("title.episode.download")}
+              </Button>
+            )}
           </div>
         )}
       </div>

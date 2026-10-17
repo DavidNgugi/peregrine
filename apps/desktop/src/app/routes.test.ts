@@ -44,6 +44,15 @@ describe("parseRoute", () => {
     }
   });
 
+  it("carries a player's episode only as a complete pair", () => {
+    const withEpisode = { kind: "player" as const, id: 7, season: 1, episode: 2 };
+    expect(parseRoute(routePath(withEpisode))).toEqual(withEpisode);
+    expect(routePath(withEpisode)).toBe("/player/7?season=1&episode=2");
+    // A season without an episode names nothing to open, so the route falls back to the title's own
+    // file rather than carrying half a pair the player cannot resolve.
+    expect(parseRoute("/player/7?season=1")).toEqual({ kind: "player", id: 7 });
+  });
+
   it("reads only supported Discover type filters", () => {
     expect(parseRoute("/?type=show#top")).toEqual({ kind: "discover", titleKind: "show" });
     expect(parseRoute("/?type=movie")).toEqual({ kind: "discover", titleKind: "movie" });

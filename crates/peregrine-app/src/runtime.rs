@@ -695,17 +695,25 @@ fn playback_error(error: peregrine_playback::PlaybackError) -> RuntimeError {
 /// is always empty, and a "best copy" that was really the first row would be worse than no claim.
 fn playable_file(
     evidence: &peregrine_storage::TitleEvidence,
+    episode_id: Option<i64>,
 ) -> Option<&peregrine_domain::MediaFile> {
-    let preferred = evidence.items.iter().find_map(|item| {
+    // A title-level play may draw on any item; an episode-level one may only draw on the items the
+    // import linked to that episode. Filtering at the one place a file is chosen keeps the title's
+    // first file from being served for a different episode.
+    let items = || {
+        evidence
+            .items
+            .iter()
+            .filter(move |item| episode_id.is_none() || item.item.episode_id == episode_id)
+    };
+    let preferred = items().find_map(|item| {
         let wanted = item.item.preferred_file_id?;
         item.files
             .iter()
             .find(|file| file.id == wanted && file.missing_since.is_none())
     });
     preferred.or_else(|| {
-        evidence
-            .items
-            .iter()
+        items()
             .flat_map(|item| item.files.iter())
             .find(|file| file.missing_since.is_none())
     })
@@ -2717,7 +2725,7 @@ impl Runtime {
             .collect();
         Ok(TitlePlayback {
             offer: peregrine_domain::TitleOffer::of(&items, &evidence.jobs),
-            support: playable_file(&evidence)
+            support: playable_file(&evidence, None)
                 .map(|file| LocalPlayback::of_name(file.path.as_str())),
         })
     }
@@ -2858,6 +2866,7 @@ impl Runtime {
     async fn playable(
         &self,
         title_id: i64,
+        episode_id: Option<i64>,
     ) -> Result<(peregrine_domain::MediaFile, SafePath), RuntimeError> {
         if self
             .database
@@ -2871,7 +2880,7 @@ impl Runtime {
             .database
             .title_evidence(installation_scope(), title_id)
             .await?;
-        let Some(file) = playable_file(&evidence) else {
+        let Some(file) = playable_file(&evidence, episode_id) else {
             return Err(RuntimeError::NoPlayableFile);
         };
         let safe = self
@@ -2908,7 +2917,7 @@ impl Runtime {
             self.stop_poster_capture(held).await;
         }
 
-        let (file, safe) = self.playable(title_id).await?;
+        let (file, safe) = self.playable(title_id, None).await?;
         let media_file_id = file.id;
         let session = peregrine_playback::PlaybackSession::open(
             media_file_id,
@@ -3033,7 +3042,19 @@ impl Runtime {
     /// [`RuntimeError::NoPlayableFile`] when it holds none that is on disk and none is downloading,
     /// [`RuntimeError::FileOutsideRoots`] when what it holds is outside every configured folder, and
     /// [`RuntimeError::Playback`] when the file cannot be served.
-    pub async fn start_playback(&self, title_id: i64) -> Result<StartedPlayback, RuntimeError> {
+    pub async fn start_playback(
+        &self,
+        title_id: i64,
+        episode: Option<crate::jobs::acquire::EpisodePick>,
+    ) -> Result<StartedPlayback, RuntimeError> {
+        let episode_id = match episode {
+            Some(pick) => {
+                self.database
+                    .episode_id_for(title_id, pick.season, pick.episode)
+                    .await?
+            }
+            None => None,
+        };
         // A webview play replaces an mpv window for the same reason an mpv play replaces the
         // webview session: one press is one player.
         self.external_player.stop();
@@ -3048,42 +3069,49 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
-        let (media_file_id, support, needs_poster, session) = match self.playable(title_id).await {
-            Ok((file, safe)) => {
-                let support = LocalPlayback::of_name(file.path.as_str());
-                // Whether a poster is worth capturing on the way, asked from the same read the play
-                // needs: only when there is nothing to draw, which is the rule that stops a film still
-                // replacing real artwork.
-                let needs_poster = self.needs_poster(title_id).await?;
-                let session = peregrine_playback::PlaybackSession::open(
-                    file.id,
-                    title_id,
-                    &safe,
-                    self.tokens.next_token(),
-                    Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
-                )
-                .await
-                .map_err(playback_error)?;
-                (file.id, support, needs_poster, session)
-            }
-            // A title with nothing on disk may still be downloading: serve it from the engine so a film
-            // can be watched while its last pieces arrive.
-            Err(RuntimeError::NoPlayableFile) => match self.torrent_media(title_id).await? {
-                Some(media) => {
-                    let session = peregrine_playback::PlaybackSession::open_torrent(
+        let (media_file_id, support, needs_poster, session) =
+            match self.playable(title_id, episode_id).await {
+                Ok((file, safe)) => {
+                    let support = LocalPlayback::of_name(file.path.as_str());
+                    // Whether a poster is worth capturing on the way, asked from the same read the play
+                    // needs: only when there is nothing to draw, which is the rule that stops a film still
+                    // replacing real artwork.
+                    let needs_poster = self.needs_poster(title_id).await?;
+                    let session = peregrine_playback::PlaybackSession::open(
+                        file.id,
                         title_id,
-                        media,
+                        &safe,
                         self.tokens.next_token(),
                         Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
                     )
                     .await
                     .map_err(playback_error)?;
-                    (0, LocalPlayback::Unknown, false, session)
+                    (file.id, support, needs_poster, session)
                 }
-                None => return Err(RuntimeError::NoPlayableFile),
-            },
-            Err(other) => return Err(other),
-        };
+                // A title with nothing on disk may still be downloading: serve it from the engine so a film
+                // can be watched while its last pieces arrive.
+                Err(RuntimeError::NoPlayableFile) if episode_id.is_none() => {
+                    match self.torrent_media(title_id).await? {
+                        Some(media) => {
+                            let session = peregrine_playback::PlaybackSession::open_torrent(
+                                title_id,
+                                media,
+                                self.tokens.next_token(),
+                                Some(Arc::clone(&self.posters)
+                                    as Arc<dyn peregrine_stream::ThumbnailSink>),
+                            )
+                            .await
+                            .map_err(playback_error)?;
+                            (0, LocalPlayback::Unknown, false, session)
+                        }
+                        None => return Err(RuntimeError::NoPlayableFile),
+                    }
+                }
+                // A torrent holds one media stream for the title and no episode identity, so serving it
+                // for a chosen episode would play whatever the torrent happens to contain first.
+                Err(RuntimeError::NoPlayableFile) => return Err(RuntimeError::NoPlayableFile),
+                Err(other) => return Err(other),
+            };
         let url = session.url().to_owned();
         let thumbnail_url = session.thumbnail_url().map(str::to_owned);
         // The guard is dropped before the answer is built: nothing below this line awaits while holding
@@ -3137,7 +3165,7 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
-        let (_file, safe) = self.playable(title_id).await?;
+        let (_file, safe) = self.playable(title_id, None).await?;
         // The app's own watch progress is the resume rule; mpv's watch_later is disabled.
         let resume_ms = self
             .database
@@ -5803,7 +5831,10 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
 
-        let started = runtime.start_playback(id).await.expect("the film plays");
+        let started = runtime
+            .start_playback(id, None)
+            .await
+            .expect("the film plays");
 
         assert_eq!(started.title_id, id);
         assert!(started.media_file_id > 0);
@@ -6063,7 +6094,7 @@ mod tests {
         let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
 
         let first = runtime
-            .start_playback(id)
+            .start_playback(id, None)
             .await
             .expect("the first press plays");
         let first_port: u16 = first
@@ -6078,7 +6109,7 @@ mod tests {
             .unwrap();
 
         let second = runtime
-            .start_playback(id)
+            .start_playback(id, None)
             .await
             .expect("the second press plays");
 
@@ -6226,7 +6257,7 @@ mod tests {
         let (runtime, _sink) = runtime(&directory).await;
 
         let refused = runtime
-            .start_playback(4_242)
+            .start_playback(4_242, None)
             .await
             .expect_err("nothing is here to play");
 
@@ -6325,7 +6356,7 @@ mod tests {
             jobs: Vec::new(),
         };
         assert_eq!(
-            playable_file(&evidence).map(|file| file.id),
+            playable_file(&evidence, None).map(|file| file.id),
             Some(2),
             "the item's preferred file wins over read order"
         );
@@ -6339,19 +6370,22 @@ mod tests {
             )],
             jobs: Vec::new(),
         };
-        assert_eq!(playable_file(&evidence).map(|file| file.id), Some(2));
+        assert_eq!(playable_file(&evidence, None).map(|file| file.id), Some(2));
 
         // Nothing present is nothing to play, which is the state `NoPlayableFile` names.
         let evidence = TitleEvidence {
             items: vec![item(None, vec![file(1, "/a.mp4", true)])],
             jobs: Vec::new(),
         };
-        assert!(playable_file(&evidence).is_none());
+        assert!(playable_file(&evidence, None).is_none());
         assert!(
-            playable_file(&TitleEvidence {
-                items: Vec::new(),
-                jobs: Vec::new(),
-            })
+            playable_file(
+                &TitleEvidence {
+                    items: Vec::new(),
+                    jobs: Vec::new(),
+                },
+                None,
+            )
             .is_none(),
             "a title the library holds nothing of has nothing to play"
         );

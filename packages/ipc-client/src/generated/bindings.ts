@@ -228,7 +228,7 @@ export const commands = {
 	 *  [`AppError`] when the title is not here, holds no copy on disk, holds a copy outside every configured
 	 *  folder, or the file cannot be served.
 	 */
-	startPlayback: (title: TitleRef) => typedError<PlaybackSessionDto, AppError_Serialize>(__TAURI_INVOKE("start_playback", { title })),
+	startPlayback: (title: TitleRef, season: number | null, episode: number | null) => typedError<PlaybackSessionDto, AppError_Serialize>(__TAURI_INVOKE("start_playback", { title, season, episode })),
 	/**
 	 *  Plays one title's file in the external player (mpv), for a container the webview cannot demux.
 	 * 

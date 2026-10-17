@@ -304,9 +304,14 @@ fn forget_match_rule_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 /// opened, which is why the contract asserts the command *fails* rather than what it returns.
 fn start_playback_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::library::start_playback(harness.dead_state(), crate::library::TitleRef { id: 1 })
-            .await
-            .map(drop)
+        crate::library::start_playback(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
+            None,
+        )
+        .await
+        .map(drop)
     })
 }
 

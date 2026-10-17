@@ -50,7 +50,13 @@ export type Route =
    * is opened for a title, so the title is what addresses it; `PG-E16-02`'s `PlayerBackend` is what
    * makes a session an addressable thing in its own right, and the path is where that will show.
    */
-  | { readonly kind: "player"; readonly id: number };
+  | {
+      readonly kind: "player";
+      readonly id: number;
+      /** The episode to open, when the play named one; absent plays the title's own file. */
+      readonly season?: number;
+      readonly episode?: number;
+    };
 
 /** Which of the two a title is, as a path spells it. */
 export type TitleKind = "movie" | "show";
@@ -136,6 +142,19 @@ export function parseRoute(path: string): Route | null {
   if (parts.length === 3 && parts[0] === "" && parts[1] === "player") {
     const id = Number(parts[2]);
     if (Number.isSafeInteger(id) && id > 0) {
+      // The pair travels together or not at all, the same rule acquisition states: a season
+      // without an episode names nothing the player could open.
+      const query = new URLSearchParams(path.split("?")[1]?.split("#")[0]);
+      const season = Number(query.get("season"));
+      const episode = Number(query.get("episode"));
+      if (
+        Number.isSafeInteger(season) &&
+        season > 0 &&
+        Number.isSafeInteger(episode) &&
+        episode > 0
+      ) {
+        return { kind: "player", id, season, episode };
+      }
       return { kind: "player", id };
     }
   }
@@ -154,7 +173,9 @@ export function routePath(route: Route): string {
     return `/title/${route.titleKind}/${String(route.id)}`;
   }
   if (route.kind === "player") {
-    return `/player/${String(route.id)}`;
+    return route.season !== undefined && route.episode !== undefined
+      ? `/player/${String(route.id)}?season=${String(route.season)}&episode=${String(route.episode)}`
+      : `/player/${String(route.id)}`;
   }
   return PATHS[route.kind];
 }

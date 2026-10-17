@@ -41,7 +41,7 @@ export interface Playback {
   /** Why it could not be opened, in the core's own words. */
   readonly failed: IpcError | null;
   /** Opens a session for a title, replacing whatever this hook had open. */
-  readonly open: (titleId: number) => Promise<void>;
+  readonly open: (titleId: number, season: number | null, episode: number | null) => Promise<void>;
   /** Closes whatever is open. Idempotent, so a caller may always call it. */
   readonly close: () => Promise<void>;
 }
@@ -53,12 +53,17 @@ export interface Playback {
  * at mount, because a route change can point the same screen at another title and the effect must
  * reopen rather than keep playing the first.
  */
-export function usePlayback(titleId: number): Playback {
+export function usePlayback(
+  titleId: number,
+  episode?: { readonly season: number; readonly episode: number },
+): Playback {
   const [state, setState] = useState<{
     session: PlaybackSessionDto | null;
     starting: boolean;
     failed: IpcError | null;
   }>({ session: null, starting: false, failed: null });
+  const season = episode?.season ?? null;
+  const episodeNumber = episode?.episode ?? null;
 
   // The session this hook opened, which is what every stop names. A ref rather than state because nothing
   // renders from it, and because the cleanup must read the value at the moment it runs rather than the one
@@ -89,39 +94,46 @@ export function usePlayback(titleId: number): Playback {
     }
   }, []);
 
-  const open = useCallback(async (forTitle: number): Promise<void> => {
-    const generation = attempt.current + 1;
-    attempt.current = generation;
-    setState({ session: null, starting: true, failed: null });
-    try {
-      const session = await startPlayback(forTitle);
-      if (!live.current || attempt.current !== generation) {
-        // Either the screen went away while the core was binding a listener, or a later mount has already
-        // asked for its own. Nothing will unmount again for this answer, so this is the only place that can
-        // close it — and by its own id, so it cannot close the session the later mount opened.
-        await stopPlayback(session.sessionId);
-        return;
+  const open = useCallback(
+    async (
+      forTitle: number,
+      season: number | null,
+      episodeNumber: number | null,
+    ): Promise<void> => {
+      const generation = attempt.current + 1;
+      attempt.current = generation;
+      setState({ session: null, starting: true, failed: null });
+      try {
+        const session = await startPlayback(forTitle, season, episodeNumber);
+        if (!live.current || attempt.current !== generation) {
+          // Either the screen went away while the core was binding a listener, or a later mount has already
+          // asked for its own. Nothing will unmount again for this answer, so this is the only place that can
+          // close it — and by its own id, so it cannot close the session the later mount opened.
+          await stopPlayback(session.sessionId);
+          return;
+        }
+        opened.current = session.sessionId;
+        setState({ session, starting: false, failed: null });
+      } catch (caught: unknown) {
+        if (!live.current) {
+          return;
+        }
+        const error = normalizeIpcError(caught);
+        logUiError("startPlayback", error);
+        setState({ session: null, starting: false, failed: error });
       }
-      opened.current = session.sessionId;
-      setState({ session, starting: false, failed: null });
-    } catch (caught: unknown) {
-      if (!live.current) {
-        return;
-      }
-      const error = normalizeIpcError(caught);
-      logUiError("startPlayback", error);
-      setState({ session: null, starting: false, failed: error });
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     live.current = true;
-    void open(titleId);
+    void open(titleId, season, episodeNumber);
     return () => {
       live.current = false;
       void close();
     };
-  }, [titleId, open, close]);
+  }, [titleId, season, episodeNumber, open, close]);
 
   return { ...state, open, close };
 }

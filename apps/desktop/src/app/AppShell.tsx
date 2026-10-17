@@ -448,7 +448,9 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                and a route is what makes Back mean what it says. The session it opens lives exactly as
                long as this component does (ADR 0023, SECURITY.md T10). */
               <PlayerScreen
+                episode={route.episode}
                 id={route.id}
+                season={route.season}
                 /* Back rather than a route of the shell's own: the player was opened from a title,
                  so the place behind it is that title, and going back is what keeps the history
                  rather than pushing a second copy of the same page. */

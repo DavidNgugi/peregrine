@@ -818,8 +818,11 @@ pub async fn add_root(
 pub async fn start_playback(
     state: State<'_, RuntimeState>,
     title: TitleRef,
+    season: Option<u32>,
+    episode: Option<u32>,
 ) -> Result<PlaybackSessionDto, AppError> {
-    let started = state.runtime()?.start_playback(title.id).await?;
+    let episode = crate::downloads::episode_pick(season, episode)?;
+    let started = state.runtime()?.start_playback(title.id, episode).await?;
     Ok(guard_response(
         "library::start_playback",
         PlaybackSessionDto::from(started),

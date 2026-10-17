@@ -315,6 +315,14 @@ export function TitleScreen({
                       ((acquire.starting ?? false) || (acquire.running ?? false))
                     }
                     episode={episode}
+                    onPlay={(chosen) => {
+                      onNavigate({
+                        kind: "player",
+                        id: title.id,
+                        season: chosen.seasonNumber,
+                        episode: chosen.episodeNumber,
+                      });
+                    }}
                     onDownload={
                       acquire === undefined
                         ? undefined
