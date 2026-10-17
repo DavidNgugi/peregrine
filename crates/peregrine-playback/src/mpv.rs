@@ -90,6 +90,8 @@ const COMMON: &[&str] = &["/usr/bin/mpv", "/usr/local/bin/mpv"];
 /// The child this player started, and the socket a reader uses to hear its position.
 struct Session {
     child: Child,
+    /// A socket file on unix, removed on stop; a named pipe on Windows, which needs no cleanup.
+    #[cfg_attr(windows, allow(dead_code))]
     socket: PathBuf,
     stop: Arc<AtomicBool>,
 }
