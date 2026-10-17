@@ -1,11 +1,19 @@
 import { createAvatar } from "@dicebear/core";
 import {
   adventurer,
+  avataaars,
+  bigSmile,
   bottts,
+  croodles,
   funEmoji,
   initials,
   lorelei,
+  micah,
   notionists,
+  openPeeps,
+  personas,
+  pixelArt,
+  rings,
   shapes,
   thumbs,
 } from "@dicebear/collection";
@@ -25,7 +33,15 @@ export type AvatarStyle =
   | "notionists"
   | "adventurer"
   | "lorelei"
-  | "shapes";
+  | "shapes"
+  | "avataaars"
+  | "bigSmile"
+  | "croodles"
+  | "micah"
+  | "openPeeps"
+  | "personas"
+  | "pixelArt"
+  | "rings";
 
 /** Where a profile's picture comes from. */
 export type Avatar =
@@ -53,14 +69,22 @@ const LEGACY_KEY = "peregrine.profile";
 
 /** The DiceBear styles offered, with the labels the editor draws. */
 export const AVATAR_STYLES = {
-  initials: initials,
-  thumbs: thumbs,
-  bottts: bottts,
-  funEmoji: funEmoji,
-  notionists: notionists,
-  adventurer: adventurer,
-  lorelei: lorelei,
-  shapes: shapes,
+  initials,
+  thumbs,
+  bottts,
+  funEmoji,
+  notionists,
+  adventurer,
+  lorelei,
+  shapes,
+  avataaars,
+  bigSmile,
+  croodles,
+  micah,
+  openPeeps,
+  personas,
+  pixelArt,
+  rings,
 } as const;
 
 /** The style keys, in the order the editor draws them. */
@@ -75,6 +99,14 @@ export const AVATAR_STYLE_LABELS: Readonly<Record<AvatarStyle, string>> = {
   adventurer: "Adventurers",
   lorelei: "Portraits",
   shapes: "Shapes",
+  avataaars: "Cartoons",
+  bigSmile: "Smiles",
+  croodles: "Doodles",
+  micah: "Figures",
+  openPeeps: "Peeps",
+  personas: "Personas",
+  pixelArt: "Pixels",
+  rings: "Rings",
 };
 
 /** The avatar a fresh profile starts with. */

@@ -21,6 +21,7 @@ export const en = {
       upload: "Upload photo",
       uploadFailed: "That file could not be read. Choose a JPEG or PNG.",
       avatarHeading: "Choose an avatar",
+      shuffle: "Shuffle",
       avatarsBy: "Avatars by DiceBear",
       save: "Save",
       create: "Create",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fileToAvatar } from "./avatar-file.js";
@@ -8,6 +8,7 @@ import {
   AVATAR_STYLE_LABELS,
   hueFor,
   type Avatar,
+  type AvatarStyle,
   type Profile,
 } from "./profile.js";
 
@@ -19,12 +20,26 @@ export interface ProfileEditorProps {
   readonly onClose: () => void;
 }
 
+const CHOICES = 16;
+
+/** Sixteen seeds derived from a name, so opening the editor twice shows the same set. */
+function seedsFor(name: string): string[] {
+  const base = name.trim().length === 0 ? "Peregrine" : name.trim();
+  return Array.from({ length: CHOICES }, (_, index) =>
+    index === 0 ? base : `${base} ${String(index + 1)}`,
+  );
+}
+
+function randomSeeds(): string[] {
+  return Array.from({ length: CHOICES }, () => crypto.randomUUID().slice(0, 8));
+}
+
 /**
  * The profile editor, opened from the pencil or the plus tile.
  *
- * One screen, two columns: the picture and its upload on the left, the name and the generated
- * choices on the right. The generated choices are DiceBear drawings over the current name and a
- * second seed, so a name change offers a different set without a refresh.
+ * One screen: the picture and its upload on the left, the name on the right, then a style rail and
+ * sixteen drawings of the current style. Shuffle draws sixteen new seeds, so the set is not limited
+ * to the ones a name happens to produce.
  */
 export function ProfileEditor({
   open,
@@ -40,14 +55,19 @@ export function ProfileEditor({
     style: "initials",
     seed: "You",
   });
+  const [style, setStyle] = useState<AvatarStyle>("initials");
+  const [seeds, setSeeds] = useState<string[]>(seedsFor("You"));
   const [error, setError] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    const nextAvatar = profile?.avatar ?? { kind: "dicebear", style: "initials", seed: "You" };
     setName(profile?.name ?? "");
-    setAvatar(profile?.avatar ?? { kind: "dicebear", style: "initials", seed: "You" });
+    setAvatar(nextAvatar);
+    setStyle(nextAvatar.kind === "dicebear" ? nextAvatar.style : "initials");
+    setSeeds(seedsFor(profile?.name ?? ""));
     setError(false);
     nameInput.current?.focus();
   }, [open, profile]);
@@ -66,22 +86,13 @@ export function ProfileEditor({
     };
   }, [onClose, open]);
 
-  const seed = name.trim().length === 0 ? "Peregrine" : name.trim();
-  const suggestions = useMemo(
-    () =>
-      AVATAR_STYLE_KEYS.flatMap((style) => [
-        { kind: "dicebear" as const, style, seed },
-        { kind: "dicebear" as const, style, seed: `${seed} two` },
-      ]),
-    [seed],
-  );
-
   if (!open) return null;
 
+  const previewName = name.trim().length === 0 ? "Peregrine" : name.trim();
   const preview: Profile = {
     id: profile?.id ?? "preview",
-    name: name.trim().length === 0 ? "Peregrine" : name.trim(),
-    hue: hueFor(name.trim().length === 0 ? "Peregrine" : name.trim()),
+    name: previewName,
+    hue: hueFor(previewName),
     avatar,
   };
 
@@ -109,7 +120,7 @@ export function ProfileEditor({
       className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-black/80 p-6"
       role="dialog"
     >
-      <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-[#141414] p-6 text-white shadow-2xl">
+      <div className="w-full max-w-3xl rounded-xl border border-white/10 bg-[#141414] p-6 text-white shadow-2xl">
         <h2 className="text-lg font-semibold">
           {mode === "create" ? t("profile.newTitle") : t("profile.editTitle")}
         </h2>
@@ -172,27 +183,63 @@ export function ProfileEditor({
           </label>
         </div>
 
-        <p className="mt-6 text-xs font-medium uppercase tracking-[0.16em] text-white/50">
-          {t("profile.avatarHeading")}
-        </p>
-        <ul className="mt-3 grid list-none grid-cols-8 gap-2 p-0">
-          {suggestions.map((choice) => (
-            <li key={`${choice.style}-${choice.seed}`}>
+        <div className="mt-6 flex items-center justify-between gap-4">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-white/50">
+            {t("profile.avatarHeading")}
+          </p>
+          <button
+            className="rounded-md border border-white/20 px-3 py-1 text-xs text-white/70 outline-none hover:border-white/50 hover:text-white focus-visible:ring-2 focus-visible:ring-white"
+            onClick={() => {
+              setSeeds(randomSeeds());
+            }}
+            type="button"
+          >
+            {t("profile.shuffle")}
+          </button>
+        </div>
+
+        <ul className="mt-3 flex list-none flex-wrap gap-1.5 p-0">
+          {AVATAR_STYLE_KEYS.map((key) => (
+            <li key={key}>
               <button
-                aria-label={`${AVATAR_STYLE_LABELS[choice.style]} ${choice.seed}`}
-                aria-pressed={same(choice)}
-                className={`block w-full overflow-hidden rounded-md outline-none ring-2 ring-offset-2 ring-offset-[#141414] transition-transform hover:scale-[1.04] focus-visible:ring-white motion-reduce:hover:scale-100 ${
-                  same(choice) ? "ring-white" : "ring-transparent"
+                aria-pressed={style === key}
+                className={`rounded-full px-3 py-1 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white ${
+                  style === key
+                    ? "bg-white text-black"
+                    : "border border-white/15 text-white/65 hover:border-white/40 hover:text-white"
                 }`}
                 onClick={() => {
-                  setAvatar(choice);
+                  setStyle(key);
                 }}
                 type="button"
               >
-                <ProfileImage profile={{ ...preview, avatar: choice }} size={64} />
+                {AVATAR_STYLE_LABELS[key]}
               </button>
             </li>
           ))}
+        </ul>
+
+        <ul className="mt-3 grid list-none grid-cols-8 gap-2 p-0">
+          {seeds.map((seed) => {
+            const choice: Avatar = { kind: "dicebear", style, seed };
+            return (
+              <li key={`${style}-${seed}`}>
+                <button
+                  aria-label={`${AVATAR_STYLE_LABELS[style]} ${seed}`}
+                  aria-pressed={same(choice)}
+                  className={`block w-full overflow-hidden rounded-md outline-none ring-2 ring-offset-2 ring-offset-[#141414] transition-transform hover:scale-[1.04] focus-visible:ring-white motion-reduce:hover:scale-100 ${
+                    same(choice) ? "ring-white" : "ring-transparent"
+                  }`}
+                  onClick={() => {
+                    setAvatar(choice);
+                  }}
+                  type="button"
+                >
+                  <ProfileImage profile={{ ...preview, avatar: choice }} size={64} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
 
         <div className="mt-6 flex items-center justify-between gap-4 border-t border-white/10 pt-4">
