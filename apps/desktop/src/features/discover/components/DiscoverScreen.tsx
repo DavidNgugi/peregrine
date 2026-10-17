@@ -9,12 +9,21 @@ import {
   TextInput,
   TitleCard,
 } from "@peregrine/ui";
-import type { RailItemDto, RailKindDto, TitleMatchDto } from "@peregrine/ipc-client";
+import type {
+  DownloadJobDto,
+  RailItemDto,
+  RailKindDto,
+  TitleMatchDto,
+} from "@peregrine/ipc-client";
 import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
-import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
+import {
+  downloadCardProps,
+  downloadStatusOf,
+  type DownloadMarks,
+} from "../../../lib/download-status.js";
 import { imageUrl } from "../../../lib/media.js";
 import {
   MIN_QUERY_CHARS,
@@ -84,6 +93,14 @@ export interface DiscoverViewProps {
    * invent rows it is not testing; an absent rail is an empty one.
    */
   readonly continueWatching?: ContinueWatchingView;
+  /**
+   * The download queue's recent rows, drawn as their own rail above Continue Watching.
+   *
+   * In-progress first and completed second — the same order Browse hoists them in — and only those
+   * two groups: a failed or blocked row is the queue's business, not a shelf. Absent or empty draws
+   * no rail at all.
+   */
+  readonly recentDownloads?: readonly DownloadJobDto[];
   readonly search: {
     readonly results: readonly TitleMatchDto[];
     readonly searching: boolean;
@@ -259,6 +276,7 @@ export function DiscoverToolbar({
 export function DiscoverView({
   rails,
   continueWatching,
+  recentDownloads,
   search,
   onPlay,
   onNavigate,
@@ -311,6 +329,14 @@ export function DiscoverView({
   }));
 
   const watching = continueWatching?.rows ?? [];
+  // In-progress ahead of completed, each group in the queue's own newest-first order. Two filter
+  // passes rather than a sort: the partition is the rule, and a comparator would make it depend on
+  // the engine's sort stability.
+  const queue = recentDownloads ?? [];
+  const recent = [
+    ...queue.filter((row) => downloadStatusOf(row.state) === "active"),
+    ...queue.filter((row) => downloadStatusOf(row.state) === "done"),
+  ];
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
@@ -450,6 +476,44 @@ export function DiscoverView({
               title={t("discover.empty.title")}
             />
           ) : null}
+          {recent.length === 0 ? null : (
+            <Rail
+              empty={null}
+              itemKey={(row) => String(row.titleId)}
+              items={recent}
+              renderItem={(row, tabIndex) => {
+                const label = t(`downloads.state.${row.state}`);
+                const percent =
+                  downloadStatusOf(row.state) === "active" && row.progressPermille > 0
+                    ? ` · ${Math.round(row.progressPermille / 10)}%`
+                    : "";
+                return (
+                  <TitleCard
+                    {...downloadCardProps(marks, row.titleId, t)}
+                    detailsLabel={t("card.details")}
+                    href={routePath({
+                      kind: "title",
+                      id: row.titleId,
+                      titleKind: row.titleKind ?? "movie",
+                    })}
+                    meta={`${label}${percent}`}
+                    onNavigate={() => {
+                      onNavigate({
+                        kind: "title",
+                        id: row.titleId,
+                        titleKind: row.titleKind ?? "movie",
+                      });
+                    }}
+                    poster={imageUrl(row.poster)}
+                    size="lg"
+                    tabIndex={tabIndex}
+                    title={row.title ?? row.releaseTitle}
+                  />
+                );
+              }}
+              title={t("discover.rail.recentDownloads")}
+            />
+          )}
           {watching.length === 0 ? null : (
             <Rail
               empty={null}
@@ -530,12 +594,15 @@ export function DiscoverScreen({
   titleKind,
   trailing,
   downloads,
+  recentDownloads,
 }: {
   readonly onNavigate: (route: Route) => void;
   /** The selected type, or `undefined` for **All** — which is also what a bare `/` means. */
   readonly titleKind?: RailKindDto | undefined;
   readonly trailing?: ReactNode;
   readonly downloads?: DownloadMarks | undefined;
+  /** The queue's recent rows, for the Recent Downloads rail. */
+  readonly recentDownloads?: readonly DownloadJobDto[] | undefined;
 }): ReactElement {
   const rails = useHomeRails(titleKind);
   // What this account watched most recently, drawn above the provider rails; one read per visit,
@@ -551,6 +618,7 @@ export function DiscoverScreen({
       downloads={downloads}
       onNavigate={onNavigate}
       titleKind={titleKind}
+      {...(recentDownloads === undefined ? {} : { recentDownloads })}
       {...(trailing === undefined ? {} : { trailing })}
       onKindChange={(kind) => {
         // All is the absence of the parameter rather than `type=all`: `/` is the home screen, and a

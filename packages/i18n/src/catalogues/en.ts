@@ -176,6 +176,7 @@ export const en = {
         popularShows: "Popular series",
         onTheAirShows: "On the air",
         topRatedShows: "Top rated series",
+        recentDownloads: "Recent Downloads",
         continueWatching: "Continue Watching",
         unknown: "More to watch",
         empty: {

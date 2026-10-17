@@ -89,11 +89,26 @@ describe("rankByDownload", () => {
     expect(ranked.map((item) => item.titleId)).toEqual([3, 1, 2]);
   });
 
-  it("does not reorder for a finished or failed job", () => {
-    // Only a transfer still running is the thing a person came back for; a completion is history.
+  it("puts a completed download above the untouched titles", () => {
     const done = rankByDownload(items, downloadMarks([{ titleId: 2, state: "completed" }]));
+    expect(done.map((item) => item.titleId)).toEqual([2, 1, 3]);
+  });
+
+  it("puts a running transfer above a completed one", () => {
+    // The two groups are ordered, not merged: what is still arriving outranks what has arrived.
+    const ranked = rankByDownload(
+      items,
+      downloadMarks([
+        { titleId: 3, state: "downloading" },
+        { titleId: 2, state: "completed" },
+      ]),
+    );
+    expect(ranked.map((item) => item.titleId)).toEqual([3, 2, 1]);
+  });
+
+  it("does not hoist a failed job", () => {
+    // A failure already wears the red mark; ranking by alarm would put it over an untouched title.
     const failed = rankByDownload(items, downloadMarks([{ titleId: 2, state: "failed" }]));
-    expect(done).toBe(items);
     expect(failed).toBe(items);
   });
 

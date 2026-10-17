@@ -77,30 +77,38 @@ export function downloadMarks(
 }
 
 /**
- * The same items, with the titles whose download is running brought to the front.
+ * The same items, with downloads first: in-progress titles, then completed ones.
  *
- * **A stable partition rather than a sort**, so the provider's own order survives inside each half:
- * "popular first" is still the answer it was, and the transfer the user came back for is at the top
- * of the page rather than somewhere on it. Nothing is dropped and nothing is ranked by anything
- * else — an item with no mark and an item whose download is finished both stay in provider order.
+ * **A stable three-way partition rather than a sort**, so the provider's own order survives inside
+ * each group: "popular first" is still the answer it was, and the title the user is waiting on is
+ * at the top of the page rather than somewhere on it. Completed downloads come next because a
+ * title already on disk is the one a reader is most likely to act on, and everything else stays in
+ * provider order. Nothing is dropped.
  *
- * The original array is returned untouched when the split would change nothing, so a Browse grid
- * does not re-key its window on every read.
+ * A failed or blocked job deliberately does not move: its card already wears the red mark, and
+ * hoisting a failure over a title nobody has touched would be ranking by alarm.
+ *
+ * The original array is returned untouched when there is nothing to hoist, so a Browse grid does
+ * not re-key its window on every read.
  */
 export function rankByDownload<T extends { readonly titleId: number }>(
   items: readonly T[],
   marks: ReadonlyMap<number, DownloadStatus>,
 ): readonly T[] {
   const active: T[] = [];
+  const done: T[] = [];
   const rest: T[] = [];
   for (const item of items) {
-    if (marks.get(item.titleId) === "active") {
+    const status = marks.get(item.titleId);
+    if (status === "active") {
       active.push(item);
+    } else if (status === "done") {
+      done.push(item);
     } else {
       rest.push(item);
     }
   }
-  return active.length === 0 || rest.length === 0 ? items : [...active, ...rest];
+  return active.length === 0 && done.length === 0 ? items : [...active, ...done, ...rest];
 }
 
 /** The catalogue key for a status's word, which is how the colour is never carried alone. */

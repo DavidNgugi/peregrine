@@ -292,6 +292,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
             <DiscoverScreen
               downloads={marks}
               onNavigate={navigate}
+              recentDownloads={downloads.downloads}
               titleKind={route.titleKind}
               trailing={
                 /* The theme control, which used to live in the title bar. Same shape as the toolbar's

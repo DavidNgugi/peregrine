@@ -160,7 +160,7 @@ impl From<peregrine_app::LibraryTitleEntry> for LibraryTitleDto {
 /// One function rather than a `.and_then(Path::to_str)` per field, because the rule is the same
 /// everywhere and the failure it prevents is silent: a lossy path is a request the asset protocol
 /// refuses, which renders as a missing poster and reports nothing.
-fn artwork_text(path: Option<&std::path::Path>) -> Option<String> {
+pub(crate) fn artwork_text(path: Option<&std::path::Path>) -> Option<String> {
     path.and_then(std::path::Path::to_str).map(str::to_owned)
 }
 

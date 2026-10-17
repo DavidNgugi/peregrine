@@ -795,6 +795,13 @@ export type DownloadJobDto = {
 	 *  nor a provider can resolve, and such a row opens nothing rather than a route that guesses.
 	 */
 	titleKind: DownloadTitleKind | null,
+	/**
+	 *  The cached poster's absolute path, when the cache holds one.
+	 * 
+	 *  A path and never bytes (AGENTS R11). It is carried so the Discover Recent Downloads rail
+	 *  can draw the same tile Browse draws; null falls back to the placeholder.
+	 */
+	poster: string | null,
 	/**  The release the indexer advertised. */
 	releaseTitle: string,
 	/**  The state machine's current state, as its stored spelling. */

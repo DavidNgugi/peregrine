@@ -1,8 +1,15 @@
 import { createI18n } from "@peregrine/i18n";
-import type { HomeRailDto, IpcError, RailItemDto, TitleMatchDto } from "@peregrine/ipc-client";
+import type {
+  DownloadJobDto,
+  HomeRailDto,
+  IpcError,
+  RailItemDto,
+  TitleMatchDto,
+} from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
+import { downloadMarks } from "../../../lib/download-status.js";
 import type { HomeRailsView } from "../hooks/useHomeRails.js";
 import { DiscoverView, itemMeta, type DiscoverViewProps } from "./DiscoverScreen.js";
 import { heroSlides } from "./hero-rotation.js";
@@ -91,6 +98,67 @@ function searched(overrides: Partial<DiscoverViewProps["search"]>): string {
     </I18nextProvider>,
   );
 }
+
+function download(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
+  return {
+    id: 1,
+    titleId: 7,
+    title: "The Matrix",
+    titleKind: "movie",
+    poster: null,
+    releaseTitle: "The.Matrix.1999.1080p",
+    state: "downloading",
+    progressPermille: 500,
+    reportedSizeBytes: 1_000,
+    downloadedBytes: 500,
+    downloadRateBps: 1,
+    peersConnected: 1,
+    peersSwarm: 2,
+    etaSeconds: 10,
+    addedAt: 0,
+    errorCode: null,
+    errorMessage: null,
+    findings: [],
+    ...overrides,
+  };
+}
+
+/** The view with a download queue, for the Recent Downloads rail. */
+function withRecent(recent: readonly DownloadJobDto[]): string {
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <DiscoverView
+        downloads={downloadMarks(recent)}
+        onNavigate={() => undefined}
+        rails={railsView()}
+        recentDownloads={recent}
+        search={{ ...NO_SEARCH }}
+      />
+    </I18nextProvider>,
+  );
+}
+
+describe("Recent Downloads", () => {
+  it("draws no rail when the queue holds nothing to show", () => {
+    // Failed and blocked rows are the queue's business; the shelf is what came down.
+    expect(withRecent([download({ state: "failed" })])).not.toContain("Recent Downloads");
+    expect(withRecent([])).not.toContain("Recent Downloads");
+  });
+
+  it("puts an in-progress title above a completed one", () => {
+    const html = withRecent([
+      download({ id: 2, titleId: 9, title: "Finished", state: "completed" }),
+      download({ id: 1, titleId: 7, title: "Arriving", state: "downloading" }),
+    ]);
+    expect(html).toContain("Recent Downloads");
+    expect(html.indexOf("Arriving")).toBeLessThan(html.indexOf("Finished"));
+  });
+
+  it("marks a completed download with the green top edge", () => {
+    const html = withRecent([download({ title: "Finished", state: "completed" })]);
+    expect(html).toContain("bg-state-ok");
+  });
+});
 
 describe("DiscoverView", () => {
   it("draws a rail's heading and one tile per title", () => {

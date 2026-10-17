@@ -76,6 +76,11 @@ pub struct DownloadJobDto {
     /// because the page names itself before its read answers. `null` is a title neither the library
     /// nor a provider can resolve, and such a row opens nothing rather than a route that guesses.
     pub title_kind: Option<DownloadTitleKind>,
+    /// The cached poster's absolute path, when the cache holds one.
+    ///
+    /// A path and never bytes (AGENTS R11). It is carried so the Discover Recent Downloads rail
+    /// can draw the same tile Browse draws; null falls back to the placeholder.
+    pub poster: Option<String>,
     /// The release the indexer advertised.
     pub release_title: String,
     /// The state machine's current state, as its stored spelling.
@@ -117,12 +122,14 @@ impl DownloadJobDto {
         row: &DownloadJobRow,
         title: Option<String>,
         title_kind: Option<DownloadTitleKind>,
+        poster: Option<String>,
     ) -> Self {
         Self {
             id: row.id,
             title_id: row.title_id,
             title,
             title_kind,
+            poster,
             release_title: row.release_title.clone(),
             state: row.state.as_str().to_owned(),
             progress_permille: row.progress_permille,
@@ -205,7 +212,7 @@ impl DeletionPlanDto {
 async fn title_ref(
     runtime: &peregrine_app::runtime::Runtime,
     title_id: i64,
-) -> (Option<String>, Option<DownloadTitleKind>) {
+) -> (Option<String>, Option<DownloadTitleKind>, Option<String>) {
     match runtime.library_title(title_id).await.ok().flatten() {
         Some(detail) => {
             let title = detail.entry.row.title;
@@ -213,9 +220,13 @@ async fn title_ref(
                 peregrine_app::TitleKind::Movie => DownloadTitleKind::Movie,
                 peregrine_app::TitleKind::Show => DownloadTitleKind::Show,
             };
-            (Some(title.name), Some(kind))
+            (
+                Some(title.name),
+                Some(kind),
+                crate::library::artwork_text(detail.entry.poster.as_deref()),
+            )
         }
-        None => (None, None),
+        None => (None, None, None),
     }
 }
 
@@ -292,8 +303,8 @@ pub async fn list_downloads(
     let rows = runtime.download_jobs().await?;
     let mut downloads = Vec::with_capacity(rows.len());
     for row in &rows {
-        let (title, title_kind) = title_ref(runtime, row.title_id).await;
-        downloads.push(DownloadJobDto::of(row, title, title_kind));
+        let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
+        downloads.push(DownloadJobDto::of(row, title, title_kind, poster));
     }
     Ok(guard_response("downloads::list", downloads))
 }
@@ -312,10 +323,10 @@ pub async fn pause_download(
         .await
         .map_err(acquisition_error)?;
     let row = row_after(runtime, download.id).await?;
-    let (title, title_kind) = title_ref(runtime, row.title_id).await;
+    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::pause",
-        DownloadJobDto::of(&row, title, title_kind),
+        DownloadJobDto::of(&row, title, title_kind, poster),
     ))
 }
 
@@ -333,10 +344,10 @@ pub async fn resume_download(
         .await
         .map_err(acquisition_error)?;
     let row = row_after(runtime, download.id).await?;
-    let (title, title_kind) = title_ref(runtime, row.title_id).await;
+    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::resume",
-        DownloadJobDto::of(&row, title, title_kind),
+        DownloadJobDto::of(&row, title, title_kind, poster),
     ))
 }
 
@@ -354,10 +365,10 @@ pub async fn remove_download(
         .await
         .map_err(acquisition_error)?;
     let row = row_after(runtime, download.id).await?;
-    let (title, title_kind) = title_ref(runtime, row.title_id).await;
+    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::remove",
-        DownloadJobDto::of(&row, title, title_kind),
+        DownloadJobDto::of(&row, title, title_kind, poster),
     ))
 }
 
