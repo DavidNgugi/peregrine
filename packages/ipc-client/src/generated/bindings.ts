@@ -504,8 +504,8 @@ export const commands = {
 	 * 
 	 *  # Errors
 	 * 
-	 *  ErrorCode::Internal when the runtime is not running or the journal refuses the row, and
-	 *  ErrorCode::Unsupported when the torrent session did not start.
+	 *  `ErrorCode::Internal` when the runtime is not running or the journal refuses the row, and
+	 *  `ErrorCode::Unsupported` when the torrent session did not start.
 	 */
 	acquire: (title: TitleRef, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire", { title, minSeeders })),
 	/**  The download queue, newest first. */
