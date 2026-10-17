@@ -141,6 +141,69 @@ pub async fn continue_watching(
     Ok(guard_response("watch::continue_watching", watching))
 }
 
+/// One row of the account's viewing history.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchHistoryDto {
+    /// The title the row is about.
+    #[specta(type = Number)]
+    pub title_id: i64,
+    /// The title's display name, when the library can answer it.
+    pub title: Option<String>,
+    /// The episode's season, when the row names an episode.
+    #[specta(type = Option<Number>)]
+    pub season_number: Option<u32>,
+    /// The episode's number within that season.
+    #[specta(type = Option<Number>)]
+    pub episode_number: Option<u32>,
+    /// Whether the account finished it.
+    pub watched: bool,
+    /// How far through, as a fraction in `0.0..=1.0`.
+    pub percent: f64,
+    /// When the row was last written, in Unix milliseconds.
+    #[specta(type = Number)]
+    pub updated_at: i64,
+}
+
+/// The account's viewing history, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn viewing_history(
+    state: State<'_, RuntimeState>,
+    limit: Option<u32>,
+) -> Result<Vec<WatchHistoryDto>, AppError> {
+    let runtime = state.runtime()?;
+    let rows = runtime.watch_history(limit.unwrap_or(200)).await?;
+    let history = history_of(runtime, rows).await;
+    Ok(guard_response("watch::viewing_history", history))
+}
+
+/// Resolves each progress row's title, episode, and state into the history list.
+async fn history_of(
+    runtime: &peregrine_app::runtime::Runtime,
+    rows: Vec<WatchProgressRow>,
+) -> Vec<WatchHistoryDto> {
+    let mut history = Vec::with_capacity(rows.len());
+    for row in rows {
+        let progress = row.progress;
+        let (title, _, _) = title_art(runtime, progress.title_id()).await;
+        let episode = match progress.episode_id() {
+            Some(id) => runtime.episode_numbers(id).await.unwrap_or(None),
+            None => None,
+        };
+        history.push(WatchHistoryDto {
+            title_id: progress.title_id(),
+            title,
+            season_number: episode.map(|(season, _)| season),
+            episode_number: episode.map(|(_, number)| number),
+            watched: progress.watched(),
+            percent: progress.percent(),
+            updated_at: progress.updated_at().as_millisecond(),
+        });
+    }
+    history
+}
+
 /// Records where the player is in a title or episode.
 #[tauri::command]
 #[specta::specta]

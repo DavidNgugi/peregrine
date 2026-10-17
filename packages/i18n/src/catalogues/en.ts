@@ -616,6 +616,15 @@ export const en = {
       },
     },
     settings: {
+      history: {
+        title: "Watch history",
+        description: "What this device has watched, newest first.",
+        empty: "Nothing watched yet.",
+        failed: "The history could not be read. Reopen Settings to try again.",
+        watched: "Watched",
+        progress: "{{percent}}%",
+        unknown: "Unknown title",
+      },
       title: "Settings",
       quality: {
         title: "Downloads",

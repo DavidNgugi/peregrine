@@ -129,6 +129,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             notifications::dismiss_notification,
             watch::continue_watching,
             watch::record_progress,
+            watch::viewing_history,
             prowlarr::prowlarr_status,
             prowlarr::install_prowlarr,
             prowlarr::start_prowlarr,

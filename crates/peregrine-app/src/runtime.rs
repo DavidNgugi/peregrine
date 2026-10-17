@@ -3273,6 +3273,18 @@ impl Runtime {
             .await?)
     }
 
+    /// The account's viewing history, newest first, for the settings list.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn watch_history(&self, limit: u32) -> Result<Vec<WatchProgressRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_watch_progress(installation_scope(), PageRequest::first(limit))
+            .await?)
+    }
+
     /// One title's per-episode watch state, which the season list draws.
     ///
     /// # Errors

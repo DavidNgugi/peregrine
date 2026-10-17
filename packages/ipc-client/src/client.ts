@@ -35,6 +35,7 @@ import type {
   ReleaseOfferDto,
   NotificationDto,
   ContinueWatchingDto,
+  WatchHistoryDto,
   ProgressReport,
   EpisodeDto,
   SeasonDto,
@@ -276,6 +277,11 @@ export async function stopProwlarr(): Promise<ProwlarrStatusDto> {
 /** What the account is part-way through, most recently updated first. */
 export async function continueWatching(): Promise<ContinueWatchingDto[]> {
   return unwrap(commands.continueWatching());
+}
+
+/** The account's viewing history, newest first. */
+export async function viewingHistory(limit = 200): Promise<WatchHistoryDto[]> {
+  return unwrap(commands.viewingHistory(limit));
 }
 
 /** Records where the player is in a title or episode. */

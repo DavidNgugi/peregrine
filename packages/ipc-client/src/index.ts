@@ -42,6 +42,7 @@ export type {
   DownloadJobDto,
   SafetyFindingDto,
   ContinueWatchingDto,
+  WatchHistoryDto,
   ProgressReport,
   OfferRef,
   ReleaseOfferDto,
@@ -125,6 +126,7 @@ export {
   stopProwlarr,
   continueWatching,
   recordProgress,
+  viewingHistory,
   unwrap,
 } from "./client.js";
 export type { CommandResult } from "./client.js";

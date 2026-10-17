@@ -597,6 +597,8 @@ export const commands = {
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
 	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
+	/**  The account's viewing history, newest first. */
+	viewingHistory: (limit: number | null) => typedError<WatchHistoryDto[], AppError_Serialize>(__TAURI_INVOKE("viewing_history", { limit })),
 	/**  Reads the managed indexer manager's state. */
 	prowlarrStatus: () => typedError<ProwlarrStatusDto, AppError_Serialize>(__TAURI_INVOKE("prowlarr_status")),
 	/**  Downloads and verifies the pinned Prowlarr pack, and answers the job doing it. */
@@ -1972,6 +1974,17 @@ export type UnmatchedRef = {
 	asTitle: MatchAsDto,
 	/**  The chosen title's id, when `asTitle` is `chosen` and the answer names one. */
 	titleId: number | null,
+};
+
+/**  One row of the account's viewing history. */
+export type WatchHistoryDto = {
+	titleId: number,
+	title: string | null,
+	seasonNumber: number | null,
+	episodeNumber: number | null,
+	watched: boolean,
+	percent: number | null,
+	updatedAt: number,
 };
 
 /* Tauri Specta runtime */
