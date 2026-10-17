@@ -8,7 +8,7 @@
 //!
 //! The plan carries absolute paths rather than ids. What the user is agreeing to is a set of files
 //! and a number of bytes, and an id the screen cannot read would make the confirmation an act of
-//! faith. A path in a plan has already been through PathGuard; the act resolves it again anyway,
+//! faith. A path in a plan has already been through `PathGuard`; the act resolves it again anyway,
 //! because the two moments are different and the filesystem can change between them.
 
 use std::path::Path;
@@ -99,7 +99,7 @@ pub trait Trash: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [TrashError::Refused] when the OS would not take it, and [TrashError::Unavailable] when
+    /// [`TrashError::Refused`] when the OS would not take it, and [`TrashError::Unavailable`] when
     /// this build cannot reach a trash at all.
     fn move_to_trash(&self, path: &Path) -> Result<(), TrashError>;
 }

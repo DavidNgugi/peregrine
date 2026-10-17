@@ -1484,8 +1484,8 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | Phase | Epics | Tasks | Ideal days |
 | --- | --- | --- | --- |
 | 0 Foundations | E0–E4 | 92 | 175 |
-| 1 Discovery | E5–E9 | 80 | 199 |
-| 2 Acquisition and library | E10–E15 | 92 | 227 |
+| 1 Discovery | E5–E9 | 81 | 200 |
+| 2 Acquisition and library | E10–E15 | 95 | 235 |
 | 3 Playback and subtitles | E16–E18 | 54 | 136 |
 | 4 Platform and distribution | E19–E27 | 133 | 327 |
 | 5 1.0 hardening and community | E28–E29 | 24 | 58 |
@@ -1493,14 +1493,14 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
 | 9 Roadmap: homelab deployment | E36 written; E37 pending | 17 written | 56 |
-| **Full backlog (phases 0–5)** | | **475** | **1 121** |
+| **Full backlog (phases 0–5)** | | **479** | **1 130** |
 
 Two numbers matter, and they are different by design.
 
 | Scope | Content | Tasks | Ideal days | Why |
 | --- | --- | --- | --- | --- |
 | **Core 1.0** | Working discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, plus signed installers and updates | 225 | 577 (+30% contingency ≈ **750**) | This is a genuinely usable, shippable app |
-| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 474 | **1 120** | This is what "no known defects, every platform, every edge case" costs |
+| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 479 | **1 130** | This is what "no known defects, every platform, every edge case" costs |
 
 Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
 
@@ -1512,6 +1512,6 @@ Reference points for calibration, since bottom-up estimates on novel work are al
 
 - Comparable open-source media clients are 80 000–150 000 lines of production code across client and server. This backlog lands in that range.
 - The estimates assume an experienced Rust **and** React developer, and they include tests, error handling, and logging per the Definition of Done in PLAN §8.
-- Re-baseline after Phase 0 using measured velocity. If Phase 0's 91 tasks take materially longer than 174 ideal days, scale every later phase by the observed factor rather than trimming the quality bar silently.
+- Re-baseline after Phase 0 using measured velocity. If Phase 0's 92 tasks take materially longer than 175 ideal days, scale every later phase by the observed factor rather than trimming the quality bar silently.
 
 Tasks marked `L` or `XL` are not estimable to better than ±50% until they are picked up; break each into sub-tasks smaller than five ideal days at that point.

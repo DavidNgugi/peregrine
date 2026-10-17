@@ -142,7 +142,7 @@ pub trait PlayerBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [PlayerError::NotInstalled] when there is no binary, and [PlayerError::Spawn] when the
+    /// [`PlayerError::NotInstalled`] when there is no binary, and [`PlayerError::Spawn`] when the
     /// operating system refused to start one.
     fn play(
         &self,

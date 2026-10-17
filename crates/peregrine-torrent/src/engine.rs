@@ -1178,7 +1178,7 @@ mod tests {
 
         assert!(selection.is_empty());
         assert_eq!(selection.len(), 0);
-        assert_eq!(selection.indices(), []);
+        assert!(selection.indices().is_empty());
         assert!(!selection.contains(0));
         assert_eq!(selection, FileSelection::new(Vec::new()));
     }

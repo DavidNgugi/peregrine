@@ -69,16 +69,13 @@ impl DevFileStore {
                 return BTreeMap::new();
             }
         };
-        match serde_json::from_str(&text) {
-            Ok(map) => map,
-            Err(_) => {
-                // A corrupt file is treated as empty so the keyring migration can repair it. The
-                // value is not logged, and the parser message is not interpolated for the same
-                // reason: it can quote the text it failed on.
-                warn!("the dev secret file is not valid JSON; the keyring will be asked instead");
-                BTreeMap::new()
-            }
-        }
+        serde_json::from_str(&text).unwrap_or_else(|_| {
+            // A corrupt file is treated as empty so the keyring migration can repair it. The
+            // value is not logged, and the parser message is not interpolated for the same
+            // reason: it can quote the text it failed on.
+            warn!("the dev secret file is not valid JSON; the keyring will be asked instead");
+            BTreeMap::new()
+        })
     }
 
     fn write(&self, map: &BTreeMap<String, Option<String>>) -> Result<(), SecretStoreError> {

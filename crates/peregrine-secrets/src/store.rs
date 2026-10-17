@@ -137,11 +137,12 @@ impl SecretStore for KeyringStore {
         // Updating an OS keychain item can raise an authorization prompt that a background process
         // cannot answer, and it fails as NoStorageAccess. Writing a value the keychain already holds
         // is a no-op the user should not be asked about, so it is skipped.
-        match entry.get_password() {
-            Ok(existing) if existing == secret.expose_secret() => return Ok(()),
-            Ok(_) | Err(keyring::Error::NoEntry) => {}
-            // A read that failed for another reason must not stop the write the caller asked for.
-            Err(_) => {}
+        // A read that failed for any reason must not stop the write the caller asked for.
+        if entry
+            .get_password()
+            .is_ok_and(|existing| existing == secret.expose_secret())
+        {
+            return Ok(());
         }
         entry
             .set_password(secret.expose_secret())

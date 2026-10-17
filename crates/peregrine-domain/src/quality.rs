@@ -35,7 +35,7 @@ impl QualityRank {
 /// The ranker's first rule is quality, so an uncapped profile always prefers the biggest disc
 /// image available; a 30 GiB remux then loses to the inspection cap and the download never
 /// starts. This ceiling keeps the default an ordinary HD release while leaving UHD and
-/// disc-grade sources available when they fit. It admits a 1080p BluRay encode and a 2160p web
+/// disc-grade sources available when they fit. It admits a 1080p `BluRay` encode and a 2160p web
 /// release; a remux does not.
 pub const DEFAULT_HD_CEILING_BYTES: u64 = 12 * 1024 * 1024 * 1024;
 
