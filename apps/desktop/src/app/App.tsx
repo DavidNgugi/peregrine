@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import { I18nextProvider } from "react-i18next";
 import type { Platform } from "../lib/platform.js";
 import { AppErrorBoundary } from "./AppErrorBoundary.js";
-import { AppShell } from "./AppShell.js";
+import { SetupGate } from "./SetupGate.js";
 import type { Route } from "./routes.js";
 
 // The catalogue is bundled, so the instance is built once per process and the
@@ -21,7 +21,7 @@ export function App({ platform, route }: AppProps): ReactElement {
   return (
     <I18nextProvider i18n={i18n}>
       <AppErrorBoundary>
-        <AppShell platform={platform} route={route} />
+        <SetupGate platform={platform} route={route} />
       </AppErrorBoundary>
     </I18nextProvider>
   );
