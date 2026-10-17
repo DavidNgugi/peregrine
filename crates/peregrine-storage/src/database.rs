@@ -985,6 +985,24 @@ impl Database {
         }
     }
 
+    /// Deletes one `media_file` row by its path, reporting whether the row was there.
+    ///
+    /// The deletion path (`AGENTS` R22) calls this once per file it removed, so the library stops
+    /// claiming a copy that no longer exists. The item is kept: it is the history that makes the
+    /// title `Availability::Removed` rather than a title that was never acquired.
+    pub async fn delete_media_file_by_path(&self, path: &str) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::DeleteMediaFileByPath {
+                path: path.to_owned(),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("delete_media_file_by_path", &other)),
+        }
+    }
+
     /// One file, when `scope` may see the title its item is for.
     pub async fn media_file(
         &self,

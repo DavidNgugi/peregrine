@@ -114,6 +114,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::remove_download,
             downloads::dismiss_download,
             downloads::clear_finished_downloads,
+            downloads::plan_download_deletion,
+            downloads::delete_download,
             downloads::preferred_quality,
             downloads::set_preferred_quality,
             downloads::list_release_offers,

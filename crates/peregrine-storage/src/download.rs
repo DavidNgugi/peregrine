@@ -896,16 +896,20 @@ pub(crate) async fn engine_state(
 ///
 /// The finished states are scoped inside the statement rather than read first, so an id that raced
 /// a state change cannot delete a live transfer. Answers whether a row went.
+///
+/// `completed` is finished: the payload is whole and the app has stopped seeding it, so the row is
+/// history rather than a transfer — clearing it is not how anything is stopped.
 pub(crate) async fn delete_finished(
     connection: &mut sqlx::SqliteConnection,
     id: i64,
 ) -> Result<bool, StorageError> {
-    let result =
-        sqlx::query("DELETE FROM download_job WHERE id = ?1 AND state IN ('failed', 'removed')")
-            .bind(id)
-            .execute(connection)
-            .await
-            .map_err(StorageError::from_sqlx)?;
+    let result = sqlx::query(
+        "DELETE FROM download_job WHERE id = ?1 AND state IN ('completed', 'failed', 'removed')",
+    )
+    .bind(id)
+    .execute(connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -915,10 +919,11 @@ pub(crate) async fn delete_finished(
 pub(crate) async fn delete_all_finished(
     connection: &mut sqlx::SqliteConnection,
 ) -> Result<u64, StorageError> {
-    let result = sqlx::query("DELETE FROM download_job WHERE state IN ('failed', 'removed')")
-        .execute(connection)
-        .await
-        .map_err(StorageError::from_sqlx)?;
+    let result =
+        sqlx::query("DELETE FROM download_job WHERE state IN ('completed', 'failed', 'removed')")
+            .execute(connection)
+            .await
+            .map_err(StorageError::from_sqlx)?;
     Ok(result.rows_affected())
 }
 

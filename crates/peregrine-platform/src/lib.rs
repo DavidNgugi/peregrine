@@ -19,7 +19,9 @@
 pub mod clock;
 pub mod ids;
 pub mod sidecar;
+pub mod trash;
 
 pub use clock::SystemClock;
 pub use ids::{TokenMinter, UlidGenerator};
 pub use sidecar::VerifiedSidecar;
+pub use trash::SystemTrash;

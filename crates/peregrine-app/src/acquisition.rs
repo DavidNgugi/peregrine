@@ -93,13 +93,14 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 use peregrine_domain::{
-    AccountScope, Clock, DownloadEvent, DownloadState, InfoHash, InspectionLimits, NonEmptyText,
-    OptIn, PathGuard, PathGuardError, SafePath, SafetyReport, TorrentDescription, TorrentInspector,
-    TransitionRejected, Verdict,
+    AccountScope, Clock, DeletionEntry, DeletionPlan, DownloadEvent, DownloadState, InfoHash,
+    InspectionLimits, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, OptIn,
+    PathGuard, PathGuardError, SafePath, SafetyReport, TorrentDescription, TorrentInspector,
+    TransitionRejected, Trash, TrashError, Verdict,
 };
 use peregrine_storage::{
-    Database, DownloadJobRow, DownloadSource, DownloadStatistics, DownloadTransitionError,
-    NewDownloadJob, StorageError,
+    Database, DownloadFileRow, DownloadJobRow, DownloadSource, DownloadStatistics,
+    DownloadTransitionError, NewDownloadJob, PageRequest, StorageError,
 };
 use peregrine_torrent::{
     AddIntent, AddRefused, AddRequest, EngineError, FileSelection, TorrentEngine, TorrentHandle,
@@ -109,9 +110,10 @@ use thiserror::Error;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::events::{DOWNLOAD_STATS, Event, EventBus};
+use crate::library::scan::modified_millis;
 
 /// How often one job's statistics may reach the database (`ARCHITECTURE` §6).
 ///
@@ -225,6 +227,11 @@ pub enum AcquisitionError {
     /// not this slice's to read.
     #[error("this build cannot start a download from a .torrent file path yet")]
     UnsupportedSource,
+
+    /// The operating system would not take a deleted file into its trash, so nothing was removed
+    /// ([AGENTS R22]).
+    #[error(transparent)]
+    Trash(#[from] TrashError),
 }
 
 /// Why a volume's free space could not be read.
@@ -304,6 +311,9 @@ pub struct AcquisitionService {
     /// read it, so the floor is one number rather than two that can drift.
     free_space_floor: u64,
     bus: Arc<EventBus>,
+    /// Where a deleted file goes. A port rather than a direct call because the trash is the
+    /// operating system's and the domain may not reach for it ([AGENTS R8], [AGENTS R22]).
+    trash: Arc<dyn Trash>,
     /// The handles this process holds, so an engine operation after an add can name its torrent
     /// without the row carrying a number. A job started by another process has no handle here and
     /// is `PG-E10-08`'s to reattach.
@@ -346,6 +356,7 @@ impl AcquisitionService {
         volume: Arc<dyn VolumeSpace>,
         free_space_floor: u64,
         bus: Arc<EventBus>,
+        trash: Arc<dyn Trash>,
     ) -> Self {
         Self {
             database,
@@ -355,6 +366,7 @@ impl AcquisitionService {
             volume,
             free_space_floor,
             bus,
+            trash,
             handles: Mutex::new(HashMap::new()),
             written_at: Mutex::new(HashMap::new()),
             pump: Mutex::new(None),
@@ -895,7 +907,280 @@ impl AcquisitionService {
             id.to_string(),
             payload(id, &statistics),
         ));
+        // A payload that has reached its whole size is finished, and the domain's two edges turn
+        // that fact into the state the queue and the title page read: downloading -> seeding ->
+        // completed. Nothing else in this build emits either event, so without this hook a finished
+        // transfer stays downloading at 100 % for ever.
+        if statistics.progress_permille >= 1_000 && row.state == DownloadState::Downloading {
+            self.finish_download(id, handle).await?;
+        }
         Ok(Some(statistics))
+    }
+
+    /// Finishes one job whose payload is whole: the two domain edges, the import, and the stop.
+    ///
+    /// This session handle is dropped first, because this tick is the last one whatever happens
+    /// after it: a second sample would apply Progress to a terminal row and be refused, and the
+    /// refusal would be logged every second for ever.
+    ///
+    /// The import and the engine removal are best-effort and logged rather than propagated. Both
+    /// are recoverable -- a later library scan adopts the file, and the torrent stops with the
+    /// process -- and neither can be retried here because the handle is already gone. The state
+    /// machine's two transitions are not best-effort: they are propagated.
+    async fn finish_download(
+        &self,
+        id: i64,
+        handle: TorrentHandle,
+    ) -> Result<(), AcquisitionError> {
+        self.handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        self.written_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+
+        self.apply(id, DownloadEvent::PayloadComplete).await?;
+        self.apply(id, DownloadEvent::SeedingSatisfied).await?;
+        let row = self.reload(id).await?;
+
+        if let Err(error) = self.import_completed(&row).await {
+            warn!(%error, job = id, "a completed download could not be added to the library");
+        }
+        // No seeding policy is configured yet (PG-E10-09), so a finished payload stops here: the
+        // torrent leaves the session and its files stay where they were written.
+        if let Err(error) = self.engine.remove(handle).await {
+            warn!(%error, job = id, "a completed download could not be stopped");
+        }
+        Ok(())
+    }
+
+    /// Finishes the jobs a previous process left at a whole payload.
+    ///
+    /// A restart loses the engine handles this session never had, so the pump cannot see a
+    /// transfer that completed while the app was closed (`PG-E10-08` owns reattaching it). What the
+    /// row still records is the answer: a job in `downloading` at 100 % is a payload that is whole,
+    /// and this applies the same two edges and import a live tick would. The composition root calls
+    /// it once before the pump starts.
+    pub(crate) async fn reconcile_finished(&self) -> Result<usize, AcquisitionError> {
+        let jobs = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                DownloadState::ALL,
+                PageRequest::first(1_000),
+            )
+            .await?;
+        let mut finished = 0;
+        for job in jobs {
+            if job.state != DownloadState::Downloading || job.progress_permille < 1_000 {
+                continue;
+            }
+            self.apply(job.id, DownloadEvent::PayloadComplete).await?;
+            self.apply(job.id, DownloadEvent::SeedingSatisfied).await?;
+            let row = self.reload(job.id).await?;
+            if let Err(error) = self.import_completed(&row).await {
+                warn!(%error, job = job.id, "a completed download could not be added to the library");
+            }
+            finished += 1;
+        }
+        Ok(finished)
+    }
+
+    /// Gives the library the media files a completed download wrote.
+    ///
+    /// The full import (PG-E14-19) owns probing, naming, and episode placement. This is the part a
+    /// completed job can do without any of them: the title the job was started for is already
+    /// known, so the item is that title, and each selected media entry that is on disk becomes a
+    /// media_file row. A file the engine has not flushed is skipped rather than failing the
+    /// import, and a path that is already recorded is left alone (media_file.path is UNIQUE, I3).
+    async fn import_completed(&self, row: &DownloadJobRow) -> Result<(), AcquisitionError> {
+        let files = self.database.download_files(unrestricted(), row.id).await?;
+        let at = self.clock.now();
+        let folder = std::path::Path::new(row.save_path.as_str());
+        let mut item_id = self
+            .database
+            .item_id_for(row.title_id, row.episode_id)
+            .await?;
+
+        for file in files.iter().filter(|file| file.selected && file.is_media) {
+            let candidate = folder.join(file.path.as_str());
+            // A metadata path the guard refuses now is not a file to import; the inspection gate
+            // already refused traversal, so this is belt and braces rather than a live path.
+            let Ok(safe) = self.destination.resolve(&candidate) else {
+                continue;
+            };
+            let Ok(metadata) = tokio::fs::metadata(safe.as_path()).await else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let id = match item_id {
+                Some(id) => id,
+                None => {
+                    let created = self
+                        .database
+                        .insert_media_item(MediaItem {
+                            id: 0,
+                            title_id: row.title_id,
+                            episode_id: row.episode_id,
+                            state: MediaItemState::Available,
+                            origin: MediaOrigin::Torrent,
+                            preferred_file_id: None,
+                            quality_label: None,
+                            created_at: at,
+                            updated_at: at,
+                        })
+                        .await?;
+                    item_id = Some(created);
+                    created
+                }
+            };
+            let Ok(path) = NonEmptyText::new(safe.as_path().to_string_lossy().as_ref()) else {
+                continue;
+            };
+            if self
+                .database
+                .media_file_by_path(unrestricted(), path.as_str())
+                .await?
+                .is_some()
+            {
+                continue;
+            }
+            self.database
+                .insert_media_file(MediaFile {
+                    id: 0,
+                    media_item_id: id,
+                    path,
+                    // No root owns a download: it lives under the app own download directory,
+                    // which is not a configured library root. A scan that later adopts the file
+                    // refreshes the root id.
+                    root_id: None,
+                    size_bytes: metadata.len(),
+                    mtime_ms: Timestamp::from_millisecond(modified_millis(&metadata)).unwrap_or(at),
+                    added_at: at,
+                    missing_since: None,
+                    container: None,
+                    duration_ms: None,
+                    video_codec: None,
+                    video_profile: None,
+                    width: None,
+                    height: None,
+                    bit_depth: None,
+                    hdr_format: None,
+                    frame_rate: None,
+                    bitrate_kbps: None,
+                    audio_codec: None,
+                    audio_channels: None,
+                    audio_layout: None,
+                    audio_languages: None,
+                    subtitle_format: None,
+                    probe_version: None,
+                    probe_json: None,
+                    quality_label: None,
+                    updated_at: at,
+                })
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Enumerates exactly what deleting one download would remove, without removing anything.
+    ///
+    /// AGENTS R22: the plan is taken first and the user confirms the list; delete_files resolves
+    /// every path again. A file the guard refuses, or that is no longer on disk, is not in the plan.
+    pub async fn deletion_plan(&self, id: i64) -> Result<DeletionPlan, AcquisitionError> {
+        let row = self.reload(id).await?;
+        let files = self.database.download_files(unrestricted(), id).await?;
+        Ok(DeletionPlan::new(id, self.enumerate(&row, &files).await))
+    }
+
+    /// Moves one download files to the operating system trash and clears its rows.
+    ///
+    /// The transfer is stopped before anything is moved, so the engine is never writing to a file
+    /// that is being taken away. Every path is resolved through the guard again between the plan
+    /// and the move (AGENTS R22); a path that no longer resolves fails the whole act rather than
+    /// skipping one file, because a partial deletion the user did not ask for is worse than a
+    /// refusal they can retry.
+    ///
+    /// The library rows the import wrote go with the bytes, so the title reports the payload as
+    /// deleted rather than missing. The item row is kept: it is the history, and the watch
+    /// progress hangs off it.
+    pub async fn delete_files(&self, id: i64) -> Result<DeletionPlan, AcquisitionError> {
+        let row = self.reload(id).await?;
+        // The guard is dropped before the await: a mutex guard held across one makes the whole
+        // future non-Send, and this service is driven from Tauri's async command surface.
+        let handle = self
+            .handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        if let Some(handle) = handle {
+            self.engine.remove(handle).await?;
+        }
+        if !row.state.is_terminal() {
+            self.apply(id, DownloadEvent::Removed).await?;
+        }
+        self.written_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+
+        let files = self.database.download_files(unrestricted(), id).await?;
+        let plan = DeletionPlan::new(id, self.enumerate(&row, &files).await);
+
+        for entry in &plan.entries {
+            let candidate = std::path::PathBuf::from(entry.path.as_str());
+            let safe = self
+                .destination
+                .resolve(&candidate)
+                .map_err(|source| AcquisitionError::SavePath { source })?;
+            let trash = Arc::clone(&self.trash);
+            let path = safe.as_path().to_path_buf();
+            tokio::task::spawn_blocking(move || trash.move_to_trash(&path))
+                .await
+                .map_err(|_| TrashError::Refused)??;
+            self.database
+                .delete_media_file_by_path(safe.as_path().to_string_lossy().as_ref())
+                .await?;
+        }
+
+        // The row is completed or removed now, which is exactly what the repository own guard
+        // admits to deletion.
+        self.database.delete_download_job(id).await?;
+        Ok(plan)
+    }
+
+    /// The on-disk files a job selected entries name, with their sizes.
+    ///
+    /// Shared by the plan and the act, so the two cannot enumerate different sets. The path is
+    /// passed through the guard, and a path with no file behind it is left out rather than planned.
+    async fn enumerate(
+        &self,
+        row: &DownloadJobRow,
+        files: &[DownloadFileRow],
+    ) -> Vec<DeletionEntry> {
+        let folder = std::path::Path::new(row.save_path.as_str());
+        let mut entries = Vec::new();
+        for file in files.iter().filter(|file| file.selected) {
+            let candidate = folder.join(file.path.as_str());
+            let Ok(safe) = self.destination.resolve(&candidate) else {
+                continue;
+            };
+            let Ok(metadata) = tokio::fs::metadata(safe.as_path()).await else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let Ok(path) = NonEmptyText::new(safe.as_path().to_string_lossy().as_ref()) else {
+                continue;
+            };
+            entries.push(DeletionEntry::new(path, metadata.len()));
+        }
+        entries
     }
 
     /// The handle this process holds for a job.
@@ -1019,6 +1304,40 @@ mod tests {
         }
     }
 
+    /// A trash that records what it took and really removes the file, so a deletion test sees the
+    /// same postcondition a user would: the bytes are gone and the call is remembered.
+    #[derive(Debug, Default)]
+    struct TrashLog(Mutex<Vec<PathBuf>>);
+
+    impl TrashLog {
+        fn new() -> Arc<Self> {
+            Arc::new(Self(Mutex::new(Vec::new())))
+        }
+
+        fn taken(&self) -> Vec<PathBuf> {
+            self.0
+                .lock()
+                .expect("the trash log is not poisoned")
+                .clone()
+        }
+    }
+
+    impl Trash for TrashLog {
+        fn move_to_trash(&self, path: &Path) -> Result<(), TrashError> {
+            std::fs::remove_file(path).map_err(|_| TrashError::Refused)?;
+            self.0
+                .lock()
+                .expect("the trash log is not poisoned")
+                .push(path.to_path_buf());
+            Ok(())
+        }
+    }
+
+    /// A trash the service can hold, for a test that does not inspect it.
+    fn trash() -> Arc<dyn Trash> {
+        TrashLog::new()
+    }
+
     /// The floor every fixture reserves.
     const FLOOR: u64 = 1_000;
 
@@ -1121,6 +1440,7 @@ mod tests {
         let bus = bus(&sink);
         let guard = PathGuard::new(directory.path().join("downloads"))
             .expect("the fixture root is absolute");
+        let trash = TrashLog::new();
         let service = AcquisitionService::new(
             Arc::clone(&database),
             Arc::clone(&engine) as Arc<dyn TorrentEngine>,
@@ -1129,6 +1449,7 @@ mod tests {
             Arc::clone(&volume) as Arc<dyn VolumeSpace>,
             FLOOR,
             Arc::clone(&bus),
+            Arc::clone(&trash) as Arc<dyn Trash>,
         );
         Harness {
             service,
@@ -1637,6 +1958,7 @@ mod tests {
                 Arc::clone(&harness.volume) as Arc<dyn VolumeSpace>,
                 FLOOR,
                 bus(&harness.sink),
+                trash(),
             );
 
             let answer = service
@@ -1873,6 +2195,117 @@ mod tests {
         );
     }
 
+    /// A whole payload finishes the job, imports what it wrote, stops the swarm, and can then be
+    /// deleted: the three edges the queue screen and the title page need.
+    #[tokio::test]
+    async fn a_complete_payload_is_imported_and_can_be_deleted() {
+        let harness = harness().await;
+        let engine = Arc::new(
+            FakeTorrentEngine::new()
+                .with_files(2, Bytes::new(1_000))
+                .with_downloaded(Bytes::new(2_000)),
+        );
+        let guard = PathGuard::new(harness.directory.path().join("downloads")).expect("absolute");
+        let trash = TrashLog::new();
+        let service = AcquisitionService::new(
+            Arc::clone(&harness.database),
+            Arc::clone(&engine) as Arc<dyn TorrentEngine>,
+            Arc::clone(&harness.clock) as Arc<dyn Clock + Send + Sync>,
+            guard,
+            Arc::clone(&harness.volume) as Arc<dyn VolumeSpace>,
+            FLOOR,
+            bus(&harness.sink),
+            Arc::clone(&trash) as Arc<dyn Trash>,
+        );
+        let started = service
+            .start(request(harness.title_id, 21, description()))
+            .await
+            .expect("the job starts");
+
+        // The fake engine moves counters and writes nothing, so the test writes what it would have.
+        let folder = harness.directory.path().join("downloads").join("Movies");
+        std::fs::create_dir_all(&folder).expect("the download folder");
+        let media = folder.join("Movie.2024.1080p.mkv");
+        std::fs::write(&media, vec![0_u8; 1_000]).expect("the media file");
+        std::fs::write(folder.join("Movie.2024.1080p.srt"), b"subs!").expect("the subtitle");
+
+        let statistics = service
+            .statistics(started.job.id)
+            .await
+            .expect("the tick answers")
+            .expect("the tick is not coalesced");
+        assert_eq!(statistics.progress_permille, 1_000);
+
+        let row = harness
+            .database
+            .download_job(account(), started.job.id)
+            .await
+            .expect("the read answers")
+            .expect("the row is there");
+        assert_eq!(
+            row.state,
+            DownloadState::Completed,
+            "a whole payload is a finished job"
+        );
+
+        // The media file is in the library; the subtitle is not a media file and is not imported.
+        let media_path = media.to_string_lossy().into_owned();
+        let imported = harness
+            .database
+            .media_file_by_path(account(), &media_path)
+            .await
+            .expect("the read answers")
+            .expect("the completed media file is in the library");
+        let item = harness
+            .database
+            .item_id_for(harness.title_id, None)
+            .await
+            .expect("the read answers")
+            .expect("the item was created");
+        assert_eq!(imported.media_item_id, item);
+        assert!(
+            engine
+                .calls()
+                .iter()
+                .any(|call| matches!(call, EngineCall::Remove(_))),
+            "the swarm is stopped rather than left seeding"
+        );
+
+        // The plan is the files the engine wrote, and nothing has gone yet.
+        let plan = service
+            .deletion_plan(started.job.id)
+            .await
+            .expect("the plan answers");
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan.total_bytes, 1_005);
+
+        let deleted = service
+            .delete_files(started.job.id)
+            .await
+            .expect("the deletion runs");
+        assert_eq!(deleted.len(), 2);
+        assert!(!media.exists(), "the media file is gone");
+        assert_eq!(trash.taken().len(), 2, "both files went to the trash");
+        assert!(
+            harness
+                .database
+                .download_job(account(), started.job.id)
+                .await
+                .expect("the read answers")
+                .is_none(),
+            "the queue entry is gone with its files"
+        );
+        assert!(
+            harness
+                .database
+                .media_file_by_path(account(), &media_path)
+                .await
+                .expect("the read answers")
+                .is_none(),
+            "the library record goes with the bytes"
+        );
+    }
+
     /// A job this process does not hold has no handle, which is a different answer from a state
     /// refusal: reattaching one is PG-E10-08's.
     #[tokio::test]
@@ -1942,6 +2375,7 @@ mod tests {
             Arc::new(UnknownVolume) as Arc<dyn VolumeSpace>,
             FLOOR,
             bus(&harness.sink),
+            trash(),
         );
 
         let error = service

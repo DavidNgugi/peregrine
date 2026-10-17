@@ -29,6 +29,7 @@ import type {
   JobStarted,
   LibraryRootDto,
   CaptureSessionDto,
+  DeletionPlanDto,
   DownloadJobDto,
   ReleaseOfferDto,
   NotificationDto,
@@ -134,6 +135,16 @@ export async function removeDownload(id: number): Promise<DownloadJobDto> {
 /** Clears one finished queue entry. The bytes on disk stay; only the record goes. */
 export async function dismissDownload(id: number): Promise<boolean> {
   return unwrap(commands.dismissDownload({ id }));
+}
+
+/** Enumerates what deleting one download would remove, without removing anything. */
+export async function planDownloadDeletion(id: number): Promise<DeletionPlanDto> {
+  return unwrap(commands.planDownloadDeletion({ id }));
+}
+
+/** Moves one download's files to the operating system's trash and clears its queue entry. */
+export async function deleteDownload(id: number): Promise<DeletionPlanDto> {
+  return unwrap(commands.deleteDownload({ id }));
 }
 
 /** Clears every finished queue entry, answering how many went. */

@@ -6,8 +6,10 @@
 //! the state machine and the engine calls are the service's, and this layer names an id and maps
 //! the answer.
 
+use peregrine_app::DeletionPlan;
 use peregrine_app::DownloadJobRow;
 use peregrine_app::PreferredQuality;
+use peregrine_app::TrashError;
 use peregrine_app::acquisition::AcquisitionError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -151,6 +153,49 @@ impl DownloadJobDto {
     }
 }
 
+/// One file a deletion would remove, as the confirmation screen lists it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionEntryDto {
+    /// The absolute path the plan enumerated.
+    pub path: String,
+    /// The file size in bytes, as the plan measured it.
+    #[specta(type = Number)]
+    pub bytes: u64,
+}
+
+/// Exactly what one deletion would remove, before the user confirms it (AGENTS R22).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionPlanDto {
+    /// The download job the plan belongs to.
+    #[specta(type = Number)]
+    pub job_id: i64,
+    /// The files, in the repository order.
+    pub entries: Vec<DeletionEntryDto>,
+    /// The sum of every entry size.
+    #[specta(type = Number)]
+    pub total_bytes: u64,
+}
+
+impl DeletionPlanDto {
+    /// The service plan, as a screen reads it.
+    fn of(plan: &DeletionPlan) -> Self {
+        Self {
+            job_id: plan.job_id,
+            entries: plan
+                .entries
+                .iter()
+                .map(|entry| DeletionEntryDto {
+                    path: entry.path.as_str().to_owned(),
+                    bytes: entry.bytes,
+                })
+                .collect(),
+            total_bytes: plan.total_bytes,
+        }
+    }
+}
+
 /// The title's display name and kind, when the library can answer them; a missing title is not a
 /// failed list.
 ///
@@ -195,10 +240,14 @@ fn acquisition_error(error: AcquisitionError) -> AppError {
         AcquisitionError::UnsupportedSource => {
             AppError::new(ErrorCode::Unsupported).with_detail(error.to_string())
         }
+        AcquisitionError::Trash(TrashError::Unavailable) => {
+            AppError::new(ErrorCode::Unsupported).with_detail(error.to_string())
+        }
         AcquisitionError::SavePath { .. }
         | AcquisitionError::SpaceUnknown { .. }
         | AcquisitionError::Engine(_)
         | AcquisitionError::AddRefused(_)
+        | AcquisitionError::Trash(TrashError::Refused)
         | AcquisitionError::TransitionRefused { .. }
         | AcquisitionError::Storage(_) => {
             AppError::new(ErrorCode::Internal).with_detail(error.to_string())
@@ -344,6 +393,50 @@ pub async fn clear_finished_downloads(state: State<'_, RuntimeState>) -> Result<
     Ok(guard_response(
         "downloads::clear_finished",
         u32::try_from(removed).unwrap_or(u32::MAX),
+    ))
+}
+
+/// Enumerates what deleting one download would remove, without removing anything.
+///
+/// The confirmation screen shows this list and its byte total, so what the user agrees to is what
+/// actually goes (AGENTS R22).
+#[tauri::command]
+#[specta::specta]
+pub async fn plan_download_deletion(
+    state: State<'_, RuntimeState>,
+    download: DownloadRef,
+) -> Result<DeletionPlanDto, AppError> {
+    let runtime = state.runtime()?;
+    let plan = runtime
+        .acquisition()?
+        .deletion_plan(download.id)
+        .await
+        .map_err(acquisition_error)?;
+    Ok(guard_response(
+        "downloads::plan_deletion",
+        DeletionPlanDto::of(&plan),
+    ))
+}
+
+/// Moves one download files to the operating system trash and clears its queue entry.
+///
+/// The list is resolved again inside the service, so a path that changed since the plan fails the
+/// whole act rather than deleting something the user did not confirm.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_download(
+    state: State<'_, RuntimeState>,
+    download: DownloadRef,
+) -> Result<DeletionPlanDto, AppError> {
+    let runtime = state.runtime()?;
+    let plan = runtime
+        .acquisition()?
+        .delete_files(download.id)
+        .await
+        .map_err(acquisition_error)?;
+    Ok(guard_response(
+        "downloads::delete",
+        DeletionPlanDto::of(&plan),
     ))
 }
 

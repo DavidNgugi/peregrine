@@ -415,6 +415,23 @@ pub(crate) async fn set_file_missing(
     Ok(result.rows_affected() > 0)
 }
 
+/// Deletes one `media_file` row by its path, reporting whether the row was there.
+///
+/// The deletion path (AGENTS R22) owns this: the bytes are gone, so the record of a copy that no
+/// longer exists goes with them. The item row is deliberately left alone — it is the history that
+/// says the payload was imported and later deleted, which is `Availability::Removed` rather than a
+/// title that was never acquired. Watch progress hangs off the item, so removing the item would
+/// take what the user watched with it.
+pub(crate) async fn delete_file_by_path(
+    connection: &mut sqlx::SqliteConnection,
+    path: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM media_file WHERE path = ?1")
+        .bind(path)
+        .execute(&mut *connection)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
 /// Reads one root.
 pub(crate) async fn root(
     pool: &sqlx::SqlitePool,

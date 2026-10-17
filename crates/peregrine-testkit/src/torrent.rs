@@ -96,6 +96,8 @@ struct FakeTorrent {
     selection: FileSelection,
     file_count: usize,
     file_len: Bytes,
+    /// Payload bytes this torrent reports as moved, which is what a completion test drives.
+    downloaded: Bytes,
     /// The state this torrent hands a caller to persist. Deterministic, like every other answer
     /// here, and derived from the handle so a round trip through it is observable.
     state: EngineState,
@@ -112,7 +114,7 @@ impl FakeTorrent {
         TorrentStats::new(
             self.info_hash,
             Transfer::new(
-                Bytes::new(0),
+                self.downloaded,
                 Bytes::new(0),
                 ByteRate::per_second(0),
                 ByteRate::per_second(0),
@@ -158,6 +160,8 @@ pub struct FakeTorrentEngine {
     descriptor: EngineDescriptor,
     file_count: usize,
     file_len: Bytes,
+    /// Payload bytes every torrent this session adds reports as moved.
+    downloaded: Bytes,
     session: Mutex<Session>,
 }
 
@@ -175,6 +179,7 @@ impl FakeTorrentEngine {
             ),
             file_count: 1,
             file_len: Bytes::new(0),
+            downloaded: Bytes::new(0),
             session: Mutex::new(Session {
                 closed: false,
                 next_handle: 0,
@@ -195,6 +200,16 @@ impl FakeTorrentEngine {
     pub fn with_files(mut self, file_count: usize, file_len: Bytes) -> Self {
         self.file_count = file_count;
         self.file_len = file_len;
+        self
+    }
+
+    /// The same session, reporting `downloaded` payload bytes for every torrent it adds.
+    ///
+    /// A complete payload spells `downloaded == file_count * file_len`; a partial one is how a
+    /// progress row is driven without a moving transfer.
+    #[must_use]
+    pub fn with_downloaded(mut self, downloaded: Bytes) -> Self {
+        self.downloaded = downloaded;
         self
     }
 
@@ -267,6 +282,7 @@ impl TorrentEngine for FakeTorrentEngine {
         });
         let file_count = self.file_count;
         let file_len = self.file_len;
+        let downloaded = self.downloaded;
         let answer = self.with_session(EngineOperation::Add, move |session| {
             if request.selection().is_empty() {
                 return Err(EngineError::EmptySelection);
@@ -289,6 +305,7 @@ impl TorrentEngine for FakeTorrentEngine {
                     selection: request.selection().clone(),
                     file_count,
                     file_len,
+                    downloaded,
                     state: state_of(handle),
                 },
             );

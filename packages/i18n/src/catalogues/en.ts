@@ -71,11 +71,17 @@ export const en = {
         peers: "Peers",
         actions: "Actions",
       },
-      action: { pause: "Pause", resume: "Resume", remove: "Remove", dismiss: "Dismiss" },
+      action: { pause: "Pause", resume: "Resume", remove: "Remove", dismiss: "Dismiss", delete: "Delete files" },
       remove: {
         title: "Remove this download?",
         body: "The transfer stops and the job leaves the queue. Files already written are not deleted.",
         confirm: "Remove",
+        cancel: "Cancel",
+      },
+      delete: {
+        title: "Delete this download's files?",
+        body: "This moves {{files}} files ({{size}}) to the system trash and clears the queue entry. The files can be restored from the trash.",
+        confirm: "Delete files",
         cancel: "Cancel",
       },
       dismiss: {

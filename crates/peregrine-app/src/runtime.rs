@@ -28,7 +28,7 @@ use peregrine_domain::{
     PlaybackPosition, PreferredQuality, ProgressSource, SafePath, ScanMode, TokenSource,
     WatchProgress,
 };
-use peregrine_platform::{SystemClock, TokenMinter, UlidGenerator};
+use peregrine_platform::{SystemClock, SystemTrash, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
 use peregrine_storage::NotificationRepository;
 use peregrine_storage::{
@@ -998,6 +998,7 @@ impl Runtime {
                                 Arc::new(SystemVolume),
                                 FREE_SPACE_FLOOR,
                                 Arc::clone(&bus),
+                                Arc::new(SystemTrash),
                             );
                             torrent_engine = Some(torrent);
                             metadata_fetch = Some(fetch);
@@ -1060,6 +1061,11 @@ impl Runtime {
         // download mark on a tile only move because something asks. The pump is started here,
         // after the engine exists, and stopped with the bus in `Runtime::shutdown`.
         if let Some(service) = &runtime.acquisition {
+            // Before the pump: finish the jobs a previous process left at a whole payload, so a
+            // download that completed while the app was closed is not stuck at 100 % for ever.
+            if let Err(error) = service.reconcile_finished().await {
+                tracing::warn!(%error, "the finished downloads could not be reconciled");
+            }
             service.start_pump();
         }
 

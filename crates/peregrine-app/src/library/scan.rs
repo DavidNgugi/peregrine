@@ -421,7 +421,7 @@ fn name_of(path: &Path) -> String {
 /// what an incremental pass (PG-E14-03) compares: a value no real mtime can equal makes such a
 /// file look changed on every scan, which is the safe direction, while `0` would make it look
 /// unchanged forever.
-fn modified_millis(metadata: &fs::Metadata) -> i64 {
+pub(crate) fn modified_millis(metadata: &fs::Metadata) -> i64 {
     let Ok(modified) = metadata.modified() else {
         return i64::MIN;
     };

@@ -115,6 +115,10 @@ pub(crate) enum WriteRequest {
     InsertMediaItem(Box<peregrine_domain::MediaItem>),
     /// Insert one row into `media_file`.
     InsertMediaFile(Box<peregrine_domain::MediaFile>),
+    /// Delete one `media_file` row by its path, for a deletion that removed the bytes.
+    DeleteMediaFileByPath {
+        path: String,
+    },
     /// Insert one row into `unmatched_file`.
     InsertUnmatchedFile {
         file: Box<peregrine_domain::UnmatchedFile>,
@@ -483,6 +487,12 @@ async fn apply_library_write(
             .await
             .map(|id| WriteResponse::RowInserted { id })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::DeleteMediaFileByPath { path } => {
+            crate::library::delete_file_by_path(connection, &path)
+                .await
+                .map(|removed| WriteResponse::RowChanged { changed: removed })
+                .map_err(StorageError::from_sqlx)
+        }
         WriteRequest::RemoveUnmatchedFile { id } => remove_unmatched_file(connection, id).await,
         WriteRequest::InsertUnmatchedFile {
             file,

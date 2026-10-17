@@ -495,6 +495,20 @@ export const commands = {
 	dismissDownload: (download: DownloadRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_download", { download })),
 	/**  Clears every finished download from the queue, answering how many went. */
 	clearFinishedDownloads: () => typedError<number, AppError_Serialize>(__TAURI_INVOKE("clear_finished_downloads")),
+	/**
+	 *  Enumerates what deleting one download would remove, without removing anything.
+	 * 
+	 *  The confirmation screen shows this list and its byte total, so what the user agrees to is what
+	 *  actually goes (AGENTS R22).
+	 */
+	planDownloadDeletion: (download: DownloadRef) => typedError<DeletionPlanDto, AppError_Serialize>(__TAURI_INVOKE("plan_download_deletion", { download })),
+	/**
+	 *  Moves one download files to the operating system trash and clears its queue entry.
+	 * 
+	 *  The list is resolved again inside the service, so a path that changed since the plan fails the
+	 *  whole act rather than deleting something the user did not confirm.
+	 */
+	deleteDownload: (download: DownloadRef) => typedError<DeletionPlanDto, AppError_Serialize>(__TAURI_INVOKE("delete_download", { download })),
 	/**  The quality downloads prefer, as its wire spelling, or null when the stored list names none. */
 	preferredQuality: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("preferred_quality")),
 	/**
@@ -746,6 +760,24 @@ export type CredentialStoreDto =
 "denied" | 
 /**  There is no store this system can use. */
 "unavailable";
+
+/**  One file a deletion would remove, as the confirmation screen lists it. */
+export type DeletionEntryDto = {
+	/**  The absolute path the plan enumerated. */
+	path: string,
+	/**  The file size in bytes, as the plan measured it. */
+	bytes: number,
+};
+
+/**  Exactly what one deletion would remove, before the user confirms it (AGENTS R22). */
+export type DeletionPlanDto = {
+	/**  The download job the plan belongs to. */
+	jobId: number,
+	/**  The files, in the repository order. */
+	entries: DeletionEntryDto[],
+	/**  The sum of every entry size. */
+	totalBytes: number,
+};
 
 /**  One download job, as the Downloads screen draws it. */
 export type DownloadJobDto = {

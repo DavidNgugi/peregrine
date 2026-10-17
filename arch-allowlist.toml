@@ -311,6 +311,10 @@ runtime = [
   "thiserror",
   "tokio",
   "tracing",
+  # Moving a deleted file to the operating system's trash is a per-OS operation and
+  # AGENTS R22 requires the trash rather than a permanent delete; this crate is the
+  # adapter leaf that owns the platform call.
+  "trash",
   # The production id generator is the one shipping site permitted to touch a
   # random source; `peregrine-platform` is a determinism adapter ([determinism]).
   "ulid",

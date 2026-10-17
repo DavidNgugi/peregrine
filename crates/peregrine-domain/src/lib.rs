@@ -15,6 +15,7 @@ pub mod cache;
 pub mod catalogue;
 pub mod centre;
 pub mod deeplink;
+pub mod deletion;
 pub mod download;
 pub mod event;
 pub mod id;
@@ -66,6 +67,7 @@ pub use centre::{
     SubjectNaming,
 };
 pub use deeplink::{ExternalLink, ExternalLinkError};
+pub use deletion::{DeletionEntry, DeletionPlan, Trash, TrashError};
 pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
 pub use event::{Event, SubjectKind, WatchSubject};
 pub use id::{ExternalId, ExternalIdError, InfoHash, InfoHashError, Provider};

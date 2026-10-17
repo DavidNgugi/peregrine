@@ -15,6 +15,8 @@ jiff = { workspace = true }
 # Verification hashes the artefact the pinned manifest describes (adr/0022 §3).
 sha2 = { workspace = true }
 thiserror = { workspace = true }
+# Deleting a file is reversible, so it goes to the operating system's trash (AGENTS R22).
+trash = { workspace = true }
 tracing = { workspace = true }
 # The production id generator is the one shipping site allowed to touch a random
 # source (AGENTS R14); `cargo xtask check-determinism` enforces that.

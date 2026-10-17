@@ -46,7 +46,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 699 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 706 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -211,6 +211,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `fastrand` | 2.5.0 |
 | `fdeflate` | 0.3.7 |
 | `field-offset` | 0.3.6 |
+| `filetime` | 0.2.29 |
 | `find-msvc-tools` | 0.1.14 |
 | `flate2` | 1.1.10 |
 | `flume` | 0.12.0 |
@@ -567,6 +568,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tao` | 0.37.1 |
 | `tao-macros` | 0.1.4 |
 | `tap` | 1.0.1 |
+| `tar` | 0.4.46 |
 | `target-lexicon` | 0.12.16 |
 | `tauri` | 2.12.1 |
 | `tauri-build` | 2.7.1 |
@@ -627,8 +629,10 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tracing-log` | 0.2.0 |
 | `tracing-serde` | 0.2.0 |
 | `tracing-subscriber` | 0.3.23 |
+| `trash` | 5.2.9 |
 | `tray-icon` | 0.25.1 |
 | `try-lock` | 0.2.5 |
+| `typed-path` | 0.12.3 |
 | `typeid` | 1.0.3 |
 | `typenum` | 1.20.1 |
 | `typewit` | 1.15.2 |
@@ -731,6 +735,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `wyz` | 0.5.1 |
 | `x11` | 2.21.0 |
 | `x11-dl` | 2.21.0 |
+| `xattr` | 1.6.1 |
 | `yoke` | 0.8.3 |
 | `yoke-derive` | 0.8.4 |
 | `zbus` | 5.19.0 |
@@ -746,8 +751,10 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `zerotrie` | 0.2.5 |
 | `zerovec` | 0.11.8 |
 | `zerovec-derive` | 0.11.6 |
+| `zip` | 9.0.4 |
 | `zlib-rs` | 0.6.8 |
 | `zmij` | 1.0.23 |
+| `zopfli` | 0.8.4 |
 | `zvariant` | 5.15.0 |
 | `zvariant_derive` | 5.15.0 |
 | `zvariant_utils` | 4.2.0 |

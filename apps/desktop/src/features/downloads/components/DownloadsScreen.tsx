@@ -22,7 +22,7 @@ import {
   Table,
 } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
-import type { DownloadJobDto } from "@peregrine/ipc-client";
+import type { DeletionPlanDto, DownloadJobDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,9 +50,13 @@ const TERMINAL_STATES: ReadonlySet<string> = new Set(["completed", "failed", "re
 
 /** A finished entry the user can clear out of the list.
  *
- * `completed` is absent on purpose: a completed torrent is usually still seeding, and clearing the
- * row is not how that is stopped. */
-const CLEARABLE_STATES: ReadonlySet<string> = new Set(["failed", "removed"]);
+ * `completed` is here because a completed payload is no longer seeding: the core stops the torrent
+ * when it finishes, so clearing the row removes a record and changes nothing on the swarm. */
+const CLEARABLE_STATES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "removed",
+]);
 
 /** Bytes as a row shows them, in whole units. */
 function sizeLabel(bytes: number, t: Translate): string {
@@ -111,7 +115,10 @@ export function DownloadsScreen({
   // One dialog serves the three destructive moves: removing a running job, dismissing a finished
   // one, and clearing every finished one. `null` is the closed state.
   const [confirming, setConfirming] = useState<
-    { kind: "remove" | "dismiss"; row: DownloadJobDto } | { kind: "clear" } | null
+    | { kind: "remove" | "dismiss"; row: DownloadJobDto }
+    | { kind: "clear" }
+    | { kind: "delete"; row: DownloadJobDto; plan: DeletionPlanDto }
+    | null
   >(null);
 
   const confirm = (): void => {
@@ -122,6 +129,8 @@ export function DownloadsScreen({
     }
     if (target.kind === "clear") {
       void actions.clearFinished();
+    } else if (target.kind === "delete") {
+      void actions.deleteFiles(target.row.id);
     } else if (target.kind === "remove") {
       void actions.remove(target.row.id);
     } else {
@@ -277,6 +286,22 @@ export function DownloadsScreen({
                 {t("downloads.action.remove")}
               </Button>
             )}
+            {row.downloadedBytes > 0 && row.state !== "removed" ? (
+              <Button
+                disabled={busy || actions.planningId === row.id}
+                onClick={() => {
+                  void actions.planDeletion(row.id).then((plan) => {
+                    if (plan !== null) {
+                      setConfirming({ kind: "delete", row, plan });
+                    }
+                  });
+                }}
+                size="sm"
+                variant="danger"
+              >
+                {t("downloads.action.delete")}
+              </Button>
+            ) : null}
           </div>
         );
       },
@@ -300,12 +325,22 @@ export function DownloadsScreen({
               confirm: t("downloads.dismiss.confirm"),
               cancel: t("downloads.dismiss.cancel"),
             }
-          : {
-              title: t("downloads.remove.title"),
-              body: t("downloads.remove.body"),
-              confirm: t("downloads.remove.confirm"),
-              cancel: t("downloads.remove.cancel"),
-            };
+          : confirming.kind === "delete"
+            ? {
+                title: t("downloads.delete.title"),
+                body: t("downloads.delete.body", {
+                  files: confirming.plan.entries.length,
+                  size: sizeLabel(confirming.plan.totalBytes, t),
+                }),
+                confirm: t("downloads.delete.confirm"),
+                cancel: t("downloads.delete.cancel"),
+              }
+            : {
+                title: t("downloads.remove.title"),
+                body: t("downloads.remove.body"),
+                confirm: t("downloads.remove.confirm"),
+                cancel: t("downloads.remove.cancel"),
+              };
 
   return (
     <Screen backLabel={backLabel} onBack={onBack} subtitle={t("downloads.subtitle")} title={t("downloads.title")}>
@@ -361,6 +396,15 @@ export function DownloadsScreen({
           }}
           title={copy.title}
         >
+          {confirming !== null && confirming.kind === "delete" ? (
+            <ul className="mb-3 flex max-h-60 flex-col gap-1 overflow-auto text-caption text-text-tertiary">
+              {confirming.plan.entries.map((entry) => (
+                <li className="truncate" key={entry.path} title={entry.path}>
+                  {entry.path}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button
               onClick={() => {
