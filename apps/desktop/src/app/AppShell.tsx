@@ -36,6 +36,7 @@ import {
   useShortcuts,
 } from "../features/settings/index.js";
 import { downloadMarks } from "../lib/download-status.js";
+import { imageUrl } from "../lib/media.js";
 import type { Platform } from "../lib/platform.js";
 import { writePath } from "../lib/window-path.js";
 import {
@@ -225,6 +226,21 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // One status per title, from the queue read the shell already holds. A screen hands a card the
   // mark for its own id rather than each subscribing to the queue: one read, one answer.
   const marks = useMemo(() => downloadMarks(downloads.downloads), [downloads.downloads]);
+  // The poster wall behind the profile selector: the titles this device already holds, which is the
+  // honest answer to "what is in this profile" while accounts do not exist.
+  const profilePosters = useMemo(() => {
+    const paths: string[] = [];
+    for (const row of downloads.downloads) {
+      if (row.poster !== null) paths.push(row.poster);
+    }
+    for (const title of library.titles) {
+      if (title.poster !== null) paths.push(title.poster);
+    }
+    return [...new Set(paths)]
+      .slice(0, 16)
+      .map(imageUrl)
+      .filter((url): url is string => url !== null);
+  }, [downloads.downloads, library.titles]);
   const scan = useScan();
   const unmatched = useUnmatchedFiles();
   const rules = useMatchRules();
@@ -440,6 +456,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           setProfileOpen(false);
         }}
         open={profileOpen}
+        posters={profilePosters}
         profile={profile}
       />
     </div>

@@ -95,3 +95,20 @@ textarea,
     transition-duration: 0.01ms !important;
   }
 }
+
+@keyframes profile-posters-up {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, -50%, 0);
+  }
+}
+
+.profile-posters-up {
+  animation: profile-posters-up 70s linear infinite;
+}
+
+.profile-posters-down {
+  animation: profile-posters-up 90s linear infinite reverse;
+}

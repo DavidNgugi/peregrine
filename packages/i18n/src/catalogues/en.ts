@@ -10,6 +10,7 @@ export const en = {
     profile: {
       who: "Who's watching?",
       switch: "Switch profile",
+      add: "Add profile",
       current: "{{name}}'s profile",
       local: "Stored on this device",
       note: "Profiles and parental controls arrive with local accounts. For now this device has one.",
