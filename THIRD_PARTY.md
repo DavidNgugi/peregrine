@@ -761,7 +761,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 
 ## Frontend packages
 
-The compiled frontend (`apps/desktop/dist`) bundles the 16 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
+The compiled frontend (`apps/desktop/dist`) bundles the 50 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
 
 Development-only packages are not redistributed and cannot appear here: pnpm records a workspace project's development dependencies in the lockfile but never resolves their transitive dependencies, so the Vite, ESLint, and Vitest toolchains have no edge into this walk. An optional *peer* that pnpm auto-installed for another package's types (`typescript`, `@types/react`) is excluded for the same reason: the bundle imports no code from it.
 
@@ -770,9 +770,43 @@ Licence expressions and texts are not repeated here: `docs/DEPENDENCIES.md` §3 
 | Package | Version |
 | --- | --- |
 | `@babel/runtime` | 7.29.10 |
+| `@dicebear/adventurer` | 9.4.2 |
+| `@dicebear/adventurer-neutral` | 9.4.2 |
+| `@dicebear/avataaars` | 9.4.2 |
+| `@dicebear/avataaars-neutral` | 9.4.2 |
+| `@dicebear/big-ears` | 9.4.2 |
+| `@dicebear/big-ears-neutral` | 9.4.2 |
+| `@dicebear/big-smile` | 9.4.2 |
+| `@dicebear/bottts` | 9.4.2 |
+| `@dicebear/bottts-neutral` | 9.4.2 |
+| `@dicebear/collection` | 9.4.2 |
+| `@dicebear/core` | 9.4.2 |
+| `@dicebear/croodles` | 9.4.2 |
+| `@dicebear/croodles-neutral` | 9.4.2 |
+| `@dicebear/dylan` | 9.4.2 |
+| `@dicebear/fun-emoji` | 9.4.2 |
+| `@dicebear/glass` | 9.4.2 |
+| `@dicebear/icons` | 9.4.2 |
+| `@dicebear/identicon` | 9.4.2 |
+| `@dicebear/initials` | 9.4.2 |
+| `@dicebear/lorelei` | 9.4.2 |
+| `@dicebear/lorelei-neutral` | 9.4.2 |
+| `@dicebear/micah` | 9.4.2 |
+| `@dicebear/miniavs` | 9.4.2 |
+| `@dicebear/notionists` | 9.4.2 |
+| `@dicebear/notionists-neutral` | 9.4.2 |
+| `@dicebear/open-peeps` | 9.4.2 |
+| `@dicebear/personas` | 9.4.2 |
+| `@dicebear/pixel-art` | 9.4.2 |
+| `@dicebear/pixel-art-neutral` | 9.4.2 |
+| `@dicebear/rings` | 9.4.2 |
+| `@dicebear/shapes` | 9.4.2 |
+| `@dicebear/thumbs` | 9.4.2 |
+| `@dicebear/toon-head` | 9.4.2 |
 | `@tauri-apps/api` | 2.12.1 |
 | `@tauri-apps/plugin-dialog` | 2.8.2 |
 | `@tauri-apps/plugin-notification` | 2.6.0 |
+| `@types/json-schema` | 7.0.15 |
 | `class-variance-authority` | 0.7.1 |
 | `clsx` | 2.1.1 |
 | `html-parse-stringify` | 4.0.1 |

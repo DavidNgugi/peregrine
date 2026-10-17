@@ -624,6 +624,33 @@ CREATE TABLE release_decision (
 CREATE INDEX release_decision_title_idx ON release_decision (title_id, created_at DESC);
 ```
 
+### 2.7.1 Download schedules
+
+```sql
+CREATE TABLE download_schedule (
+  id          INTEGER PRIMARY KEY,
+  account_id  INTEGER NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+  title_id    INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
+  episode_id  INTEGER REFERENCES episode(id) ON DELETE CASCADE,
+  entity_key  TEXT GENERATED ALWAYS AS (
+                CASE WHEN episode_id IS NULL THEN 't' || title_id ELSE 'e' || episode_id END
+              ) STORED,
+  release_on  TEXT NOT NULL,       -- YYYY-MM-DD, the first date it may be fetched
+  state       TEXT NOT NULL DEFAULT 'scheduled'
+              CHECK (state IN ('scheduled','started','failed')),
+  error       TEXT,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  UNIQUE (account_id, entity_key)
+);
+
+CREATE INDEX download_schedule_due_idx
+  ON download_schedule (account_id, release_on)
+  WHERE state = 'scheduled';
+```
+
+A schedule is a request without an attempt. `entity_key` collapses the two shapes into one spelling because SQLite treats NULLs in a `UNIQUE` constraint as distinct, which would otherwise allow two whole-title schedules. The ticker reads only the partial index, claims a due row by moving it to `started`, and records an acquisition failure on the row instead of losing it. Cancelling deletes the row; a job already started is the queue's to cancel.
+
 ### 2.8 Caches, jobs, operations
 
 ```sql

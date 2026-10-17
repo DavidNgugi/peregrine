@@ -113,6 +113,7 @@ from `pnpm-lock.yaml` instead of being copied from here, and it is in
 | `@tauri-apps/plugin-dialog` | 2.8.2 | Apache-2.0 OR MIT | The native file and folder picker, wrapped by `apps/desktop/src/lib/picker.ts` so no feature names it directly. The Rust half is `tauri-plugin-dialog`, registered and granted exactly `dialog:allow-open` (PG-E1-12) |
 | `@tauri-apps/plugin-updater`, `@tauri-apps/plugin-store` | 2.13.2, 2.5.0 | MIT OR Apache-2.0 | Update prompt and small client-side persistence |
 | `vite-plugin-svgr` | 5.2.0 | MIT | SVG-as-component for icons |
+| `@dicebear/core`, `@dicebear/collection` | 9.4.2 | MIT (core); per-style CC0-1.0 or CC BY 4.0 | Profile avatars. Pinned together: collection 9 depends on core 9, and core 10 no longer exports the `createAvatar` the collection's styles expect. The editor footer carries the attribution the CC BY styles require ([adr/0027](./adr/0027-local-profiles.md)), and `THIRD_PARTY.md` lists every style package the collection pulls in |
 
 Dropped: `framer-motion` (alias of `motion`), `suspend-react` (abandoned 2023), `sortablejs` (superseded by `@dnd-kit/core`).
 

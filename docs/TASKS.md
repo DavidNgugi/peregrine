@@ -28,13 +28,13 @@ Every task implicitly includes its tests, error handling, structured logging, an
 
 **This file is the plan, not the status.** A checkbox means the task has met the Definition of Done in [PLAN.md](./PLAN.md) §8, which includes tests, the gates, and platform verification; a task can have working code and still be open. What the application can do today is stated in the [README](../README.md).
 
-Peregrine is a working prototype, not a release. On macOS the whole path runs end to end: discover a title from TMDB, add an indexer, search releases, rank and pick one, download it, play it, and scan folders you already have. Windows and Linux have not been run, nothing is packaged, and there are no releases.
+Peregrine is a working prototype, not a release. On macOS the whole path runs end to end: discover a title from TMDB, add an indexer, search releases, rank and pick one, download it, play that episode, and scan folders you already have. The release workflow produces macOS, Windows, and Linux bundles, but they are unsigned, unnotarised, and unpublished, and Windows and Linux have not been run.
 
-**Working now.** Discovery: TMDB rails, search, browse, and title pages with seasons and episodes, cached in SQLite. Acquisition: a managed or an existing Prowlarr, indexer search, quality ranking, and magnet download. The queue: progress, pause, resume, remove, and deletion that plans before it acts. Playback: streaming from the torrent engine while a download runs, mpv for containers the webview cannot demux, resume, and continue watching. Library: scanning folders you already have, parsing filenames, manual matching for the rest. Safety: torrent inspection before a byte is written, path guarding, keyring secrets, redacted logs. Plus an in-app notification centre.
+**Working now.** Discovery: TMDB rails, search, browse, and title pages with seasons and episodes, cached in SQLite. Acquisition: a managed or an existing Prowlarr, indexer search, quality ranking, and magnet download. The queue: progress, pause, resume, remove, and deletion that plans before it acts. Playback: streaming from the torrent engine while a download runs, episode-level play with the season/episode pair in the player route, mpv for containers the webview cannot demux, resume, and continue watching that reopens the exact episode. Watch state: per-episode bars, a Next up marker, and a viewing history in Settings. Scheduling: an unreleased episode or title stores a request and the app's ticker starts it on its release date, with a Scheduled list that cancels it. Library: scanning folders you already have, parsing filenames, manual matching for the rest. Safety: torrent inspection before a byte is written, path guarding, keyring secrets, redacted logs. Plus an in-app notification centre and a device-local profile selector.
 
-**Still missing.** Subtitles beyond the domain parser, with no search, download, or sync. Casting. Watchlists and air-date monitoring. MCP. Local accounts and parental gating. The Jellyfin-compatible server and its LAN listener. Windows and Linux verification. Packaging and signing. Performance budgets, end-to-end tests, and fuzz targets.
+**Still missing.** Subtitles beyond the domain parser, with no search, download, or sync. Casting. Watchlists and air-date monitoring. MCP. Local accounts and parental gating. The Jellyfin-compatible server and its LAN listener. Windows and Linux verification. Signing, notarisation, and publishing the bundles. Performance budgets, end-to-end tests, and fuzz targets.
 
-The tree was built in eight days on top of these documents: 308 commits and roughly 151,000 lines of Rust and TypeScript, against the acceptance criteria this backlog states. [AGENTS.md](../AGENTS.md) §3 is the contract for what a change owes, and the README is the user-facing status.
+The tree was built in eight days on top of these documents: over 360 commits and roughly 151,000 lines of Rust and TypeScript, against the acceptance criteria this backlog states. [AGENTS.md](../AGENTS.md) §3 is the contract for what a change owes, and the README is the user-facing status.
 
 **On verification.** An earlier version of this section quoted a full gate run at one commit. That run predates the current tree, and no later full run is recorded here, so this file makes no claim about a green suite. Run the commands in AGENTS §3 before repeating one.
 
@@ -173,6 +173,9 @@ graph LR
   - Acceptance: Screen does not sleep during playback; released on stop
 - [ ] **PG-E1-18** *(review)* `M` · deps PG-E1-01 · High-DPI, multi-monitor, and fractional-scaling correctness pass **Remaining:** Landed: every chrome metric is a logical pixel taken from the platform's own logical metric (52 px macOS, 40 px Windows, 47 px GNOME) and applied as a minimum height, so rounding at a fractional scale or 1.4× text expansion grows the bar instead of clipping it; the document no longer sizes itself with `100vh`, which a fractional device-pixel ratio rounds against the window box and turns into a scrollbar; `trafficLightPosition` is asserted to be a logical position. Observed on macOS arm64: the built stylesheet carries the geometry as `min-height: 52px/40px/47px` and `padding-left: 78px`, the window opened at the config's logical 1280×800 (persisted as 2560×1602 physical at 2×), and the two-display machine has one 2× and one 1× screen, which is where the scale-factor defect PG-E1-02 measured lives — in the persisted window rectangle, not in the CSS. Unobserved: 125% and 150% are Windows and GNOME factors that no macOS display produces, and no screen was inspected visually for blur or clipping at a fractional scale.
   - Acceptance: No blurry text or clipped chrome at 125%, 150%, 200%
+
+- [x] **PG-E1-22** `M` · deps PG-E1-01 · Profile selector: a device-local book of names and avatars, opened from the sidebar and the Discover toolbar, with add, rename, DiceBear choices, and an uploaded photo
+  - Acceptance: Selecting a profile enters it and closes the selector; add and rename persist across launches; an uploaded image is cropped and stored locally. **Provisional:** the book is `localStorage`, not accounts — it scopes nothing, as [adr/0027](./adr/0027-local-profiles.md) records.
 
 ## E2 · IPC layer
 
@@ -695,6 +698,9 @@ graph LR
 - [ ] **PG-E13-16** `S` · deps PG-E13-03, PG-E7-04 · Download state on the surfaces that show a title, and a queue row that opens it
   - Acceptance: A film or series with a job wears one top-edge mark on its card — `--accent` while a transfer is in flight, `--state-ok` when it is done, `--state-danger` when it failed — and the word is in the tile's accessible name, so colour is never the only signal; Browse brings the titles whose transfer is active to the front of the order it was given, and the completed ones immediately after them; a queue row's title opens that title's own route. The state-to-tone projection is `apps/desktop/src/lib/download-status.ts`, the border is `TitleCard`'s, and the route kind a queue row needs travels on `DownloadJobDto.titleKind`.
 
+- [ ] **PG-E13-17** *(doing)* `S` · deps PG-E13-03, PG-E10-01 · Scheduled downloads: an unreleased title or episode stores a request with its release date, and the runtime ticker starts it when the date arrives
+  - Acceptance: A scheduled row starts the same acquisition the Download button starts once its date is due, a failed acquire is recorded on the row rather than lost, cancelling a waiting row deletes it, and a job the scheduler already started is cancelled from the queue rather than by deleting history. **Owed:** a test of the tick loop itself — the five-minute cadence and the due-row claim are currently exercised only by compilation and a manual run.
+
 ## E14 · Library scan and match
 
 - [x] **PG-E14-01** `S` · deps PG-E3-06 · Root management: add, remove, classify, rescan policy **Landed at the storage and service layers; the IPC and UI face is the remainder.** `peregrine-app::LibraryService` adds a root (`PathGuard` first, because that is what `LibraryRoot`'s own doc requires — absolute, no `.` or `..`, components checked for reserved and empty names), removes one, changes one's scan mode, and lists them; `peregrine-storage` gained `remove_library_root`, `set_root_scan_mode`, and `library_root_by_path`. **The acceptance is proven twice, at the two layers that could break it:** at storage, a real file on a real disk plus a `media_file` row and a `watch_progress` row all survive a root removal, and the only statement it runs is `DELETE FROM library_root WHERE id = ?`; at the service, the file the user cared about is still on disk afterwards. **Three decisions taken deliberately rather than by default:** a folder that does not exist can still be added, because a library on an unmounted drive is a state this build models (PG-E14-16) and refusing would make a removable library impossible to configure before plugging it in; two roots over one directory are both allowed, because PG-E14-12 reports duplicates rather than the schema refusing them and a user may keep `/media` and `/media/Movies` for reasons of their own; and the `kind` is the user's rather than a guess, because guessing it means walking the directory, which is the scanner's job (PG-E14-02) and would make adding a root as slow as scanning one. The duplicate check is a *lookup* for the error message — the schema's `UNIQUE (path)` is what actually stops a duplicate, so a lost race arrives as a storage error rather than as a silent second root. **Ticked, and the IPC and UI face is what finished it.** `library::list_roots`, `library::add_root` and `library::remove_root` are registered commands with contract cases declaring the failure each must report (PG-E2-10), and the bindings are regenerated (`cargo xtask gen-ipc --check` compares bytes, not a hand-written list). Two things about that surface are decisions rather than plumbing: a row id travels in a **DTO** (`RootRef`) because specta refuses to export a large integer as a command argument, which is the same reason `jobs::list` shows one page and takes a limit; and `RuntimeError::Library` maps to `Conflict` for a folder that is already a library, `InvalidInput` for a path `PathGuard` refuses, and through to the storage codes otherwise — the service's own message names the absolute path the user picked, so the payload carries a sentence and the path stays in the log (ARCHITECTURE §7 rule 3). **Settings now has a Media folders section**: every root by path, what it is expected to hold, whether it has ever been scanned, a Remove per row, and Add folder through the shell's own picker (PG-E1-12), which returns an `UntrustedPath` the core re-validates. The section keeps three states apart rather than collapsing them — reading, failed, and genuinely empty — because a list reading "you have no libraries" when the core did not answer is telling the user something the app does not know. Reviewed by rendering it in both themes against a stub core at 1100×900. **Owed, and smaller than what landed:** choosing the *kind* and the *scan mode* from this screen, which the settings registry owns (PG-E20-01) — a folder added here is filed as `mixed`, the honest answer for a folder nobody has classified — and rendering *when* a root was last scanned, which needs the locale-aware date formatting the i18n work owns (nothing in this build formats a date yet, and a hand-rolled one would be the first of several); the row says whether it has been scanned instead. `last_scan_at` is already writable (`record_root_scan`) and the scanner that writes it is PG-E14-02's; the scheduled-scan *interval* is PG-E20's setting, which is why `scan_mode` is recorded as policy data with no period invented beside it.
@@ -828,6 +834,9 @@ graph LR
 - [ ] **PG-E16-24** `M` · deps PG-E16-15, PG-E27-08 · Playback perf bench: startup, seek latency, memory during 2 h playback
   - Acceptance: Stable memory, seek under the defined budget
 
+- [x] **PG-E16-25** `M` · deps PG-E16-01, PG-E3-08 · Episode-level playback: the player route carries a season/episode pair, and the runtime scopes the playable-file search to that episode's media item
+  - Acceptance: Playing 1×02 opens 1×02's file rather than the title's first file; a season without an episode falls back to the title; a torrent stays title-level and refuses the episode rather than serving the wrong file. Route round-trip is pinned in `routes.test.ts` and the evidence filter in `runtime::playable_file`.
+
 ## E17 · Subtitles and language
 
 - [ ] **PG-E17-01** `M` · deps PG-E4-19 · `SubtitleProvider` trait and conformance suite
@@ -898,6 +907,11 @@ graph LR
 ---
 
 # Phase 4 — Platform, casting, distribution
+
+- [x] **PG-E18-11** `M` · deps PG-E18-02, PG-E16-25 · Episode watch bars and next-up: the season read merges each episode's watched flag and fraction, and the first unfinished episode is marked
+  - Acceptance: A partial transfer fills the bar proportionally, a finished one fills it fully, and the first unfinished episode carries a ring and the words "Next up". The merge is a second read rather than a join on the season query, so a season read without cards does not drag progress with it.
+- [x] **PG-E18-12** `S` · deps PG-E18-02 · Viewing history in Settings, newest first, with title, episode, state, and date
+  - Acceptance: Rows read the same `watch_progress` table the bars do and resolve their episode numbers through the same lookup Continue Watching uses.
 
 ## E19 · Casting
 
@@ -1483,24 +1497,24 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 
 | Phase | Epics | Tasks | Ideal days |
 | --- | --- | --- | --- |
-| 0 Foundations | E0–E4 | 92 | 175 |
+| 0 Foundations | E0–E4 | 93 | 178 |
 | 1 Discovery | E5–E9 | 81 | 200 |
-| 2 Acquisition and library | E10–E15 | 95 | 235 |
-| 3 Playback and subtitles | E16–E18 | 54 | 136 |
+| 2 Acquisition and library | E10–E15 | 96 | 236 |
+| 3 Playback and subtitles | E16–E18 | 57 | 142 |
 | 4 Platform and distribution | E19–E27 | 133 | 327 |
 | 5 1.0 hardening and community | E28–E29 | 24 | 58 |
 | 6 Roadmap: monitoring and agent access | E30–E31 | 22 | 66 |
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
 | 9 Roadmap: homelab deployment | E36 written; E37 pending | 17 written | 56 |
-| **Full backlog (phases 0–5)** | | **479** | **1 130** |
+| **Full backlog (phases 0–5)** | | **484** | **1 139** |
 
 Two numbers matter, and they are different by design.
 
 | Scope | Content | Tasks | Ideal days | Why |
 | --- | --- | --- | --- | --- |
 | **Core 1.0** | Working discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, plus signed installers and updates | 225 | 577 (+30% contingency ≈ **750**) | This is a genuinely usable, shippable app |
-| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 479 | **1 130** | This is what "no known defects, every platform, every edge case" costs |
+| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 484 | **1 139** | This is what "no known defects, every platform, every edge case" costs |
 
 Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
 
@@ -1512,6 +1526,6 @@ Reference points for calibration, since bottom-up estimates on novel work are al
 
 - Comparable open-source media clients are 80 000–150 000 lines of production code across client and server. This backlog lands in that range.
 - The estimates assume an experienced Rust **and** React developer, and they include tests, error handling, and logging per the Definition of Done in PLAN §8.
-- Re-baseline after Phase 0 using measured velocity. If Phase 0's 92 tasks take materially longer than 175 ideal days, scale every later phase by the observed factor rather than trimming the quality bar silently.
+- Re-baseline after Phase 0 using measured velocity. If Phase 0's 93 tasks take materially longer than 178 ideal days, scale every later phase by the observed factor rather than trimming the quality bar silently.
 
 Tasks marked `L` or `XL` are not estimable to better than ±50% until they are picked up; break each into sub-tasks smaller than five ideal days at that point.

@@ -304,6 +304,46 @@ Tests: hostile fixtures (traversal path, absolute path, `..%2f` encoded, symlink
 
 ---
 
+## F6.1 — Scheduled acquisition
+
+An episode or title whose date has not arrived offers **Schedule** instead of Download. The request
+is stored in `download_schedule` with the first date it may be fetched; a ticker on the app's own
+thread runs once at startup and every five minutes.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI
+    participant DB as storage
+    participant Tick as schedule ticker
+    participant Acq as AcquisitionService
+
+    UI->>DB: upsert download_schedule(title, episode?, release_on)
+    DB-->>UI: state = scheduled
+
+    loop every five minutes, and once at startup
+        Tick->>DB: due_schedules(today)
+        DB-->>Tick: rows with release_on <= today and state = scheduled
+        Tick->>DB: set state = started
+        Tick->>Acq: start_acquire(title, episode?)
+        alt acquire accepted
+            Acq-->>Tick: job queued
+        else acquire refused
+            Tick->>DB: set state = failed, error = reason
+        end
+    end
+
+    opt Cancel while still scheduled
+        UI->>DB: delete download_schedule
+    end
+```
+
+Three properties are deliberate. A due row is claimed **before** the acquire runs, so a tick that
+overlaps another cannot start the same download twice. A failure is written on the row rather than
+dropped, so the Scheduled list can say why nothing arrived. And a row already `started` is history,
+not a retry: cancelling its job is the Transfer queue's Cancel, which is a different act from
+deleting the request.
+
 ## F7 — Streaming playback
 
 ```mermaid
@@ -526,6 +566,8 @@ sequenceDiagram
 ```
 
 The watched policy is a pure function with the boundary cases pinned by tests: exactly at the threshold, a video shorter than the skip window, a manual "mark unwatched" that must survive the next finalize, and a re-watch that increments `play_count` without clearing `watched_at`.
+
+**What the current build does.** A player session carries the episode id it opened, so `recordProgress` writes a row keyed to that episode and not to the title. The season read merges each episode's `watched` flag and fraction, which draws the bar under the still, marks the first unfinished episode **Next up**, and re-reads when the reader returns from the player. Settings carries the full history from the same rows. The autoplay-next countdown and the Trakt scrobbler in the diagram are still owed.
 
 **The threshold above is the policy; the storage floor is lower, and they are not the same number.** The policy marks a title watched at ≥ 0.95, or when the credits are reached. The stored invariant, [DATA_MODEL](./DATA_MODEL.md) I6, is weaker on purpose: a row with `watched = 1` must carry `percent ≥ 0.92`, so that a manual mark and an imported mark — a Trakt row, or a user pressing "mark watched" at 93% — is representable without the database rejecting it. `0.95` is therefore what normal playback writes; `0.92` is the weakest row the database accepts. Neither number decides the other, and both boundaries are tested (`PG-E4-09` owns the policy's, `PG-E4-01` owns the invariant's). The continue-watching index band ends at 0.95 because a `watched = 0` row above it should not exist; the band is a query optimisation, not a rule.
 

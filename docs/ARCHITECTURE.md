@@ -317,10 +317,12 @@ Rules that keep it fast:
 | `/title/:kind/:id` | Detail | Movie or show; seasons, episodes, cast, availability, actions. |
 | `/library` | Library | All local media, unmatched files, storage usage, re-scan. |
 | `/downloads` | Queue | Active, queued, seeding, completed, failed; global limits. |
-| `/player/:id` | Player | Own window/fullscreen; mpv child surface + HTML overlay. **The parameter names the *title* in the 1.0 slice**, because a session is opened for one title and the runtime holds one at a time; `PG-E16-02`'s session registry is what makes a session addressable in its own right (ADR [0023](./adr/0023-in-app-video-surface.md)) |
+| `/player/:id?season=&episode=` | Player | Own window/fullscreen; mpv child surface + HTML overlay. The id names the *title*; an optional season/episode pair names the episode to open, and both travel together or not at all. `PG-E16-02`'s session registry is what makes a session addressable in its own right (ADR [0023](./adr/0023-in-app-video-surface.md)) |
 | `/cast` | Cast | Devices, session control, capability report. |
 | `/settings/:section?` | Settings | `Cmd/Ctrl+,`; sections mirror the settings registry. |
 | `/diagnostics` | Diagnostics | Provider health, disk budget, log tail, endpoint list. |
+
+The profile selector is a full-window modal rather than a route: it is reachable from every screen, and choosing a profile returns to the screen underneath. It holds device-local names and avatars until the local-account work lands.
 
 ### Feature folder convention
 
@@ -404,6 +406,8 @@ erDiagram
     EPISODE ||--o{ WATCH_PROGRESS : tracked
     TITLE ||--o{ WATCHLIST_ENTRY : saved
     TITLE ||--o{ DOWNLOAD_JOB : requested
+    TITLE ||--o{ DOWNLOAD_SCHEDULE : scheduled
+    EPISODE ||--o{ DOWNLOAD_SCHEDULE : scheduled
     DOWNLOAD_JOB ||--o{ DOWNLOAD_FILE : selects
     MEDIA_ITEM ||--o{ DOWNLOAD_JOB : sourced
     TITLE ||--o{ SMART_COLLECTION_MEMBER : grouped
@@ -415,7 +419,8 @@ Key modelling decisions:
 - **`external_id` is a separate table** keyed by `(provider, value)` so a title can carry TMDB, IMDb, TVDB, and AniDB IDs simultaneously and resolution is a join, not a column guess.
 - **`media_item` is the library's notion of "we have this"**, distinct from the metadata title. One episode can have several `media_file` rows (a 1080p and a 4K copy); the player picks by preference and the library counts it once.
 - **Everything cached from a provider is `provider_cache` or `image_ref`.** JSON resources carry TTL plus `ETag`/`Last-Modified` for revalidation; artwork carries an immutable path and is evicted by LRU size alone. Either way the cache is droppable at any time without data loss.
-- **Watch progress is per `(account, title|episode)`**, so multi-account support (phase 2) is a schema-compatible addition rather than a migration of user data.
+- **Watch progress is per `(account, title|episode)`**, so multi-account support (phase 2) is a schema-compatible addition rather than a migration of user data. A player session carries the episode id it opened, which is what lets the progress row and the episode bar agree.
+- **`download_schedule` is a request, not an attempt.** It stores the title or episode and the first date it may be fetched; the runtime's ticker converts a due row into the same acquisition the Download button starts. Cancelling deletes the request; a job it already started is cancelled from the queue.
 - **`job` is a durable journal**, so the queue screen can show history and a crash mid-download leaves a record rather than nothing. **No job outlives the process that was running it**, and the journal cannot tell the rows of a process that died from the rows of one still working — so every non-terminal row is closed as `INTERRUPTED` when the database is opened (`peregrine_storage::jobs::fail_unfinished`). That is not bookkeeping: `job_dedupe_uq` covers the non-terminal rows only, so a row left `queued` holds its dedupe key against every later submission, and a caller that joins a live row — as the Discover fetch does — would join a job that can never run.
 
 ---
@@ -636,6 +641,8 @@ Known gaps, stated honestly:
 
 ## 18. Packaging, distribution, updates
 
+**What exists today.** The matrix builds four artefacts — DMG for both macOS architectures, NSIS, and a deb plus an AppImage — and the macOS and Windows bundles carry mpv and ffprobe as resources. Signing, notarisation, the signed manifest, the updater, rpm/Flatpak, and publishing a GitHub release are still owed; the workflow fails at the manifest stage until the minisign key is configured.
+
 ```mermaid
 graph LR
     Tag["git tag vX.Y.Z"] --> CI["GitHub Actions matrix<br/>macOS arm64+x86_64, Windows x64, Linux x86_64"]
@@ -649,7 +656,7 @@ graph LR
 | Concern | Decision |
 | --- | --- |
 | Update mechanism | `tauri-plugin-updater`, signed manifests, in-app "restart to update" prompt, never a forced restart during playback or an active download. |
-| Sidecars | **Base install carries mpv and a minimal ffprobe** — enough to play anything and to probe codecs, HDR, and tracks. **Full ffmpeg is an on-demand component pack**, because a complete build is 40–60 MB per platform and transcoding only matters when casting. Both base sidecars are signed and versioned with their own licence files and a source offer. The optional pack is fetched with an explicit user action, verified against a pinned checksum and signature, and never executed with elevated privileges. |
+| Sidecars | **Base install carries mpv and a minimal ffprobe** — enough to play anything and to probe codecs, HDR, and tracks. **Full ffmpeg is an on-demand component pack**, because a complete build is 60–170 MB per platform and transcoding only matters when casting. Both base sidecars are signed and versioned with their own licence files and a source offer. The optional pack is fetched with an explicit user action, verified against a pinned checksum and signature, and never executed with elevated privileges. |
 | Reproducibility | Locked `Cargo.lock` and `pnpm-lock.yaml`; `cargo-vet`-style audit trail via `cargo-deny` + SBOM; release builds use `--locked` and `--offline` where possible. |
 | Linux packages | AppImage (default), `.deb`, `.rpm`, Flatpak manifest in-repo with portal-based file access. |
 | Channels | `stable` and `beta`, selected in Settings → Advanced; the beta channel is opt-in and clearly labelled. |

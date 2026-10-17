@@ -6,7 +6,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 
 ![The Discover screen, showing a featured title, its details, and a trending rail](assets/screenshots/discover.webp)
 
-> **Status: early.** Discovery, acquisition, library scanning, and playback work end to end on macOS. Windows and Linux are untested, nothing is packaged, and subtitles, casting, and accounts do not exist yet. Treat this as a working prototype.
+> **Status: early beta.** Discovery, acquisition, library scanning, episode-level playback, watch state, and scheduled downloads work end to end on macOS. The release workflow builds macOS, Windows, and Linux bundles, but they are unsigned, unnotarised, and unpublished; Windows and Linux have not been run. Subtitles, casting, and accounts still do not exist. Treat this as a working prototype.
 
 ## What works today
 
@@ -15,7 +15,10 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 - **Download queue** — live progress with pause, resume, and removal, and deletion that plans before it acts.
 - **Play while it downloads** — a download is playable once its file list is known, served from the torrent engine through a loopback HTTP server.
 - **Your library** — point it at folders you already have. Filenames are parsed and matched to titles, with manual matching for the ones it cannot place. Nothing is moved or renamed without asking.
-- **Playback** — mpv with resume, continue watching, and an external-player route for containers the webview cannot demux.
+- **Playback** — pick an episode and play that episode, not the title's first file. mpv for containers the webview cannot demux, resume, and continue watching that reopens the exact episode.
+- **Watch state** — a bar along each episode's still fills as you watch and completes when you finish; the first unfinished episode is marked **Next up**, and Settings carries the full viewing history.
+- **Scheduled downloads** — an unreleased episode or title offers Schedule instead of Download; the app fetches it on its release date and the Scheduled list in Downloads cancels it.
+- **Profiles** — a local selector with DiceBear avatars or an uploaded photo. It is device-local scaffolding for the local accounts and parental gating in the roadmap, not a security boundary.
 - **Safety gate** — every torrent is inspected before a byte is written: path traversal, executables, symlinks, unicode spoofing, and size and file-count caps. Downloaded media is never opened with the OS handler.
 - **Notifications** — an in-app centre, because OS delivery can fail silently.
 
@@ -44,15 +47,15 @@ Self-hosted media is usually five services: an indexer manager, a film manager, 
 
 The wins worth stating: a native app rather than a web console; one configuration surface rather than five; an engine and a player that can coordinate, which is what makes play-while-downloading possible; and an inspection before any byte is written.
 
-The honest limits: Peregrine is early, macOS-only, and has no installer yet, while the stacks above have years of maturity. The first-run setup that would make the one-configuration-surface claim true is not built, and today the app still wants a provider key and `mpv` on the path.
+The honest limits: Peregrine is early, verified only on macOS, and its bundles are neither signed nor notarised, while the stacks above have years of maturity. The first-run setup wizard exists, but there are no real accounts yet: profiles are local names and pictures, not scoped libraries. The bundled mpv and ffprobe remove the separate install on macOS and Windows; the Linux bundle still has no player.
 
 ## Build from source
 
-Prerequisites: Rust 1.95 or newer, Node 22 or newer, pnpm, and `mpv` on your `PATH` (`brew install mpv` on macOS). `ffprobe` is used for probing when present.
+Prerequisites: Rust 1.95 or newer, Node 22 or newer, and pnpm. The build fetches the pinned mpv and ffprobe sidecars itself (`pnpm sidecars:fetch`), so no separate mpv install is needed; a development build falls back to `PATH` when a sidecar has not been staged.
 
 Release builds are compiled with a shared TMDB token supplied as `PEREGRINE_TMDB_TOKEN` at build time, so a fresh install can search without a key. The token is never in the repository. A key saved in Settings takes precedence, and a local build without the variable simply asks for one.
 
-Nothing is packaged yet, so there is nothing to download and install.
+The release workflow produces a DMG, a deb, an AppImage, and an NSIS installer, but no GitHub release is published until the signing key is configured, so there is still nothing to download.
 
 ```bash
 pnpm install
