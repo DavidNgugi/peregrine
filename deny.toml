@@ -40,6 +40,13 @@ ignore = [
   # element's `Drop` panics, and `u8` has no `Drop`. No release of
   # `librqbit-utp` accepts `ringbuf` 0.5, so the fixed version cannot be chosen.
   { id = "RUSTSEC-2026-0293", reason = "unreachable: librqbit-utp buffers u8, whose Drop cannot panic, and no librqbit-utp release allows ringbuf 0.5" },
+  # The zbus family is unmaintained, not vulnerable, and arrives only through keyring's Linux
+  # secret-service backend. There is no safe upgrade and no alternative persistent keyring backend:
+  # the kernel keyutils option does not survive a logout, so it cannot hold a provider key. The
+  # adapter is Linux-only and never compiled on macOS or Windows.
+  { id = "RUSTSEC-2026-0370", reason = "unmaintained zbus_names via keyring on Linux; no safe upgrade, and keyutils cannot persist a key" },
+  { id = "RUSTSEC-2026-0371", reason = "unmaintained zvariant via keyring on Linux; no safe upgrade (same backend)" },
+  { id = "RUSTSEC-2026-0372", reason = "unmaintained zvariant_derive via keyring on Linux; no safe upgrade (same backend)" },
 ]
 
 [licenses]

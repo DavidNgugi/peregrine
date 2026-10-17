@@ -1,7 +1,5 @@
 {
   "bundle": {
-    "resources": [
-      "sidecars"
-    ]
+    "resources": ["sidecars"]
   }
 }

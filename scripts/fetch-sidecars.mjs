@@ -11,6 +11,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -82,7 +83,12 @@ function hoist(directory) {
       const nested = join(directory, entries[0]);
       const kind = entries[0].endsWith(".zip") ? "zip" : "tar.xz";
       if (kind === "tar.xz" || entries[0].endsWith(".tar.gz")) {
-        execFileSync("tar", [entries[0].endsWith(".tar.gz") ? "-xzf" : "-xJf", nested, "-C", directory]);
+        execFileSync("tar", [
+          entries[0].endsWith(".tar.gz") ? "-xzf" : "-xJf",
+          nested,
+          "-C",
+          directory,
+        ]);
       } else {
         extract(nested, directory, "zip");
       }
@@ -98,6 +104,22 @@ function ensureDirectory(path) {
   mkdirSync(path, { recursive: true });
 }
 
+// Adds owner-write to every entry under `path`.
+//
+// **Not cosmetic: it is what makes a second build possible.** Tauri copies `bundle.resources` into
+// `target/` with `fs::copy`, and that copies the source's permission bits onto the destination. The
+// upstream mpv bundle ships `Contents/Frameworks/libMoltenVK.dylib` as 0444, so the first build
+// leaves a read-only file in `target/` and the second one dies opening it for writing with
+// "Permission denied (os error 13)" — for ever, until the stale tree is deleted by hand.
+function makeWritable(path) {
+  const stats = lstatSync(path);
+  if (stats.isSymbolicLink()) return;
+  chmodSync(path, stats.mode | 0o200);
+  if (stats.isDirectory()) {
+    for (const entry of readdirSync(path)) makeWritable(join(path, entry));
+  }
+}
+
 for (const component of components) {
   const key = targetKey();
   const entry = lock[component]?.[key];
@@ -110,7 +132,9 @@ for (const component of components) {
   const stage = join(root, "apps/desktop/src-tauri/sidecars");
   const isMacMpv = component === "mpv" && key.startsWith("macos");
   const destination = isMacMpv ? join(stage, "mpv.app") : join(stage, component);
-  const binary = isMacMpv ? join(destination, "Contents/MacOS/mpv") : join(destination, entry.binary);
+  const binary = isMacMpv
+    ? join(destination, "Contents/MacOS/mpv")
+    : join(destination, entry.binary);
   if (existsSync(binary) && !force) {
     console.log(`${component}: present at ${destination}`);
     continue;
@@ -125,19 +149,28 @@ for (const component of components) {
   const digest = sha256(cache);
   if (digest !== entry.sha256) {
     rmSync(cache);
-    throw new Error(`${component}: digest mismatch\n expected ${entry.sha256}\n actual   ${digest}`);
+    throw new Error(
+      `${component}: digest mismatch\n expected ${entry.sha256}\n actual   ${digest}`,
+    );
   }
 
   const staging = mkdtempSync(join(tmpdir(), "peregrine-sidecar-"));
   try {
     extract(cache, staging, archiveKind(entry.url));
-    const content = hoist(staging);
-    let source = content;
-    if (component !== "mpv") {
+    // The macOS archive's top level *is* the app bundle, so the bundle is what gets copied; every
+    // other component wraps its payload in one directory this descends into. Copying the staging
+    // directory instead put the bundle one level too deep (`mpv.app/mpv.app/Contents`), which is a
+    // path `existsSync` then reported as a missing binary.
+    let source;
+    if (component === "mpv") {
+      source = join(hoist(staging), "mpv.app");
+    } else {
+      const content = hoist(staging);
       const entries = readdirSync(content);
-      if (entries.length === 1 && statSync(join(content, entries[0])).isDirectory()) {
-        source = join(content, entries[0]);
-      }
+      source =
+        entries.length === 1 && statSync(join(content, entries[0])).isDirectory()
+          ? join(content, entries[0])
+          : content;
     }
     rmSync(destination, { recursive: true, force: true });
     ensureDirectory(destination);
@@ -145,6 +178,7 @@ for (const component of components) {
     if (!existsSync(binary)) {
       throw new Error(`${component}: ${entry.binary} is missing after extraction`);
     }
+    makeWritable(destination);
     chmodSync(binary, 0o755);
     console.log(`${component}: ${key} ready at ${destination}`);
   } finally {
