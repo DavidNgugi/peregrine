@@ -100,6 +100,9 @@ jobs:
       - name: Clippy (pedantic, warnings are errors)
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Tests
+        # A hung test held this job for over an hour with no output. The cap turns that into a
+        # failure somebody can act on rather than a run somebody has to cancel by hand.
+        timeout-minutes: 45
         run: cargo test --workspace --locked
 
   msrv:
