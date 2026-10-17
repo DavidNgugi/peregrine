@@ -1,5 +1,5 @@
 import { createI18n } from "@peregrine/i18n";
-import type { PlaybackSessionDto } from "@peregrine/ipc-client";
+import type { IpcError, PlaybackSessionDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
@@ -30,10 +30,11 @@ function session(overrides: Partial<PlaybackSessionDto> = {}): PlaybackSessionDt
 }
 
 /** The screen as markup, from the state the hook would have answered with. */
-function markup(state: Partial<Playback> = {}): string {
+function markup(state: Partial<Playback> = {}, externalFailure?: IpcError | null): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <PlayerView
+        externalFailure={externalFailure}
         onClose={() => undefined}
         playback={{
           session: null,
@@ -54,7 +55,9 @@ describe("PlayerView", () => {
     // builds one — which is what keeps the token in exactly one place (AGENTS R11).
     const html = markup({ session: session() });
 
-    expect(html).toContain(`src="http://127.0.0.1:51234/media/abc123abc123abc123abc123abc123abc123"`);
+    expect(html).toContain(
+      `src="http://127.0.0.1:51234/media/abc123abc123abc123abc123abc123abc123"`,
+    );
     expect(html).toContain("controls");
     expect(html).toContain("autoPlay");
     expect(html).toContain('data-player-surface=""');
@@ -70,6 +73,27 @@ describe("PlayerView", () => {
     expect(markup({ session: session({ support: "externalPlayer" }) })).toContain(
       "Playing with an external player.",
     );
+  });
+
+  it("draws no video surface for a session the external player owns", () => {
+    // The webview cannot demux this container, so the picture is mpv's. A video element here would
+    // be the black rectangle that made a working film look broken.
+    const html = markup({ session: session({ support: "externalPlayer" }) });
+
+    expect(html).not.toContain("<video");
+    expect(html).toContain('data-player-external=""');
+    expect(html).toContain("The film is open in mpv.");
+  });
+
+  it("says why the external player could not be started", () => {
+    // mpv missing is a launch failure, not a media failure; the core's sentence is the one shown.
+    const html = markup(
+      { session: session({ support: "externalPlayer" }) },
+      { code: "INTERNAL", message: "mpv is not installed", retryable: false },
+    );
+
+    expect(html).toContain("mpv is not installed");
+    expect(html).toContain("could not be played");
   });
 
   it("draws a reason rather than a blank page when the core refused", () => {

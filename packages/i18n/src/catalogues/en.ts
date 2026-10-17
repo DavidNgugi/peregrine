@@ -352,6 +352,8 @@ export const en = {
         externalPlayer: "Playing with an external player.",
         unknown: "Peregrine does not recognise this file's format. Playing it may not work.",
       },
+      // What the external branch says when mpv is the reader: no picture in the page, and the reason.
+      external: "The film is open in mpv. Watch progress is saved as you go.",
     },
     title: {
       section: "In your library",

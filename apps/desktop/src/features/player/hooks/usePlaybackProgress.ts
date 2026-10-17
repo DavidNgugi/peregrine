@@ -31,15 +31,23 @@ export function usePlaybackProgress(
   const seeked = useRef(false);
   // The media position the last report was taken at.
   const reportedAt = useRef(0);
+  // Whether the element ever reached its metadata. **A session that opened and closed without
+  // decoding anything must not report a position of zero**: that is not "the viewer is at the
+  // start", it is "there was no picture", and writing it would wipe the resume point the rail is
+  // built on.
+  const loaded = useRef(false);
 
   useEffect(() => {
     seeked.current = false;
     reportedAt.current = 0;
+    loaded.current = false;
   }, [session?.url]);
 
   useEffect(() => {
     const element = surface.current;
-    if (element === null || session === null) {
+    // An external session's progress belongs to the core's mpv reader, not to this element — which
+    // is not even drawn. Reporting from a video that never receives the file would write zeros.
+    if (element === null || session === null || session.support === "externalPlayer") {
       return;
     }
     const titleId = session.titleId;
@@ -55,6 +63,7 @@ export function usePlaybackProgress(
     };
 
     const onLoadedMetadata = (): void => {
+      loaded.current = true;
       const resume = session.resumePositionMs;
       if (!seeked.current && resume !== null && resume > 0) {
         seeked.current = true;
@@ -62,13 +71,19 @@ export function usePlaybackProgress(
       }
     };
     const onTimeUpdate = (): void => {
-      if (Math.abs(element.currentTime - reportedAt.current) < REPORT_EVERY_SECONDS) {
+      if (
+        !loaded.current ||
+        Math.abs(element.currentTime - reportedAt.current) < REPORT_EVERY_SECONDS
+      ) {
         return;
       }
       reportedAt.current = element.currentTime;
       report(element.currentTime, element.duration);
     };
     const onPause = (): void => {
+      if (!loaded.current) {
+        return;
+      }
       report(element.currentTime, element.duration);
     };
 
@@ -79,7 +94,11 @@ export function usePlaybackProgress(
       element.removeEventListener("loadedmetadata", onLoadedMetadata);
       element.removeEventListener("timeupdate", onTimeUpdate);
       element.removeEventListener("pause", onPause);
-      report(element.currentTime, element.duration);
+      // The final position, but only from a film that actually played. A file the webview could
+      // not decode is not a viewer who went back to the beginning.
+      if (loaded.current && element.currentTime > 0) {
+        report(element.currentTime, element.duration);
+      }
     };
   }, [surface, session]);
 }
