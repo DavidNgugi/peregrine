@@ -25,7 +25,7 @@ Subtitles, casting, watchlists with air dates, local accounts with parental gati
 
 ## Scope
 
-Peregrine hosts and indexes nothing. You bring your own indexers, providers, and files. It is not a streaming site, and it is not a headless server yet.
+Peregrine hosts and distributes nothing. It is not a streaming site, and it is not a headless server yet.
 
 ## Build from source
 
