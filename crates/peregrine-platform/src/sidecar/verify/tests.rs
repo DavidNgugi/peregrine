@@ -5,6 +5,7 @@
 //! is offline and deterministic. The `PATH` proof, which belongs to resolution rather
 //! than to verification, lives in the parent module's tests.
 
+#[cfg(unix)]
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
