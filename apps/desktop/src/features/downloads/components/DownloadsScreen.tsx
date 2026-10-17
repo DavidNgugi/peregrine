@@ -28,6 +28,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { routePath, type Route } from "../../../app/routes.js";
 import { messageOf } from "../../../lib/ipc-message.js";
+import { imageUrl } from "../../../lib/media.js";
 import { useDownloadActions } from "../hooks/useDownloadActions.js";
 import type { Downloads } from "../hooks/useDownloads.js";
 
@@ -150,8 +151,28 @@ export function DownloadsScreen({
       // than a link to a guessed route.
       cell: (row) => {
         const label = row.title ?? row.releaseTitle;
+        const poster = imageUrl(row.poster);
+        // The thumbnail is decorative: the label beside it is the cell's text and the link's name,
+        // so an alt here would make a screen reader say the title twice.
+        const content = (
+          <span className="flex items-center gap-2">
+            <span className="block h-12 w-8 shrink-0 overflow-hidden rounded-sm border border-border-subtle bg-surface-2">
+              {poster === null ? null : (
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className="size-full object-cover"
+                  decoding="async"
+                  loading="lazy"
+                  src={poster}
+                />
+              )}
+            </span>
+            <span className="min-w-0 truncate">{label}</span>
+          </span>
+        );
         if (row.titleKind === null) {
-          return label;
+          return content;
         }
         const route: Route = { id: row.titleId, kind: "title", titleKind: row.titleKind };
         return (
@@ -161,7 +182,7 @@ export function DownloadsScreen({
               onNavigate(route);
             }}
           >
-            {label}
+            {content}
           </Link>
         );
       },
