@@ -58,10 +58,37 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # The macOS ffmpeg build has no redistributable equivalent, so it is built here and handed to the
+  # bundle job as an artefact. Both architectures build on the arm64 runner; the x86_64 configure
+  # disables x86 asm because nasm is not installed there.
+  sidecars:
+    name: sidecars (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-aarch64
+            arch: arm64
+          - label: macos-x86_64
+            arch: x86_64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+      - name: Build LGPL ffmpeg and ffprobe
+        run: ./scripts/build-ffmpeg-macos.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidecars-${{ matrix.label }}
+          path: dist/sidecars/${{ matrix.arch }}/ffprobe
+          if-no-files-found: error
+
   # One native build per platform we ship, because a Tauri bundle is not
   # cross-compilable in practice: the installer formats, the WebView, and the
   # code signing all belong to the host.
   bundle:
+    needs: sidecars
     name: bundle (${{ matrix.label }})
     strategy:
       fail-fast: false
@@ -69,15 +96,19 @@ jobs:
         include:
           - os: macos-14
             label: macos-aarch64
+            sidecar: macos-arm64
             target: aarch64-apple-darwin
           - os: macos-14
             label: macos-x86_64
+            sidecar: macos-x86_64
             target: x86_64-apple-darwin
           - os: windows-2022
             label: windows-x86_64
+            sidecar: windows-x86_64
             target: x86_64-pc-windows-msvc
           - os: ubuntu-24.04
             label: linux-x86_64
+            sidecar: linux-x86_64
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
@@ -89,6 +120,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Stage the macOS ffmpeg build
+        if: startsWith(matrix.label, 'macos')
+        uses: actions/download-artifact@v4
+        with:
+          name: sidecars-${{ matrix.label }}
+          path: apps/desktop/src-tauri/sidecars
       # A bundle pulls in the whole workspace; the frontend is a separate cache
       # because `pnpm install` and `cargo build` age at completely different rates.
       - uses: Swatinem/rust-cache@v2
@@ -131,6 +168,8 @@ jobs:
         env:
           # Compiled in, never committed. When the secret is absent the app asks for a key.
           PEREGRINE_TMDB_TOKEN: ${{ secrets.PEREGRINE_TMDB_TOKEN }}
+          # Which pinned mpv to stage; the runner's own arch is not always the target's.
+          PEREGRINE_TARGET: ${{ matrix.sidecar }}
         run: pnpm tauri build --target ${{ matrix.target }}
       # Runs after the build because this is the only place the assembled bundle
       # — with its sidecar executables and their notices — exists. A missing
