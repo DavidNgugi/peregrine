@@ -501,7 +501,7 @@ mod tests {
             .strip_prefix(&canonical_root)
             .unwrap_or(&canonical_path)
             .to_string_lossy()
-            .into_owned()
+            .replace('\\', "/")
     }
 
     #[test]
