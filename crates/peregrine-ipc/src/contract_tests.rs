@@ -575,6 +575,7 @@ fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
     all.extend(provider_cases());
     all.extend(credential_cases());
+    all.extend(download_cases());
     all
 }
 
@@ -695,6 +696,31 @@ fn provider_cases() -> Vec<ContractCase> {
             drive: recommendations_without_a_runtime,
         },
     ]
+}
+
+/// The `downloads` namespace. Every command needs a runtime, so the dead state is the failure.
+fn download_cases() -> Vec<ContractCase> {
+    vec![ContractCase {
+        command: "acquire",
+        expected: Expected::Fails {
+            code: ErrorCode::Internal,
+            retryable: false,
+        },
+        drive: acquire_without_a_runtime,
+    }]
+}
+
+/// `acquire` starts a job through the runtime, so it fails when there is none.
+fn acquire_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::acquire(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
+        )
+        .await
+        .map(drop)
+    })
 }
 
 fn cases_by_namespace() -> Vec<ContractCase> {

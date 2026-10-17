@@ -842,7 +842,8 @@ pub async fn play_externally(
     title: TitleRef,
 ) -> Result<(), AppError> {
     state.runtime()?.start_external_playback(title.id).await?;
-    Ok(guard_response("library::play_externally", ()))
+    let () = guard_response("library::play_externally", ());
+    Ok(())
 }
 
 /// Opens a session for one title's file so the renderer can capture a poster frame from it.

@@ -144,5 +144,6 @@ pub async fn record_progress(
             report.duration_ms,
         )
         .await?;
-    Ok(guard_response("watch::record_progress", ()))
+    let () = guard_response("watch::record_progress", ());
+    Ok(())
 }

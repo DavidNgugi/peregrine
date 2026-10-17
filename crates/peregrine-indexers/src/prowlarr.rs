@@ -41,7 +41,7 @@ impl Prowlarr {
     ///
     /// # Errors
     ///
-    /// InvalidBaseUrl when the URL is not http(s), Unconfigured when the key is blank, and
+    /// `InvalidBaseUrl` when the URL is not http(s), Unconfigured when the key is blank, and
     /// Transport when no client could be built.
     pub fn new(base_url: &str, api_key: String) -> Result<Self, IndexerError> {
         let base = base_url.trim().trim_end_matches('/').to_owned();
@@ -67,7 +67,7 @@ impl Prowlarr {
         format!("{}{path}", self.base)
     }
 
-    /// Reads a response under SEARCH_BODY_CAP, refusing a non-success status first.
+    /// Reads a response under `SEARCH_BODY_CAP`, refusing a non-success status first.
     async fn read_capped(&self, mut response: reqwest::Response) -> Result<Vec<u8>, IndexerError> {
         if !response.status().is_success() {
             return Err(self.rejection(response).await);
@@ -141,7 +141,7 @@ fn validation_detail(body: &[u8]) -> String {
 }
 
 impl Indexer for Prowlarr {
-    fn check<'a>(&'a self) -> IndexerFuture<'a, ()> {
+    fn check(&self) -> IndexerFuture<'_, ()> {
         Box::pin(async move {
             let response = self
                 .client
@@ -214,7 +214,7 @@ impl Indexer for Prowlarr {
     }
 }
 
-/// One entry of Prowlarr's ReleaseResource array. Private: no third-party shape escapes the adapter.
+/// One entry of Prowlarr's `ReleaseResource` array. Private: no third-party shape escapes the adapter.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireRelease {
@@ -241,10 +241,10 @@ impl WireRelease {
     fn into_release(self) -> Option<IndexerRelease> {
         // A usenet result has no info hash and no magnet, so a torrent engine cannot use it; dropping
         // it here keeps the port's vocabulary torrent-only rather than a flag every caller checks.
-        if let Some(protocol) = self.protocol.as_deref() {
-            if !protocol.eq_ignore_ascii_case("torrent") {
-                return None;
-            }
+        if let Some(protocol) = self.protocol.as_deref()
+            && !protocol.eq_ignore_ascii_case("torrent")
+        {
+            return None;
         }
         let raw_title = stated(self.title)?;
         // Prowlarr calls the field magnetUrl, but for several indexers it is that indexer's own
@@ -550,7 +550,7 @@ impl Prowlarr {
     }
 
     /// Prowlarr's default app profile id. An add that does not name one is refused with
-    /// "AppProfileId: must be greater than 0", because every schema definition ships the field
+    /// "`AppProfileId`: must be greater than 0", because every schema definition ships the field
     /// as zero; verified against a live 2.6.5.5623 instance.
     async fn default_app_profile_id(&self) -> Result<i64, IndexerError> {
         let response = self

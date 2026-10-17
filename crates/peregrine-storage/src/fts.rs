@@ -304,7 +304,7 @@ pub(crate) async fn search_kind(
 ///
 /// `sqlx` 0.9 only accepts a `&'static str` here, which is why the expression is written out rather
 /// than built by a helper: at runtime it would be the same statement with a leaked string.
-const FOLDED_SEARCH: &str = r#"
+const FOLDED_SEARCH: &str = r"
 SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult
 FROM title t
 JOIN title_fts f ON f.rowid = t.id
@@ -318,11 +318,11 @@ WHERE (
   AND (?3 IS NULL OR t.id < ?3)
   AND (?5 IS NULL OR t.kind = ?5)
 ORDER BY t.id DESC LIMIT ?4
-"#;
+";
 
-/// The same folding as FOLDED_SEARCH, applied to the reader's own text.
+/// The same folding as `FOLDED_SEARCH`, applied to the reader's own text.
 ///
-/// ASCII lowercase rather than Unicode, because that is what SQLite's lower() does to the column;
+/// ASCII lowercase rather than Unicode, because that is what SQLite's `lower()` does to the column;
 /// accents and non-ASCII case are the index's job. The cap is the guard the FTS sanitizer gives a
 /// term, for the same reason: a 100 000-character "term" is not a search, and a LIKE pattern that
 /// long is refused by SQLite before it can answer.

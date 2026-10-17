@@ -166,7 +166,7 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// StorageError::InvalidJsonField or StorageError::UnexpectedValue when the stored row is
+    /// `StorageError::InvalidJsonField` or `StorageError::UnexpectedValue` when the stored row is
     /// not a profile this build wrote.
     pub async fn default_quality_profile(
         &self,
@@ -333,7 +333,7 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// StorageError when the statement fails.
+    /// `StorageError` when the statement fails.
     pub async fn replace_release_offers(
         &self,
         title_id: i64,
@@ -358,7 +358,7 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// StorageError when the statement fails.
+    /// `StorageError` when the statement fails.
     pub async fn choose_release_offer(
         &self,
         id: i64,
@@ -377,7 +377,7 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// StorageError when the statement fails.
+    /// `StorageError` when the statement fails.
     pub async fn dismiss_release_offer(&self, id: i64) -> Result<bool, StorageError> {
         match self
             .writer
@@ -393,7 +393,7 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// StorageError when the read fails.
+    /// `StorageError` when the read fails.
     pub async fn list_release_offers(
         &self,
         title_id: i64,

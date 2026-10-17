@@ -10,7 +10,7 @@
 //! The pinned values are in this file, never fetched at runtime (docs/adr/0022 section 1). The
 //! manifest entry that carries the licence and the written offer of source is sidecars.toml.
 //!
-//! Nothing here runs at start-up: install and Supervisor::start are explicit calls.
+//! Nothing here runs at start-up: install and `Supervisor::start` are explicit calls.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -210,7 +210,7 @@ fn executable_at(root: &Path) -> PathBuf {
     root.join("Prowlarr")
 }
 
-/// Downloads, verifies, and unpacks the pinned Prowlarr into data_dir/sidecars/prowlarr.
+/// Downloads, verifies, and unpacks the pinned Prowlarr into `data_dir/sidecars/prowlarr`.
 ///
 /// The download is staged as a .part file, hashed as the bytes arrive, and refused the first byte
 /// past the pinned size, so an oversized or substituted response never reaches the disk in full.
@@ -219,7 +219,7 @@ fn executable_at(root: &Path) -> PathBuf {
 ///
 /// # Errors
 ///
-/// UnsupportedPlatform when this OS/arch is not pinned; the transport, size, checksum, archive,
+/// `UnsupportedPlatform` when this OS/arch is not pinned; the transport, size, checksum, archive,
 /// and I/O variants for a download that failed; and Bundle when macOS refused to un-quarantine or
 /// re-sign the app.
 pub async fn install(data_dir: &Path, progress: &AtomicU64) -> Result<Installed, ProwlarrError> {
@@ -446,7 +446,7 @@ fn find_app(staging: &Path) -> Result<PathBuf, ProwlarrError> {
 
 /// A running, managed Prowlarr.
 ///
-/// The child is stopped when this is dropped or Supervisor::stop is called, so a session that ends
+/// The child is stopped when this is dropped or `Supervisor::stop` is called, so a session that ends
 /// does not leave an indexer manager behind.
 #[derive(Debug)]
 pub struct Supervisor {
@@ -465,7 +465,7 @@ impl Supervisor {
     ///
     /// # Errors
     ///
-    /// MissingExecutable when the pack is not installed; NotReady when it does not answer within
+    /// `MissingExecutable` when the pack is not installed; `NotReady` when it does not answer within
     /// the timeout, with the child stopped before that is returned; and the config variant for a
     /// key that could not be read.
     pub async fn start(
@@ -618,7 +618,7 @@ pub fn managed_credentials(data_dir: &Path) -> Option<(String, String)> {
     Some((format!("http://127.0.0.1:{}", config.port), config.api_key))
 }
 
-/// Reads config_dir/config.xml, or None when it is not there or not readable yet.
+/// Reads `config_dir/config.xml`, or None when it is not there or not readable yet.
 fn read_config(config_dir: &Path) -> Option<Config> {
     let text = std::fs::read_to_string(config_dir.join("config.xml")).ok()?;
     let mut reader = quick_xml::Reader::from_str(&text);
@@ -630,12 +630,13 @@ fn read_config(config_dir: &Path) -> Option<Config> {
             Ok(quick_xml::events::Event::Start(event)) => {
                 element = String::from_utf8_lossy(event.name().as_ref()).into_owned();
             }
-            Ok(quick_xml::events::Event::Empty(_)) => element.clear(),
+            Ok(quick_xml::events::Event::Empty(_) | quick_xml::events::Event::End(_)) => {
+                element.clear();
+            }
             // Clearing on the end tag is load-bearing: without it the whitespace between two
             // elements inherits the name of the one just closed, so the newline after
             // </ApiKey> overwrote the real key with an empty string and the whole read
             // answered None — a permanent start timeout. Verified with a standalone parser.
-            Ok(quick_xml::events::Event::End(_)) => element.clear(),
             Ok(quick_xml::events::Event::Text(text)) => {
                 if let Ok(value) = text.xml10_content() {
                     let value = value.trim();

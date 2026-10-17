@@ -112,7 +112,7 @@ fn content_type_for(path: &str) -> &'static str {
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("mp4") | Some("m4v") => "video/mp4",
+        Some("mp4" | "m4v") => "video/mp4",
         Some("webm") => "video/webm",
         Some("mov") => "video/quicktime",
         _ => "application/octet-stream",

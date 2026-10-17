@@ -76,6 +76,9 @@ const MEDIA_ROUTE: &str = "/media/{token}";
 /// The prefix [`MEDIA_ROUTE`] matches, for the guard to strip the token out of a request path.
 const MEDIA_PREFIX: &str = "/media/";
 
+/// A boxed future that stays sendable across the server's tasks.
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 /// A reader over one range of a torrent-backed file, opened fresh for each HTTP request.
 ///
 /// The engine's reader has no seek — a different offset is a new stream — so each range request is
@@ -83,10 +86,7 @@ const MEDIA_PREFIX: &str = "/media/";
 /// of the file; a read that has bytes answers `Ok(Some(..))`.
 pub trait MediaReader: Send {
     /// Reads up to `max` bytes from the current position.
-    fn read<'a>(
-        &'a mut self,
-        max: usize,
-    ) -> Pin<Box<dyn Future<Output = io::Result<Option<Vec<u8>>>> + Send + 'a>>;
+    fn read(&mut self, max: usize) -> BoxFuture<'_, io::Result<Option<Vec<u8>>>>;
 }
 
 /// A torrent-backed file the server can open readers over, and the four facts serving one needs.
@@ -97,14 +97,16 @@ pub trait TorrentMedia: Send + Sync + 'static {
     /// The file's length in bytes, as the torrent's metadata reports it.
     fn len(&self) -> u64;
 
+    /// Whether the file holds no bytes. A torrent with no selected file never reaches the server.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// The content type a media element is told the bytes are.
     fn content_type(&self) -> &str;
 
     /// Opens a reader starting at `offset`.
-    fn open<'a>(
-        &'a self,
-        offset: u64,
-    ) -> Pin<Box<dyn Future<Output = io::Result<Box<dyn MediaReader>>> + Send + 'a>>;
+    fn open(&self, offset: u64) -> BoxFuture<'_, io::Result<Box<dyn MediaReader>>>;
 }
 
 /// The route a captured poster frame is posted to, by the renderer that captured it.

@@ -2,7 +2,7 @@
 //!
 //! Search answers a page of candidates a screen waits on, so it is a command rather than a job.
 //! Configure, clear, and test touch the keyring and the network; the blocking keyring read is run in
-//! spawn_blocking by the service rather than on the runtime's threads.
+//! `spawn_blocking` by the service rather than on the runtime's threads.
 //!
 //! Ranking is deliberately absent: no quality profile is stored yet and PG-E12-10 owns the release
 //! decision, so these results are in the indexer's own order and nothing here pretends otherwise.

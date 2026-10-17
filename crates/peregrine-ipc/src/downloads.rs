@@ -234,7 +234,7 @@ async fn title_ref(
 ///
 /// The sentence is the service's own, so a screen says what happened rather than a code's short
 /// word; only the code is chosen here.
-fn acquisition_error(error: AcquisitionError) -> AppError {
+fn acquisition_error(error: &AcquisitionError) -> AppError {
     match error {
         AcquisitionError::TitleUnavailable | AcquisitionError::NotFound => {
             AppError::new(ErrorCode::NotFound).with_detail(error.to_string())
@@ -248,10 +248,7 @@ fn acquisition_error(error: AcquisitionError) -> AppError {
         AcquisitionError::DiskFull { .. } => {
             AppError::new(ErrorCode::InvalidInput).with_detail(error.to_string())
         }
-        AcquisitionError::UnsupportedSource => {
-            AppError::new(ErrorCode::Unsupported).with_detail(error.to_string())
-        }
-        AcquisitionError::Trash(TrashError::Unavailable) => {
+        AcquisitionError::UnsupportedSource | AcquisitionError::Trash(TrashError::Unavailable) => {
             AppError::new(ErrorCode::Unsupported).with_detail(error.to_string())
         }
         AcquisitionError::SavePath { .. }
@@ -270,8 +267,8 @@ fn acquisition_error(error: AcquisitionError) -> AppError {
 ///
 /// # Errors
 ///
-/// ErrorCode::Internal when the runtime is not running or the journal refuses the row, and
-/// ErrorCode::Unsupported when the torrent session did not start.
+/// `ErrorCode::Internal` when the runtime is not running or the journal refuses the row, and
+/// `ErrorCode::Unsupported` when the torrent session did not start.
 #[tauri::command]
 #[specta::specta]
 pub async fn acquire(
@@ -321,7 +318,7 @@ pub async fn pause_download(
         .acquisition()?
         .pause(download.id)
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     let row = row_after(runtime, download.id).await?;
     let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
@@ -342,7 +339,7 @@ pub async fn resume_download(
         .acquisition()?
         .resume(download.id)
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     let row = row_after(runtime, download.id).await?;
     let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
@@ -363,7 +360,7 @@ pub async fn remove_download(
         .acquisition()?
         .remove(download.id)
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     let row = row_after(runtime, download.id).await?;
     let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
@@ -387,7 +384,7 @@ pub async fn dismiss_download(
         .acquisition()?
         .dismiss(download.id)
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     Ok(guard_response("downloads::dismiss", removed))
 }
 
@@ -400,7 +397,7 @@ pub async fn clear_finished_downloads(state: State<'_, RuntimeState>) -> Result<
         .acquisition()?
         .clear_finished()
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     Ok(guard_response(
         "downloads::clear_finished",
         u32::try_from(removed).unwrap_or(u32::MAX),
@@ -422,7 +419,7 @@ pub async fn plan_download_deletion(
         .acquisition()?
         .deletion_plan(download.id)
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     Ok(guard_response(
         "downloads::plan_deletion",
         DeletionPlanDto::of(&plan),
@@ -444,7 +441,7 @@ pub async fn delete_download(
         .acquisition()?
         .delete_files(download.id)
         .await
-        .map_err(acquisition_error)?;
+        .map_err(|error| acquisition_error(&error))?;
     Ok(guard_response(
         "downloads::delete",
         DeletionPlanDto::of(&plan),

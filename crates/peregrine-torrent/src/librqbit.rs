@@ -293,10 +293,10 @@ impl TorrentEngine for LibrqbitEngine {
             if file >= count {
                 return Err(EngineError::UnknownFile { index: file });
             }
-            if let Some(selected) = held.handle.only_files() {
-                if !selected.contains(&file) {
-                    return Err(EngineError::FileNotSelected { index: file });
-                }
+            if let Some(selected) = held.handle.only_files()
+                && !selected.contains(&file)
+            {
+                return Err(EngineError::FileNotSelected { index: file });
             }
             let mut stream = held
                 .handle

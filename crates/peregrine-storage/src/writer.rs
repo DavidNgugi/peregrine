@@ -477,6 +477,7 @@ impl WriterHandle {
 /// Split from [`apply`] because the arm list is a dispatch table: the catalogue, jobs, and
 /// notification arms each read as one line, and thirteen library arms in the middle of them
 /// hide both halves. The channel is still one, and every request still arrives in order.
+#[allow(clippy::too_many_lines)] // One dispatch table; splitting it hides which verb maps to which write.
 async fn apply_library_write(
     connection: &mut sqlx::SqliteConnection,
     request: WriteRequest,

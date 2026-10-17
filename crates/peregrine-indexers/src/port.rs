@@ -82,8 +82,8 @@ pub trait Indexer: Send + Sync {
     fn search<'a>(&'a self, query: &'a IndexerQuery) -> IndexerFuture<'a, Vec<IndexerRelease>>;
 
     /// Asks whether the configured endpoint and credential work.
-    fn check<'a>(&'a self) -> IndexerFuture<'a, ()>;
+    fn check(&self) -> IndexerFuture<'_, ()>;
 
-    /// Fetches the .torrent bytes behind a TorrentSource::TorrentUrl.
+    /// Fetches the .torrent bytes behind a `TorrentSource::TorrentUrl`.
     fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, FetchedTorrent>;
 }

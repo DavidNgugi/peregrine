@@ -1,7 +1,7 @@
 //! The quality profile a release is chosen against.
 //!
 //! The row is three scalars plus a JSON document, so a profile is assembled here rather than read
-//! as one blob: rules_json is only the rules, and the name, cutoff, and upgrade flag are columns
+//! as one blob: `rules_json` is only the rules, and the name, cutoff, and upgrade flag are columns
 //! the profile type also wants. Parsing through the domain's own Deserialize is what keeps a
 //! hand-edited file from widening a preference order the constructor would have refused.
 
@@ -88,7 +88,7 @@ pub(crate) async fn insert_default(
     .bind(name)
     .bind(rules_json)
     .bind(cutoff_rank)
-    .bind(if upgrade_allowed { 1 } else { 0 })
+    .bind(i32::from(upgrade_allowed))
     .bind(at)
     .execute(connection)
     .await?;
@@ -117,12 +117,12 @@ pub(crate) async fn set_default_resolutions(
     Ok(result.rows_affected() > 0)
 }
 
-/// The one profile marked is_default, or None when the installation has not chosen one.
+/// The one profile marked `is_default`, or None when the installation has not chosen one.
 ///
 /// # Errors
 ///
-/// StorageError::InvalidJsonField when rules_json is not the rules this build writes, and
-/// StorageError::UnexpectedValue when a scalar is outside its domain or more than one row claims
+/// `StorageError::InvalidJsonField` when `rules_json` is not the rules this build writes, and
+/// `StorageError::UnexpectedValue` when a scalar is outside its domain or more than one row claims
 /// to be the default.
 pub(crate) async fn default_profile(
     pool: &SqlitePool,

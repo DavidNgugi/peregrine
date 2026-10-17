@@ -7,7 +7,7 @@
 //! `indexerIds`, `categories`, `limit`, and `offset`, authenticated by an `X-Api-Key`
 //! header (the spec also accepts an `apikey` query parameter; this adapter uses the header so
 //! the key never reaches a URL). The response is a `ReleaseResource` array. Verified against
-//! the OpenAPI the project publishes at
+//! the `OpenAPI` the project publishes at
 //! `https://raw.githubusercontent.com/Prowlarr/Prowlarr/develop/src/Prowlarr.Api.V1/openapi.json`
 //! (path `/api/v1/search`; security scheme `X-Api-Key`, `in: header`) on 2026-10-16. The
 //! fields this adapter reads are `title`, `size`, `seeders`, `leechers`, `magnetUrl`,
@@ -18,7 +18,7 @@
 //! `fields`), `POST /api/v1/indexer` adds one, and `DELETE /api/v1/indexer/{id}` removes one.
 //! `IndexerResource` carries `id`, `name`, `implementation`, `configContract`, `definitionName`,
 //! `description`, `enable`, and `fields`, and each `Field` carries `name`, `label`, `type`,
-//! `value`, `advanced`, `privacy`, and `selectOptions`. All verified against the same OpenAPI
+//! `value`, `advanced`, `privacy`, and `selectOptions`. All verified against the same `OpenAPI`
 //! (paths `/api/v1/indexer`, `/api/v1/indexer/{id}`, `/api/v1/indexer/schema`) on 2026-10-16.
 //!
 //! Adapters ship disabled with no bundled default domain, and nothing here polls on a schedule.

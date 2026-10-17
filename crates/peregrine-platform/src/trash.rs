@@ -2,7 +2,7 @@
 //!
 //! AGENTS R22 makes deletion reversible where the OS can hold it, and this is that hold. The
 //! adapter is deliberately thin: the platform differences (Finder on macOS, the XDG trash spec on
-//! Linux, SHFileOperation on Windows) are a solved problem with a maintained implementation, and a
+//! Linux, `SHFileOperation` on Windows) are a solved problem with a maintained implementation, and a
 //! second one here would be a second thing to keep correct. What this adds is the failure shape
 //! the domain port promises: a refusal leaves the file exactly where it was.
 

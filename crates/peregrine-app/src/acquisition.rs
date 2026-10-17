@@ -348,6 +348,7 @@ impl AcquisitionService {
     /// resolved rather than values this type derives, because a service that read a setting would be
     /// a second place the setting is spelled.
     #[must_use]
+    #[allow(clippy::too_many_arguments)] // The service's dependencies, all resolved by its caller.
     pub fn new(
         database: Arc<Database>,
         engine: Arc<dyn TorrentEngine>,
@@ -993,8 +994,8 @@ impl AcquisitionService {
     /// The full import (PG-E14-19) owns probing, naming, and episode placement. This is the part a
     /// completed job can do without any of them: the title the job was started for is already
     /// known, so the item is that title, and each selected media entry that is on disk becomes a
-    /// media_file row. A file the engine has not flushed is skipped rather than failing the
-    /// import, and a path that is already recorded is left alone (media_file.path is UNIQUE, I3).
+    /// `media_file` row. A file the engine has not flushed is skipped rather than failing the
+    /// import, and a path that is already recorded is left alone (`media_file.path` is UNIQUE, I3).
     async fn import_completed(&self, row: &DownloadJobRow) -> Result<(), AcquisitionError> {
         let files = self.database.download_files(unrestricted(), row.id).await?;
         let at = self.clock.now();
@@ -1017,26 +1018,25 @@ impl AcquisitionService {
             if !metadata.is_file() {
                 continue;
             }
-            let id = match item_id {
-                Some(id) => id,
-                None => {
-                    let created = self
-                        .database
-                        .insert_media_item(MediaItem {
-                            id: 0,
-                            title_id: row.title_id,
-                            episode_id: row.episode_id,
-                            state: MediaItemState::Available,
-                            origin: MediaOrigin::Torrent,
-                            preferred_file_id: None,
-                            quality_label: None,
-                            created_at: at,
-                            updated_at: at,
-                        })
-                        .await?;
-                    item_id = Some(created);
-                    created
-                }
+            let id = if let Some(id) = item_id {
+                id
+            } else {
+                let created = self
+                    .database
+                    .insert_media_item(MediaItem {
+                        id: 0,
+                        title_id: row.title_id,
+                        episode_id: row.episode_id,
+                        state: MediaItemState::Available,
+                        origin: MediaOrigin::Torrent,
+                        preferred_file_id: None,
+                        quality_label: None,
+                        created_at: at,
+                        updated_at: at,
+                    })
+                    .await?;
+                item_id = Some(created);
+                created
             };
             let Ok(path) = NonEmptyText::new(safe.as_path().to_string_lossy().as_ref()) else {
                 continue;
@@ -1089,7 +1089,7 @@ impl AcquisitionService {
 
     /// Enumerates exactly what deleting one download would remove, without removing anything.
     ///
-    /// AGENTS R22: the plan is taken first and the user confirms the list; delete_files resolves
+    /// AGENTS R22: the plan is taken first and the user confirms the list; `delete_files` resolves
     /// every path again. A file the guard refuses, or that is no longer on disk, is not in the plan.
     pub async fn deletion_plan(&self, id: i64) -> Result<DeletionPlan, AcquisitionError> {
         let row = self.reload(id).await?;

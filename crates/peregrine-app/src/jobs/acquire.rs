@@ -1,9 +1,9 @@
 //! Auto-acquiring one title: find the best release on the configured indexer and queue it.
 //!
 //! A job rather than a command because it leaves the machine three times — a Prowlarr search, a
-//! metadata fetch over BitTorrent, and the engine's own add — and ARCHITECTURE §7 rule 2 puts any
+//! metadata fetch over `BitTorrent`, and the engine's own add — and ARCHITECTURE §7 rule 2 puts any
 //! of those past a command's budget. The selection itself is pure and lives in peregrine-domain
-//! (rank::best_candidate); this file only supplies the candidates and the profile.
+//! (`rank::best_candidate`); this file only supplies the candidates and the profile.
 
 use std::sync::Arc;
 
@@ -38,7 +38,7 @@ const SEARCH_LIMIT: u32 = 100;
 
 /// How many ranked candidates one acquire will try before it reports the last refusal.
 ///
-/// Each try costs a metadata fetch over BitTorrent — seconds to a minute — so this bounds one user
+/// Each try costs a metadata fetch over `BitTorrent` — seconds to a minute — so this bounds one user
 /// action while still stepping past a handful of releases the gate refuses: a size the profile
 /// allowed but the volume cannot hold, a name the guard refuses, a swarm with no peers left.
 const MAX_CANDIDATES_TRIED: usize = 5;
@@ -178,6 +178,7 @@ impl AcquireJob {
     }
 
     /// The work, owning everything it borrows.
+    #[allow(clippy::too_many_lines)] // The job is one loop; splitting it hides the order the steps run in.
     async fn acquire(
         &mut self,
         job: ulid::Ulid,
@@ -368,10 +369,12 @@ impl AcquireJob {
                 release_title: release.raw_title.clone(),
                 indexer: release.indexer.clone(),
                 score: ranking.score().map_or(0.0, |score| score as f64),
-                rank_position: position as i64,
+                rank_position: i64::try_from(position).unwrap_or(i64::MAX),
                 reasons_json,
                 source_json,
-                size_bytes: release.size_bytes.map(|value| value as i64),
+                size_bytes: release
+                    .size_bytes
+                    .and_then(|value| i64::try_from(value).ok()),
                 seeders: release.seeders.map(i64::from),
             });
         }
@@ -433,7 +436,7 @@ impl AcquireJob {
                     // The proxy answered 301 with a magnet, which is the source the engine wanted
                     // all along; the row keeps it, so nothing has to be re-derived from bytes.
                     FetchedTorrent::Magnet(uri) => {
-                        magnet_uri = uri.clone();
+                        magnet_uri.clone_from(&uri);
                         EngineSource::Magnet(NonEmptyText::new(&uri).map_err(|error| {
                             JobError::failed(format!("the release's magnet is not usable: {error}"))
                         })?)

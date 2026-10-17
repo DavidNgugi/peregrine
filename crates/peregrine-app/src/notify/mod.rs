@@ -35,8 +35,8 @@ pub use service::{NotificationService, ServiceError};
 
 /// The preferences the shipping binary uses until \`PG-E20-01\`'s settings registry exists.
 ///
-/// It answers the catalogue defaults and stores nothing. \`Preferences::default\` carries
-/// \`Consent::UNASKED\`, so no toast is delivered while the centre row is still written — which
+/// It answers the catalogue defaults and stores nothing. \``Preferences::default`\` carries
+/// \``Consent::UNASKED`\`, so no toast is delivered while the centre row is still written — which
 /// is R31's order and ADR 0015 §1's. Replacing it with a real store is \`PG-E20-01\`'s job;
 /// writing through it is \`PG-E1-20\`'s.
 #[derive(Debug, Clone, Copy, Default)]

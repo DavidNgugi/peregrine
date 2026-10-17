@@ -896,6 +896,7 @@ impl Runtime {
     /// [`RuntimeError::DataDirectory`] when the directory cannot be created,
     /// [`RuntimeError::Storage`] when the database cannot be opened or migrated. Both
     /// happen before any job can be accepted, so a failure here leaves nothing running.
+    #[allow(clippy::too_many_lines)] // Startup is one ordered sequence; a split would hide the order.
     pub async fn start(
         config: RuntimeConfig,
         logging: Observability,
@@ -1106,10 +1107,11 @@ impl Runtime {
         // health wait belongs to the job, not to this path. A submit that fails is logged and
         // forgotten: a Prowlarr that cannot run must never fail or delay the launch, and the
         // existing dedupe key and live-supervisor checks keep a second start from being spawned.
-        if runtime.prowlarr.is_installed() && !runtime.prowlarr.is_running() {
-            if let Err(error) = runtime.start_prowlarr().await {
-                tracing::warn!(%error, "the managed Prowlarr did not start automatically");
-            }
+        if runtime.prowlarr.is_installed()
+            && !runtime.prowlarr.is_running()
+            && let Err(error) = runtime.start_prowlarr().await
+        {
+            tracing::warn!(%error, "the managed Prowlarr did not start automatically");
         }
 
         Ok(runtime)
@@ -1782,8 +1784,8 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the journal cannot be written, RuntimeError::Scheduler when the
-    /// queue refuses the job, and RuntimeError::TorrentEngineUnavailable when the torrent session
+    /// `RuntimeError::Storage` when the journal cannot be written, `RuntimeError::Scheduler` when the
+    /// queue refuses the job, and `RuntimeError::TorrentEngineUnavailable` when the torrent session
     /// did not start.
     pub async fn start_acquire(
         &self,
@@ -1806,8 +1808,8 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::InvalidRequest when the offer is gone or was already acted on, plus the same
-    /// storage, scheduler and engine errors that start_acquire reports.
+    /// `RuntimeError::InvalidRequest` when the offer is gone or was already acted on, plus the same
+    /// storage, scheduler and engine errors that `start_acquire` reports.
     pub async fn acquire_release(
         &self,
         account: peregrine_domain::AccountScope,
@@ -1850,7 +1852,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the read fails.
+    /// `RuntimeError::Storage` when the read fails.
     pub async fn release_offers(
         &self,
         title_id: i64,
@@ -1865,7 +1867,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the write fails.
+    /// `RuntimeError::Storage` when the write fails.
     pub async fn dismiss_release_offer(&self, offer_id: i64) -> Result<bool, RuntimeError> {
         self.database
             .dismiss_release_offer(offer_id)
@@ -1946,7 +1948,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the read fails.
+    /// `RuntimeError::Storage` when the read fails.
     pub async fn download_jobs(
         &self,
     ) -> Result<Vec<peregrine_storage::DownloadJobRow>, RuntimeError> {
@@ -1964,7 +1966,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the read fails.
+    /// `RuntimeError::Storage` when the read fails.
     pub async fn download_job(
         &self,
         id: i64,
@@ -3177,7 +3179,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the read fails.
+    /// `RuntimeError::Storage` when the read fails.
     pub async fn preferred_quality(&self) -> Result<Option<PreferredQuality>, RuntimeError> {
         let profile = self.database.default_quality_profile().await?;
         Ok(profile
@@ -3192,7 +3194,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the write fails, and RuntimeError::InvalidRequest when there
+    /// `RuntimeError::Storage` when the write fails, and `RuntimeError::InvalidRequest` when there
     /// is no default profile to write.
     pub async fn set_preferred_quality(
         &self,
@@ -3219,7 +3221,7 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// RuntimeError::Storage when the read fails.
+    /// `RuntimeError::Storage` when the read fails.
     pub async fn continue_watching(&self) -> Result<Vec<WatchProgressRow>, RuntimeError> {
         Ok(self
             .database

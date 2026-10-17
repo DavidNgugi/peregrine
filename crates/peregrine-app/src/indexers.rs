@@ -1,7 +1,7 @@
 //! Prowlarr: what the user configured, and searching it.
 //!
 //! The configuration is two keyring entries because a base URL is configuration and an API key is a
-//! credential; SecretKey::endpoint names the first and SecretKey::provider the second, which is the
+//! credential; `SecretKey::endpoint` names the first and `SecretKey::provider` the second, which is the
 //! shape a metadata provider key already uses. Nothing here logs, formats, or returns a key.
 
 use std::path::PathBuf;
