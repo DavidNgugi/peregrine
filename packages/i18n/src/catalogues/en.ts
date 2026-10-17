@@ -7,6 +7,14 @@
  */
 export const en = {
   translation: {
+    profile: {
+      who: "Who's watching?",
+      switch: "Switch profile",
+      current: "{{name}}'s profile",
+      local: "Stored on this device",
+      note: "Profiles and parental controls arrive with local accounts. For now this device has one.",
+      done: "Done",
+    },
     shell: {
       nav: {
         label: "Screens",

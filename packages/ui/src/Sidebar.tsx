@@ -33,6 +33,13 @@ export interface SidebarProps {
    * It sits outside the scroller, so a control in it stays where it is while the screens scroll.
    */
   readonly header?: ReactNode;
+  /**
+   * The strip below the rows, pinned to the bottom.
+   *
+   * It sits outside the scroller for the same reason the header does: an identity control should be
+   * reachable from every screen without scrolling the navigation to it.
+   */
+  readonly footer?: ReactNode;
   /** The user's own answer to "show me the labels", which the shell owns and a control toggles. */
   readonly collapsed?: boolean;
   /** The id a collapse control points at with `aria-controls`. */
@@ -44,6 +51,7 @@ export interface SidebarProps {
 export function Sidebar({
   label,
   header,
+  footer,
   collapsed = false,
   id,
   children,
@@ -64,6 +72,9 @@ export function Sidebar({
     >
       {header}
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">{children}</div>
+      {footer === undefined ? null : (
+        <div className="shrink-0 border-t border-border-subtle p-2">{footer}</div>
+      )}
     </nav>
   );
 }

@@ -1,5 +1,6 @@
 import { NowPlayingBar } from "@peregrine/player-ui";
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
+import { ProfileAvatar, ProfileSwitcher, useProfile } from "../features/profiles/index.js";
 import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
@@ -84,6 +85,8 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // from one value. It starts where the window opened, and only this shell moves it — through the
   // history, so every screen except the first has somewhere to go back to (`./navigation.js`).
   const [history, setHistory] = useState(() => startHistory(initialRoute));
+  const [profileOpen, setProfileOpen] = useState(false);
+  const { profile } = useProfile();
   const route = history.current;
   const navigate = useCallback((next: Route) => {
     setHistory((current) => navigateTo(current, next));
@@ -272,6 +275,20 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       <div className="flex min-h-0 flex-1">
         <Sidebar
           collapsed={collapsed}
+          footer={
+            <div className={collapsed ? "flex justify-center" : "flex items-center gap-2"}>
+              <ProfileAvatar
+                label={t("profile.switch")}
+                onClick={() => {
+                  setProfileOpen(true);
+                }}
+                profile={profile}
+              />
+              {collapsed ? null : (
+                <span className="truncate text-sm text-text-secondary">{profile.name}</span>
+              )}
+            </div>
+          }
           header={sidebarHeader}
           id={sidebarId}
           label={t("shell.nav.label")}
@@ -305,19 +322,28 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               recentDownloads={downloads.downloads}
               titleKind={route.titleKind}
               trailing={
-                /* The theme control, which used to live in the title bar. Same shape as the toolbar's
-                   own icon buttons — 44 px, on the translucent surface — because it sits beside them:
-                   the refresh control that follows it is the neighbour it has to match. */
-                <IconButton
-                  className="size-11 rounded-full border border-border-subtle bg-surface-0/70"
-                  icon={nextTheme === "light" ? "sun" : "moon"}
-                  label={themeLabel}
-                  onClick={() => {
-                    setPreference(nextTheme);
-                  }}
-                  title={themeLabel}
-                  variant="ghost"
-                />
+                <>
+                  {/* The theme control, which used to live in the title bar. Same shape as the toolbar's
+                      own icon buttons — 44 px, on the translucent surface — because it sits beside them:
+                      the refresh control that follows it is the neighbour it has to match. */}
+                  <IconButton
+                    className="size-11 rounded-full border border-border-subtle bg-surface-0/70"
+                    icon={nextTheme === "light" ? "sun" : "moon"}
+                    label={themeLabel}
+                    onClick={() => {
+                      setPreference(nextTheme);
+                    }}
+                    title={themeLabel}
+                    variant="ghost"
+                  />
+                  <ProfileAvatar
+                    label={t("profile.switch")}
+                    onClick={() => {
+                      setProfileOpen(true);
+                    }}
+                    profile={profile}
+                  />
+                </>
               }
             />
           ) : null}
@@ -409,6 +435,13 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
         </main>
       </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />
+      <ProfileSwitcher
+        onClose={() => {
+          setProfileOpen(false);
+        }}
+        open={profileOpen}
+        profile={profile}
+      />
     </div>
   );
 }
