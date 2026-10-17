@@ -159,7 +159,17 @@ export function DownloadsScreen({
                 />
               )}
             </span>
-            <span className="min-w-0 truncate">{label}</span>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">{label}</span>
+              {row.seasonNumber !== null && row.episodeNumber !== null ? (
+                <span className="text-caption text-text-tertiary">
+                  {t("downloads.episode", {
+                    season: row.seasonNumber,
+                    episode: String(row.episodeNumber).padStart(2, "0"),
+                  })}
+                </span>
+              ) : null}
+            </span>
           </span>
         );
         if (row.titleKind === null) {

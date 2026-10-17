@@ -106,6 +106,8 @@ function download(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
     title: "The Matrix",
     titleKind: "movie",
     poster: null,
+    seasonNumber: null,
+    episodeNumber: null,
     releaseTitle: "The.Matrix.1999.1080p",
     state: "downloading",
     progressPermille: 500,

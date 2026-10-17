@@ -845,6 +845,10 @@ export type DownloadJobDto = {
 	 *  can draw the same tile Browse draws; null falls back to the placeholder.
 	 */
 	poster: string | null,
+	/**  The episode's season, when the job was started for one episode. */
+	seasonNumber: number | null,
+	/**  The episode's number within that season. */
+	episodeNumber: number | null,
 	/**  The release the indexer advertised. */
 	releaseTitle: string,
 	/**  The state machine's current state, as its stored spelling. */
@@ -1978,12 +1982,19 @@ export type UnmatchedRef = {
 
 /**  One row of the account's viewing history. */
 export type WatchHistoryDto = {
+	/**  The title the row is about. */
 	titleId: number,
+	/**  The title's display name, when the library can answer it. */
 	title: string | null,
+	/**  The episode's season, when the row names an episode. */
 	seasonNumber: number | null,
+	/**  The episode's number within that season. */
 	episodeNumber: number | null,
+	/**  Whether the account finished it. */
 	watched: boolean,
+	/**  How far through, as a fraction in `0.0..=1.0`. */
 	percent: number | null,
+	/**  When the row was last written, in Unix milliseconds. */
 	updatedAt: number,
 };
 

@@ -62,6 +62,7 @@ export const en = {
     },
     downloads: {
       title: "Downloads",
+      episode: "S{{season}}E{{episode}}",
       subtitle: "Transfers this build is running, and the queue behind them.",
       section: "Transfer queue",
       description: "Progress updates while a transfer is active.",

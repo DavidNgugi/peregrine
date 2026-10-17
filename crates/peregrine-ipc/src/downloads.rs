@@ -82,6 +82,12 @@ pub struct DownloadJobDto {
     /// A path and never bytes (AGENTS R11). It is carried so the Discover Recent Downloads rail
     /// can draw the same tile Browse draws; null falls back to the placeholder.
     pub poster: Option<String>,
+    /// The episode's season, when the job was started for one episode.
+    #[specta(type = Option<Number>)]
+    pub season_number: Option<u32>,
+    /// The episode's number within that season.
+    #[specta(type = Option<Number>)]
+    pub episode_number: Option<u32>,
     /// The release the indexer advertised.
     pub release_title: String,
     /// The state machine's current state, as its stored spelling.
@@ -131,6 +137,8 @@ impl DownloadJobDto {
             title,
             title_kind,
             poster,
+            season_number: None,
+            episode_number: None,
             release_title: row.release_title.clone(),
             state: row.state.as_str().to_owned(),
             progress_permille: row.progress_permille,
@@ -327,7 +335,16 @@ pub async fn list_downloads(
     let mut downloads = Vec::with_capacity(rows.len());
     for row in &rows {
         let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
-        downloads.push(DownloadJobDto::of(row, title, title_kind, poster));
+        let mut dto = DownloadJobDto::of(row, title, title_kind, poster);
+        let episode = match row.episode_id {
+            Some(id) => runtime.episode_numbers(id).await.ok().flatten(),
+            None => None,
+        };
+        if let Some((season, episode)) = episode {
+            dto.season_number = Some(season);
+            dto.episode_number = Some(episode);
+        }
+        downloads.push(dto);
     }
     Ok(guard_response("downloads::list", downloads))
 }
