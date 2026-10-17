@@ -183,6 +183,13 @@ impl RuntimeConfig {
         self
     }
 
+    /// Uses an explicit mpv binary, which is how a bundled sidecar wins over `PATH`.
+    #[must_use]
+    pub fn with_player_binary(mut self, binary: impl Into<PathBuf>) -> Self {
+        self.player = Arc::new(peregrine_playback::MpvPlayer::with_binary(binary));
+        self
+    }
+
     /// Replaces the external player, so a test can assert the hand-off without opening a window.
     #[must_use]
     pub fn with_player(mut self, player: Arc<dyn peregrine_domain::PlayerBackend>) -> Self {

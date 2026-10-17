@@ -19,6 +19,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "check-dead-deps": "node scripts/check-dead-deps.mjs",
+    "sidecars:fetch": "node scripts/fetch-sidecars.mjs",
     "gallery": "pnpm --filter @peregrine/desktop gallery",
     "tauri": "pnpm --filter @peregrine/desktop exec tauri"
   },

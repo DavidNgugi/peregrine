@@ -105,6 +105,22 @@ pub fn serve<R: tauri::Runtime>(
     outcome.map(|_| ())
 }
 
+/// The mpv binary shipped inside the bundle, when this build has one.
+///
+/// A bundled player is the reason the installer does not ask for mpv; `PATH` remains the fallback
+/// for a development build, where no sidecar has been staged.
+fn bundled_mpv<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let directory = app.path().resource_dir().ok()?;
+    let sidecars = directory.join("sidecars");
+    #[cfg(target_os = "macos")]
+    let binary = sidecars.join("mpv.app/Contents/MacOS/mpv");
+    #[cfg(target_os = "windows")]
+    let binary = sidecars.join("mpv").join("mpv.exe");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let binary = sidecars.join("mpv");
+    binary.is_file().then_some(binary)
+}
+
 /// Installs logging and starts the runtime.
 fn start<R: tauri::Runtime>(
     app: &AppHandle<R>,
@@ -122,6 +138,10 @@ fn start<R: tauri::Runtime>(
         artwork_directory,
         Arc::new(TauriSink { app: app.clone() }),
     );
+    let config = match bundled_mpv(app) {
+        Some(binary) => config.with_player_binary(binary),
+        None => config,
+    };
     #[cfg(debug_assertions)]
     let config = config.with_secrets(Arc::new(peregrine_app::DevFileStore::new(dev_secrets)));
     let logging = Observability::install(&config.log_config())?;

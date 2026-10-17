@@ -29,6 +29,11 @@ test-results/
 *.pem
 *.p12
 
+# Fetched sidecar binaries (scripts/fetch-sidecars.mjs)
+/vendor/
+apps/desktop/src-tauri/sidecars/*
+!apps/desktop/src-tauri/sidecars/.gitkeep
+
 # Local runtime state (never committed)
 *.sqlite
 *.sqlite-wal

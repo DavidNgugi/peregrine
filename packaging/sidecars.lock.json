@@ -27,7 +27,7 @@
       "sha256": "a49811c0752c108b8260636f9c6f6fcb97406641c98b30f1e7b500dfb20177de",
       "size": 39002683,
       "archive": "zip",
-      "binary": "mpv/mpv.exe",
+      "binary": "mpv.exe",
       "licence": "GPL-3.0-or-later",
       "notes": "Official upstream build; mpv.exe plus DLLs."
     },

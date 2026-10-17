@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "app.peregrine.desktop",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm sidecars:fetch && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm sidecars:fetch && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {

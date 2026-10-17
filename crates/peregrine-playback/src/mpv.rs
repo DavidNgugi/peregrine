@@ -116,7 +116,7 @@ impl MpvPlayer {
         }
     }
 
-    /// The same player, always spawning `binary`. A test seam rather than a setting.
+    /// The same player, always spawning `binary`: a bundled sidecar, or a test fixture.
     #[must_use]
     pub fn with_binary(binary: impl Into<PathBuf>) -> Self {
         Self {
