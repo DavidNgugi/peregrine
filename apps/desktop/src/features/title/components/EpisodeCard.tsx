@@ -80,7 +80,11 @@ export function EpisodeCard({
   const [failed, setFailed] = useState<string | null>(null);
   const source =
     episode.still !== null && episode.still !== failed ? imageUrl(episode.still) : null;
-  const availability = episodeAvailability(episode);
+  // A date in the future is not an availability question: the episode exists in the catalogue and
+  // has nothing to fetch until it airs, so it offers no Download and says when it arrives instead.
+  const today = new Date().toISOString().slice(0, 10);
+  const unaired = episode.airDate !== null && episode.airDate > today;
+  const availability = unaired ? null : episodeAvailability(episode);
 
   return (
     <article
@@ -136,7 +140,9 @@ export function EpisodeCard({
             </span>
           ) : null}
           <span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-caption text-text-secondary">
-            {t(`title.episode.availability.${availability}`)}
+            {availability === null
+              ? t("title.episode.availability.unaired")
+              : t(`title.episode.availability.${availability}`)}
           </span>
         </div>
 
@@ -146,7 +152,11 @@ export function EpisodeCard({
             all rather than a dash — a placeholder for a fact nobody stated is noise on every card. */}
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-text-tertiary">
           {episode.airDate === null ? null : (
-            <span>{t("title.episode.aired", { date: episode.airDate })}</span>
+            <span>
+              {unaired
+                ? t("title.episode.airs", { date: episode.airDate })
+                : t("title.episode.aired", { date: episode.airDate })}
+            </span>
           )}
           {episode.runtimeMinutes === null ? null : (
             <span>{t("title.episode.runtime", { minutes: episode.runtimeMinutes })}</span>
@@ -160,8 +170,9 @@ export function EpisodeCard({
         {/* A card the library already holds offers no Download: the chip says it is here, and a
             second button would be an offer to fetch what is on disk. While this episode's own
             transfer is in flight the button stays, saying so. */}
-        {onPlay === undefined &&
-        (onDownload === undefined || (availability !== "wanted" && !downloading)) ? null : (
+        {availability === null ||
+        (onPlay === undefined &&
+          (onDownload === undefined || (availability !== "wanted" && !downloading))) ? null : (
           <div className="mt-auto flex flex-wrap gap-2 pt-1">
             {onPlay !== undefined &&
             (availability === "available" || availability === "partial") ? (

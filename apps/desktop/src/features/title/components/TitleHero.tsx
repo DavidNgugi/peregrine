@@ -110,6 +110,10 @@ export function TitleHero({
   const [failed, setFailed] = useState<string | null>(null);
   const source = backdrop !== null && backdrop !== failed ? imageUrl(backdrop) : null;
   const actions = titlePageActions(offer, onPlay !== undefined, playSupport);
+  // A title that has not been released has nothing to fetch, so it offers no Download and says when
+  // it arrives. The same rule the episode card applies to an unaired episode.
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = released !== null && released > today;
 
   return (
     <section className="relative flex flex-col gap-4 overflow-hidden rounded-md border border-border-subtle bg-surface-1">
@@ -156,7 +160,13 @@ export function TitleHero({
               because a reader compares them across pages and a sentence makes them read. */}
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-text-secondary">
             <span>{kindLabel}</span>
-            {released === null ? null : <span>{t("title.hero.released", { date: released })}</span>}
+            {released === null ? null : (
+              <span>
+                {upcoming
+                  ? t("title.hero.releases", { date: released })
+                  : t("title.hero.released", { date: released })}
+              </span>
+            )}
             {seasons === 0 ? null : <span>{t("title.hero.seasons", { count: seasons })}</span>}
             {episodes === 0 ? null : <span>{t("title.hero.episodes", { count: episodes })}</span>}
           </p>
@@ -182,7 +192,7 @@ export function TitleHero({
                 or one whose transfer is running, or whose file is recorded and absent — gets no
                 Download control at all, because a disabled one beside a working Play still reads as an
                 offer to fetch what the user already has. */}
-            {actions.acquire ? (
+            {actions.acquire && !upcoming ? (
               <Button
                 disabled={onAcquire === undefined || acquiring === true}
                 onClick={onAcquire}

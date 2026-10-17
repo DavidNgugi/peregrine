@@ -419,6 +419,7 @@ export const en = {
       // offer the core derives, and each names the thing a reader can act on.
       hero: {
         released: "{{date}}",
+        releases: "Releases {{date}}",
         seasons: "{{count}} season",
         seasons_other: "{{count}} seasons",
         episodes: "{{count}} episode",
@@ -458,6 +459,7 @@ export const en = {
           alt: "Still for episode {{number}}, {{name}}",
         },
         aired: "Aired {{date}}",
+        airs: "Airs {{date}}",
         runtime: "{{minutes}} min",
         download: "Download",
         downloading: "Downloading… {{percent}}%",
@@ -472,6 +474,7 @@ export const en = {
           partial: "Partly here",
           missing: "Files are gone",
           wanted: "Not acquired",
+          unaired: "Not aired",
         },
       },
       missing: {
