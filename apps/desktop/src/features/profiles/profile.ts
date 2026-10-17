@@ -1,28 +1,42 @@
 /**
- * The one profile this build has.
+ * The profiles this build has.
  *
- * Accounts, avatars, and per-profile content are Phase 8 (ADR 0019). Until that backend exists, the
- * selector has a single local identity so the entry point and the switching flow are in place and the
- * account work can replace this module rather than the UI around it. The value is device-local and
- * holds nothing but a display name and a colour.
+ * Names and colours only: accounts, per-profile content, and parental gating are Phase 8 (ADR 0019).
+ * Until that backend exists this is a device-local list so adding, renaming, and choosing a profile
+ * are real actions rather than disabled tiles. Nothing here is a security boundary.
  */
 export interface Profile {
+  /** Stable within this device, so a rename does not reselect somebody else. */
+  readonly id: string;
   /** The name shown under the avatar. */
   readonly name: string;
-  /** The avatar's hue, 0-359; derived from the name when one is chosen. */
+  /** The avatar's hue, 0-359; derived from the name when it is created. */
   readonly hue: number;
 }
 
-const KEY = "peregrine.profile";
+/** Every profile on this device, and which one is watching. */
+export interface ProfileBook {
+  readonly profiles: readonly Profile[];
+  readonly activeId: string;
+}
+
+const KEY = "peregrine.profiles";
+const LEGACY_KEY = "peregrine.profile";
 
 /** The profile a fresh install starts with. */
-export const DEFAULT_PROFILE: Profile = { name: "You", hue: 212 };
+export const DEFAULT_PROFILE: Profile = { id: "you", name: "You", hue: 212 };
+
+/** The book a fresh install starts with. */
+export const DEFAULT_BOOK: ProfileBook = {
+  profiles: [DEFAULT_PROFILE],
+  activeId: DEFAULT_PROFILE.id,
+};
 
 /** A hue derived from the name, so the same name always draws the same avatar. */
 export function hueFor(name: string): number {
   let hash = 0;
   for (const character of name) {
-    hash = (hash * 31 + character.codePointAt(0)!) % 360;
+    hash = (hash * 31 + (character.codePointAt(0) ?? 0)) % 360;
   }
   return hash;
 }
@@ -35,10 +49,19 @@ export function initialsFor(name: string): string {
   return (first + second).toUpperCase();
 }
 
-function valid(value: unknown): value is Profile {
+/** A new profile for a name, with an id that is stable for the life of this device. */
+export function newProfile(name: string): Profile {
+  const id =
+    typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `profile-${String(Date.now())}`;
+  return { id, name: name.trim(), hue: hueFor(name) };
+}
+
+function validProfile(value: unknown): value is Profile {
   if (typeof value !== "object" || value === null) return false;
-  const { name, hue } = value as Record<string, unknown>;
+  const { id, name, hue } = value as Record<string, unknown>;
   return (
+    typeof id === "string" &&
+    id.length > 0 &&
     typeof name === "string" &&
     name.trim().length > 0 &&
     typeof hue === "number" &&
@@ -47,23 +70,59 @@ function valid(value: unknown): value is Profile {
   );
 }
 
-/** The stored profile, or the default when nothing valid is stored. */
-export function loadProfile(): Profile {
+function validBook(value: unknown): value is ProfileBook {
+  if (typeof value !== "object" || value === null) return false;
+  const { profiles, activeId } = value as Record<string, unknown>;
+  return (
+    Array.isArray(profiles) &&
+    profiles.length > 0 &&
+    profiles.every(validProfile) &&
+    typeof activeId === "string" &&
+    profiles.some((profile) => (profile as Profile).id === activeId)
+  );
+}
+
+/** The stored book, migrating the single-profile value an earlier build wrote. */
+export function loadProfileBook(): ProfileBook {
   try {
     const raw = globalThis.localStorage?.getItem(KEY);
-    if (raw === undefined || raw === null) return DEFAULT_PROFILE;
-    const parsed: unknown = JSON.parse(raw);
-    return valid(parsed) ? parsed : DEFAULT_PROFILE;
+    if (raw !== null && raw !== undefined) {
+      const parsed: unknown = JSON.parse(raw);
+      if (validBook(parsed)) return parsed;
+    }
+    const legacy = globalThis.localStorage?.getItem(LEGACY_KEY);
+    if (legacy !== null && legacy !== undefined) {
+      const parsed: unknown = JSON.parse(legacy);
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        typeof (parsed as Record<string, unknown>).name === "string"
+      ) {
+        const { name, hue } = parsed as { name: string; hue?: number };
+        const profile: Profile = {
+          id: DEFAULT_PROFILE.id,
+          name,
+          hue: typeof hue === "number" ? hue : hueFor(name),
+        };
+        return { profiles: [profile], activeId: profile.id };
+      }
+    }
+    return DEFAULT_BOOK;
   } catch {
-    return DEFAULT_PROFILE;
+    return DEFAULT_BOOK;
   }
 }
 
-/** Stores the profile, ignoring a storage that refuses writes (private mode, a locked device). */
-export function saveProfile(profile: Profile): void {
+/** Stores the book, ignoring a storage that refuses writes. */
+export function saveProfileBook(book: ProfileBook): void {
   try {
-    globalThis.localStorage?.setItem(KEY, JSON.stringify(profile));
+    globalThis.localStorage?.setItem(KEY, JSON.stringify(book));
   } catch {
-    // The selector still works for this session; the next launch starts from the default.
+    // The session still works; the next launch starts from the default.
   }
+}
+
+/** The active profile, falling back to the first when a stored id no longer exists. */
+export function activeProfile(book: ProfileBook): Profile {
+  return book.profiles.find((profile) => profile.id === book.activeId) ?? book.profiles[0]!;
 }

@@ -1,4 +1,4 @@
 export { ProfileAvatar } from "./ProfileAvatar.js";
 export { ProfileSwitcher } from "./ProfileSwitcher.js";
-export { useProfile } from "./useProfile.js";
-export type { Profile } from "./profile.js";
+export { useProfiles } from "./useProfiles.js";
+export type { Profile, ProfileBook } from "./profile.js";

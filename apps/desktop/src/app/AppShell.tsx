@@ -1,6 +1,6 @@
 import { NowPlayingBar } from "@peregrine/player-ui";
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
-import { ProfileAvatar, ProfileSwitcher, useProfile } from "../features/profiles/index.js";
+import { ProfileAvatar, ProfileSwitcher, useProfiles } from "../features/profiles/index.js";
 import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
@@ -87,10 +87,14 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // history, so every screen except the first has somewhere to go back to (`./navigation.js`).
   const [history, setHistory] = useState(() => startHistory(initialRoute));
   const [profileOpen, setProfileOpen] = useState(false);
-  const [profileBackdrop, setProfileBackdrop] = useState<string | null>(null);
-  const { profile } = useProfile();
-  const reportBackdrop = useCallback((url: string | null) => {
-    setProfileBackdrop(url);
+  const [profileBackdrops, setProfileBackdrops] = useState<readonly string[]>([]);
+  const { active, add, book, rename, select } = useProfiles();
+  const reportBackdrops = useCallback((urls: readonly string[]) => {
+    setProfileBackdrops((current) =>
+      current.length === urls.length && current.every((url, index) => url === urls[index])
+        ? current
+        : urls,
+    );
   }, []);
   const route = history.current;
   const navigate = useCallback((next: Route) => {
@@ -302,10 +306,10 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 onClick={() => {
                   setProfileOpen(true);
                 }}
-                profile={profile}
+                profile={active}
               />
               {collapsed ? null : (
-                <span className="truncate text-sm text-text-secondary">{profile.name}</span>
+                <span className="truncate text-sm text-text-secondary">{active.name}</span>
               )}
             </div>
           }
@@ -338,7 +342,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                answers when the URL carries no `type`. */
             <DiscoverScreen
               downloads={marks}
-              onBackdrop={reportBackdrop}
+              onBackdrops={reportBackdrops}
               onNavigate={navigate}
               recentDownloads={downloads.downloads}
               titleKind={route.titleKind}
@@ -362,7 +366,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                     onClick={() => {
                       setProfileOpen(true);
                     }}
-                    profile={profile}
+                    profile={active}
                   />
                 </>
               }
@@ -457,13 +461,17 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />
       <ProfileSwitcher
+        activeId={book.activeId}
+        backdrops={profileBackdrops}
+        onAdd={add}
         onClose={() => {
           setProfileOpen(false);
         }}
-        backdrop={profileBackdrop}
+        onRename={rename}
+        onSelect={select}
         open={profileOpen}
         posters={profilePosters}
-        profile={profile}
+        profiles={book.profiles}
       />
     </div>
   );

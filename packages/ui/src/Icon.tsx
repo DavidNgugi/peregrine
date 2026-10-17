@@ -36,6 +36,13 @@ const PATHS = {
       <rect height="6.5" rx="1.5" width="6.5" x="14" y="14" />
     </>
   ),
+  /** Edit: a pencil, used beside the selected profile. */
+  pencil: (
+    <>
+      <path d="M4 20h4L18.5 9.5a2.8 2.8 0 0 0-4-4L4 16Z" />
+      <path d="m13.5 6.5 4 4" />
+    </>
+  ),
   /** Close: two strokes crossing, which read the same on all three platforms. */
   close: (
     <>

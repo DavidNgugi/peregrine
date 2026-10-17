@@ -128,7 +128,7 @@ export interface DiscoverViewProps {
    * The profile selector draws the same picture at full window, so it reads the hero's answer
    * rather than fetching a second catalogue for decoration.
    */
-  readonly onBackdrop?: ((url: string | null) => void) | undefined;
+  readonly onBackdrops?: ((urls: readonly string[]) => void) | undefined;
   /** A download status per title, so a rail's tiles wear the mark of a transfer in flight. */
   readonly downloads?: DownloadMarks | undefined;
   /**
@@ -283,7 +283,7 @@ export function DiscoverView({
   search,
   onPlay,
   onNavigate,
-  onBackdrop,
+  onBackdrops,
   downloads,
   titleKind,
   onKindChange,
@@ -334,10 +334,13 @@ export function DiscoverView({
 
   // The selector paints the hero's backdrop at full window. Reported from here because this screen
   // already holds the answer, and a second catalogue read for decoration would be a second query.
-  const featuredBackdrop = slides[0]?.backdrop ?? null;
+  const featuredBackdrops = [
+    ...new Set(slides.map((slide) => slide.backdrop).filter((url): url is string => url !== null)),
+  ];
+  const backdropKey = featuredBackdrops.join("|");
   useEffect(() => {
-    onBackdrop?.(featuredBackdrop);
-  }, [featuredBackdrop, onBackdrop]);
+    onBackdrops?.(backdropKey.length === 0 ? [] : backdropKey.split("|"));
+  }, [backdropKey, onBackdrops]);
 
   // The Discover kind filter applies to the two rails this screen owns as well as to the provider
   // ones: a film must not appear under TV shows, and a series must not appear under Films.
@@ -609,7 +612,7 @@ export function DiscoverView({
 /** Discover, wired to the core. */
 export function DiscoverScreen({
   onNavigate,
-  onBackdrop,
+  onBackdrops,
   titleKind,
   trailing,
   downloads,
@@ -617,7 +620,7 @@ export function DiscoverScreen({
 }: {
   readonly onNavigate: (route: Route) => void;
   /** The featured title's backdrop, reported so the profile selector can draw the same picture. */
-  readonly onBackdrop?: (url: string | null) => void;
+  readonly onBackdrops?: (urls: readonly string[]) => void;
   /** The selected type, or `undefined` for **All** — which is also what a bare `/` means. */
   readonly titleKind?: RailKindDto | undefined;
   readonly trailing?: ReactNode;
@@ -637,7 +640,7 @@ export function DiscoverScreen({
   return (
     <DiscoverView
       downloads={downloads}
-      onBackdrop={onBackdrop}
+      onBackdrops={onBackdrops}
       onNavigate={onNavigate}
       titleKind={titleKind}
       {...(recentDownloads === undefined ? {} : { recentDownloads })}
