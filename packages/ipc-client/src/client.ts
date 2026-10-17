@@ -37,6 +37,7 @@ import type {
   ContinueWatchingDto,
   WatchHistoryDto,
   ScheduledDownloadDto,
+  WatchlistEntryDto,
   ProgressReport,
   EpisodeDto,
   SeasonDto,
@@ -303,6 +304,21 @@ export async function continueWatching(): Promise<ContinueWatchingDto[]> {
 /** The account's viewing history, newest first. */
 export async function viewingHistory(limit = 200): Promise<WatchHistoryDto[]> {
   return unwrap(commands.viewingHistory(limit));
+}
+
+/** The account's watchlist, newest first. */
+export async function watchlist(): Promise<WatchlistEntryDto[]> {
+  return unwrap(commands.watchlist());
+}
+
+/** Adds one title to the watchlist. */
+export async function addToWatchlist(titleId: number): Promise<void> {
+  await unwrap(commands.addToWatchlist({ id: titleId }));
+}
+
+/** Removes one title from the watchlist, answering whether it was on it. */
+export async function removeFromWatchlist(titleId: number): Promise<boolean> {
+  return unwrap(commands.removeFromWatchlist({ id: titleId }));
 }
 
 /** Records where the player is in a title or episode. */

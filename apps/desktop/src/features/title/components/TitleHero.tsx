@@ -84,6 +84,10 @@ export interface TitleHeroProps {
   readonly acquiring?: boolean | undefined;
   /** How far the transfer has got, 0-100, while {@link TitleHeroProps.acquiring} is true. */
   readonly acquiringPercent?: number | undefined;
+  /** Adds or removes the title from the watchlist. */
+  readonly onWatchlist?: (() => void) | undefined;
+  /** Whether the title is on the watchlist. */
+  readonly watchlisted?: boolean | undefined;
   /** Schedules the title for its release date, when it has not been released. */
   readonly onSchedule?: (() => void) | undefined;
   /** Whether this title is already scheduled. */
@@ -109,6 +113,8 @@ export function TitleHero({
   acquiringPercent,
   onSchedule,
   scheduled = false,
+  onWatchlist,
+  watchlisted = false,
 }: TitleHeroProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: another title's page has to give the next backdrop
@@ -198,6 +204,11 @@ export function TitleHero({
                 or one whose transfer is running, or whose file is recorded and absent — gets no
                 Download control at all, because a disabled one beside a working Play still reads as an
                 offer to fetch what the user already has. */}
+            {onWatchlist === undefined ? null : (
+              <Button onClick={onWatchlist} variant="secondary">
+                {watchlisted ? t("title.hero.watchlisted") : t("title.hero.watchlist")}
+              </Button>
+            )}
             {upcoming && onSchedule !== undefined ? (
               <Button disabled={scheduled} onClick={onSchedule} variant="secondary">
                 {scheduled ? t("title.hero.scheduled") : t("title.hero.schedule")}

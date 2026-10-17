@@ -605,6 +605,12 @@ export const commands = {
 	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
 	/**  The account's viewing history, newest first. */
 	viewingHistory: (limit: number | null) => typedError<WatchHistoryDto[], AppError_Serialize>(__TAURI_INVOKE("viewing_history", { limit })),
+	/**  The account's watchlist, newest first. */
+	watchlist: () => typedError<WatchlistEntryDto[], AppError_Serialize>(__TAURI_INVOKE("watchlist")),
+	/**  Adds one title to the watchlist. */
+	addToWatchlist: (title: TitleRef) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("add_to_watchlist", { title })),
+	/**  Removes one title from the watchlist. */
+	removeFromWatchlist: (title: TitleRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("remove_from_watchlist", { title })),
 	/**  Reads the managed indexer manager's state. */
 	prowlarrStatus: () => typedError<ProwlarrStatusDto, AppError_Serialize>(__TAURI_INVOKE("prowlarr_status")),
 	/**  Downloads and verifies the pinned Prowlarr pack, and answers the job doing it. */
@@ -2028,6 +2034,20 @@ export type WatchHistoryDto = {
 	percent: number | null,
 	/**  When the row was last written, in Unix milliseconds. */
 	updatedAt: number,
+};
+
+/**  One saved title, as the Discover rail and the title page draw it. */
+export type WatchlistEntryDto = {
+	/**  The title on the list. */
+	titleId: number,
+	/**  The title's display name, when the library can answer it. */
+	title: string | null,
+	/**  Where the cached poster is, when the cache holds one. */
+	poster: string | null,
+	/**  Which of the two the title is, so a card links to the right route. */
+	kind: DownloadTitleKind | null,
+	/**  When it was added, in Unix milliseconds. */
+	addedAt: number,
 };
 
 /* Tauri Specta runtime */

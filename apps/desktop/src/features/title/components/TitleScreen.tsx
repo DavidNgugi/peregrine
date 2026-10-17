@@ -70,6 +70,10 @@ interface TitleScreenProps {
   readonly acquire?: AcquireControl;
   /** A download status per title, forwarded to the feed's tiles. */
   readonly downloads?: DownloadMarks | undefined;
+  /** Whether this title is on the watchlist. */
+  readonly watchlisted?: boolean | undefined;
+  /** Adds or removes this title from the watchlist. */
+  readonly onWatchlist?: (() => void) | undefined;
   /** The shell's back control, present only when there is somewhere behind this screen. */
   readonly onBack?: (() => void) | undefined;
   readonly backLabel?: string | undefined;
@@ -103,6 +107,8 @@ export function TitleScreen({
   acquire,
   onNavigate,
   downloads,
+  watchlisted = false,
+  onWatchlist,
   onBack,
   backLabel,
 }: TitleScreenProps): ReactElement {
@@ -175,6 +181,8 @@ export function TitleScreen({
                 acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
               }
               scheduled={scheduled.has("t")}
+              onWatchlist={onWatchlist}
+              watchlisted={watchlisted}
               {...(detail.released === null
                 ? {}
                 : {

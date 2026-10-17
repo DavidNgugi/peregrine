@@ -204,6 +204,65 @@ async fn history_of(
     history
 }
 
+/// One saved title, as the Discover rail and the title page draw it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchlistEntryDto {
+    /// The title on the list.
+    #[specta(type = Number)]
+    pub title_id: i64,
+    /// The title's display name, when the library can answer it.
+    pub title: Option<String>,
+    /// Where the cached poster is, when the cache holds one.
+    pub poster: Option<String>,
+    /// Which of the two the title is, so a card links to the right route.
+    pub kind: Option<DownloadTitleKind>,
+    /// When it was added, in Unix milliseconds.
+    #[specta(type = Number)]
+    pub added_at: i64,
+}
+
+/// The account's watchlist, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn watchlist(state: State<'_, RuntimeState>) -> Result<Vec<WatchlistEntryDto>, AppError> {
+    let runtime = state.runtime()?;
+    let rows = runtime.watchlist().await?;
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (title, poster, kind) = title_art(runtime, row.entry.title_id).await;
+        entries.push(WatchlistEntryDto {
+            title_id: row.entry.title_id,
+            title,
+            poster,
+            kind,
+            added_at: row.entry.added_at.as_millisecond(),
+        });
+    }
+    Ok(guard_response("watch::watchlist", entries))
+}
+
+/// Adds one title to the watchlist.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_to_watchlist(
+    state: State<'_, RuntimeState>,
+    title: crate::library::TitleRef,
+) -> Result<(), AppError> {
+    state.runtime()?.add_to_watchlist(title.id).await?;
+    Ok(())
+}
+
+/// Removes one title from the watchlist.
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_from_watchlist(
+    state: State<'_, RuntimeState>,
+    title: crate::library::TitleRef,
+) -> Result<bool, AppError> {
+    Ok(state.runtime()?.remove_from_watchlist(title.id).await?)
+}
+
 /// Records where the player is in a title or episode.
 #[tauri::command]
 #[specta::specta]

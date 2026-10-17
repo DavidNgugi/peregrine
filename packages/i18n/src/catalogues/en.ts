@@ -222,6 +222,7 @@ export const en = {
         topRatedShows: "Top rated series",
         recentDownloads: "Recent Downloads",
         continueWatching: "Continue Watching",
+        watchlist: "My list",
         unknown: "More to watch",
         empty: {
           title: "Nothing in this rail yet",
@@ -435,6 +436,8 @@ export const en = {
         schedule: "Schedule",
         scheduled: "Scheduled",
         releases: "Releases {{date}}",
+        watchlist: "Add to watchlist",
+        watchlisted: "In watchlist",
         seasons: "{{count}} season",
         seasons_other: "{{count}} seasons",
         episodes: "{{count}} episode",

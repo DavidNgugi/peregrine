@@ -3285,6 +3285,45 @@ impl Runtime {
             .await?)
     }
 
+    /// Adds a title to the account's watchlist, or refreshes the row that is already there.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the write fails.
+    pub async fn add_to_watchlist(&self, title_id: i64) -> Result<(), RuntimeError> {
+        let entry = peregrine_domain::WatchlistEntry::new(
+            installation_scope().account(),
+            title_id,
+            self.clock.now(),
+        );
+        self.database.add_to_watchlist(entry).await?;
+        Ok(())
+    }
+
+    /// Removes a title from the watchlist, answering whether it was on it.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the delete fails.
+    pub async fn remove_from_watchlist(&self, title_id: i64) -> Result<bool, RuntimeError> {
+        Ok(self
+            .database
+            .remove_from_watchlist(installation_scope().account(), title_id)
+            .await?)
+    }
+
+    /// The account's watchlist, newest first.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn watchlist(&self) -> Result<Vec<peregrine_storage::WatchlistRow>, RuntimeError> {
+        Ok(self
+            .database
+            .list_watchlist(installation_scope(), PageRequest::first(200))
+            .await?)
+    }
+
     /// One title's per-episode watch state, which the season list draws.
     ///
     /// # Errors
