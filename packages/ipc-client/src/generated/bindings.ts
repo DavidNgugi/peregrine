@@ -731,6 +731,8 @@ export type ContinueWatchingDto = {
 	title: string | null,
 	/**  Where the cached poster is, when the cache holds one (AGENTS R11 keeps it a path). */
 	poster: string | null,
+	/**  Which of the two the title is, so the rail can honour the Discover filter. */
+	kind: DownloadTitleKind | null,
 	/**  The episode, for a series; `null` for a film or a whole-title row. */
 	episodeId: number | null,
 	/**  Where the account left off, in milliseconds. */

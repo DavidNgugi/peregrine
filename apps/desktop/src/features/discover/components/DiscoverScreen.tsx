@@ -328,11 +328,18 @@ export function DiscoverView({
     playable: item.playable,
   }));
 
-  const watching = continueWatching?.rows ?? [];
+  // The Discover kind filter applies to the two rails this screen owns as well as to the provider
+  // ones: a film must not appear under TV shows, and a series must not appear under Films.
+  // undefined is All, which admits both.
+  const watching = (continueWatching?.rows ?? []).filter(
+    (row) => titleKind === undefined || row.kind === titleKind,
+  );
   // In-progress ahead of completed, each group in the queue's own newest-first order. Two filter
   // passes rather than a sort: the partition is the rule, and a comparator would make it depend on
   // the engine's sort stability.
-  const queue = recentDownloads ?? [];
+  const queue = (recentDownloads ?? []).filter(
+    (row) => titleKind === undefined || row.titleKind === titleKind,
+  );
   const recent = [
     ...queue.filter((row) => downloadStatusOf(row.state) === "active"),
     ...queue.filter((row) => downloadStatusOf(row.state) === "done"),

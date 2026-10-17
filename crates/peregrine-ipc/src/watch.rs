@@ -10,6 +10,7 @@ use specta::Type;
 use specta_typescript::Number;
 use tauri::State;
 
+use crate::downloads::DownloadTitleKind;
 use crate::error::AppError;
 use crate::guard::guard_response;
 use crate::runtime::RuntimeState;
@@ -25,6 +26,8 @@ pub struct ContinueWatchingDto {
     pub title: Option<String>,
     /// Where the cached poster is, when the cache holds one (AGENTS R11 keeps it a path).
     pub poster: Option<String>,
+    /// Which of the two the title is, so the rail can honour the Discover filter.
+    pub kind: Option<DownloadTitleKind>,
     /// The episode, for a series; `null` for a film or a whole-title row.
     #[specta(type = Option<Number>)]
     pub episode_id: Option<i64>,
@@ -43,12 +46,18 @@ pub struct ContinueWatchingDto {
 
 impl ContinueWatchingDto {
     /// The row, plus what this read could resolve about its title.
-    fn of(row: WatchProgressRow, title: Option<String>, poster: Option<String>) -> Self {
+    fn of(
+        row: WatchProgressRow,
+        title: Option<String>,
+        poster: Option<String>,
+        kind: Option<DownloadTitleKind>,
+    ) -> Self {
         let progress = row.progress;
         Self {
             title_id: progress.title_id(),
             title,
             poster,
+            kind,
             episode_id: progress.episode_id(),
             position_ms: progress.position_ms(),
             duration_ms: progress.duration_ms(),
@@ -86,16 +95,20 @@ pub struct ProgressReport {
 async fn title_art(
     runtime: &peregrine_app::runtime::Runtime,
     title_id: i64,
-) -> (Option<String>, Option<String>) {
+) -> (Option<String>, Option<String>, Option<DownloadTitleKind>) {
     match runtime.library_title(title_id).await {
-        Ok(Some(detail)) => (
-            Some(detail.entry.row.title.name),
-            detail
-                .entry
-                .poster
-                .map(|path| path.to_string_lossy().into_owned()),
-        ),
-        _ => (None, None),
+        Ok(Some(detail)) => {
+            let kind = match detail.entry.row.title.kind {
+                peregrine_app::TitleKind::Movie => DownloadTitleKind::Movie,
+                peregrine_app::TitleKind::Show => DownloadTitleKind::Show,
+            };
+            (
+                Some(detail.entry.row.title.name),
+                crate::library::artwork_text(detail.entry.poster.as_deref()),
+                Some(kind),
+            )
+        }
+        _ => (None, None, None),
     }
 }
 
@@ -109,8 +122,8 @@ pub async fn continue_watching(
     let rows = runtime.continue_watching().await?;
     let mut watching = Vec::with_capacity(rows.len());
     for row in rows {
-        let (title, poster) = title_art(runtime, row.progress.title_id()).await;
-        watching.push(ContinueWatchingDto::of(row, title, poster));
+        let (title, poster, kind) = title_art(runtime, row.progress.title_id()).await;
+        watching.push(ContinueWatchingDto::of(row, title, poster, kind));
     }
     Ok(guard_response("watch::continue_watching", watching))
 }

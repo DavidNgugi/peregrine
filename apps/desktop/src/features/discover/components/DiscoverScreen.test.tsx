@@ -124,7 +124,10 @@ function download(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
 }
 
 /** The view with a download queue, for the Recent Downloads rail. */
-function withRecent(recent: readonly DownloadJobDto[]): string {
+function withRecent(
+  recent: readonly DownloadJobDto[],
+  titleKind?: DiscoverViewProps["titleKind"],
+): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <DiscoverView
@@ -133,6 +136,7 @@ function withRecent(recent: readonly DownloadJobDto[]): string {
         rails={railsView()}
         recentDownloads={recent}
         search={{ ...NO_SEARCH }}
+        titleKind={titleKind}
       />
     </I18nextProvider>,
   );
@@ -157,6 +161,16 @@ describe("Recent Downloads", () => {
   it("marks a completed download with the green top edge", () => {
     const html = withRecent([download({ title: "Finished", state: "completed" })]);
     expect(html).toContain("bg-state-ok");
+  });
+
+  it("honours the Films / TV shows filter", () => {
+    const movie = download({ title: "A Film", titleKind: "movie" });
+    const show = download({ id: 2, titleId: 9, title: "A Series", titleKind: "show" });
+    // A film must not appear under TV shows, and a series must not appear under Films.
+    expect(withRecent([movie], "show")).not.toContain("Recent Downloads");
+    expect(withRecent([show], "movie")).not.toContain("Recent Downloads");
+    expect(withRecent([movie], "movie")).toContain("Recent Downloads");
+    expect(withRecent([show], "show")).toContain("Recent Downloads");
   });
 });
 
