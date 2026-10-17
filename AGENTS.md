@@ -103,6 +103,7 @@ pnpm test                    # frontend unit tests
 pnpm test:e2e                # Playwright flows
 pnpm gallery                 # the component gallery, in a browser, in both themes
 pnpm check-dead-deps         # unused frontend dependencies (needs pnpm install)
+pnpm clean:cache             # remove target/ build output only; ~/.cargo, the pnpm store, and vendor/cache stay
 cargo xtask check-arch       # dependency rules
 cargo xtask check-determinism # no wall clock or randomness outside an adapter crate
 cargo xtask check-migrations # migration immutability
