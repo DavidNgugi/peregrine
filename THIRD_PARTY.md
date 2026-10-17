@@ -481,7 +481,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `rustc-hash` | 2.1.3 |
 | `rustc_version` | 0.4.1 |
 | `rustix` | 1.1.5 |
-| `rustls` | 0.23.45 |
+| `rustls` | 0.23.46 |
 | `rustls-native-certs` | 0.8.4 |
 | `rustls-pki-types` | 1.15.1 |
 | `rustls-platform-verifier` | 0.7.1 |
