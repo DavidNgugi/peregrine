@@ -29,6 +29,23 @@ After that, a headless server with a browser client, installable with Docker or 
 
 Peregrine hosts and distributes nothing. The indexers it searches are examples or sources you configure yourself, and what you download and keep is your responsibility. It is not a streaming site, and it is not a headless server yet.
 
+## Why Peregrine
+
+Self-hosted media is usually five services: an indexer manager, a film manager, a series manager, a torrent client, and a media server, each with its own configuration. Wrapper dashboards put one interface over all five. Peregrine replaces the path itself: the torrent engine, the library, and the player live in the app. The only external service is Prowlarr, which the app can install and run for you, or you can point it at one you already have.
+
+| | Peregrine | *arr + Jellyfin | Wrapper dashboard | Streaming add-on |
+| --- | --- | --- | --- | --- |
+| What you install | one desktop app | five services | five services plus a UI | a player plus an add-on |
+| Config surfaces | one setup flow, in progress | one per service | one per service | an add-on URL and an account |
+| Torrent engine | in the app | a separate client | a separate client | external |
+| Player | in the app | Jellyfin or another | Jellyfin or another | external |
+| Play while downloading | yes | no | no | yes, without keeping the file |
+| Keeps the file, works offline | yes | yes | yes | no |
+
+The wins worth stating: a native app rather than a web console; one configuration surface rather than five; an engine and a player that can coordinate, which is what makes play-while-downloading possible; and an inspection before any byte is written.
+
+The honest limits: Peregrine is early, macOS-only, and has no installer yet, while the stacks above have years of maturity. The first-run setup that would make the one-configuration-surface claim true is not built, and today the app still wants a provider key and `mpv` on the path.
+
 ## Build from source
 
 Prerequisites: Rust 1.95 or newer, Node 22 or newer, pnpm, and `mpv` on your `PATH` (`brew install mpv` on macOS). `ffprobe` is used for probing when present.
