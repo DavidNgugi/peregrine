@@ -21,11 +21,11 @@ version = 2
 # An advisory is a build failure, not a warning. A known-vulnerable dependency is
 # not something to ship and note later.
 yanked = "deny"
-# Two unmaintained-crate advisories are accepted, and both are compile-time only:
-# a proc-macro expands into our code and is not present in the shipped binary, so
-# neither can carry a runtime defect into a release. They are ignored by exact
-# advisory id rather than by turning the `unmaintained` class off, because a
-# *third* unmaintained crate — especially a runtime one — must still fail here.
+# Three advisories are accepted. Two are unmaintained proc-macros that expand
+# into our code and are absent from the shipped binary. The third is a
+# vulnerability that cannot be reached in this build. They are ignored by exact
+# advisory id rather than by turning a class off, because any *other* advisory
+# of the same class must still fail here.
 ignore = [
   # `paste` arrives through `specta`, which is pinned at 2.0.0-rc.25 and is the
   # IPC type pipeline itself (PG-E0-06). No safe upgrade exists and there is no
@@ -35,6 +35,11 @@ ignore = [
   # only on the Linux GTK stack, and again only as proc-macros. Both are upstream
   # Tauri-stack crates we cannot substitute.
   { id = "RUSTSEC-2024-0370", reason = "proc-macro through the Linux-only glib/gtk3 macros; compile-time only (DEPENDENCIES §7)" },
+  # `ringbuf` 0.4 arrives only through `librqbit-utp`, which stores `u8` in a
+  # `SharedRb<Heap<u8>>`. RUSTSEC-2026-0293 is a double free when a buffered
+  # element's `Drop` panics, and `u8` has no `Drop`. No release of
+  # `librqbit-utp` accepts `ringbuf` 0.5, so the fixed version cannot be chosen.
+  { id = "RUSTSEC-2026-0293", reason = "unreachable: librqbit-utp buffers u8, whose Drop cannot panic, and no librqbit-utp release allows ringbuf 0.5" },
 ]
 
 [licenses]
