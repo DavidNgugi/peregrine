@@ -58,7 +58,12 @@ const SHIPPED_ROOT: &str = "peregrine-desktop";
 /// (AGENTS R25, `docs/adr/0009`), and each is one `docs/DEPENDENCIES.md` §5 has
 /// reviewed; a new one is a deliberate change to that document and to this list.
 /// GPL-3.0-or-later is Prowlarr, the on-demand indexer manager (`docs/adr/0024`).
-const SIDECAR_LICENCES: [&str; 3] = ["GPL-2.0-or-later", "GPL-3.0-or-later", "LGPL-2.1-or-later"];
+const SIDECAR_LICENCES: [&str; 4] = [
+    "GPL-2.0-or-later",
+    "GPL-3.0-or-later",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-or-later",
+];
 
 /// The version value meaning `docs/DEPENDENCIES.md` §1's rule: the release
 /// records the exact version and SHA-256 for each platform. It is a pin, not a

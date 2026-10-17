@@ -10,25 +10,25 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ### mpv
 
-- **Licence:** GPL-2.0-or-later
+- **Licence:** GPL-3.0-or-later
 - **Version pin:** pinned per OS; the exact version and SHA-256 for each platform are recorded by the release bundling work (`docs/DEPENDENCIES.md` §1)
 - **Upstream source:** https://github.com/mpv-player/mpv
 - **Written offer of corresponding source:** Written offer: the complete corresponding source for the exact binary shipped, with the recorded build configuration and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases
-- **Why it is a separate executable:** GPL-2.0-or-later, so linking it would put copyleft code inside our binary (docs/adr/0009). An LGPL-only build is not an escape: it disables Linux X11 video output (docs/adr/0013).
-- **Build configuration:** Upstream release build, unpatched unless a patch is recorded with the pin. The exact meson configuration and any carried patch are recorded per OS beside the pinned version by the release bundling work (docs/DEPENDENCIES.md §5).
+- **Why it is a separate executable:** GPL copyleft, so linking it would put that code inside our binary (docs/adr/0009). An LGPL-only build is not an escape: it disables Linux X11 video output (docs/adr/0013). The official macOS and Windows builds are GPL-3.0 as shipped because they embed FFmpeg built with --enable-gpl --enable-version3.
+- **Build configuration:** macOS and Windows: the official upstream release build, unpatched, pinned by asset and SHA-256 in packaging/sidecars.lock.json. Linux: built in CI from mpv-build at the pinned commit in a digest-pinned Ubuntu image. The source offer names the mpv commit, the FFmpeg source embedded in the official builds, and the meson configuration (docs/adr/0025).
 
 ### ffmpeg
 
-- **Licence:** LGPL-2.1-or-later
+- **Licence:** LGPL-3.0-or-later
 - **Version pin:** pinned per OS; the exact version and SHA-256 for each platform are recorded by the release bundling work (`docs/DEPENDENCIES.md` §1)
 - **Upstream source:** https://github.com/FFmpeg/FFmpeg
 - **Written offer of corresponding source:** Written offer: the complete corresponding source for the exact binary shipped, with the recorded `configure` line and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases
-- **Why it is a separate executable:** LGPL-2.1-or-later, so linking libav* would put copyleft code inside our binary (docs/adr/0009). Running it as a subprocess also gives crash isolation for codecs we do not control.
-- **Build configuration:** Built LGPL-only: no `--enable-gpl`, `--enable-nonfree`, or `--enable-version3` (docs/adr/0014). The exact `configure` line and any `git diff` ship beside the pinned version. Distributed as an on-demand component pack, not in the base install.
+- **Why it is a separate executable:** LGPL, so linking libav* would put copyleft code inside our binary (docs/adr/0009). Running it as a subprocess also gives crash isolation for codecs we do not control.
+- **Build configuration:** LGPL-only: no `--enable-gpl` and no `--enable-nonfree`. `--enable-version3` is accepted, so the licence is LGPL-3.0-or-later on every platform (docs/adr/0025). Windows and Linux are pinned BtbN LGPL builds; macOS is built in CI. The exact `configure` line and any `git diff` ship beside the pinned version. Distributed as an on-demand component pack, not in the base install.
 
 ### ffprobe
 
-- **Licence:** LGPL-2.1-or-later
+- **Licence:** LGPL-3.0-or-later
 - **Version pin:** pinned per OS; the exact version and SHA-256 for each platform are recorded by the release bundling work (`docs/DEPENDENCIES.md` §1)
 - **Upstream source:** https://github.com/FFmpeg/FFmpeg
 - **Written offer of corresponding source:** Written offer: the complete corresponding source for the exact binary shipped, with the recorded `configure` line and any patch we carry, is published on the same distribution channel as the binary at https://github.com/peregrine-app/peregrine/releases
