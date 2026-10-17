@@ -457,6 +457,8 @@ mod tests {
             path
         }
 
+        /// Used only by the unix permission tests; dead code on Windows is an error there.
+        #[cfg(unix)]
         fn directory(&self, relative: &str) -> PathBuf {
             let path = self.root.join(relative);
             fs::create_dir_all(&path).unwrap();
