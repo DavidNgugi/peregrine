@@ -493,8 +493,13 @@ mod tests {
     }
 
     fn relative(root: &Path, path: &Path) -> String {
-        path.strip_prefix(root)
-            .unwrap_or(path)
+        // The scan canonicalises what it walks, and on Windows a temporary directory's short name
+        // (RUNNER~1) is not the long one canonicalisation returns; compare under one spelling.
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        canonical_path
+            .strip_prefix(&canonical_root)
+            .unwrap_or(&canonical_path)
             .to_string_lossy()
             .into_owned()
     }

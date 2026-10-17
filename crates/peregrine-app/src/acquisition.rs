@@ -1525,7 +1525,8 @@ mod tests {
 
         // The resolved destination is what the row holds, not the relative text the caller sent.
         assert!(
-            started.job.save_path.as_str().ends_with("downloads/Movies"),
+            std::path::Path::new(started.job.save_path.as_str())
+                .ends_with(std::path::Path::new("downloads").join("Movies")),
             "the row holds the guarded absolute path, found {}",
             started.job.save_path.as_str()
         );
