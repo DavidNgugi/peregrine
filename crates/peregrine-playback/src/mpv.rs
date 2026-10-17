@@ -33,6 +33,9 @@ const HARDENED: &[&str] = &[
     "--media-controls=no",
     // The app's own watch progress is the resume rule; mpv's watch_later must not override it.
     "--no-resume-playback",
+    // A fresh child starts audible whatever a previous session did with the mute key.
+    "--volume=100",
+    "--mute=no",
 ];
 
 /// The variables a window needs, and nothing else, for the same reason the flags are fixed.
@@ -213,6 +216,8 @@ mod tests {
             "--input-media-keys=no",
             "--media-controls=no",
             "--no-resume-playback",
+            "--volume=100",
+            "--mute=no",
         ] {
             assert!(
                 args.iter().any(|arg| arg.to_string_lossy() == flag),
