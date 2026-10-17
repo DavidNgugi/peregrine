@@ -127,13 +127,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/setup@v3
         with:
-          version: 11
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
+          runtime: node@24
+          cache: true
       - name: Install (lockfile is authoritative)
         run: pnpm install --frozen-lockfile
       - name: Build every package
@@ -179,13 +176,10 @@ jobs:
             echo "::error::the advisory fixture passed, so the gate no longer detects advisories"
             exit 1
           fi
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/setup@v3
         with:
-          version: 11
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
+          runtime: node@24
+          cache: true
       - run: pnpm install --frozen-lockfile
       - name: Audit frontend dependencies
         run: pnpm audit --audit-level high
