@@ -2,7 +2,9 @@ import { IconButton } from "@peregrine/ui";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
-import { initialsFor, type Profile } from "./profile.js";
+import { ProfileEditor } from "./ProfileEditor.js";
+import { ProfileImage } from "./ProfileImage.js";
+import type { Avatar, Profile } from "./profile.js";
 
 export interface ProfileSwitcherProps {
   readonly open: boolean;
@@ -13,18 +15,20 @@ export interface ProfileSwitcherProps {
   /** Poster URLs, used only when no backdrop has been reported yet. */
   readonly posters: readonly string[];
   readonly onSelect: (id: string) => void;
-  readonly onAdd: (name: string) => void;
-  readonly onRename: (id: string, name: string) => void;
+  readonly onAdd: (name: string, avatar: Avatar) => void;
+  readonly onRename: (id: string, name: string, avatar: Avatar) => void;
   readonly onClose: () => void;
 }
+
+type Editing = { readonly mode: "create" } | { readonly mode: "edit"; readonly id: string };
 
 /**
  * The "who's watching" screen.
  *
  * A television selector: one full-window backdrop that crossfades between the featured titles, a
  * narrow avatar rail bleeding over its left edge, the focused profile ringed with its name beside
- * it, and a pencil for renaming. Choosing an avatar enters that profile; there is no Done button,
- * because choosing one is the exit.
+ * it, and a pencil that opens the editor. Choosing an avatar enters that profile; choosing is the
+ * exit.
  */
 export function ProfileSwitcher({
   open,
@@ -39,17 +43,13 @@ export function ProfileSwitcher({
 }: ProfileSwitcherProps): ReactElement | null {
   const { t } = useTranslation();
   const [index, setIndex] = useState(0);
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
+  const [editing, setEditing] = useState<Editing | null>(null);
   const avatarRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const images = backdrops.length > 0 ? backdrops : posters.length > 0 ? [posters[0]!] : [];
 
   useEffect(() => {
     if (!open) {
-      setAdding(false);
       setEditing(null);
       setIndex(0);
       return;
@@ -70,37 +70,19 @@ export function ProfileSwitcher({
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || editing !== null) return;
       event.preventDefault();
-      if (editing !== null) {
-        setEditing(null);
-      } else if (adding) {
-        setAdding(false);
-        setDraft("");
-      } else {
-        onClose();
-      }
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
     };
-  }, [adding, editing, onClose, open]);
+  }, [editing, onClose, open]);
 
   if (!open) return null;
 
-  const submitAdd = (): void => {
-    if (draft.trim().length === 0) return;
-    onAdd(draft);
-    setDraft("");
-    setAdding(false);
-  };
-
-  const submitRename = (id: string): void => {
-    if (editDraft.trim().length === 0) return;
-    onRename(id, editDraft);
-    setEditing(null);
-  };
+  const edited = editing?.mode === "edit" ? profiles.find((p) => p.id === editing.id) : undefined;
 
   return (
     <div
@@ -139,7 +121,7 @@ export function ProfileSwitcher({
                   <button
                     aria-current={current}
                     aria-label={profile.name}
-                    className={`grid size-14 shrink-0 place-items-center rounded-md text-xl font-semibold outline-none transition-transform hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none motion-reduce:hover:scale-100 ${
+                    className={`shrink-0 rounded-md outline-none transition-transform hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none motion-reduce:hover:scale-100 ${
                       current ? "ring-2 ring-white" : "ring-1 ring-white/15"
                     }`}
                     onClick={() => {
@@ -150,53 +132,26 @@ export function ProfileSwitcher({
                       if (node === null) avatarRefs.current.delete(profile.id);
                       else avatarRefs.current.set(profile.id, node);
                     }}
-                    style={{ backgroundColor: `hsl(${String(profile.hue)} 52% 42%)` }}
                     type="button"
                   >
-                    {initialsFor(profile.name)}
+                    <ProfileImage profile={profile} size={56} />
                   </button>
-                  {editing === profile.id ? (
-                    <form
-                      className="flex items-center gap-1"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        submitRename(profile.id);
+                  <span
+                    className={`min-w-0 flex-1 truncate text-sm ${current ? "font-medium text-white" : "text-white/60"}`}
+                  >
+                    {profile.name}
+                  </span>
+                  {current ? (
+                    <IconButton
+                      className="text-white/60 hover:text-white"
+                      icon="pencil"
+                      label={t("profile.edit")}
+                      onClick={() => {
+                        setEditing({ mode: "edit", id: profile.id });
                       }}
-                    >
-                      <input
-                        autoFocus
-                        className="w-28 rounded-sm border border-white/25 bg-black/40 px-2 py-1 text-sm text-white outline-none focus:border-white/60"
-                        onChange={(event) => {
-                          setEditDraft(event.target.value);
-                        }}
-                        value={editDraft}
-                      />
-                      <button className="text-xs text-white/80 hover:text-white" type="submit">
-                        {t("profile.save")}
-                      </button>
-                    </form>
-                  ) : (
-                    <>
-                      <span
-                        className={`text-sm ${current ? "font-medium text-white" : "text-white/60"}`}
-                      >
-                        {profile.name}
-                      </span>
-                      {current ? (
-                        <IconButton
-                          className="text-white/60 hover:text-white"
-                          icon="pencil"
-                          label={t("profile.edit")}
-                          onClick={() => {
-                            setEditing(profile.id);
-                            setEditDraft(profile.name);
-                          }}
-                          size="sm"
-                          variant="ghost"
-                        />
-                      ) : null}
-                    </>
-                  )}
+                      variant="ghost"
+                    />
+                  ) : null}
                 </li>
               );
             })}
@@ -205,44 +160,34 @@ export function ProfileSwitcher({
                 aria-label={t("profile.add")}
                 className="grid size-14 shrink-0 place-items-center rounded-md border border-white/25 bg-black/20 text-2xl text-white/45 outline-none transition-colors hover:border-white/50 hover:text-white focus-visible:ring-2 focus-visible:ring-white"
                 onClick={() => {
-                  setAdding(true);
-                  setDraft("");
+                  setEditing({ mode: "create" });
                 }}
                 type="button"
               >
                 +
               </button>
-              {adding ? (
-                <form
-                  className="flex items-center gap-1"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    submitAdd();
-                  }}
-                >
-                  <input
-                    autoFocus
-                    className="w-28 rounded-sm border border-white/25 bg-black/40 px-2 py-1 text-sm text-white outline-none focus:border-white/60"
-                    onChange={(event) => {
-                      setDraft(event.target.value);
-                    }}
-                    placeholder={t("profile.name")}
-                    value={draft}
-                  />
-                  <button className="text-xs text-white/80 hover:text-white" type="submit">
-                    {t("profile.create")}
-                  </button>
-                </form>
-              ) : (
-                <span className="max-w-[7rem] text-[11px] leading-snug text-white/45">
-                  {t("profile.local")}
-                </span>
-              )}
+              <span className="max-w-[7rem] text-[11px] leading-snug text-white/45">
+                {t("profile.local")}
+              </span>
             </li>
           </ul>
         </aside>
         <div className="min-w-0 flex-1" />
       </div>
+
+      <ProfileEditor
+        mode={editing?.mode ?? "create"}
+        onClose={() => {
+          setEditing(null);
+        }}
+        onSave={(name, avatar) => {
+          if (editing?.mode === "edit") onRename(editing.id, name, avatar);
+          else onAdd(name, avatar);
+          setEditing(null);
+        }}
+        open={editing !== null}
+        profile={edited}
+      />
     </div>
   );
 }

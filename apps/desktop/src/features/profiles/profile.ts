@@ -1,17 +1,45 @@
+import { createAvatar } from "@dicebear/core";
+import {
+  adventurer,
+  bottts,
+  funEmoji,
+  initials,
+  lorelei,
+  notionists,
+  shapes,
+  thumbs,
+} from "@dicebear/collection";
+
 /**
  * The profiles this build has.
  *
- * Names and colours only: accounts, per-profile content, and parental gating are Phase 8 (ADR 0019).
- * Until that backend exists this is a device-local list so adding, renaming, and choosing a profile
- * are real actions rather than disabled tiles. Nothing here is a security boundary.
+ * Names, colours, and avatars only: accounts, per-profile content, and parental gating are Phase 8
+ * (ADR 0019). Until that backend exists this is a device-local list so adding, renaming, choosing an
+ * avatar, and choosing a profile are real actions. Nothing here is a security boundary.
  */
+export type AvatarStyle =
+  | "initials"
+  | "thumbs"
+  | "bottts"
+  | "funEmoji"
+  | "notionists"
+  | "adventurer"
+  | "lorelei"
+  | "shapes";
+
+/** Where a profile's picture comes from. */
+export type Avatar =
+  | { readonly kind: "dicebear"; readonly style: AvatarStyle; readonly seed: string }
+  | { readonly kind: "upload"; readonly dataUrl: string };
+
 export interface Profile {
   /** Stable within this device, so a rename does not reselect somebody else. */
   readonly id: string;
   /** The name shown under the avatar. */
   readonly name: string;
-  /** The avatar's hue, 0-359; derived from the name when it is created. */
+  /** A fallback hue, used when a generated avatar cannot be drawn. */
   readonly hue: number;
+  readonly avatar: Avatar;
 }
 
 /** Every profile on this device, and which one is watching. */
@@ -23,8 +51,42 @@ export interface ProfileBook {
 const KEY = "peregrine.profiles";
 const LEGACY_KEY = "peregrine.profile";
 
+/** The DiceBear styles offered, with the labels the editor draws. */
+export const AVATAR_STYLES = {
+  initials: initials,
+  thumbs: thumbs,
+  bottts: bottts,
+  funEmoji: funEmoji,
+  notionists: notionists,
+  adventurer: adventurer,
+  lorelei: lorelei,
+  shapes: shapes,
+} as const;
+
+/** The style keys, in the order the editor draws them. */
+export const AVATAR_STYLE_KEYS = Object.keys(AVATAR_STYLES) as AvatarStyle[];
+
+export const AVATAR_STYLE_LABELS: Readonly<Record<AvatarStyle, string>> = {
+  initials: "Initials",
+  thumbs: "Thumbs",
+  bottts: "Robots",
+  funEmoji: "Faces",
+  notionists: "Sketches",
+  adventurer: "Adventurers",
+  lorelei: "Portraits",
+  shapes: "Shapes",
+};
+
+/** The avatar a fresh profile starts with. */
+export const DEFAULT_AVATAR: Avatar = { kind: "dicebear", style: "initials", seed: "You" };
+
 /** The profile a fresh install starts with. */
-export const DEFAULT_PROFILE: Profile = { id: "you", name: "You", hue: 212 };
+export const DEFAULT_PROFILE: Profile = {
+  id: "you",
+  name: "You",
+  hue: 212,
+  avatar: DEFAULT_AVATAR,
+};
 
 /** The book a fresh install starts with. */
 export const DEFAULT_BOOK: ProfileBook = {
@@ -32,7 +94,7 @@ export const DEFAULT_BOOK: ProfileBook = {
   activeId: DEFAULT_PROFILE.id,
 };
 
-/** A hue derived from the name, so the same name always draws the same avatar. */
+/** A hue derived from the name, so the same name always draws the same fallback colour. */
 export function hueFor(name: string): number {
   let hash = 0;
   for (const character of name) {
@@ -49,11 +111,41 @@ export function initialsFor(name: string): string {
   return (first + second).toUpperCase();
 }
 
+/** The data URI a generated avatar is drawn from. */
+export function avatarUri(avatar: Avatar, size = 128): string {
+  if (avatar.kind === "upload") return avatar.dataUrl;
+  // Each style module has its own option type, so the map's values form a union the generic
+  // cannot infer through. The runtime call is the documented one; only the type needs the cast.
+  return createAvatar(AVATAR_STYLES[avatar.style] as Parameters<typeof createAvatar>[0], {
+    seed: avatar.seed,
+    size,
+    radius: 8,
+  }).toDataUri();
+}
+
 /** A new profile for a name, with an id that is stable for the life of this device. */
-export function newProfile(name: string): Profile {
+export function newProfile(name: string, avatar?: Avatar): Profile {
+  const trimmed = name.trim();
   const id =
     typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `profile-${String(Date.now())}`;
-  return { id, name: name.trim(), hue: hueFor(name) };
+  return {
+    id,
+    name: trimmed,
+    hue: hueFor(trimmed),
+    avatar: avatar ?? { kind: "dicebear", style: "initials", seed: trimmed },
+  };
+}
+
+function validAvatar(value: unknown): value is Avatar {
+  if (typeof value !== "object" || value === null) return false;
+  const { kind, style, seed, dataUrl } = value as Record<string, unknown>;
+  if (kind === "upload") return typeof dataUrl === "string" && dataUrl.startsWith("data:image/");
+  return (
+    kind === "dicebear" &&
+    typeof style === "string" &&
+    AVATAR_STYLE_KEYS.includes(style as AvatarStyle) &&
+    typeof seed === "string"
+  );
 }
 
 function validProfile(value: unknown): value is Profile {
@@ -68,6 +160,13 @@ function validProfile(value: unknown): value is Profile {
     hue >= 0 &&
     hue < 360
   );
+}
+
+/** The profile as stored, with the avatar an earlier build did not have. */
+function withAvatar(value: Profile): Profile {
+  return validAvatar(value.avatar)
+    ? value
+    : { ...value, avatar: { kind: "dicebear", style: "initials", seed: value.name } };
 }
 
 function validBook(value: unknown): value is ProfileBook {
@@ -88,7 +187,12 @@ export function loadProfileBook(): ProfileBook {
     const raw = globalThis.localStorage?.getItem(KEY);
     if (raw !== null && raw !== undefined) {
       const parsed: unknown = JSON.parse(raw);
-      if (validBook(parsed)) return parsed;
+      if (validBook(parsed)) {
+        return {
+          profiles: parsed.profiles.map((profile) => withAvatar(profile)),
+          activeId: parsed.activeId,
+        };
+      }
     }
     const legacy = globalThis.localStorage?.getItem(LEGACY_KEY);
     if (legacy !== null && legacy !== undefined) {
@@ -103,6 +207,7 @@ export function loadProfileBook(): ProfileBook {
           id: DEFAULT_PROFILE.id,
           name,
           hue: typeof hue === "number" ? hue : hueFor(name),
+          avatar: { kind: "dicebear", style: "initials", seed: name },
         };
         return { profiles: [profile], activeId: profile.id };
       }

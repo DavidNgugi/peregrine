@@ -2,9 +2,11 @@ import { useCallback, useState } from "react";
 
 import {
   activeProfile,
+  hueFor,
   loadProfileBook,
   newProfile,
   saveProfileBook,
+  type Avatar,
   type Profile,
   type ProfileBook,
 } from "./profile.js";
@@ -14,8 +16,8 @@ export interface ProfilesState {
   readonly book: ProfileBook;
   readonly active: Profile;
   readonly select: (id: string) => void;
-  readonly add: (name: string) => void;
-  readonly rename: (id: string, name: string) => void;
+  readonly add: (name: string, avatar: Avatar) => void;
+  readonly rename: (id: string, name: string, avatar: Avatar) => void;
 }
 
 export function useProfiles(): ProfilesState {
@@ -28,24 +30,24 @@ export function useProfiles(): ProfilesState {
       return next;
     });
   }, []);
-  const add = useCallback((name: string) => {
+  const add = useCallback((name: string, avatar: Avatar) => {
     const trimmed = name.trim();
     if (trimmed.length === 0) return;
     setBook((current) => {
-      const profile = newProfile(trimmed);
+      const profile = newProfile(trimmed, avatar);
       const next = { profiles: [...current.profiles, profile], activeId: profile.id };
       saveProfileBook(next);
       return next;
     });
   }, []);
-  const rename = useCallback((id: string, name: string) => {
+  const rename = useCallback((id: string, name: string, avatar: Avatar) => {
     const trimmed = name.trim();
     if (trimmed.length === 0) return;
     setBook((current) => {
       const next = {
         ...current,
         profiles: current.profiles.map((profile) =>
-          profile.id === id ? { ...profile, name: trimmed } : profile,
+          profile.id === id ? { ...profile, name: trimmed, hue: hueFor(trimmed), avatar } : profile,
         ),
       };
       saveProfileBook(next);
