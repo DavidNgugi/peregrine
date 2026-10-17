@@ -129,6 +129,7 @@ fn a_directory_where_a_file_is_expected_is_refused_as_not_regular() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlink_is_refused_rather_than_followed() {
     use std::os::unix::fs::symlink;

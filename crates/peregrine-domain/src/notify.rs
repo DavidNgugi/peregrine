@@ -1518,10 +1518,5 @@ mod tests {
                 "{platform:?} must name a sound value"
             );
         }
-        assert_eq!(
-            Platform::current(),
-            Platform::MacOs,
-            "this test host is macOS"
-        );
     }
 }

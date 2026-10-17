@@ -4103,6 +4103,15 @@ mod tests {
             vec!["tmdb"],
             "the injected store is what says a provider is configured"
         );
+        // `Runtime::start` refreshes the registry on a blocking thread. Replacing the adapters
+        // before that lands lets the refresh overwrite them with real ones, which turns a test
+        // into a live provider call; wait for the flag rather than racing it.
+        let mut spins = 0_u32;
+        while !runtime.providers.refreshed() {
+            std::thread::yield_now();
+            spins += 1;
+            assert!(spins < 10_000_000, "the provider registry never refreshed");
+        }
         runtime.providers.use_adapters(vec![adapter]);
         (runtime, sink)
     }
