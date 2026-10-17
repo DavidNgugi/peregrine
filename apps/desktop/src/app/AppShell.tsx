@@ -43,7 +43,7 @@ import {
   navigate as navigateTo,
   startHistory,
 } from "./navigation.js";
-import { ROUTE_FOR_ACTION, routePath, type Route } from "./routes.js";
+import { ROUTE_FOR_ACTION, routePath, type Route, type TitleKind } from "./routes.js";
 import { SCREENS } from "./screens.js";
 import { useFullscreen } from "./useFullscreen.js";
 import { useTheme } from "./useTheme.js";
@@ -242,10 +242,20 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const feed = useTitleFeed(route.kind === "title" ? route.titleKind : "movie", similar);
   // The seasons and the season on screen, asked for by the same route. A film is answered without a
   // request, which is the same short circuit the title read makes.
-  const seasons = useSeasons(
-    route.kind === "title" ? route.id : null,
-    route.kind === "title" ? route.titleKind : "movie",
-  );
+  //
+  // **The kind the *read* answered, once there is one.** The route's spelling is what the page can
+  // say before its read lands, and it is not always right: the player's way back has no kind to go
+  // on and spells "movie", and a download row may carry none. A season read driven by the route
+  // would then never happen for a show — no request, no section, and nothing a reader could retry.
+  const titleKind: TitleKind =
+    title.title === null
+      ? route.kind === "title"
+        ? route.titleKind
+        : "movie"
+      : title.title.kind === "shows"
+        ? "show"
+        : "movie";
+  const seasons = useSeasons(route.kind === "title" ? route.id : null, titleKind, title.refreshes);
   const openScreen = useCallback(
     (action: string) => {
       const target = ROUTE_FOR_ACTION[action];
@@ -317,6 +327,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                `BrowseScreen`. */
             <BrowseScreen
               backLabel={t("shell.back")}
+              downloadRows={downloads.downloads}
               downloads={marks}
               onBack={canBack ? goBack : undefined}
               onNavigate={navigate}

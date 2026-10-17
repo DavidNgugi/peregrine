@@ -281,6 +281,24 @@ export const commands = {
 /**  A series. */
 "show" | null) => typedError<TitleMatchDto[], AppError_Serialize>(__TAURI_INVOKE("search_providers", { query, limit, kind })),
 	/**
+	 *  Searches the configured providers and answers with the poster tiles the Browse grid draws.
+	 * 
+	 *  **The tile-shaped sibling of [`search_providers`].** That one answers identities for a text list;
+	 *  this one answers what a poster needs — the year, the score, the synopsis, and the cached artwork
+	 *  path. Both write what the provider found into the catalogue before answering, and an empty query
+	 *  is an empty result rather than a failure on an empty box.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running, or when a provider or the catalogue fails. A provider
+	 *  that is slow, rate-limited, or unreachable is reported rather than hidden.
+	 */
+	searchTiles: (query: string, limit: number | null, kind: 
+/**  A film. */
+"movie" | 
+/**  A series. */
+"show" | null) => typedError<RailItemDto[], AppError_Serialize>(__TAURI_INVOKE("search_tiles", { query, limit, kind })),
+	/**
 	 *  Every rail the Discover screen draws, from what the catalogue and the cache already hold.
 	 * 
 	 *  **Cache-first, and it never waits for a provider.** The rails were filled by

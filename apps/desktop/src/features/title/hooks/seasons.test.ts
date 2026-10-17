@@ -2,7 +2,7 @@ import type { SeasonDto } from "@peregrine/ipc-client";
 import { createI18n } from "@peregrine/i18n";
 import { describe, expect, it } from "vitest";
 
-import { defaultSeason, episodeAvailability } from "./seasons.js";
+import { defaultSeason, episodeAvailability, seasonAfterRead } from "./seasons.js";
 
 function season(overrides: Partial<SeasonDto> = {}): SeasonDto {
   return {
@@ -38,6 +38,30 @@ describe("defaultSeason", () => {
     // `null` rather than a fabricated season one: the screen draws no section at all, which is the
     // state a show nobody has fetched arrives in.
     expect(defaultSeason([])).toBeNull();
+  });
+});
+
+describe("seasonAfterRead", () => {
+  it("keeps the season on screen when a re-read still holds it", () => {
+    // A refresh landing is not a navigation: the reader may be on season four, and opening the
+    // default would move them back to season one under a heading they were already reading.
+    const seasons = [season({ seasonNumber: 1 }), season({ seasonNumber: 4 })];
+    expect(seasonAfterRead(seasons, 4)).toBe(4);
+  });
+
+  it("falls back to the default when the list no longer holds the season", () => {
+    // A title correction, or a provider that dropped a season: the number on screen answers nothing
+    // now, so the default is the only season there is to show.
+    expect(seasonAfterRead([season({ seasonNumber: 1 })], 4)).toBe(1);
+  });
+
+  it("opens on the default when nothing was on screen", () => {
+    // The first read of a visit, which is also the read after a move to another title: null is not a
+    // season to keep.
+    expect(seasonAfterRead([season({ seasonNumber: 0 }), season({ seasonNumber: 2 })], null)).toBe(
+      2,
+    );
+    expect(seasonAfterRead([], null)).toBeNull();
   });
 });
 

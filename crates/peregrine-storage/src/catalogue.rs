@@ -878,6 +878,36 @@ pub(crate) async fn update_title_metadata(
     Ok(changed)
 }
 
+/// Records that a provider has answered this title's season step, and when.
+///
+/// **A fact of its own rather than a side effect of the season writes.** A show whose provider lists
+/// no seasons writes no `season` row, and it is still a show whose seasons have been read; deriving
+/// this from "does the season table hold a row" would ask such a show again on every visit. The other
+/// direction matters more: a season read that *fails* leaves this column alone, so the title stays due
+/// and the next visit retries, where a marker written before the read would have made the failure
+/// permanent (PG-E5-06).
+///
+/// `at` is when the answer arrived, not how fresh the data is: the staleness policy that will read
+/// this column (`PG-E6-15`) does not exist yet, and a timestamp is still the right shape for it.
+pub(crate) async fn mark_title_seasons_synced(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    at: i64,
+) -> Result<bool, StorageError> {
+    // `updated_at` moves with it: the column is the row's own "something about me changed", and a
+    // marker that left it behind would make the two disagree about when this title was last written.
+    let changed =
+        sqlx::query("UPDATE title SET season_synced_at = ?2, updated_at = ?2 WHERE id = ?1")
+            .bind(id)
+            .bind(at)
+            .execute(connection)
+            .await
+            .map_err(StorageError::from_sqlx)?
+            .rows_affected()
+            > 0;
+    Ok(changed)
+}
+
 /// The local titles a candidate name could be, with everything the matching rule reads.
 ///
 /// One row per title of that kind whose `sort_name` matches, plus its aliases and external ids — the

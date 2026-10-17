@@ -83,6 +83,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::start_poster_capture,
             library::stop_poster_capture,
             discover::search_providers,
+            discover::search_tiles,
             discover::home_rails,
             discover::refresh_rails,
             discover::browse,

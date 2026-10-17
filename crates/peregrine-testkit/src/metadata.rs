@@ -309,6 +309,17 @@ impl FakeMetadataProvider {
         self
     }
 
+    /// The same fake, refusing the season *list* itself with `error`.
+    ///
+    /// The difference from [`FakeMetadataProvider::with_season_failure`] is which question failed:
+    /// that one is one season's episodes missing, and this one is the list no provider answered — the
+    /// failure that must leave the title due rather than mark its seasons read.
+    #[must_use]
+    pub fn with_season_list_failure(mut self, error: ProviderError) -> Self {
+        self.seasons_answer = Err(error);
+        self
+    }
+
     /// The same fake, failing the season numbered `season_number` with `error`.
     ///
     /// The provider-having-a-bad-day case at one season, which the title page's refresh must not turn

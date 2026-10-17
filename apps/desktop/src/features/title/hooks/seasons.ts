@@ -29,6 +29,26 @@ export function defaultSeason(seasons: readonly SeasonDto[]): SeasonDto | null {
 }
 
 /**
+ * The season a *re-read* of the list should open on.
+ *
+ * **A re-read is not a navigation.** The seasons are read again when the refresh this screen asked
+ * for lands, and by then the reader may be on season four; opening the read's default would move
+ * them back to season one under a heading they were already reading. The season on screen is kept
+ * when the new list still has it, and a list that no longer holds it — a title correction, a
+ * provider that dropped a season — falls back to `defaultSeason` rather than to a number nothing
+ * answers.
+ */
+export function seasonAfterRead(
+  seasons: readonly SeasonDto[],
+  current: number | null,
+): number | null {
+  if (current !== null && seasons.some((season) => season.seasonNumber === current)) {
+    return current;
+  }
+  return defaultSeason(seasons)?.seasonNumber ?? null;
+}
+
+/**
  * How an episode's availability reads, from the counts the core sent.
  *
  * `AGENTS R7` puts business logic in Rust and the counts *are* the core's; what happens here is the

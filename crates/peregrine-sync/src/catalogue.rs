@@ -15,7 +15,7 @@ use peregrine_storage::{Database, ProviderTitle, StorageError, TitleExternalId};
 use crate::images::{ImageCache, ImageCacheError, ImageKey, ImageVariant};
 
 /// What one sync did.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncOutcome {
     /// Candidates that named a title the catalogue already had.
     pub matched: usize,
@@ -23,6 +23,15 @@ pub struct SyncOutcome {
     pub created: usize,
     /// Candidates the rule could not attribute, left for a person.
     pub ambiguous: usize,
+    /// The candidates' external ids, in the order the provider answered them.
+    ///
+    /// **A provider search has to be able to answer with its own order rather than the index's.**
+    /// The local index tokenises "Spider-Man" into `spider` and `man`, so a reader who types
+    /// "spiderman" has no term the index can match; the provider that answered the search does know
+    /// the title, and this list is what lets the caller read those titles back without re-searching
+    /// text the index cannot spell. An id whose candidate the rule left ambiguous has no title, and
+    /// a caller reading it finds none.
+    pub found: Vec<peregrine_domain::ExternalId>,
 }
 
 /// Why a sync stopped.
@@ -51,6 +60,9 @@ pub async fn sync_search(
     let mut outcome = SyncOutcome::default();
 
     for candidate in candidates {
+        // Recorded before any branch can skip the candidate, because the caller's read-back is about
+        // what the *provider* found, including the answer the matching rule leaves as a question.
+        outcome.found.push(candidate.external_id().clone());
         // Identity first, and it is a read of its own because it settles the common case without
         // gathering anything: an id the catalogue already carries is this title, whatever it is called.
         if database
@@ -175,7 +187,15 @@ pub async fn refresh_title(
 
     let artwork = match kind {
         TitleKind::Show => {
-            refresh_seasons(provider, database, id, &external, &provider_name, at).await?
+            let artwork =
+                refresh_seasons(provider, database, id, &external, &provider_name, at).await?;
+            // **After the step, never before it.** The details were written above and they are what
+            // makes the title look filled in; this is the only record that the *season* read
+            // happened, and a marker written before it would turn a failed season read into a
+            // title that is never asked about again. A failure above therefore leaves the column
+            // empty and the next visit retries.
+            database.mark_title_seasons_synced(id, at).await?;
+            artwork
         }
         TitleKind::Movie => Vec::new(),
     };

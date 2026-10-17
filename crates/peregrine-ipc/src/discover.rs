@@ -335,6 +335,43 @@ pub async fn search_providers(
     ))
 }
 
+/// Searches the configured providers and answers with the poster tiles the Browse grid draws.
+///
+/// **The tile-shaped sibling of [`search_providers`].** That one answers identities for a text list;
+/// this one answers what a poster needs — the year, the score, the synopsis, and the cached artwork
+/// path. Both write what the provider found into the catalogue before answering, and an empty query
+/// is an empty result rather than a failure on an empty box.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is not running, or when a provider or the catalogue fails. A provider
+/// that is slow, rate-limited, or unreachable is reported rather than hidden.
+#[tauri::command]
+#[specta::specta]
+pub async fn search_tiles(
+    state: State<'_, RuntimeState>,
+    query: String,
+    limit: Option<u32>,
+    kind: Option<RailKindDto>,
+) -> Result<Vec<RailItemDto>, AppError> {
+    let query = query.trim().to_owned();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let found = state
+        .runtime()?
+        .search_tiles(
+            &query,
+            limit.unwrap_or(20).clamp(1, 100),
+            kind.map(Into::into),
+        )
+        .await?;
+    Ok(guard_response(
+        "discover::search_tiles",
+        found.into_iter().map(RailItemDto::from).collect(),
+    ))
+}
+
 /// Every rail the Discover screen draws, from what the catalogue and the cache already hold.
 ///
 /// **Cache-first, and it never waits for a provider.** The rails were filled by

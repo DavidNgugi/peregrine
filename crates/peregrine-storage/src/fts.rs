@@ -279,6 +279,85 @@ pub(crate) async fn search_kind(
     .fetch_all(pool)
     .await
     .map_err(StorageError::from_sqlx)?;
+    if rows.is_empty() {
+        // **The index has no term for what the reader typed, and that is not the same as no
+        // match.** "Spider-Man" is `spider` + `man` to the tokenizer, so a reader who types
+        // "spiderman" has nothing to match; the folded read is the one that closes that gap.
+        return search_folded(pool, scope, query, request, kind).await;
+    }
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// The read an index miss falls back to: a folded name match over the scoped catalogue.
+///
+/// **The index tokenises by word, and a reader does not.** "Spider-Man" is `spider` + `man` to
+/// `unicode61`, so a reader who types "spiderman" has nothing to match. This folds the punctuation
+/// out of both sides — the title's name and original name against the query — and compares the
+/// result. It is deliberately a scan, because it only runs for a query the index found nothing for,
+/// and the catalogue's size makes that cheap. The trigram index and the ranking weights that would
+/// replace it are `PG-E8-04` and `PG-E8-01`.
+///
+/// **The join back to the index is the index's contract.** A title whose index row is gone is
+/// unsearchable, and that has to keep being true; a fallback that read `title` directly would make an
+/// unindexed title findable again and hide a broken index from the rebuild test that exists to catch
+/// one.
+///
+/// `sqlx` 0.9 only accepts a `&'static str` here, which is why the expression is written out rather
+/// than built by a helper: at runtime it would be the same statement with a leaked string.
+const FOLDED_SEARCH: &str = r#"
+SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult
+FROM title t
+JOIN title_fts f ON f.rowid = t.id
+WHERE (
+  lower(replace(replace(replace(replace(replace(t.name, '-', ''), ' ', ''), '''', ''), ':', ''), '.', ''))
+    LIKE '%' || ?1 || '%'
+  OR lower(replace(replace(replace(replace(replace(t.original_name, '-', ''), ' ', ''), '''', ''), ':', ''), '.', ''))
+    LIKE '%' || ?1 || '%'
+)
+  AND (?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL))
+  AND (?3 IS NULL OR t.id < ?3)
+  AND (?5 IS NULL OR t.kind = ?5)
+ORDER BY t.id DESC LIMIT ?4
+"#;
+
+/// The same folding as FOLDED_SEARCH, applied to the reader's own text.
+///
+/// ASCII lowercase rather than Unicode, because that is what SQLite's lower() does to the column;
+/// accents and non-ASCII case are the index's job. The cap is the guard the FTS sanitizer gives a
+/// term, for the same reason: a 100 000-character "term" is not a search, and a LIKE pattern that
+/// long is refused by SQLite before it can answer.
+fn folded_query(query: &str) -> String {
+    query
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace() && !matches!(character, '-' | '\'' | ':' | '.')
+        })
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+const MAX_FOLDED_QUERY_CHARS: usize = 256;
+
+async fn search_folded(
+    pool: &SqlitePool,
+    scope: AccountScope,
+    query: &str,
+    request: PageRequest,
+    kind: Option<crate::catalogue::TitleKind>,
+) -> Result<Vec<TitleIdentity>, StorageError> {
+    let needle = folded_query(query);
+    if needle.is_empty() || needle.chars().count() > MAX_FOLDED_QUERY_CHARS {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query_as::<_, IdentityRow>(FOLDED_SEARCH)
+        .bind(needle)
+        .bind(hidden_by_scope(scope))
+        .bind(request.bindable_cursor())
+        .bind(request.bindable_limit())
+        .bind(kind.map(crate::catalogue::TitleKind::as_str))
+        .fetch_all(pool)
+        .await
+        .map_err(StorageError::from_sqlx)?;
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
@@ -961,6 +1040,37 @@ mod tests {
         assert_eq!(
             hits(&readers, any_account(), "君の名は").await,
             vec![japanese]
+        );
+    }
+
+    /// A compound the tokenizer splits is still found by the spelling a person types.
+    #[tokio::test]
+    async fn a_compound_the_index_splits_is_found_by_its_folded_name() {
+        let directory = TempDir::new().unwrap();
+        let (mut connection, readers) = fixture(&directory).await;
+        let spider = rated(
+            &mut connection,
+            "Spider-Man: Brand New Day",
+            0,
+            Some("PG-13"),
+        )
+        .await;
+        let speed = rated(&mut connection, "Speed", 0, Some("R")).await;
+
+        assert_eq!(
+            hits(&readers, any_account(), "spiderman").await,
+            vec![spider],
+            "the hyphen and the spaces are folded out of both sides"
+        );
+        assert_eq!(
+            hits(&readers, any_account(), "spider man").await,
+            vec![spider],
+            "spacing is a spelling, not a term"
+        );
+        assert_eq!(
+            hits(&readers, any_account(), "speed").await,
+            vec![speed],
+            "the index answers first and the fallback does not take its place"
         );
     }
 

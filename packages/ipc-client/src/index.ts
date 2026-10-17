@@ -71,6 +71,7 @@ export {
   listLibraryRoots,
   listLibraryTitles,
   searchProviders,
+  searchTiles,
   homeRails,
   refreshRails,
   getTitle,

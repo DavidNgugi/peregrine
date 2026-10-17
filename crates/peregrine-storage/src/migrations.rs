@@ -330,6 +330,8 @@ mod tests {
         ("last_synced_at", "INTEGER", 0, None, 0),
         ("created_at", "INTEGER", 1, None, 0),
         ("updated_at", "INTEGER", 1, None, 0),
+        // Migration 0019.
+        ("season_synced_at", "INTEGER", 0, None, 0),
     ];
 
     const TITLE_ALIAS: &[ColumnShape] = &[
@@ -2803,6 +2805,69 @@ mod tests {
         }
         names.sort();
         names
+    }
+
+    /// Migration 0019 repairs what 0014 left behind, and backfills what it can know.
+    ///
+    /// 'partial' was what a *list* answer stamped before 'listed' existed, and 0014 copied the table
+    /// without correcting the rows it invalidated, so a title a rail listed claims a details read to
+    /// this day and every rule that reads `has_details` treats it as finished. Only a details read
+    /// writes the columns the repair tests, which is what makes the predicate sayable.
+    #[tokio::test]
+    async fn migration_0019_repairs_the_rows_a_list_answer_stamped() {
+        let directory = TempDir::new().unwrap();
+        let mut connection = open_writer_connection(&database_path(&directory))
+            .await
+            .unwrap();
+        MIGRATOR.run_to(18, &mut connection).await.unwrap();
+
+        // A list answer's row: a name, a synopsis, and none of the columns only a details read
+        // writes.
+        statement(
+            &mut connection,
+            "INSERT INTO title (id, kind, name, sort_name, metadata_state, overview, created_at, updated_at) VALUES (1, 'show', 'The Wire', 'wire', 'partial', 'A show.', 0, 0)",
+        )
+        .await
+        .unwrap();
+        // The same stamp on a row a details read did reach: a season count is the tell.
+        statement(
+            &mut connection,
+            "INSERT INTO title (id, kind, name, sort_name, metadata_state, season_count, created_at, updated_at) VALUES (2, 'show', 'The Sopranos', 'sopranos', 'partial', 6, 0, 0)",
+        )
+        .await
+        .unwrap();
+        // A show that already holds a season row was answered, and the backfill says so rather than
+        // asking every show the catalogue knows about once more.
+        statement(
+            &mut connection,
+            "INSERT INTO title (id, kind, name, sort_name, metadata_state, season_count, last_synced_at, created_at, updated_at) VALUES (3, 'show', 'The Wire', 'wire', 'partial', 1, 500, 0, 0)",
+        )
+        .await
+        .unwrap();
+        statement(
+            &mut connection,
+            "INSERT INTO season (id, title_id, season_number, updated_at) VALUES (1, 3, 1, 0)",
+        )
+        .await
+        .unwrap();
+
+        MIGRATOR.run(&mut connection).await.unwrap();
+
+        let rows: Vec<(i64, String, Option<i64>)> =
+            sqlx::query_as("SELECT id, metadata_state, season_synced_at FROM title ORDER BY id")
+                .fetch_all(&mut connection)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, "listed".to_owned(), None),
+                (2, "partial".to_owned(), None),
+                (3, "partial".to_owned(), Some(500)),
+            ],
+            "a list-stamped row is due again, a details read is left alone, and an answered show \
+             is not asked about its seasons twice"
+        );
     }
 
     /// PG-E3-13's acceptance: a failing migration leaves the database untouched and a copy

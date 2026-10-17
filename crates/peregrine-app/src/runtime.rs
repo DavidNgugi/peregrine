@@ -2102,16 +2102,22 @@ impl Runtime {
     }
 
     /// Searches the providers this installation has configured, writes what they know into the
-    /// catalogue, and returns what the catalogue now holds.
+    /// catalogue, and answers with the titles those results name.
     ///
-    /// **Two steps, in that order, and the second is not optional.** A provider's answer is written
-    /// (`PG-E6-04`) and the *local* search is what the screen shows, so a result is a title the
-    /// catalogue owns — with an id, a poster, and a place in the library — rather than a row that exists
-    /// only in this response. It also means a provider that is slow, rate-limited, or gone still leaves
-    /// the screen with everything it already had.
+    /// **The answer is the provider's order, and not a second local search.** The local index
+    /// tokenises "Spider-Man" into `spider` and `man`, so the reader who types "spiderman" has no
+    /// term the index can match — even after the title is here. Re-searching that text would answer
+    /// zero for a title the provider just found. The sync records the candidates it was given, and
+    /// this reads those titles back by the ids it attached: catalogue-owned rows with an id a screen
+    /// can open, in the order the provider ranked them.
     ///
-    /// With no provider configured this is a local search, which is the honest answer rather than an
-    /// error: an installation with no API key still has a library.
+    /// **A provider answer with nothing readable in it falls back to the local index.** A provider
+    /// that is configured but does not carry a title the catalogue already holds, or one whose
+    /// candidates the matching rule all left as questions, leaves the local read to answer rather
+    /// than turning that into a claim that the library is empty.
+    ///
+    /// With no provider configured this is that local search, which is the honest answer rather than
+    /// an error: an installation with no API key still has a library.
     ///
     /// # Errors
     ///
@@ -2129,12 +2135,152 @@ impl Runtime {
             let limit = NonZeroU32::new(limit).unwrap_or(NonZeroU32::MIN);
             let search = peregrine_providers::provider::SearchQuery::new(text, limit, kind);
             let at = self.clock.now().as_millisecond();
-            peregrine_sync::sync_search(provider.as_ref(), &self.database, &search, at).await?;
+            let outcome =
+                peregrine_sync::sync_search(provider.as_ref(), &self.database, &search, at).await?;
+            let scope = installation_scope();
+            // Two candidates can settle on the same local row — a provider can answer with two ids
+            // for one title — and a screen keys its rows by that row, so the repeat is dropped here
+            // rather than drawn twice.
+            let mut seen = std::collections::HashSet::new();
+            let mut found = Vec::new();
+            for external in &outcome.found {
+                let Some(id) = self.database.title_for_external_id(external).await? else {
+                    continue;
+                };
+                if !seen.insert(id) {
+                    continue;
+                }
+                if let Some(identity) = self.database.title_identity(scope, id).await? {
+                    found.push(identity);
+                }
+                if found.len() >= limit.get() as usize {
+                    break;
+                }
+            }
+            if !found.is_empty() {
+                return Ok(found);
+            }
         }
         Ok(self
             .database
             .search_kind(installation_scope(), query, PageRequest::first(limit), kind)
             .await?)
+    }
+
+    /// Searches the configured providers and answers with tiles the grid can draw.
+    ///
+    /// **The tile-shaped sibling of [`Runtime::discover`].** That read answers identities for a text
+    /// list; a poster needs the year, the score, the synopsis, and a cached path, and those are what a
+    /// list answer carries. Each candidate goes through [`Runtime::listed_item`] — the browse writer —
+    /// so a search result and a browse page describe a title the same way, and the artwork pass is the
+    /// same [`Runtime::fill_posters`] the grid already uses. The provider is asked directly rather
+    /// than through the local index first, because the index tokenises "Spider-Man" into two terms and
+    /// cannot match a reader who types "spiderman"; the provider that published the title can.
+    ///
+    /// With no provider configured this is a local read of the index, drawn from the catalogue rows
+    /// the library already holds. **A provider that fails is the same case**: the local read is
+    /// attempted, and its answer is returned if it has one. The provider's error is only reported
+    /// when there is nothing local to show either — a hiccup in one reader must not tell a man with
+    /// fifteen Spider-Man titles in his catalogue that nothing matched.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Provider`] when the provider fails **and** the local index has nothing,
+    /// [`RuntimeError::Storage`] when the catalogue cannot be read or written, and
+    /// [`RuntimeError::EmptyQuery`] for a blank query.
+    pub async fn search_tiles(
+        &self,
+        query: &str,
+        limit: u32,
+        kind: Option<peregrine_domain::catalogue::TitleKind>,
+    ) -> Result<Vec<crate::jobs::discover_rails::RailItem>, RuntimeError> {
+        // The query's text is not logged: a search is the reader's own words, and the count is what
+        // diagnoses a call without carrying them into a log file.
+        info!(
+            query_chars = query.chars().count(),
+            ?kind,
+            "search_tiles asked"
+        );
+        let adapters = self.providers.adapters();
+        let mut provider_error = None;
+        if let Some(provider) = adapters.first() {
+            let provider_result: Result<Vec<crate::jobs::discover_rails::RailItem>, RuntimeError> =
+                async {
+                    let text = NonEmptyText::new(query).map_err(|_| RuntimeError::EmptyQuery)?;
+                    let limit = NonZeroU32::new(limit).unwrap_or(NonZeroU32::MIN);
+                    let search = peregrine_providers::provider::SearchQuery::new(text, limit, kind);
+                    let candidates = provider.search(&search).await?;
+                    let at = self.clock.now().as_millisecond();
+                    let mut items = Vec::new();
+                    let mut sources = Vec::new();
+                    // Two candidates can settle on one row — a provider can answer with two ids for one
+                    // title — and a grid keys its tiles by that row, so the repeat is dropped before it
+                    // is drawn.
+                    let mut seen = std::collections::HashSet::new();
+                    for candidate in candidates.iter().take(limit.get() as usize) {
+                        let Some((item, source)) = self.listed_item(candidate, at).await? else {
+                            continue;
+                        };
+                        if !seen.insert(item.title_id) {
+                            continue;
+                        }
+                        items.push(item);
+                        sources.push(source);
+                        if items.len() >= limit.get() as usize {
+                            break;
+                        }
+                    }
+                    self.fill_posters(provider, &mut items, &sources).await;
+                    Ok(items)
+                }
+                .await;
+            match provider_result {
+                Ok(items) if !items.is_empty() => {
+                    info!(tiles = items.len(), "search_tiles answered from a provider");
+                    return Ok(items);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(%error, "the provider search failed; answering from the local index");
+                    provider_error = Some(error);
+                }
+            }
+        }
+
+        let found = self
+            .database
+            .search_kind(installation_scope(), query, PageRequest::first(limit), kind)
+            .await?;
+        let mut items = Vec::new();
+        for identity in found {
+            let Some(detail) = self.library_title(identity.id).await? else {
+                continue;
+            };
+            let playable = detail.entry.row.files > detail.entry.row.missing_files;
+            items.push(crate::jobs::discover_rails::RailItem {
+                title_id: identity.id,
+                kind: identity.kind,
+                name: identity.name,
+                year: detail.released.map(|date| i32::from(date.year())),
+                poster: detail.entry.poster,
+                backdrop_source: None,
+                backdrop: detail.backdrop,
+                playable,
+                rating: detail.rating,
+                overview: detail.overview,
+                votes: None,
+            });
+        }
+        if items.is_empty()
+            && let Some(error) = provider_error
+        {
+            return Err(error);
+        }
+        info!(
+            tiles = items.len(),
+            "search_tiles answered from the local index"
+        );
+        Ok(items)
     }
 
     /// One page of a filtered, ordered list, written into the catalogue and answered as it is drawn.
@@ -5375,6 +5521,69 @@ mod tests {
         assert!(
             matches!(refused, RuntimeError::NoProvider),
             "a provider that cannot list is not the provider to ask: {refused:?}"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// A provider's answer is the search result, even when the local index cannot spell the query.
+    ///
+    /// "Spiderman" has no hyphen, and the index tokenises "Spider-Man" into two terms — so
+    /// re-searching the reader's text locally after the sync writes the title would answer zero for
+    /// the title the provider just found. The read-back by the ids the sync attached is what makes
+    /// the answer the provider's own result.
+    #[tokio::test]
+    async fn a_provider_search_answers_its_own_result_when_the_local_index_cannot_spell_it() {
+        let directory = TempDir::new().unwrap();
+        let adapter = Arc::new(peregrine_testkit::FakeMetadataProvider::searching(
+            peregrine_domain::id::Provider::Tmdb,
+            vec![candidate("1", "Spider-Man: Brand New Day")],
+        ));
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let found = runtime
+            .discover("spiderman", 20, None)
+            .await
+            .expect("the provider's answer is readable");
+        assert_eq!(found.len(), 1, "the provider found the title");
+        assert_eq!(found[0].name, "Spider-Man: Brand New Day");
+        runtime.shutdown().await;
+    }
+
+    /// A tile search answers with the poster fields the list writer stored, not a bare identity.
+    ///
+    /// The provider's candidate carries the year, the score, and the synopsis a list answer does, and
+    /// `search_tiles` writes them through `upsert_list_candidate` — the same writer a browse page
+    /// uses — so a result row can be handed to a tile without a second read or a screen-side lookup.
+    #[tokio::test]
+    async fn a_provider_search_answers_tiles_with_the_metadata_the_list_carried() {
+        let directory = TempDir::new().unwrap();
+        let listed = peregrine_providers::provider::SearchCandidate::new(
+            peregrine_domain::id::ExternalId::new(peregrine_domain::id::Provider::Tmdb, "1")
+                .expect("a fixture id"),
+            peregrine_domain::text::NonEmptyText::new("Spider-Man: Brand New Day")
+                .expect("real text"),
+            peregrine_domain::catalogue::TitleKind::Movie,
+            Some("2026-07-31".parse().expect("a date")),
+        )
+        .with_rating(Some(8.5))
+        .with_overview(Some("A spider in a world that forgot him.".to_owned()));
+        let adapter = Arc::new(peregrine_testkit::FakeMetadataProvider::searching(
+            peregrine_domain::id::Provider::Tmdb,
+            vec![listed],
+        ));
+        let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
+
+        let tiles = runtime
+            .search_tiles("spiderman", 20, None)
+            .await
+            .expect("the search answers");
+        assert_eq!(tiles.len(), 1, "the provider found the title");
+        assert_eq!(tiles[0].name, "Spider-Man: Brand New Day");
+        assert_eq!(tiles[0].year, Some(2026));
+        assert_eq!(tiles[0].rating, Some(8.5));
+        assert_eq!(
+            tiles[0].overview.as_deref(),
+            Some("A spider in a world that forgot him.")
         );
         runtime.shutdown().await;
     }

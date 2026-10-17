@@ -309,9 +309,7 @@ export function TitlePreviewPanel({
           a wrap, because a wrapped line inside a panel that is pinned to the poster's foot pushes the meta
           and the action out of the visible box, which is what it did before this was clamped. */}
       {name === null ? null : <span className="truncate font-medium">{name}</span>}
-      {metaLine === null ? null : (
-        <span className="truncate text-text-secondary">{metaLine}</span>
-      )}
+      {metaLine === null ? null : <span className="truncate text-text-secondary">{metaLine}</span>}
       {prose === null ? null : <span className="line-clamp-3">{prose}</span>}
       {details === null ? null : (
         <span className="mt-0.5 inline-flex w-full items-center justify-center rounded-full bg-accent px-2 py-1 font-medium text-text-on-accent">
@@ -414,6 +412,10 @@ export function TitleCard({
   downloadStatus,
   downloadLabel,
   size,
+  // The container's answer to the tile's enlargement. A rail reserves the room and a grid cannot,
+  // so the name is the room's rather than the interaction's: `previewLift` below is the stacking
+  // order a revealed tile takes, and the two are different questions.
+  lift: reserved = true,
   priority = false,
   tabIndex,
   onNavigate,
@@ -558,7 +560,7 @@ export function TitleCard({
       }}
       onTransitionEnd={onTransitionEnd}
       style={{
-        transform: `scale(${String(previewScale(preview))})`,
+        transform: `scale(${String(previewScale(preview, reserved))})`,
         // §5's two ends, from the state. Inline rather than as classes so the enter and the exit can
         // differ without two `duration-*` utilities racing in the cascade — and so `will-change` is
         // a value that is *absent*, not an empty rule, on every tile that is not moving.

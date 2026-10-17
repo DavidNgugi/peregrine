@@ -102,6 +102,13 @@ pub(crate) enum WriteRequest {
         /// Unix milliseconds.
         at: i64,
     },
+    /// Record that a provider has answered this title's season step.
+    MarkTitleSeasonsSynced {
+        /// The title row.
+        id: i64,
+        /// Unix milliseconds, when the answer arrived.
+        at: i64,
+    },
     /// Find or create the title one provider id names, and attach the id, in one transaction.
     UpsertProviderTitle(Box<crate::catalogue::ProviderTitle>),
     /// Attach external ids to one title.
@@ -876,6 +883,11 @@ async fn apply_catalogue_write(
         )
         .await
         .map(|changed| WriteResponse::RowChanged { changed }),
+        WriteRequest::MarkTitleSeasonsSynced { id, at } => {
+            crate::catalogue::mark_title_seasons_synced(connection, id, at)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
         WriteRequest::UpsertProviderTitle(title) => {
             crate::catalogue::upsert_provider_title(connection, &title)
                 .await

@@ -670,6 +670,15 @@ pub struct TitleDetailRow {
     /// `last_synced_at`: a list answer sets that column, because a provider did answer about the
     /// title, and a rail listing is exactly the case where a details read has *not* happened.
     pub detailed: bool,
+    /// Whether a provider has ever answered this title's *season* step
+    /// (`title.season_synced_at`).
+    ///
+    /// **A second fact rather than a stronger `detailed`, because a series is two reads.** The
+    /// details read carries a name, a synopsis, a poster, and a season *count*; the seasons and
+    /// their episodes are a separate read and a separate set of rows. Without this, a show whose
+    /// details landed and whose season read did not was indistinguishable from one that had
+    /// nothing left to fetch — which is a title page with no seasons and no reason to ask again.
+    pub seasons_synced: bool,
 }
 
 /// A page of the titles the library holds, newest first.
@@ -811,6 +820,7 @@ pub(crate) async fn library_title(
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
                 t.poster_provider, t.poster_path, t.backdrop_provider, t.backdrop_path, \
                 t.overview, t.tmdb_rating, COALESCE(t.release_date, t.first_air_date) AS released, \
+                t.season_synced_at, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
@@ -1069,6 +1079,7 @@ struct TitleDetailQueryRow {
     overview: Option<String>,
     tmdb_rating: Option<f64>,
     released: Option<String>,
+    season_synced_at: Option<i64>,
     items: i64,
     files: i64,
     bytes: i64,
@@ -1145,6 +1156,7 @@ impl TryFrom<TitleDetailQueryRow> for TitleDetailRow {
         let overview = row.overview.take();
         let rating = row.tmdb_rating;
         let released = stored_date("title.release_date", row.released.take());
+        let seasons_synced = row.season_synced_at.is_some();
         let library = LibraryTitleRow::try_from(LibraryTitleQueryRow::from(row))?;
         // Read back off the parsed identity rather than off the raw column, so the state is
         // parsed once and a value this build does not know is refused by the conversion rather
@@ -1157,6 +1169,7 @@ impl TryFrom<TitleDetailQueryRow> for TitleDetailRow {
             rating,
             released,
             detailed,
+            seasons_synced,
         })
     }
 }
@@ -3579,6 +3592,62 @@ mod tests {
             counts(with_artwork.library),
             counts(no_artwork.library),
             "an artwork fill changes no count"
+        );
+    }
+
+    /// The season step's own fact is read back, and it is not derived from the details read.
+    ///
+    /// The two are written by different reads of the same refresh, and the whole point of the column
+    /// is that the first can land without the second: a fixture that set them together could not
+    /// catch a read that answered one of them from the other.
+    #[tokio::test]
+    async fn the_season_step_is_recorded_separately_from_the_details_read() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _adult) = populated(&directory).await;
+        let scope = any_account();
+
+        let fresh = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert!(!fresh.seasons_synced, "nobody has read the seasons yet");
+
+        database
+            .update_title_metadata(
+                certified,
+                details("Alien", Some("/poster.jpg")),
+                "alien".to_owned(),
+                MetadataState::Partial,
+                "tmdb".to_owned(),
+                NOW,
+            )
+            .await
+            .unwrap();
+        let detailed = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert!(detailed.detailed);
+        assert!(
+            !detailed.seasons_synced,
+            "a details fill is not a season read, which is the confusion this column exists to end"
+        );
+
+        database
+            .mark_title_seasons_synced(certified, NOW)
+            .await
+            .unwrap();
+        let answered = database
+            .library_title(scope, certified)
+            .await
+            .unwrap()
+            .expect("the fixture's title");
+        assert!(answered.seasons_synced);
+        assert_eq!(
+            answered.detailed, detailed.detailed,
+            "and recording it changes nothing the details read decided"
         );
     }
 

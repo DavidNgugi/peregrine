@@ -1344,6 +1344,30 @@ impl Database {
         }
     }
 
+    /// Records that a provider has answered this title's season step.
+    ///
+    /// A fact of its own, not a side effect of the season writes: a show whose provider lists no
+    /// seasons writes no row and is still read, and a season read that fails must leave the title due
+    /// (`catalogue::mark_title_seasons_synced`).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the statement fails.
+    pub async fn mark_title_seasons_synced(
+        &self,
+        title_id: i64,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::MarkTitleSeasonsSynced { id: title_id, at })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("mark_title_seasons_synced", &other)),
+        }
+    }
+
     /// The id of the season a title and number already name, or `None`.
     ///
     /// Part of the **scanner's** surface: a season row is created by a scan, so the scan is what has

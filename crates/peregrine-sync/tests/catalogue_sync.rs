@@ -14,6 +14,11 @@ use peregrine_storage::{ArtworkPath, Database, StubTitle};
 use peregrine_sync::{SyncOutcome, record_list_answer, refresh_title, sync_search};
 use peregrine_testkit::{FakeMetadataProvider, fake_descriptor};
 
+/// The id a fake candidate will answer with.
+fn external(value: &str) -> ExternalId {
+    ExternalId::new(Provider::Tmdb, value).expect("an id")
+}
+
 fn candidate(value: &str, name: &str, released: Option<&str>) -> SearchCandidate {
     SearchCandidate::new(
         ExternalId::new(Provider::Tmdb, value).expect("an id"),
@@ -91,7 +96,8 @@ async fn a_candidate_nobody_has_creates_one_title_and_the_second_sync_matches_it
         SyncOutcome {
             matched: 0,
             created: 1,
-            ambiguous: 0
+            ambiguous: 0,
+            found: vec![external("603")],
         }
     );
     assert_eq!(
@@ -99,7 +105,8 @@ async fn a_candidate_nobody_has_creates_one_title_and_the_second_sync_matches_it
         SyncOutcome {
             matched: 1,
             created: 0,
-            ambiguous: 0
+            ambiguous: 0,
+            found: vec![external("603")],
         }
     );
     assert_eq!(database.title_count().await.expect("a count"), 1);
@@ -137,7 +144,8 @@ async fn a_candidate_that_names_a_title_already_held_attaches_the_id_to_it() {
         SyncOutcome {
             matched: 1,
             created: 0,
-            ambiguous: 0
+            ambiguous: 0,
+            found: vec![external("603")],
         }
     );
     assert_eq!(database.title_count().await.expect("a count"), 1);
@@ -630,6 +638,71 @@ async fn a_series_refresh_writes_its_seasons_and_their_episodes_and_hands_back_t
     assert_eq!(
         episodes[0].air_date,
         Some("2008-01-27".parse().expect("a date"))
+    );
+}
+
+#[tokio::test]
+async fn a_series_refresh_records_that_the_season_step_was_answered() {
+    // The fact the title page's refresh rule reads. Without it, "details read" and "everything a
+    // provider can give" were the same answer, and a show whose season step had not happened looked
+    // finished — which is a page with no seasons and no reason to ask again.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let (id, provider) =
+        described_show(&database, show_details(), vec![season_details(1, None)]).await;
+    let provider = provider.with_episodes(1, vec![episode_details(1, 1, None)]);
+
+    refresh_title(&provider, &database, id, TitleKind::Show, 2_000)
+        .await
+        .expect("the refresh runs")
+        .expect("the provider serves details");
+
+    let scope = peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("an account"),
+    );
+    let row = database
+        .library_title(scope, id)
+        .await
+        .expect("the title read")
+        .expect("the fixture's title");
+    assert!(
+        row.seasons_synced,
+        "the season step answered, so the title is no longer due for it"
+    );
+}
+
+#[tokio::test]
+async fn a_season_list_that_failed_leaves_the_title_due_to_be_asked_again() {
+    // The other half, and the one that must not regress: the details are written first, so a marker
+    // written before the season read would make a provider's bad minute permanent. The column stays
+    // empty and the next visit asks again.
+    let directory = tempfile::tempdir().expect("a directory");
+    let database = database(&directory).await;
+    let (id, provider) = described_show(&database, show_details(), Vec::new()).await;
+    let provider = provider.with_season_list_failure(ProviderError::RateLimited {
+        provider: Provider::Tmdb,
+        retry_after: None,
+    });
+
+    refresh_title(&provider, &database, id, TitleKind::Show, 2_000)
+        .await
+        .expect_err("a rate limit is the provider's problem and fails the refresh");
+
+    let scope = peregrine_domain::AccountScope::unrestricted(
+        peregrine_domain::AccountId::new(1).expect("an account"),
+    );
+    let row = database
+        .library_title(scope, id)
+        .await
+        .expect("the title read")
+        .expect("the fixture's title");
+    assert!(
+        row.detailed,
+        "the details were written before the season read, which is why this needed its own fact"
+    );
+    assert!(
+        !row.seasons_synced,
+        "a failed season read must leave the title due"
     );
 }
 

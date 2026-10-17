@@ -392,6 +392,15 @@ fn search_providers_without_a_runtime(harness: &Harness) -> Invocation<'_> {
             .map(drop)
     })
 }
+
+/// The tile-shaped search reads through the same runtime and fails the same way.
+fn search_tiles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::discover::search_tiles(harness.dead_state(), "alien".to_owned(), None, None)
+            .await
+            .map(drop)
+    })
+}
 fn refresh_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::library::refresh_title(
@@ -636,6 +645,14 @@ fn provider_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: search_providers_without_a_runtime,
+        },
+        ContractCase {
+            command: "search_tiles",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: search_tiles_without_a_runtime,
         },
         ContractCase {
             command: "home_rails",

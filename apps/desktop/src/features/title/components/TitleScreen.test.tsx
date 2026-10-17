@@ -105,6 +105,9 @@ function detail(state: Partial<TitleDetail> = {}): TitleDetail {
     loading: false,
     missing: false,
     failed: false,
+    // No refresh watched stop: this fixture is drawn from one read, and the season read a stop would
+    // re-run has its own fixture.
+    refreshes: 0,
     refresh: () => Promise.resolve(),
     ...state,
   };

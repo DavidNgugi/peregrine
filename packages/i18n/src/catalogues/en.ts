@@ -71,7 +71,13 @@ export const en = {
         peers: "Peers",
         actions: "Actions",
       },
-      action: { pause: "Pause", resume: "Resume", remove: "Remove", dismiss: "Dismiss", delete: "Delete files" },
+      action: {
+        pause: "Pause",
+        resume: "Resume",
+        remove: "Remove",
+        dismiss: "Dismiss",
+        delete: "Delete files",
+      },
       remove: {
         title: "Remove this download?",
         body: "The transfer stops and the job leaves the queue. Files already written are not deleted.",
@@ -247,6 +253,13 @@ export const en = {
       // The other half of `loading`: a reader who has reached the end of the loaded pages has to be
       // able to tell "nothing more is coming" from "the next page is still on its way".
       end: "That is everything for these filters.",
+      search: {
+        // The accessible name of a field whose visible invitation is the placeholder.
+        label: "Search for a title",
+        placeholder: "Search titles",
+        // The grid's accessible name while a query is live; the browse grid has its own above.
+        results: "Search results",
+      },
       empty: {
         title: "Nothing matches these filters",
         body: "The provider has no title that fits. Try another genre, a lower rating, or a different order.",
@@ -398,7 +411,8 @@ export const en = {
         // system's own decoder may well take it. Saying nothing would make a failure look like a bug.
         unnamedContainer:
           "Peregrine does not recognise this file's format. Playing it may not work.",
-        acquire: "Peregrine will find the best release for this title and add it to your downloads.",
+        acquire:
+          "Peregrine will find the best release for this title and add it to your downloads.",
       },
       // The switcher. `{{number}}` is the only thing a chip needs for a season a provider named the
       // way it names every season — "Season 4" — and the provider's own name is used only when it says
@@ -572,7 +586,8 @@ export const en = {
       title: "Settings",
       quality: {
         title: "Downloads",
-        description: "The quality Peregrine looks for. A higher quality is larger and slower to fetch.",
+        description:
+          "The quality Peregrine looks for. A higher quality is larger and slower to fetch.",
         label: "Preferred quality",
         failed: "The preferred quality could not be read.",
         custom: "Custom (not one of these)",

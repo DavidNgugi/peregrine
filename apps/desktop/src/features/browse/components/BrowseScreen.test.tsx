@@ -2,11 +2,12 @@
  * The drawing, from synthetic DTOs.
  *
  * No network, no Tauri bridge, and no store: `BrowseView` takes what the hooks answered as props,
- * which is the seam that makes the toolbar, the grid, and both empty states testable in a Node
- * environment. What this file *cannot* do is scroll the grid or change a filter — `renderToStaticMarkup`
- * is one pass with no DOM and no event loop — so the end-of-list rule is `packages/ui`'s
- * `gridEndReached` test, the page-merge rule is `browse-pages.test.ts`, and the filter round trip
- * through the core is the command contract's.
+ * which is the seam that makes the toolbar, the grid, the search results, and the empty states
+ * testable in a Node environment. What this file *cannot* do is scroll the grid, change a filter, or
+ * type — `renderToStaticMarkup` is one pass with no DOM and no event loop — so the end-of-list rule
+ * is `packages/ui`'s `gridEndReached` test, the page-merge rule is `paged-list.test.ts`, the search
+ * hook's debounce is `lib/title-search.ts`, and the filter round trip through the core is the command
+ * contract's.
  */
 
 import { createI18n } from "@peregrine/i18n";
@@ -15,7 +16,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
 
-import type { DownloadMarks } from "../../../lib/download-status.js";
+import type { DownloadMarks, DownloadTitleSource } from "../../../lib/download-status.js";
+import type { TileSearch } from "../../../lib/title-search.js";
 import type { BrowseData } from "../hooks/useBrowse.js";
 import { DEFAULT_FILTERS } from "../hooks/useBrowse.js";
 import { BrowseView } from "./BrowseScreen.js";
@@ -54,21 +56,38 @@ function data(overrides: Partial<BrowseData> = {}): BrowseData {
   };
 }
 
+function tileSearch(overrides: Partial<TileSearch> = {}): TileSearch {
+  return {
+    query: "",
+    setQuery: () => undefined,
+    results: [],
+    searching: false,
+    failed: false,
+    searched: false,
+    searchNow: () => undefined,
+    ...overrides,
+  };
+}
+
 function markup(
   overrides: Partial<BrowseData> = {},
   genres: readonly GenreDto[] = [],
   kind: "movie" | "show" = "movie",
   downloads?: DownloadMarks,
+  downloadRows?: readonly DownloadTitleSource[],
+  searchOverrides: Partial<TileSearch> = {},
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <BrowseView
         data={data(overrides)}
+        downloadRows={downloadRows}
         downloads={downloads}
         genres={genres}
         kind={kind}
         onKind={() => undefined}
         onNavigate={() => undefined}
+        search={tileSearch(searchOverrides)}
       />
     </I18nextProvider>,
   );
@@ -104,6 +123,64 @@ describe("BrowseView", () => {
     const html = markup({ items: [item({ kind: "show", name: "Severance", year: 2022 })] });
 
     expect(html).toContain("Severance, 2022 · Series");
+  });
+
+  it("offers a search field over the screen", () => {
+    const html = markup();
+
+    expect(html).toContain('role="search"');
+    expect(html).toContain('placeholder="Search titles"');
+    expect(html).toContain("Search for a title");
+  });
+
+  it("replaces the grid with a live search's poster tiles", () => {
+    // The provider answered, and a title the loaded page never carried is the result. It is drawn by
+    // the same card as a browse tile — a poster, a score, the year, and the hover panel.
+    const html = markup({}, [], "movie", undefined, undefined, {
+      query: "spiderman",
+      results: [item({ titleId: 9, name: "Spider-Man: Brand New Day", year: 2026, rating: 8.5 })],
+      searched: true,
+    });
+
+    expect(html).toContain("Spider-Man: Brand New Day, 2026 · Film");
+    expect(html).toContain("/title/movie/9");
+    expect(html).toContain("Search results");
+    expect(html).not.toContain("Browse results");
+    // The provider filters belong to the grid; a live search disables them rather than letting a
+    // change spend a request on a page nobody can see.
+    expect(html).toContain('disabled=""');
+  });
+
+  it("keeps the grid for a query too short to search", () => {
+    const html = markup({}, [], "movie", undefined, undefined, { query: "s" });
+
+    expect(html).toContain("Browse results");
+    expect(html).toContain("/title/movie/7");
+  });
+
+  it("says a search is running, and says when one matched nothing", () => {
+    const running = markup({}, [], "movie", undefined, undefined, {
+      query: "spider",
+      searching: true,
+    });
+    expect(running).toContain("Searching the providers…");
+
+    const nothing = markup({}, [], "movie", undefined, undefined, {
+      query: "zzz",
+      searched: true,
+    });
+    expect(nothing).toContain("Nothing matched");
+  });
+
+  it("reports a failed search rather than calling it empty", () => {
+    const html = markup({}, [], "movie", undefined, undefined, {
+      query: "spider",
+      failed: true,
+      searched: true,
+    });
+
+    expect(html).toContain("The search could not be made");
+    expect(html).not.toContain("Nothing matched");
   });
 
   it("offers the provider's genres as a filter, with the unfiltered choice first", () => {
@@ -202,5 +279,28 @@ describe("BrowseView", () => {
     const html = markup({ items: [item()], hasMore: true, loading: true });
 
     expect(html).not.toContain("That is everything for these filters.");
+  });
+
+  it("puts a download the provider did not send above the loaded page", () => {
+    // The whole point of the global merge: a niche title the reader downloaded is not on the
+    // provider's page, and it still opens Browse at the top rather than being invisible.
+    const html = markup(
+      { items: [item({ titleId: 1, name: "Provider" })] },
+      [],
+      "movie",
+      new Map([[9, "done" as const]]),
+      [
+        {
+          titleId: 9,
+          title: "Downloaded",
+          titleKind: "movie",
+          poster: null,
+          state: "completed",
+        },
+      ],
+    );
+    expect(html).toContain("Downloaded");
+    expect(html).toContain("/title/movie/9");
+    expect(html.indexOf("/title/movie/9")).toBeLessThan(html.indexOf("/title/movie/1"));
   });
 });

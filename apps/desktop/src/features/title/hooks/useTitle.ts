@@ -78,6 +78,14 @@ export interface TitleDetail {
   readonly missing: boolean;
   /** A read failed, so what is here is unknown rather than absent. */
   readonly failed: boolean;
+  /**
+   * How many refreshes this screen has watched stop.
+   *
+   * A count rather than a flag because a screen re-reads on every stop, and the page's *other* reads
+   * — the seasons and their episodes — take it as their trigger: a refresh that wrote seasons is the
+   * reason they must run again, and the title read is not the only thing it changed.
+   */
+  readonly refreshes: number;
   /** Re-reads the title. */
   readonly refresh: () => Promise<void>;
 }
@@ -201,7 +209,7 @@ export function useTitle(id: number | null): TitleDetail {
       }
       setState({
         title: answer.title,
-      playSupport: answer.playSupport,
+        playSupport: answer.playSupport,
         // The poster is the read's own row rather than a field beside it: the title the core answered
         // with carries the cached path, so a page and a tile cannot disagree about what there is to draw.
         poster: answer.title.poster,
@@ -285,5 +293,5 @@ export function useTitle(id: number | null): TitleDetail {
     void read();
   }, [id, read, follow.finished]);
 
-  return { ...state, refresh: read };
+  return { ...state, refresh: read, refreshes: follow.finished };
 }

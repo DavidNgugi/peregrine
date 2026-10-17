@@ -77,6 +77,22 @@ pub enum Artwork {
     Cached,
 }
 
+/// What the catalogue knows about a title's seasons, one of the facts [`refresh_due`] turns on.
+///
+/// **A distinct value rather than a second boolean.** "A film has no seasons", "nobody has asked
+/// this show", and "a provider answered" are three answers, and the second is the one that used to
+/// be unrepresentable: a series is filled in two reads, the details and then its seasons, and
+/// `metadata_state` only ever recorded the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seasons {
+    /// A film, which has no seasons: the season read is a question it cannot be asked.
+    NotAShow,
+    /// A show whose season list no provider has answered.
+    NeverRead,
+    /// A show whose provider answered its season step, whatever the answer held.
+    Read,
+}
+
 /// What the catalogue, the cache, and this installation's providers know between them about one
 /// title's artwork.
 ///
@@ -100,6 +116,8 @@ pub struct ArtworkState {
     pub detailed: bool,
     /// What the catalogue and the cache hold.
     pub artwork: Artwork,
+    /// Whether the title's seasons have ever been read, and whether it can have any.
+    pub seasons: Seasons,
 }
 
 impl ArtworkState {
@@ -124,6 +142,11 @@ impl ArtworkState {
             answerable,
             detailed: row.detailed,
             artwork,
+            seasons: match row.library.title.kind {
+                peregrine_storage::TitleKind::Show if row.seasons_synced => Seasons::Read,
+                peregrine_storage::TitleKind::Show => Seasons::NeverRead,
+                peregrine_storage::TitleKind::Movie => Seasons::NotAShow,
+            },
         }
     }
 }
@@ -140,7 +163,7 @@ pub fn can_answer(configured: &[Provider], held: &[peregrine_domain::ExternalId]
 
 /// Whether opening a title's screen should ask its provider for it.
 ///
-/// **A rule, and the reason it is here rather than in a screen** (AGENTS R7). Three facts decide it:
+/// **A rule, and the reason it is here rather than in a screen** (AGENTS R7). Four facts decide it:
 ///
 /// * **There is something to ask with.** No configured provider owns an id for this title, so none
 ///   of them can answer about it.
@@ -152,10 +175,16 @@ pub fn can_answer(configured: &[Provider], held: &[peregrine_domain::ExternalId]
 ///   filled in and left those fields absent for ever.
 /// * **A provider is known to have artwork the cache does not hold.** Then the blob was evicted, or
 ///   the fill recorded the path and the bytes never arrived, and one request puts it back.
+/// * **A show's seasons have never been read.** A series is filled in two reads — its details, and
+///   then its seasons with each season's episodes — and the details read is what `detailed`
+///   records. Reading only that made a show whose details landed and whose season step did not into
+///   a page with no seasons that nothing would ask about again, which is why the catalogue now
+///   records the second read separately (`Seasons`).
 ///
-/// What the three together *exclude* is the case that would otherwise ask forever: a title that has
-/// been filled in from its details, whose provider had no poster. Asking again would spend a request
-/// to be told the same thing on every visit, which is the shape `AGENTS R24` exists to prevent.
+/// What the four together *exclude* is the case that would otherwise ask forever: a title that has
+/// been filled in from its details, whose provider had no poster, and — for a series — whose season
+/// list that provider has answered. Asking again would spend a request to be told the same thing on
+/// every visit, which is the shape `AGENTS R24` exists to prevent.
 ///
 /// **This is not the staleness policy.** When a *detailed* title is due again — the six-month window,
 /// the state machine for `MetadataState::Stale` — is `PG-E6-15`'s, and nothing here has an opinion
@@ -165,7 +194,10 @@ pub fn can_answer(configured: &[Provider], held: &[peregrine_domain::ExternalId]
 /// and remembers that it did, so a refresh that produced nothing cannot become a request loop.
 #[must_use]
 pub const fn refresh_due(state: &ArtworkState) -> bool {
-    state.answerable && (!state.detailed || matches!(state.artwork, Artwork::Missing))
+    state.answerable
+        && (!state.detailed
+            || matches!(state.artwork, Artwork::Missing)
+            || matches!(state.seasons, Seasons::NeverRead))
 }
 
 #[cfg(test)]
@@ -271,12 +303,23 @@ mod tests {
         );
     }
 
-    /// The three facts, in the order the rule reads them.
+    /// The facts, in the order the rule reads them, for a film — which has no seasons to read.
     fn state(answerable: bool, detailed: bool, artwork: Artwork) -> ArtworkState {
+        state_of(answerable, detailed, artwork, Seasons::NotAShow)
+    }
+
+    /// The same, with the season step's own fact varied.
+    fn state_of(
+        answerable: bool,
+        detailed: bool,
+        artwork: Artwork,
+        seasons: Seasons,
+    ) -> ArtworkState {
         ArtworkState {
             answerable,
             detailed,
             artwork,
+            seasons,
         }
     }
 
@@ -308,6 +351,47 @@ mod tests {
     }
 
     #[test]
+    fn a_show_whose_seasons_were_never_read_is_asked_about_however_filled_in_it_is() {
+        // **The defect this fact exists for.** A series' details read leaves 'partial' and its
+        // poster in the cache, so every other input says "nothing to ask" — and the season list,
+        // which is a second read, had never happened. The page then drew no seasons and no visit
+        // ever asked again. Each artwork state is the same case, because a poster is not a season.
+        for artwork in [Artwork::Unknown, Artwork::Missing, Artwork::Cached] {
+            assert!(
+                refresh_due(&state_of(true, true, artwork, Seasons::NeverRead)),
+                "a detailed show nobody has read the seasons of: {artwork:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_show_whose_seasons_a_provider_answered_is_not_asked_again() {
+        // The other direction, and it is what stops the fix from becoming a request per visit: a
+        // show whose provider listed no seasons writes no row, and is still answered.
+        for artwork in [Artwork::Unknown, Artwork::Cached] {
+            assert!(
+                !refresh_due(&state_of(true, true, artwork, Seasons::Read)),
+                "a show whose season step answered: {artwork:?}"
+            );
+        }
+        // A poster the cache lost is still one request's worth, whatever the seasons did.
+        assert!(refresh_due(&state_of(
+            true,
+            true,
+            Artwork::Missing,
+            Seasons::Read
+        )));
+        // A season read that failed leaves the column empty, so the title stays due and the next
+        // visit retries rather than the failure being permanent.
+        assert!(refresh_due(&state_of(
+            true,
+            true,
+            Artwork::Cached,
+            Seasons::NeverRead
+        )));
+    }
+
+    #[test]
     fn an_evicted_poster_is_fetched_again_and_a_cached_one_is_not() {
         assert!(
             refresh_due(&state(true, true, Artwork::Missing)),
@@ -319,12 +403,22 @@ mod tests {
         );
     }
 
-    /// One title row, with only the two fields the state is built from varying.
+    /// One title row, with only the fields the state is built from varying.
     ///
     /// `detailed` picks the stored state a details read and a list answer leave behind, and the
     /// flag is read back off it, so the fixture cannot hold a pairing the catalogue could not:
     /// `Listed` and a details read are different rows rather than one row with a boolean beside it.
     fn row(detailed: bool, poster: Option<&str>) -> peregrine_storage::TitleDetailRow {
+        row_of(peregrine_storage::TitleKind::Movie, detailed, poster, false)
+    }
+
+    /// The same row, with the kind and the season step's own fact varied.
+    fn row_of(
+        kind: peregrine_storage::TitleKind,
+        detailed: bool,
+        poster: Option<&str>,
+        seasons_synced: bool,
+    ) -> peregrine_storage::TitleDetailRow {
         let metadata_state = if detailed {
             peregrine_storage::MetadataState::Partial
         } else {
@@ -334,7 +428,7 @@ mod tests {
             library: peregrine_storage::LibraryTitleRow {
                 title: peregrine_storage::TitleIdentity {
                     id: 7,
-                    kind: peregrine_storage::TitleKind::Movie,
+                    kind,
                     subtype: peregrine_storage::TitleSubtype::Standard,
                     name: "Alien".to_owned(),
                     sort_name: "alien".to_owned(),
@@ -359,6 +453,7 @@ mod tests {
             rating: None,
             released: None,
             detailed: metadata_state.has_details(),
+            seasons_synced,
         }
     }
 
@@ -387,6 +482,30 @@ mod tests {
             state(true, true, Artwork::Unknown),
             "a filled title whose provider recorded no poster"
         );
+        // The season step is a fact of its own, and the two kinds answer it differently: a film can
+        // never be due for it, and a show is due until a provider has answered — including the show
+        // that looks complete in every other way, which is the case this column exists for.
+        for (kind, synced, seasons) in [
+            (
+                peregrine_storage::TitleKind::Movie,
+                false,
+                Seasons::NotAShow,
+            ),
+            (peregrine_storage::TitleKind::Movie, true, Seasons::NotAShow),
+            (
+                peregrine_storage::TitleKind::Show,
+                false,
+                Seasons::NeverRead,
+            ),
+            (peregrine_storage::TitleKind::Show, true, Seasons::Read),
+        ] {
+            assert_eq!(
+                ArtworkState::of(&row_of(kind, true, Some("/poster.jpg"), synced), None, true)
+                    .seasons,
+                seasons,
+                "{kind:?} synced={synced}"
+            );
+        }
     }
 
     #[test]

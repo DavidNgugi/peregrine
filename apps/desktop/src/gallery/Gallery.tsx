@@ -435,6 +435,7 @@ export function Gallery(): ReactElement {
               <TitleCard
                 detailsLabel="View More"
                 href={`/title/movie/${String(item.id)}`}
+                lift={false}
                 overview="One tile of five thousand, at the geometry §4 fixes."
                 poster={POSTER}
                 size="sm"

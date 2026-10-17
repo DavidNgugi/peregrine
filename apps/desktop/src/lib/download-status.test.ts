@@ -3,6 +3,7 @@ import {
   downloadMarks,
   downloadStatusLabelKey,
   downloadStatusOf,
+  downloadsFirst,
   rankByDownload,
 } from "./download-status.js";
 
@@ -119,5 +120,73 @@ describe("rankByDownload", () => {
 
   it("handles the empty list", () => {
     expect(rankByDownload([], downloadMarks([{ titleId: 1, state: "downloading" }]))).toEqual([]);
+  });
+});
+
+describe("downloadsFirst", () => {
+  const items = [
+    { titleId: 1, name: "one" },
+    { titleId: 2, name: "two" },
+  ];
+  const make = (row: { readonly title: string | null; readonly titleId: number }) => ({
+    titleId: row.titleId,
+    name: row.title ?? "",
+  });
+
+  it("puts a download the provider did not send above the feed", () => {
+    const merged = downloadsFirst(
+      items,
+      [
+        {
+          titleId: 9,
+          title: "nine",
+          titleKind: "movie",
+          poster: null,
+          state: "completed",
+        },
+      ],
+      "movie",
+      make,
+    );
+    expect(merged.map((item) => item.titleId)).toEqual([9, 1, 2]);
+  });
+
+  it("puts an in-progress transfer above a completed one", () => {
+    const merged = downloadsFirst(
+      items,
+      [
+        { titleId: 9, title: "nine", titleKind: "movie", poster: null, state: "completed" },
+        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "downloading" },
+      ],
+      "movie",
+      make,
+    );
+    expect(merged.map((item) => item.titleId)).toEqual([8, 9, 1, 2]);
+  });
+
+  it("keeps the provider row for a title that is both and does not draw it twice", () => {
+    const merged = downloadsFirst(
+      items,
+      [
+        { titleId: 2, title: "two", titleKind: "movie", poster: null, state: "downloading" },
+      ],
+      "movie",
+      make,
+    );
+    expect(merged.map((item) => item.titleId)).toEqual([2, 1]);
+    expect(merged[0]).toBe(items[1]);
+  });
+
+  it("leaves the other kind and a failed job where they are", () => {
+    const merged = downloadsFirst(
+      items,
+      [
+        { titleId: 9, title: "nine", titleKind: "show", poster: null, state: "completed" },
+        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "failed" },
+      ],
+      "movie",
+      make,
+    );
+    expect(merged).toBe(items);
   });
 });

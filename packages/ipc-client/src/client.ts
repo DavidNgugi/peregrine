@@ -24,6 +24,7 @@ import type {
   IndexerDefinitionDto,
   IndexerRef,
   IndexerSummaryDto,
+  RailItemDto,
   RailKindDto,
   RecommendationsDto,
   JobStarted,
@@ -334,6 +335,23 @@ export async function searchProviders(
   kind?: RailKindDto,
 ): Promise<TitleMatchDto[]> {
   return unwrap(commands.searchProviders(query, limit ?? null, kind ?? null));
+}
+
+/**
+ * Searches the configured providers and answers with the tiles a poster grid draws.
+ *
+ * **The tile-shaped sibling of `searchProviders`.** A result carries the year, the score, the
+ * synopsis, and the cached poster path, because it went through the same list writer a browse page
+ * does — so a search result and a page tile cannot describe one title two ways. The provider's answer
+ * is written into the catalogue before it is returned, so a result outlives the provider being
+ * reachable. `poster` is an absolute path or nothing, for the reason `browse`'s is.
+ */
+export async function searchTiles(
+  query: string,
+  limit?: number,
+  kind?: RailKindDto,
+): Promise<RailItemDto[]> {
+  return unwrap(commands.searchTiles(query, limit ?? null, kind ?? null));
 }
 
 /**

@@ -159,6 +159,13 @@ CREATE TABLE title (
   metadata_state      TEXT    NOT NULL DEFAULT 'stub'
                               CHECK (metadata_state IN ('stub','listed','partial','complete','stale','failed')),
   last_synced_at      INTEGER,
+  -- When a provider answered a *series'* season step, which is a second read and a second set of
+  -- rows. `metadata_state` records the details read and nothing else, so a show whose details landed
+  -- and whose season read did not used to be indistinguishable from one that had nothing left to
+  -- fetch: the page drew no seasons and no visit asked again. Null is "nobody has read them", which
+  -- is a fact `season_count` cannot stand in for — a provider that lists no seasons answers no rows.
+  -- Written only after the season step succeeds, so a failed read stays due. Migration 0019.
+  season_synced_at    INTEGER,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
 );

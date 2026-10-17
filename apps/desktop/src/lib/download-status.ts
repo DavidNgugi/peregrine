@@ -111,6 +111,60 @@ export function rankByDownload<T extends { readonly titleId: number }>(
   return active.length === 0 && done.length === 0 ? items : [...active, ...done, ...rest];
 }
 
+/**
+ * The download fields a Browse tile can be built from.
+ *
+ * Structural rather than the wire DTO, so the merge below is testable with a literal and this
+ * module does not depend on the generated bindings.
+ */
+export interface DownloadTitleSource extends DownloadMarkSource {
+  readonly title: string | null;
+  readonly titleKind: "movie" | "show" | null;
+  readonly poster: string | null;
+}
+
+/**
+ * The provider's items with the account's own downloads ahead of them, globally.
+ *
+ * [`rankByDownload`] can only lift a title the provider already sent, and a niche film the reader
+ * downloaded may never appear on the provider's page at all. So the queue's rows themselves are
+ * merged in: in-progress before completed, then the provider's order. A title the provider also
+ * sent keeps its richer row and simply moves; a download the provider did not send is built by
+ * `make`. A failed job does not hoist, because a red mark already says what happened.
+ */
+export function downloadsFirst<T extends { readonly titleId: number }>(
+  items: readonly T[],
+  downloads: readonly DownloadTitleSource[],
+  kind: "movie" | "show",
+  make: (download: DownloadTitleSource) => T,
+): readonly T[] {
+  const chosen = new Map<number, { row: DownloadTitleSource; status: "active" | "done" }>();
+  for (const row of downloads) {
+    if (row.titleKind !== kind || row.title === null) {
+      continue;
+    }
+    const status = downloadStatusOf(row.state);
+    if (status !== "active" && status !== "done") {
+      continue;
+    }
+    const held = chosen.get(row.titleId);
+    if (held === undefined || (held.status === "done" && status === "active")) {
+      chosen.set(row.titleId, { row, status });
+    }
+  }
+  if (chosen.size === 0) {
+    return items;
+  }
+  // **A stable sort**, so the queue's newest-first order survives inside each half.
+  const ordered = [...chosen.values()].sort((left, right) =>
+    left.status === right.status ? 0 : left.status === "active" ? -1 : 1,
+  );
+  const sent = new Map(items.map((item) => [item.titleId, item] as const));
+  const downloaded = ordered.map((entry) => sent.get(entry.row.titleId) ?? make(entry.row));
+  const own = new Set(downloaded.map((item) => item.titleId));
+  return [...downloaded, ...items.filter((item) => !own.has(item.titleId))];
+}
+
 /** The catalogue key for a status's word, which is how the colour is never carried alone. */
 export function downloadStatusLabelKey(status: DownloadStatus): string {
   return `downloads.status.${status}`;

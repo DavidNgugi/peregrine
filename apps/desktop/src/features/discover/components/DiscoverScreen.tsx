@@ -25,11 +25,7 @@ import {
   type DownloadMarks,
 } from "../../../lib/download-status.js";
 import { imageUrl } from "../../../lib/media.js";
-import {
-  MIN_QUERY_CHARS,
-  useDiscoverSearch,
-  type SearchSource,
-} from "../hooks/useDiscoverSearch.js";
+import { MIN_QUERY_CHARS, useTitleSearch, type SearchSource } from "../../../lib/title-search.js";
 import { useContinueWatching, type ContinueWatchingView } from "../hooks/useContinueWatching.js";
 import { useHomeRails, type HomeRailsView } from "../hooks/useHomeRails.js";
 import { DiscoverHero, DiscoverHeroSkeleton, type HeroSlide } from "./DiscoverHero.js";
@@ -618,7 +614,7 @@ export function DiscoverScreen({
   // The box's text lives in the hook, because the debounce does: a screen that held it would have to
   // run the timer itself, and the "catalogue first" rule would be split across two files.
   const { failed, results, searched, searching, source, query, setQuery, searchNow } =
-    useDiscoverSearch(titleKind);
+    useTitleSearch(titleKind);
 
   return (
     <DiscoverView
