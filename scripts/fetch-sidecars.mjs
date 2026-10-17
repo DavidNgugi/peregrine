@@ -12,6 +12,7 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -21,7 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,8 +120,36 @@ function findBinary(directory, suffix) {
   return match;
 }
 
+/** The first directory with this basename, which is how mpv.app is found in an archive. */
+function findDirectory(directory, name) {
+  for (const entry of readdirSync(directory)) {
+    const path = join(directory, entry);
+    if (!statSync(path).isDirectory()) continue;
+    if (entry === name) return path;
+    const nested = findDirectory(path, name);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
+}
+
 function ensureDirectory(path) {
   mkdirSync(path, { recursive: true });
+}
+
+// Adds owner-write to every entry under `path`.
+//
+// **Not cosmetic: it is what makes a second build possible.** Tauri copies `bundle.resources` into
+// `target/` with `fs::copy`, and that copies each source's permission bits onto the destination. The
+// upstream mpv bundle ships `Contents/Frameworks/libMoltenVK.dylib` as 0444, so the first build
+// leaves a read-only file in `target/` and the next one dies opening its own output for writing with
+// "Permission denied (os error 13)" — permanently, until that tree is deleted by hand.
+function makeWritable(path) {
+  const stats = lstatSync(path);
+  if (stats.isSymbolicLink()) return;
+  chmodSync(path, stats.mode | 0o200);
+  if (stats.isDirectory()) {
+    for (const entry of readdirSync(path)) makeWritable(join(path, entry));
+  }
 }
 
 const stage = join(root, "apps/desktop/src-tauri/sidecars");
@@ -162,7 +191,7 @@ for (const component of components) {
     if (component === "mpv") {
       rmSync(directory, { recursive: true, force: true });
       if (isMacMpv) {
-        const app = walk(content).find((path) => basename(path) === "mpv.app");
+        const app = findDirectory(content, "mpv.app");
         if (app === undefined) throw new Error("mpv.app is missing after extraction");
         cpSync(app, directory, { recursive: true });
       } else {
@@ -183,3 +212,7 @@ for (const component of components) {
     rmSync(staging, { recursive: true, force: true });
   }
 }
+
+// Normalised whatever is here, including components this run skipped and files someone dropped in
+// by hand: the mode of the source is the mode the build gives its own output.
+if (existsSync(stage)) makeWritable(stage);
