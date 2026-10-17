@@ -46,6 +46,7 @@ import {
   type DownloadMarks,
   type DownloadTitleSource,
 } from "../../../lib/download-status.js";
+import { useDownloadProgress } from "../../../lib/download-progress.js";
 import { imageUrl } from "../../../lib/media.js";
 import { MIN_QUERY_CHARS, useTitleSearch, type TileSearch } from "../../../lib/title-search.js";
 import { useBrowse, type BrowseData, type BrowseFilters } from "../hooks/useBrowse.js";
@@ -117,6 +118,7 @@ export function BrowseView({
 }: BrowseViewProps): ReactElement {
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
+  const progress = useDownloadProgress();
   // The field hands its text to the search hook, which owns the debounce, the request, and the three
   // answers. This screen only decides which surface the answer replaces.
   const searchMode = search.query.trim().length >= MIN_QUERY_CHARS;
@@ -140,7 +142,7 @@ export function BrowseView({
   const renderTile = (item: RailItemDto): ReactElement => (
     <TitleCard
       detailsLabel={t("card.details")}
-      {...downloadCardProps(marks, item.titleId, t)}
+      {...downloadCardProps(marks, item.titleId, t, progress)}
       href={routePath(routeFor(item))}
       // A grid has no room to give the 30 % enlargement, so the panel reveals inside the tile
       // instead of scaling the first and last columns under the scroller's edge.

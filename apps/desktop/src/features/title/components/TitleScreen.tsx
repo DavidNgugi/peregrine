@@ -154,6 +154,9 @@ export function TitleScreen({
                 acquire?.titleId === title.id &&
                 ((acquire?.starting ?? false) || (acquire?.running ?? false))
               }
+              acquiringPercent={
+                acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
+              }
               onAcquire={
                 acquire === undefined
                   ? undefined
@@ -302,6 +305,15 @@ export function TitleScreen({
                   key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
                 >
                   <EpisodeCard
+                    downloadPercent={
+                      acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
+                    }
+                    downloading={
+                      acquire?.titleId === title.id &&
+                      acquire.episode?.season === episode.seasonNumber &&
+                      acquire.episode?.episode === episode.episodeNumber &&
+                      ((acquire.starting ?? false) || (acquire.running ?? false))
+                    }
                     episode={episode}
                     onDownload={
                       acquire === undefined

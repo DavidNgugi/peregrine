@@ -47,6 +47,7 @@ import { imageUrl } from "../../../lib/media.js";
 import { usePosterBackfill } from "../../player/index.js";
 import { routePath, type Route } from "../../../app/routes.js";
 import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
+import { useDownloadProgress } from "../../../lib/download-progress.js";
 import { TitlePicker } from "./TitlePicker.js";
 import type { LibraryTitles } from "../hooks/useLibraryTitles.js";
 import type { MatchRules } from "../hooks/useMatchRules.js";
@@ -396,6 +397,7 @@ export function LibraryScreen({
 }: LibraryScreenProps): ReactElement {
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
+  const progress = useDownloadProgress();
   const columns = useMemo(() => columnsOf(t, onNavigate), [t, onNavigate]);
   const { finished, refresh } = { finished: scan.finished, refresh: titles.refresh };
   // **The library is where the wall of placeholders is, so it is where the frames are asked for.** A
@@ -512,7 +514,7 @@ export function LibraryScreen({
               label={t("library.grid.label")}
               renderItem={(row) => (
                 <TitleCard
-                  {...downloadCardProps(marks, row.id, t)}
+                  {...downloadCardProps(marks, row.id, t, progress)}
                   detailsLabel={t("card.details")}
                   href={routePath(routeFor(row))}
                   meta={tileMeta(row, t)}

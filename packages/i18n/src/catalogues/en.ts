@@ -425,6 +425,7 @@ export const en = {
         play: "Play",
         download: "Download",
         finding: "Finding a release…",
+        downloading: "Downloading… {{percent}}%",
         noFile: "The library holds no file for this title yet.",
         fileMissing: "The library recorded a file for this title, and it is not on disk right now.",
         arriving: "A download for this title is in flight.",
@@ -458,6 +459,7 @@ export const en = {
         aired: "Aired {{date}}",
         runtime: "{{minutes}} min",
         download: "Download",
+        downloading: "Downloading… {{percent}}%",
         downloadLabel: "Download episode {{number}} ({{name}})",
         // The word and not the dot: a card's state is carried by its word (§2.2), and the dot's colour
         // mapping belongs to `TitleCard`, which owns the one copy of it.

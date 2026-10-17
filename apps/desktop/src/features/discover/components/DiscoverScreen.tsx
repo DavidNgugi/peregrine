@@ -24,6 +24,7 @@ import {
   downloadStatusOf,
   type DownloadMarks,
 } from "../../../lib/download-status.js";
+import { useDownloadProgress } from "../../../lib/download-progress.js";
 import { imageUrl } from "../../../lib/media.js";
 import { MIN_QUERY_CHARS, useTitleSearch, type SearchSource } from "../../../lib/title-search.js";
 import { useContinueWatching, type ContinueWatchingView } from "../hooks/useContinueWatching.js";
@@ -291,6 +292,7 @@ export function DiscoverView({
 }: DiscoverViewProps): ReactElement {
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
+  const progress = useDownloadProgress();
 
   const routeFor = (item: RailItemDto): Route => ({
     id: item.titleId,
@@ -510,7 +512,7 @@ export function DiscoverView({
                     : "";
                 return (
                   <TitleCard
-                    {...downloadCardProps(marks, row.titleId, t)}
+                    {...downloadCardProps(marks, row.titleId, t, progress)}
                     detailsLabel={t("card.details")}
                     href={routePath({
                       kind: "title",
@@ -542,7 +544,7 @@ export function DiscoverView({
               items={watching}
               renderItem={(row, tabIndex) => (
                 <TitleCard
-                  {...downloadCardProps(marks, row.titleId, t)}
+                  {...downloadCardProps(marks, row.titleId, t, progress)}
                   detailsLabel={t("card.details")}
                   href={routePath({ kind: "player", id: row.titleId })}
                   meta={t("discover.continue.percent", {
@@ -584,7 +586,7 @@ export function DiscoverView({
               {...(firstFetch ? { skeleton: "lg" as const } : {})}
               renderItem={(item, tabIndex) => (
                 <TitleCard
-                  {...downloadCardProps(marks, item.titleId, t)}
+                  {...downloadCardProps(marks, item.titleId, t, progress)}
                   detailsLabel={t("card.details")}
                   href={routePath(routeFor(item))}
                   meta={itemMeta(item, kindFor(item))}

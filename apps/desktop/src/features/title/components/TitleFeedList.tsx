@@ -28,6 +28,7 @@ import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
 import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
+import { useDownloadProgress } from "../../../lib/download-progress.js";
 import { imageUrl } from "../../../lib/media.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
 
@@ -86,6 +87,7 @@ export function TitleFeedList({
 }: TitleFeedListProps): ReactElement | null {
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
+  const progress = useDownloadProgress();
 
   if (feed.items.length === 0) {
     // Nothing to draw and nothing wrong: a title no provider can be asked about has no feed, and the
@@ -124,7 +126,7 @@ export function TitleFeedList({
         {feed.items.map((item) => (
           <li key={item.titleId}>
             <TitleCard
-              {...downloadCardProps(marks, item.titleId, t)}
+              {...downloadCardProps(marks, item.titleId, t, progress)}
               detailsLabel={t("card.details")}
               href={routePath(routeFor(item))}
               meta={meta(item)}

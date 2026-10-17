@@ -49,10 +49,19 @@ export interface EpisodeCardProps {
    * then the card draws no button at all rather than a disabled one.
    */
   readonly onDownload?: ((episode: EpisodeDto) => void) | undefined;
+  /** This episode's own transfer is in flight, so the button says so rather than offering it again. */
+  readonly downloading?: boolean | undefined;
+  /** How far that transfer has got, 0-100. */
+  readonly downloadPercent?: number | undefined;
 }
 
 /** One episode's card. */
-export function EpisodeCard({ episode, onDownload }: EpisodeCardProps): ReactElement {
+export function EpisodeCard({
+  episode,
+  onDownload,
+  downloading = false,
+  downloadPercent,
+}: EpisodeCardProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: moving to another season has to give the next still
   // its own chance, and a boolean would keep the previous season's refusal forever.
@@ -124,13 +133,16 @@ export function EpisodeCard({ episode, onDownload }: EpisodeCardProps): ReactEle
                 number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
                 name: episode.name ?? t("title.unnamedEpisode"),
               })}
+              disabled={downloading}
               onClick={() => {
                 onDownload(episode);
               }}
               size="sm"
-              variant="secondary"
+              variant={downloading ? "primary" : "secondary"}
             >
-              {t("title.episode.download")}
+              {downloading
+                ? t("title.episode.downloading", { percent: downloadPercent ?? 0 })
+                : t("title.episode.download")}
             </Button>
           </div>
         )}

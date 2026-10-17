@@ -82,6 +82,8 @@ export interface TitleHeroProps {
   readonly onAcquire?: (() => void) | undefined;
   /** A start is in flight, so the control waits rather than offering a second. */
   readonly acquiring?: boolean | undefined;
+  /** How far the transfer has got, 0-100, while {@link TitleHeroProps.acquiring} is true. */
+  readonly acquiringPercent?: number | undefined;
 }
 
 /** The hero. */
@@ -100,6 +102,7 @@ export function TitleHero({
   onPlay,
   onAcquire,
   acquiring,
+  acquiringPercent,
 }: TitleHeroProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: another title's page has to give the next backdrop
@@ -185,9 +188,17 @@ export function TitleHero({
                 onClick={onAcquire}
                 // The surface has one affirmative action: while Play can run it is Play, and
                 // Download is the alternate; when there is nothing to play, Download is it.
-                variant={actions.play.kind === "play" ? "secondary" : "primary"}
+                variant={
+                  acquiring === true
+                    ? "primary"
+                    : actions.play.kind === "play"
+                      ? "secondary"
+                      : "primary"
+                }
               >
-                {acquiring === true ? t("title.hero.finding") : t("title.hero.download")}
+                {acquiring === true
+                  ? t("title.hero.downloading", { percent: acquiringPercent ?? 0 })
+                  : t("title.hero.download")}
               </Button>
             ) : null}
             {/* The reason, said rather than left to a disabled control: a reader who does not know why

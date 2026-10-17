@@ -184,9 +184,48 @@ export function downloadCardProps(
   marks: DownloadMarks,
   titleId: number,
   t: (key: string) => string,
-): { readonly downloadStatus?: DownloadStatus; readonly downloadLabel?: string } {
+  progress?: DownloadProgress,
+): {
+  readonly downloadStatus?: DownloadStatus;
+  readonly downloadLabel?: string;
+  readonly downloadProgress?: number;
+} {
   const status = marks.get(titleId);
-  return status === undefined
-    ? {}
-    : { downloadStatus: status, downloadLabel: t(downloadStatusLabelKey(status)) };
+  if (status === undefined) return {};
+  const percent = progress?.get(titleId);
+  return {
+    downloadStatus: status,
+    downloadLabel: t(downloadStatusLabelKey(status)),
+    ...(percent === undefined ? {} : { downloadProgress: percent }),
+  };
+}
+
+/** One percent per title whose transfer is in flight, from the queue's own progress. */
+export type DownloadProgress = ReadonlyMap<number, number>;
+
+/** The subset of a download row the progress map reads. */
+export interface DownloadProgressSource extends DownloadMarkSource {
+  readonly progressPermille: number;
+}
+
+/**
+ * How far each title's transfer has got, as whole percent.
+ *
+ * Only active jobs appear: a completed title has its own word and a failed one has its own colour,
+ * neither of which is a number. When a title has more than one active job the furthest along wins,
+ * because the overlay answers "is it nearly here" rather than "which attempt is this".
+ */
+export function downloadProgressMarks(
+  downloads: readonly DownloadProgressSource[],
+): DownloadProgress {
+  const marks = new Map<number, number>();
+  for (const job of downloads) {
+    if (downloadStatusOf(job.state) !== "active") continue;
+    const percent = Math.min(100, Math.max(0, Math.round(job.progressPermille / 10)));
+    const held = marks.get(job.titleId);
+    if (held === undefined || percent > held) {
+      marks.set(job.titleId, percent);
+    }
+  }
+  return marks;
 }

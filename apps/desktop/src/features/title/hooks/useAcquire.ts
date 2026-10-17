@@ -52,12 +52,15 @@ export interface AcquireControl {
   /** The title this state belongs to, or `null` before the first start. A control held by the shell
    * would otherwise show one title's job on every other title's page. */
   readonly titleId: number | null;
+  /** The episode the last start named, or `null` when it asked for the whole title. */
+  readonly episode: EpisodePick | null;
   /** Asks the core to acquire the title, or one episode of it when one is given. */
   readonly start: (titleId: number, episode?: EpisodePick) => Promise<void>;
 }
 
 interface AcquireState {
   titleId: number | null;
+  episode: EpisodePick | null;
   jobId: string | null;
   journalId: number | null;
   phase: JobState | null;
@@ -73,6 +76,7 @@ interface AcquireState {
 
 const IDLE: AcquireState = {
   titleId: null,
+  episode: null,
   jobId: null,
   journalId: null,
   phase: null,
@@ -90,7 +94,7 @@ export function useAcquire(): AcquireControl {
   const [state, setState] = useState<AcquireState>(IDLE);
 
   const start = useCallback(async (titleId: number, episode?: EpisodePick): Promise<void> => {
-    setState({ ...IDLE, titleId, starting: true });
+    setState({ ...IDLE, titleId, episode: episode ?? null, starting: true });
     try {
       const started = await unwrap(
         commands.acquire({ id: titleId }, null, episode?.season ?? null, episode?.episode ?? null),
@@ -98,6 +102,7 @@ export function useAcquire(): AcquireControl {
       setState({
         ...IDLE,
         titleId,
+        episode: episode ?? null,
         jobId: started.jobId,
         journalId: started.journalId,
         phase: "queued",
@@ -105,7 +110,7 @@ export function useAcquire(): AcquireControl {
     } catch (caught: unknown) {
       const error = normalizeIpcError(caught);
       logUiError("acquire", error);
-      setState({ ...IDLE, titleId, error });
+      setState({ ...IDLE, titleId, episode: episode ?? null, error });
     }
   }, []);
 

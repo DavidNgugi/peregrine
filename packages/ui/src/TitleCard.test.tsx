@@ -203,6 +203,23 @@ describe("TitleCard download mark", () => {
     );
   });
 
+  it("draws the percentage over an active transfer and not over a finished one", () => {
+    const active = card({
+      downloadStatus: "active",
+      downloadLabel: "Downloading",
+      downloadProgress: 42,
+    });
+    expect(active).toContain("data-download-overlay");
+    expect(active).toContain(">42%<");
+    expect(active).toContain("Alien, Downloading, 42%");
+    const finished = card({
+      downloadStatus: "done",
+      downloadLabel: "Downloaded",
+      downloadProgress: 100,
+    });
+    expect(finished).not.toContain("data-download-overlay");
+  });
+
   it("adds the download's word to the accessible name exactly once", () => {
     const markup = card({ downloadStatus: "active", downloadLabel: "Downloading" });
     expect(markup).toContain('<span class="sr-only">Alien, Downloading</span>');

@@ -376,6 +376,13 @@ export interface TitleCardProps {
   readonly downloadStatus?: CardDownloadStatus | null;
   /** The status's word, localized by the caller. Drawn only in the accessible name. */
   readonly downloadLabel?: string | null;
+  /**
+   * How far an in-flight transfer has got, as whole percent.
+   *
+   * Drawn as a translucent overlay only while {@link TitleCardProps.downloadStatus} is `active`; a
+   * number without a status would be a progress bar for something the card cannot name.
+   */
+  readonly downloadProgress?: number | null;
   readonly size?: CardSize;
   /**
    * Loads eagerly and at high priority.
@@ -411,6 +418,7 @@ export function TitleCard({
   availabilityLabel,
   downloadStatus,
   downloadLabel,
+  downloadProgress,
   size,
   // The container's answer to the tile's enlargement. A rail reserves the room and a grid cannot,
   // so the name is the room's rather than the interaction's: `previewLift` below is the stacking
@@ -507,6 +515,8 @@ export function TitleCard({
       : DOWNLOAD_SIGNALS[downloadStatus];
   const downloadWord = said(downloadLabel);
   const showsDownload = downloadSignal !== null && downloadWord !== null;
+  const percent = downloadProgress ?? null;
+  const showsProgress = downloadStatus === "active" && percent !== null;
 
   const metaLine = said(meta);
   const spoken = [
@@ -515,6 +525,7 @@ export function TitleCard({
     said(ratingLabel),
     showsChip ? chip : null,
     showsDownload ? downloadWord : null,
+    showsProgress && percent !== null ? `${String(percent)}%` : null,
   ]
     .filter((part): part is string => part !== null)
     .join(", ");
@@ -589,6 +600,15 @@ export function TitleCard({
         className="relative block aspect-[2/3] w-full overflow-hidden rounded-[inherit] bg-surface-2"
         {...(placeholder === undefined ? {} : { style: { backgroundColor: placeholder } })}
       >
+        {showsProgress && percent !== null ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 z-20 grid place-items-center bg-black/55 backdrop-blur-[1px]"
+            data-download-overlay=""
+          >
+            <span className="text-lg font-semibold tabular-nums text-white">{percent}%</span>
+          </span>
+        ) : null}
         {posterVisible(poster, failed) ? (
           <img
             alt=""

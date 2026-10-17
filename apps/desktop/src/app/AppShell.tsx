@@ -35,7 +35,8 @@ import {
   useShortcutDispatch,
   useShortcuts,
 } from "../features/settings/index.js";
-import { downloadMarks } from "../lib/download-status.js";
+import { DownloadProgressProvider } from "../lib/download-progress.js";
+import { downloadMarks, downloadProgressMarks } from "../lib/download-status.js";
 import { imageUrl } from "../lib/media.js";
 import type { Platform } from "../lib/platform.js";
 import { writePath } from "../lib/window-path.js";
@@ -234,6 +235,10 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // One status per title, from the queue read the shell already holds. A screen hands a card the
   // mark for its own id rather than each subscribing to the queue: one read, one answer.
   const marks = useMemo(() => downloadMarks(downloads.downloads), [downloads.downloads]);
+  const progressMarks = useMemo(
+    () => downloadProgressMarks(downloads.downloads),
+    [downloads.downloads],
+  );
   // The poster wall behind the profile selector: the titles this device already holds, which is the
   // honest answer to "what is in this profile" while accounts do not exist.
   const profilePosters = useMemo(() => {
@@ -337,109 +342,110 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
             property `App.test.tsx` pins. On macOS the overlay title bar drags on its own; on Windows
             and Linux the frame and its caption do. */}
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {route.kind === "discover" ? (
-            /* A bare `/` is All, which is the default the toolbar starts on and what `parseRoute`
+          <DownloadProgressProvider value={progressMarks}>
+            {route.kind === "discover" ? (
+              /* A bare `/` is All, which is the default the toolbar starts on and what `parseRoute`
                answers when the URL carries no `type`. */
-            <DiscoverScreen
-              downloads={marks}
-              onBackdrops={reportBackdrops}
-              onNavigate={navigate}
-              recentDownloads={downloads.downloads}
-              titleKind={route.titleKind}
-              trailing={
-                <>
-                  {/* The theme control, which used to live in the title bar. Same shape as the toolbar's
+              <DiscoverScreen
+                downloads={marks}
+                onBackdrops={reportBackdrops}
+                onNavigate={navigate}
+                recentDownloads={downloads.downloads}
+                titleKind={route.titleKind}
+                trailing={
+                  <>
+                    {/* The theme control, which used to live in the title bar. Same shape as the toolbar's
                       own icon buttons — 44 px, on the translucent surface — because it sits beside them:
                       the refresh control that follows it is the neighbour it has to match. */}
-                  <IconButton
-                    className="size-11 rounded-full border border-border-subtle bg-surface-0/70"
-                    icon={nextTheme === "light" ? "sun" : "moon"}
-                    label={themeLabel}
-                    onClick={() => {
-                      setPreference(nextTheme);
-                    }}
-                    title={themeLabel}
-                    variant="ghost"
-                  />
-                  <ProfileAvatar
-                    label={t("profile.switch")}
-                    onClick={() => {
-                      setProfileOpen(true);
-                    }}
-                    profile={active}
-                  />
-                </>
-              }
-            />
-          ) : null}
-          {route.kind === "browse" ? (
-            /* The kind is the route's, so the toolbar's switch is a navigation and the window's
+                    <IconButton
+                      className="size-11 rounded-full border border-border-subtle bg-surface-0/70"
+                      icon={nextTheme === "light" ? "sun" : "moon"}
+                      label={themeLabel}
+                      onClick={() => {
+                        setPreference(nextTheme);
+                      }}
+                      title={themeLabel}
+                      variant="ghost"
+                    />
+                    <ProfileAvatar
+                      label={t("profile.switch")}
+                      onClick={() => {
+                        setProfileOpen(true);
+                      }}
+                      profile={active}
+                    />
+                  </>
+                }
+              />
+            ) : null}
+            {route.kind === "browse" ? (
+              /* The kind is the route's, so the toolbar's switch is a navigation and the window's
                path says which category is on screen. A route naming none is the default kind — see
                `BrowseScreen`. */
-            <BrowseScreen
-              backLabel={t("shell.back")}
-              downloadRows={downloads.downloads}
-              downloads={marks}
-              onBack={canBack ? goBack : undefined}
-              onNavigate={navigate}
-              titleKind={route.titleKind}
-            />
-          ) : null}
-          {route.kind === "library" ? (
-            <LibraryScreen
-              backLabel={t("shell.back")}
-              downloads={marks}
-              onBack={canBack ? goBack : undefined}
-              onNavigate={navigate}
-              onView={libraryView.setView}
-              rules={rules}
-              scan={scan}
-              titles={library}
-              unmatched={unmatched}
-              view={libraryView.view}
-            />
-          ) : null}
-          {route.kind === "downloads" ? (
-            <DownloadsScreen
-              backLabel={t("shell.back")}
-              downloads={downloads}
-              onBack={canBack ? goBack : undefined}
-              onNavigate={navigate}
-            />
-          ) : null}
-          {route.kind === "diagnostics" ? (
-            <JobsScreen backLabel={t("shell.back")} onBack={canBack ? goBack : undefined} />
-          ) : null}
-          {route.kind === "settings" ? (
-            <SettingsScreen
-              backLabel={t("shell.back")}
-              indexers={indexers}
-              prowlarr={prowlarr}
-              libraries={libraries}
-              onBack={canBack ? goBack : undefined}
-              providers={providers}
-              shortcuts={shortcuts}
-            />
-          ) : null}
-          {route.kind === "player" ? (
-            /* The player is a screen of its own rather than a state inside the title page: the video
+              <BrowseScreen
+                backLabel={t("shell.back")}
+                downloadRows={downloads.downloads}
+                downloads={marks}
+                onBack={canBack ? goBack : undefined}
+                onNavigate={navigate}
+                titleKind={route.titleKind}
+              />
+            ) : null}
+            {route.kind === "library" ? (
+              <LibraryScreen
+                backLabel={t("shell.back")}
+                downloads={marks}
+                onBack={canBack ? goBack : undefined}
+                onNavigate={navigate}
+                onView={libraryView.setView}
+                rules={rules}
+                scan={scan}
+                titles={library}
+                unmatched={unmatched}
+                view={libraryView.view}
+              />
+            ) : null}
+            {route.kind === "downloads" ? (
+              <DownloadsScreen
+                backLabel={t("shell.back")}
+                downloads={downloads}
+                onBack={canBack ? goBack : undefined}
+                onNavigate={navigate}
+              />
+            ) : null}
+            {route.kind === "diagnostics" ? (
+              <JobsScreen backLabel={t("shell.back")} onBack={canBack ? goBack : undefined} />
+            ) : null}
+            {route.kind === "settings" ? (
+              <SettingsScreen
+                backLabel={t("shell.back")}
+                indexers={indexers}
+                prowlarr={prowlarr}
+                libraries={libraries}
+                onBack={canBack ? goBack : undefined}
+                providers={providers}
+                shortcuts={shortcuts}
+              />
+            ) : null}
+            {route.kind === "player" ? (
+              /* The player is a screen of its own rather than a state inside the title page: the video
                wants the content area, the title page's counts and seasons want to stay where they are,
                and a route is what makes Back mean what it says. The session it opens lives exactly as
                long as this component does (ADR 0023, SECURITY.md T10). */
-            <PlayerScreen
-              id={route.id}
-              /* Back rather than a route of the shell's own: the player was opened from a title,
+              <PlayerScreen
+                id={route.id}
+                /* Back rather than a route of the shell's own: the player was opened from a title,
                  so the place behind it is that title, and going back is what keeps the history
                  rather than pushing a second copy of the same page. */
-              onClose={leavePlayer}
-            />
-          ) : null}
-          {route.kind === "title" ? (
-            <TitleScreen
-              detail={title}
-              feed={feed}
-              kind={route.titleKind}
-              /* **Keyed by which title it is, and its absence was a bug a reader hit.** Opening a
+                onClose={leavePlayer}
+              />
+            ) : null}
+            {route.kind === "title" ? (
+              <TitleScreen
+                detail={title}
+                feed={feed}
+                kind={route.titleKind}
+                /* **Keyed by which title it is, and its absence was a bug a reader hit.** Opening a
                  title from another title's feed is the same component in the same position, so React
                  reconciled it onto the *same* `<section>` — and that section is the screen's scroller.
                  The new page therefore opened at the old page's scroll offset, so following a
@@ -448,15 +454,16 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                  screen, which resets the scroll and, just as importantly, drops the previous title's
                  component state — the season switcher would otherwise open on the season the *last*
                  title was left on. */
-              key={`${route.titleKind}:${String(route.id)}`}
-              acquire={acquire}
-              backLabel={t("shell.back")}
-              downloads={marks}
-              onBack={canBack ? goBack : undefined}
-              onNavigate={navigate}
-              seasons={seasons}
-            />
-          ) : null}
+                key={`${route.titleKind}:${String(route.id)}`}
+                acquire={acquire}
+                backLabel={t("shell.back")}
+                downloads={marks}
+                onBack={canBack ? goBack : undefined}
+                onNavigate={navigate}
+                seasons={seasons}
+              />
+            ) : null}
+          </DownloadProgressProvider>
         </main>
       </div>
       <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />
