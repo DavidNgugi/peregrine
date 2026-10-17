@@ -326,10 +326,10 @@ Authority for naming conventions: **TRaSH Guides**, `https://trash-guides.info/`
 ```
 HTTP/1.1 200 OK
 CACHE-CONTROL: max-age=1800
-LOCATION: http://192.168.100.27:9197/dmr
+LOCATION: http://192.168.1.50:9197/dmr
 SERVER: Samsung-Linux/4.1, UPnP/1.0, Samsung_UPnP_SDK/1.0
 ST: urn:schemas-upnp-org:device:MediaRenderer:1
-USN: uuid:1f0eae0c-51fa-4530-b1b5-38e26daa9085::urn:schemas-upnp-org:device:MediaRenderer:1
+USN: uuid:<device-uuid>::urn:schemas-upnp-org:device:MediaRenderer:1
 BOOTID.UPNP.ORG: 9
 ```
 Working flow: M-SEARCH → parse `LOCATION` → HTTP `GET` the device description XML → find `serviceType`/`controlURL` for `AVTransport` and `ConnectionManager`. `CACHE-CONTROL: max-age=1800` means SSDP responses are themselves cacheable, so re-discovering more often than every 30 minutes is wasteful. No MediaServer existed on this LAN, so `ContentDirectory:Browse` is untested and the `ssdp:all` / `MediaServer:1` targets are **unverified**.
@@ -443,7 +443,7 @@ The architectural split: **text formats convert losslessly between each other an
 | 15 | torlink's piece prioritization / delivery design; Peeri's existence | Read `baairon/torlink` source for HTTP-range vs pipe; locate Peeri first |
 | 16 | DHT bootstrap host list (BEP 5 gives only an example) | Read libtorrent/Transmission source for compiled-in defaults |
 | 17 | `_googlecast._tcp` TXT field set + CASTV2 framing/namespaces | `dns-sd -B _googlecast._tcp` on a LAN with a Chromecast, then `protoc --decode_raw` one session |
-| 18 | DLNA DIDL-Lite skeleton, `protocolInfo` strings, `ContentDirectory:Browse` | `GetProtocolInfo` against the Samsung TV at `192.168.100.27:9197`; re-run SSDP with `ST: ssdp:all` plus a NAS |
+| 18 | DLNA DIDL-Lite skeleton, `protocolInfo` strings, `ContentDirectory:Browse` | `GetProtocolInfo` against the Samsung TV at `192.168.1.50:9197`; re-run SSDP with `ST: ssdp:all` plus a NAS |
 | 19 | External-IP leak-check endpoint list; split-tunnel + interface-bind semantics per OS | Compare 3–4 echo services; kill the VPN mid-run and assert all peer I/O stops (fail-closed) |
 | 20 | YouTube ToS verbatim download-prohibition clause; Dailymotion limits/ToS | Read the API Services ToS + Developer Policies; query the Dailymotion developer portal |
 | 21 | TRaSH Guides current release-profile regex page (old Sonarr path returns 450 bytes) | Find the live regex page from `trash-guides.info` navigation |

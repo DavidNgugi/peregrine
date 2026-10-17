@@ -23,6 +23,12 @@ playwright-report/
 test-results/
 .eslintcache
 
+# Local environment and secret files (never committed)
+.env
+.env.*
+*.pem
+*.p12
+
 # Local runtime state (never committed)
 *.sqlite
 *.sqlite-wal

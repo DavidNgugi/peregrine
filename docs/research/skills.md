@@ -11,7 +11,7 @@ was resolved on 2026-10-08; no candidate is listed on name alone.
 
 **Install-path caveat, verified 2026-10-09.** `npx skills` does **not** run on this machine. Three
 independent invocations failed with `npm error code EPERM` on `~/.npm/_cacache/tmp`, with npm advising
-`sudo chown -R 501:20 "/Users/davidngugi/.npm"`. Section 2's install commands are therefore verified
+`sudo chown -R "$(id -u):$(id -g)" "$HOME/.npm"`. Section 2's install commands are therefore verified
 against the **skills.sh API and the upstream repositories**, not against a successful local install.
 Repair the npm cache ownership before attempting any install, and see section 6 for the install rules.
 
@@ -159,7 +159,7 @@ A skill is a set of instructions an agent will follow, so installing one is a su
 in this project it is also a security decision. Rules:
 
 1. **Repair the npm cache first.** `npx` currently fails with `EPERM` on `~/.npm/_cacache`; the fix is
-   `sudo chown -R 501:20 "/Users/davidngugi/.npm"`, which is the user's call to make. Nothing in the
+   `sudo chown -R "$(id -u):$(id -g)" "$HOME/.npm"`, which is the user's call to make. Nothing in the
    build may depend on an ad-hoc `npx` install, so CI must never shell out to `npx skills`.
 2. **Read the skill before installing it.** A `SKILL.md` that instructs the agent to pipe a remote script
    into a shell, disable a safety check, or exfiltrate files is rejected regardless of its install count.
