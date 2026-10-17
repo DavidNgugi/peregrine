@@ -576,6 +576,10 @@ fn cases() -> Vec<ContractCase> {
     all.extend(provider_cases());
     all.extend(credential_cases());
     all.extend(download_cases());
+    all.extend(indexer_cases());
+    all.extend(notification_cases());
+    all.extend(watch_cases());
+    all.extend(prowlarr_cases());
     all
 }
 
@@ -698,20 +702,39 @@ fn provider_cases() -> Vec<ContractCase> {
     ]
 }
 
-/// The `downloads` namespace. Every command needs a runtime, so the dead state is the failure.
-fn download_cases() -> Vec<ContractCase> {
-    vec![ContractCase {
-        command: "acquire",
+/// A case whose only reachable failure with a dead runtime is an internal error.
+fn fails_internal(command: &'static str, drive: Drive) -> ContractCase {
+    ContractCase {
+        command,
         expected: Expected::Fails {
             code: ErrorCode::Internal,
             retryable: false,
         },
-        drive: acquire_without_a_runtime,
-    }]
+        drive,
+    }
 }
 
-/// `acquire` starts a job through the runtime, so it fails when there is none.
-fn acquire_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+/// The downloads namespace. Every command needs a runtime, so the dead state is the failure.
+fn download_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("acquire", acquire_dead),
+        fails_internal("list_downloads", list_downloads_dead),
+        fails_internal("pause_download", pause_download_dead),
+        fails_internal("resume_download", resume_download_dead),
+        fails_internal("remove_download", remove_download_dead),
+        fails_internal("dismiss_download", dismiss_download_dead),
+        fails_internal("clear_finished_downloads", clear_finished_downloads_dead),
+        fails_internal("plan_download_deletion", plan_download_deletion_dead),
+        fails_internal("delete_download", delete_download_dead),
+        fails_internal("preferred_quality", preferred_quality_dead),
+        fails_internal("set_preferred_quality", set_preferred_quality_dead),
+        fails_internal("list_release_offers", list_release_offers_dead),
+        fails_internal("choose_release_offer", choose_release_offer_dead),
+        fails_internal("dismiss_release_offer", dismiss_release_offer_dead),
+    ]
+}
+
+fn acquire_dead(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::downloads::acquire(
             harness.dead_state(),
@@ -720,6 +743,383 @@ fn acquire_without_a_runtime(harness: &Harness) -> Invocation<'_> {
         )
         .await
         .map(drop)
+    })
+}
+
+fn list_downloads_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::list_downloads(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn pause_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::pause_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn resume_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::resume_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn remove_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::remove_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn dismiss_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::dismiss_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn clear_finished_downloads_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::clear_finished_downloads(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn plan_download_deletion_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::plan_download_deletion(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn delete_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::delete_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn preferred_quality_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::preferred_quality(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_preferred_quality_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::set_preferred_quality(harness.dead_state(), "1080p".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+fn list_release_offers_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::list_release_offers(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn choose_release_offer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::choose_release_offer(
+            harness.dead_state(),
+            crate::downloads::OfferRef { id: 1 },
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn dismiss_release_offer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::dismiss_release_offer(
+            harness.dead_state(),
+            crate::downloads::OfferRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// The indexers namespace. Every command reaches the secret store through the runtime.
+fn indexer_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("indexer_status", indexer_status_dead),
+        fails_internal("set_indexer", set_indexer_dead),
+        fails_internal("clear_indexer", clear_indexer_dead),
+        fails_internal("test_indexer", test_indexer_dead),
+        fails_internal("search_releases", search_releases_dead),
+        fails_internal("list_indexers", list_indexers_dead),
+        fails_internal("indexer_catalog", indexer_catalog_dead),
+        fails_internal("indexer_definition", indexer_definition_dead),
+        fails_internal("add_indexer", add_indexer_dead),
+        fails_internal("remove_indexer", remove_indexer_dead),
+    ]
+}
+
+fn indexer_status_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::indexer_status(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_indexer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::set_indexer(
+            harness.dead_state(),
+            "http://127.0.0.1:9696".to_owned(),
+            "secret".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn clear_indexer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::clear_indexer(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn test_indexer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::test_indexer(
+            harness.dead_state(),
+            "http://127.0.0.1:9696".to_owned(),
+            "secret".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn search_releases_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::search_releases(harness.dead_state(), "matrix".to_owned(), None)
+            .await
+            .map(drop)
+    })
+}
+
+fn list_indexers_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::list_indexers(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn indexer_catalog_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::indexer_catalog(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn indexer_definition_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::indexer_definition(harness.dead_state(), "1337x".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+fn add_indexer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::add_indexer(
+            harness.dead_state(),
+            crate::indexers::AddIndexerRequest {
+                key: "1337x".to_owned(),
+                name: "Test".to_owned(),
+                fields: Vec::new(),
+            },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn remove_indexer_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::indexers::remove_indexer(harness.dead_state(), crate::indexers::IndexerRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+/// The notifications namespace. Every command reads or writes the centre through the runtime.
+fn notification_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("list_notifications", list_notifications_dead),
+        fails_internal("mark_notification_read", mark_notification_read_dead),
+        fails_internal(
+            "mark_all_notifications_read",
+            mark_all_notifications_read_dead,
+        ),
+        fails_internal("dismiss_notification", dismiss_notification_dead),
+    ]
+}
+
+fn list_notifications_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::notifications::list_notifications(harness.dead_state(), 10)
+            .await
+            .map(drop)
+    })
+}
+
+fn mark_notification_read_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::notifications::mark_notification_read(
+            harness.dead_state(),
+            crate::notifications::NotificationRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn mark_all_notifications_read_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::notifications::mark_all_notifications_read(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn dismiss_notification_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::notifications::dismiss_notification(
+            harness.dead_state(),
+            crate::notifications::NotificationRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// The watch namespace. Both commands read or write progress through the runtime.
+fn watch_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("continue_watching", continue_watching_dead),
+        fails_internal("record_progress", record_progress_dead),
+    ]
+}
+
+fn continue_watching_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::continue_watching(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn record_progress_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::record_progress(
+            harness.dead_state(),
+            crate::watch::ProgressReport {
+                title_id: 1,
+                episode_id: None,
+                position_ms: 0,
+                duration_ms: None,
+            },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// The prowlarr namespace. The managed instance is owned by the runtime.
+fn prowlarr_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("prowlarr_status", prowlarr_status_dead),
+        fails_internal("install_prowlarr", install_prowlarr_dead),
+        fails_internal("start_prowlarr", start_prowlarr_dead),
+        fails_internal("stop_prowlarr", stop_prowlarr_dead),
+    ]
+}
+
+fn prowlarr_status_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::prowlarr::prowlarr_status(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn install_prowlarr_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::prowlarr::install_prowlarr(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn start_prowlarr_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::prowlarr::start_prowlarr(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn stop_prowlarr_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::prowlarr::stop_prowlarr(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+/// `play_externally` asks the runtime for the player, so it fails when there is none.
+fn play_externally_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::play_externally(harness.dead_state(), crate::library::TitleRef { id: 1 })
+            .await
+            .map(drop)
     })
 }
 
@@ -808,6 +1208,7 @@ fn job_cases() -> Vec<ContractCase> {
 /// The commands that manage the library roots.
 fn library_cases() -> Vec<ContractCase> {
     vec![
+        fails_internal("play_externally", play_externally_dead),
         ContractCase {
             command: "list_roots",
             expected: Expected::Fails {
