@@ -428,6 +428,7 @@ fn prepare_bundle(staging: &Path) -> Result<(), ProwlarrError> {
 
 /// Off macOS there is no quarantine flag and no app bundle to re-sign.
 #[cfg(not(target_os = "macos"))]
+#[allow(clippy::unnecessary_wraps)] // The signature must match the macOS implementation.
 fn prepare_bundle(_staging: &Path) -> Result<(), ProwlarrError> {
     Ok(())
 }
