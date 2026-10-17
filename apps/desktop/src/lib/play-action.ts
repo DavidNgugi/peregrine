@@ -20,7 +20,7 @@
 import type { LocalPlaybackDto, TitleOfferDto } from "@peregrine/ipc-client";
 
 /** Why a primary action cannot be taken. */
-export type PlayReason = "noFile" | "fileMissing" | "arriving" | "noPlayer" | "container";
+export type PlayReason = "noFile" | "fileMissing" | "arriving" | "noPlayer";
 
 /**
  * What Play is: an action, or a control that is disabled for a stated reason.
@@ -37,7 +37,12 @@ export type PlayReason = "noFile" | "fileMissing" | "arriving" | "noPlayer" | "c
  * beside it (`ADR 0023` §5).
  */
 export type PlayAction =
-  | { readonly kind: "play"; readonly containerUnknown: boolean }
+  | {
+      readonly kind: "play";
+      readonly containerUnknown: boolean;
+      /** Who opens the file: the page's own media element, or mpv for a container it cannot read. */
+      readonly reader: "webview" | "external";
+    }
   | { readonly kind: "unavailable"; readonly reason: PlayReason };
 
 /** The action, from the two facts that decide it. */
@@ -51,7 +56,7 @@ export function heroPlay(playable: boolean, player: boolean): PlayAction {
   // A rail tile carries no container, which is not the same as a container this build cannot name: the
   // absence is on the *read*, and a tile that said "might not play" about every film would be saying
   // nothing. The title page is where the file itself is known, and it is the screen that admits it.
-  return { kind: "play", containerUnknown: false };
+  return { kind: "play", containerUnknown: false, reader: "webview" };
 }
 
 /** What a title's own page draws, from the core's offer and the build's player. */
@@ -77,10 +82,10 @@ export interface TitlePageActions {
  * beside the control the core's answer rather than a screen's guess.
  *
  * **The container comes last because it is only meaningful once there is a file.** `externalPlayer`
- * means the webview's media stack cannot demux it, so pressing Play would buy a black rectangle and a
- * decoder error; saying so before the press is the whole reason the core classifies the name at all
- * (`ADR 0023` §5). `unknown` plays, with an admission; `null` is the read not knowing, which is not a
- * reason to withhold anything.
+ * means the webview's media stack cannot demux it, so the action names mpv as the reader and the
+ * screen starts that instead of a `<video>`; the classification is what tells the two apart
+ * (`ADR 0023` §5). `unknown` plays in the page, with an admission; `null` is the read not knowing,
+ * which is not a reason to withhold anything.
  */
 export function titlePageActions(
   offer: TitleOfferDto,
@@ -100,10 +105,15 @@ export function titlePageActions(
     return { play: { kind: "unavailable", reason: "noPlayer" }, acquire: false };
   }
   if (support === "externalPlayer") {
-    return { play: { kind: "unavailable", reason: "container" }, acquire: false };
+    // The build has a reader for this container: mpv. The press starts it rather than being
+    // refused, and the page says which reader will open the file.
+    return {
+      play: { kind: "play", containerUnknown: false, reader: "external" },
+      acquire: false,
+    };
   }
   return {
-    play: { kind: "play", containerUnknown: support === "unknown" },
+    play: { kind: "play", containerUnknown: support === "unknown", reader: "webview" },
     acquire: false,
   };
 }

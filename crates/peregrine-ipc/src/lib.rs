@@ -78,6 +78,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_match_rules,
             library::get_title,
             library::start_playback,
+            library::play_externally,
             library::stop_playback,
             library::start_poster_capture,
             library::stop_poster_capture,

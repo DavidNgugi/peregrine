@@ -427,6 +427,16 @@ export async function startPlayback(titleId: number): Promise<PlaybackSessionDto
 }
 
 /**
+ * Opens one title's file in mpv, for a container the page's media element cannot demux.
+ *
+ * The bytes never cross IPC: mpv opens the file itself, so this command carries only the title id.
+ * A refusal is mpv missing, or one of the same file refusals `startPlayback` reports.
+ */
+export async function playExternally(titleId: number): Promise<void> {
+  await unwrap(commands.playExternally({ id: titleId }));
+}
+
+/**
  * Opens a session for one title's file so a frame can be captured from it.
  *
  * Not `startPlayback` with a flag, and the name is the reason: nothing plays a capture session, and a

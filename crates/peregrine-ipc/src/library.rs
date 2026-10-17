@@ -826,6 +826,25 @@ pub async fn start_playback(
     ))
 }
 
+/// Plays one title's file in the external player (mpv), for a container the webview cannot demux.
+///
+/// One command rather than a flag on `start_playback`: the bytes never cross this process, and a
+/// caller that could not tell the two apart would give the wrong one the wrong error path.
+///
+/// # Errors
+///
+/// [`AppError`] when the title is not here, holds no copy on disk, holds a copy outside every
+/// configured folder, or when mpv is not installed.
+#[tauri::command]
+#[specta::specta]
+pub async fn play_externally(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+) -> Result<(), AppError> {
+    state.runtime()?.start_external_playback(title.id).await?;
+    Ok(guard_response("library::play_externally", ()))
+}
+
 /// Opens a session for one title's file so the renderer can capture a poster frame from it.
 ///
 /// **Not `start_playback` with a flag, and the name is the reason.** Both open the same listener for the

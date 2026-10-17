@@ -44,7 +44,6 @@ const REASON_COPY: Readonly<Record<PlayReason, string>> = {
   fileMissing: "title.hero.fileMissing",
   arriving: "title.hero.arriving",
   noPlayer: "title.hero.noPlayer",
-  container: "title.hero.container",
 };
 
 export interface TitleHeroProps {
@@ -72,8 +71,13 @@ export interface TitleHeroProps {
    * it, or `null` when it holds no copy on disk.
    */
   readonly playSupport: LocalPlaybackDto | null;
-  /** What Play does when it can. Absent means this build has no player to give. */
-  readonly onPlay?: () => void;
+  /**
+   * What Play does when it can. Absent means this build has no player to give.
+   *
+   * The reader is the core's classification rather than a screen's: a container the webview cannot
+   * demux opens in mpv, and this is what tells the two apart.
+   */
+  readonly onPlay?: (reader: "webview" | "external") => void;
   /** What Download does when it can. Absent means this build has no acquisition path to give. */
   readonly onAcquire?: (() => void) | undefined;
   /** A start is in flight, so the control waits rather than offering a second. */
@@ -161,7 +165,11 @@ export function TitleHero({
           <div className="flex flex-wrap items-center gap-3">
             <Button
               disabled={actions.play.kind !== "play"}
-              onClick={onPlay}
+              onClick={() => {
+                if (actions.play.kind === "play") {
+                  onPlay?.(actions.play.reader);
+                }
+              }}
               variant="primary"
             >
               <Icon name="play" size={20} />
@@ -192,7 +200,11 @@ export function TitleHero({
                 the doubt is said beside it. Withholding playback that works and promising playback that
                 fails are both worse than a sentence. */}
             {actions.play.kind === "play" ? (
-              actions.play.containerUnknown ? (
+              actions.play.reader === "external" ? (
+                <p className="text-caption text-text-secondary" role="status">
+                  {t("title.hero.external")}
+                </p>
+              ) : actions.play.containerUnknown ? (
                 <p className="text-caption text-text-secondary" role="status">
                   {t("title.hero.unnamedContainer")}
                 </p>

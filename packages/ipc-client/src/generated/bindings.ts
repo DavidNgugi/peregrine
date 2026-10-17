@@ -230,6 +230,18 @@ export const commands = {
 	 */
 	startPlayback: (title: TitleRef) => typedError<PlaybackSessionDto, AppError_Serialize>(__TAURI_INVOKE("start_playback", { title })),
 	/**
+	 *  Plays one title's file in the external player (mpv), for a container the webview cannot demux.
+	 * 
+	 *  One command rather than a flag on `start_playback`: the bytes never cross this process, and a
+	 *  caller that could not tell the two apart would give the wrong one the wrong error path.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the title is not here, holds no copy on disk, holds a copy outside every
+	 *  configured folder, or when mpv is not installed.
+	 */
+	playExternally: (title: TitleRef) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("play_externally", { title })),
+	/**
 	 *  Stops the playback session `session` names, answering whether that one was open.
 	 * 
 	 *  Deliberately infallible: there is no state in which a caller asking for silence should be told no, and a

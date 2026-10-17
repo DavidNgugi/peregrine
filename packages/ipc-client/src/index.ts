@@ -81,6 +81,7 @@ export {
   listMatchRules,
   forgetMatchRule,
   startPlayback,
+  playExternally,
   stopPlayback,
   startPosterCapture,
   stopPosterCapture,

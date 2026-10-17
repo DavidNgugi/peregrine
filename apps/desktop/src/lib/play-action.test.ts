@@ -4,7 +4,11 @@ import { heroPlay, titlePageActions } from "./play-action.js";
 
 describe("heroPlay", () => {
   it("plays only when there is a file and something that can play it", () => {
-    expect(heroPlay(true, true)).toEqual({ kind: "play", containerUnknown: false });
+    expect(heroPlay(true, true)).toEqual({
+      kind: "play",
+      containerUnknown: false,
+      reader: "webview",
+    });
   });
 
   it("names the title's own reason first, because that is the one a person can act on", () => {
@@ -27,7 +31,7 @@ describe("titlePageActions", () => {
     // Download is not drawn at all — neither disabled nor enabled, because either one is a page
     // offering to fetch what the user already has.
     expect(titlePageActions("play", true, null)).toEqual({
-      play: { kind: "play", containerUnknown: false },
+      play: { kind: "play", containerUnknown: false, reader: "webview" },
       acquire: false,
     });
   });
@@ -72,12 +76,12 @@ describe("titlePageActions", () => {
     });
   });
 
-  it("refuses a container this build cannot read before the press rather than after it", () => {
+  it("routes a container the page cannot read to the external player", () => {
     // An MKV is the tenth file in this project's own library: HEVC inside Matroska, which a WebKit
-    // `<video>` cannot demux (ADR 0023 §5). Pressing Play would buy a black rectangle and a decoder
-    // error, so the control is disabled with a sentence naming what is missing.
+    // `<video>` cannot demux (ADR 0023 §5). The reader is mpv, and the action names it rather than
+    // leaving the control inert.
     expect(titlePageActions("play", true, "externalPlayer")).toEqual({
-      play: { kind: "unavailable", reason: "container" },
+      play: { kind: "play", containerUnknown: false, reader: "external" },
       acquire: false,
     });
     // And Play still wins over the container: a build that could not play anything says so first.
@@ -92,31 +96,30 @@ describe("titlePageActions", () => {
     // withholding this would withhold playback that may well work. Saying nothing would make a failure
     // look like a bug, so the action is allowed *with* the doubt attached.
     expect(titlePageActions("play", true, "unknown")).toEqual({
-      play: { kind: "play", containerUnknown: true },
+      play: { kind: "play", containerUnknown: true, reader: "webview" },
       acquire: false,
     });
     expect(titlePageActions("play", true, "webview")).toEqual({
-      play: { kind: "play", containerUnknown: false },
+      play: { kind: "play", containerUnknown: false, reader: "webview" },
       acquire: false,
     });
     // `null` is the read not knowing which file it meant rather than a file this build cannot name,
     // and it is not a reason to make a reader doubt a Play the core offered.
     expect(titlePageActions("play", true, null)).toEqual({
-      play: { kind: "play", containerUnknown: false },
+      play: { kind: "play", containerUnknown: false, reader: "webview" },
       acquire: false,
     });
   });
 
   it("never draws an enabled control this build cannot honour", () => {
     // Every offer, player, and container: the only enabled action is Play, and only when a copy is on
-    // disk, something can play it, and the container is not one this build knows it cannot read
-    // (PG-E1-07).
+    // disk and something can open it — the page's own element, mpv, or a reader this build cannot
+    // name but will try (PG-E1-07).
     for (const offer of ["play", "arriving", "absent", "acquire"] as const) {
       for (const player of [true, false]) {
         for (const support of ["webview", "externalPlayer", "unknown", null] as const) {
           const actions = titlePageActions(offer, player, support);
-          const playable =
-            offer === "play" && player && (support === "webview" || support === "unknown" || support === null);
+          const playable = offer === "play" && player;
           expect(
             actions.play.kind === "play",
             `${offer}/${String(player)}/${String(support)}`,

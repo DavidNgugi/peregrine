@@ -94,7 +94,7 @@ pub use ordering::{
     DEFAULT_SCHEME, EpisodeOrderingStrategy, OrderedEpisodes, Unplaced, UnplacedReason,
 };
 pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
-pub use playback::LocalPlayback;
+pub use playback::{LocalPlayback, PlayerBackend, PlayerError};
 pub use ports::{Clock, IdGenerator, SessionToken, SessionTokenError, TokenSource};
 pub use quality::{
     DEFAULT_HD_CEILING_BYTES, GroupRules, PreferredQuality, QualityProfile, QualityProfileError,

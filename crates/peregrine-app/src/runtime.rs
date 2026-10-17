@@ -129,6 +129,9 @@ pub struct RuntimeConfig {
     /// developer's own keychain, and never raises an OS prompt for it (AGENTS R14). The default is
     /// the real one; [`RuntimeConfig::with_secrets`] is what a test replaces.
     secrets: Arc<dyn SecretStore>,
+    /// The external player. Injected for the same reason: the real one opens a window, and a unit
+    /// test must not; [`RuntimeConfig::with_player`] is what a test replaces.
+    player: Arc<dyn peregrine_domain::PlayerBackend>,
 }
 
 impl RuntimeConfig {
@@ -147,6 +150,7 @@ impl RuntimeConfig {
             directives: DEFAULT_DIRECTIVES.to_owned(),
             tray_enabled: true,
             secrets: Arc::new(peregrine_secrets::KeyringStore::new()),
+            player: Arc::new(peregrine_playback::MpvPlayer::new()),
         }
     }
 
@@ -176,6 +180,13 @@ impl RuntimeConfig {
     #[must_use]
     pub fn with_tray_enabled(mut self, tray_enabled: bool) -> Self {
         self.tray_enabled = tray_enabled;
+        self
+    }
+
+    /// Replaces the external player, so a test can assert the hand-off without opening a window.
+    #[must_use]
+    pub fn with_player(mut self, player: Arc<dyn peregrine_domain::PlayerBackend>) -> Self {
+        self.player = player;
         self
     }
 
@@ -742,6 +753,11 @@ pub struct Runtime {
     /// `std::sync::Mutex` and is therefore **never held across an `await`** — every use takes the value
     /// out, drops the guard, and only then awaits closing it.
     session: Mutex<Option<peregrine_playback::PlaybackSession>>,
+    /// The external player (mpv) behind the Play action for a container the webview cannot demux.
+    ///
+    /// Held for this session so a second press replaces the first window and shutdown closes it
+    /// rather than leaving a player behind.
+    external_player: Arc<dyn peregrine_domain::PlayerBackend>,
     startup: Duration,
     /// The torrent session, or `None` when it could not be started (see [`Runtime::start`]).
     ///
@@ -1029,6 +1045,7 @@ impl Runtime {
             bus: Arc::clone(&bus),
         });
 
+        let external_player = Arc::clone(&config.player);
         let runtime = Self {
             config,
             database,
@@ -1049,6 +1066,7 @@ impl Runtime {
             capture: Mutex::new(None),
             session_id: Mutex::new(None),
             session: Mutex::new(None),
+            external_player,
             startup,
             torrent_engine,
             metadata_fetch,
@@ -2841,6 +2859,9 @@ impl Runtime {
     /// [`RuntimeError::FileOutsideRoots`] when what it holds is outside every configured folder, and
     /// [`RuntimeError::Playback`] when the file cannot be served.
     pub async fn start_playback(&self, title_id: i64) -> Result<StartedPlayback, RuntimeError> {
+        // A webview play replaces an mpv window for the same reason an mpv play replaces the
+        // webview session: one press is one player.
+        self.external_player.stop();
         // Whatever was playing stops first, and it stops before the new one is resolved: two listeners for
         // one screen would be two sockets the runtime could not both own. Named by its id rather than by
         // "current" — see `SessionId`, and the black rectangle a stale stop produced.
@@ -2922,6 +2943,32 @@ impl Runtime {
         })
     }
 
+    /// Plays one of a title's files in mpv, for a container the webview cannot demux.
+    ///
+    /// The title and path resolution is [`Runtime::start_playback`]'s, but the bytes never cross
+    /// this process: mpv opens the file itself. Whatever the webview was serving is stopped first,
+    /// because two players for one press is one too many.
+    ///
+    /// # Errors
+    ///
+    /// The same refusals as [`Runtime::start_playback`], plus [`RuntimeError::Player`] when mpv is
+    /// not installed or the operating system would not start it.
+    pub async fn start_external_playback(&self, title_id: i64) -> Result<(), RuntimeError> {
+        let opening = *self
+            .session_id
+            .lock()
+            .expect("the session id lock is not poisoned");
+        if let Some(held) = opening {
+            self.stop_playback(held).await;
+        }
+
+        let (_file, safe) = self.playable(title_id).await?;
+        let player = Arc::clone(&self.external_player);
+        tokio::task::spawn_blocking(move || player.play(&safe))
+            .await
+            .map_err(|_| peregrine_domain::PlayerError::Spawn)??;
+        Ok(())
+    }
     /// A page of what the installation account is part-way through, most recently updated first.
     ///
     /// The account is the installation scope for the same reason every other read uses it (R34); the
@@ -3096,6 +3143,15 @@ impl Runtime {
             if let Ok(safe) = guard.resolve(path) {
                 return Ok(safe);
             }
+        }
+        // The app's own download root, which is not a configured library root: a completed download
+        // lives there, and a playback that only tried the roots would refuse the file Peregrine
+        // itself wrote. The guard is built the same way, so containment is still proven.
+        if let Ok(guard) =
+            peregrine_domain::PathGuard::new(self.config.data_directory().join(DOWNLOAD_DIRECTORY))
+            && let Ok(safe) = guard.resolve(path)
+        {
+            return Ok(safe);
         }
         Err(RuntimeError::FileOutsideRoots)
     }
@@ -3431,6 +3487,7 @@ impl Runtime {
     /// Idempotent.
     pub async fn shutdown(&self) {
         info!("the runtime is stopping");
+        self.external_player.stop();
         self.prowlarr.stop();
         self.scheduler.shutdown().await;
         // Before the bus: a last tick published into a stopped bus is a delivery nobody hears.
@@ -3625,6 +3682,10 @@ pub enum RuntimeError {
     #[error(transparent)]
     Playback(#[from] peregrine_playback::PlaybackError),
 
+    /// The external player could not be started.
+    #[error(transparent)]
+    Player(#[from] peregrine_domain::PlayerError),
+
     /// No live job has that id.
     #[error("no job {job} is running; it may have finished already")]
     UnknownJob {
@@ -3690,6 +3751,51 @@ mod tests {
             Arc::clone(&sink) as Arc<dyn EventSink>,
         )
         .with_secrets(secrets);
+        let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
+        drop(subscriber);
+        let runtime = Runtime::start(config, logging).await.unwrap();
+        (runtime, sink)
+    }
+
+    /// An external player that records what it was asked to open, so the hand-off can be asserted
+    /// without a window.
+    #[derive(Default)]
+    struct RecordingPlayer(Mutex<Vec<PathBuf>>);
+
+    impl RecordingPlayer {
+        fn opened(&self) -> Vec<PathBuf> {
+            self.0
+                .lock()
+                .expect("the player log is not poisoned")
+                .clone()
+        }
+    }
+
+    impl peregrine_domain::PlayerBackend for RecordingPlayer {
+        fn play(&self, file: &SafePath) -> Result<(), peregrine_domain::PlayerError> {
+            self.0
+                .lock()
+                .expect("the player log is not poisoned")
+                .push(file.as_path().to_path_buf());
+            Ok(())
+        }
+
+        fn stop(&self) {}
+    }
+
+    /// Starts a runtime whose external player is the one the caller brought.
+    async fn runtime_with_player(
+        directory: &TempDir,
+        player: Arc<RecordingPlayer>,
+    ) -> (Runtime, Arc<RecordingSink>) {
+        let sink = Arc::new(RecordingSink::default());
+        let config = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("cache/images"),
+            Arc::clone(&sink) as Arc<dyn EventSink>,
+        )
+        .with_secrets(Arc::new(MemorySecretStore::new()))
+        .with_player(Arc::clone(&player) as Arc<dyn peregrine_domain::PlayerBackend>);
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Runtime::start(config, logging).await.unwrap();
@@ -5445,6 +5551,93 @@ mod tests {
         runtime.shutdown().await;
     }
 
+    /// A completed download lives in the app own download root rather than a configured library
+    /// root, and the external hand-off must still reach it. This is the path that makes a
+    /// downloaded MKV playable at all.
+    #[tokio::test]
+    async fn a_downloaded_mkv_is_handed_to_the_external_player() {
+        use peregrine_domain::{MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText};
+
+        let directory = TempDir::new().unwrap();
+        let player = Arc::new(RecordingPlayer::default());
+        let (runtime, _sink) = runtime_with_player(&directory, Arc::clone(&player)).await;
+
+        let folder = directory.path().join("downloads").join("Interstellar");
+        std::fs::create_dir_all(&folder).expect("the download folder");
+        let film = folder.join("Interstellar (2014).mkv");
+        std::fs::write(&film, vec![1_u8; 16]).expect("the fixture file");
+
+        let at = jiff::Timestamp::from_millisecond(0).expect("in range");
+        let title_id = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "Interstellar".to_owned(),
+                original_name: None,
+                sort_name: "interstellar".to_owned(),
+                at: 0,
+            })
+            .await
+            .expect("the title");
+        let item_id = runtime
+            .database
+            .insert_media_item(MediaItem {
+                id: 0,
+                title_id,
+                episode_id: None,
+                state: MediaItemState::Available,
+                origin: MediaOrigin::Torrent,
+                preferred_file_id: None,
+                quality_label: None,
+                created_at: at,
+                updated_at: at,
+            })
+            .await
+            .expect("the item");
+        runtime
+            .database
+            .insert_media_file(MediaFile {
+                id: 0,
+                media_item_id: item_id,
+                path: NonEmptyText::new(film.to_string_lossy().as_ref()).expect("fixture text"),
+                // No root owns a download: it lives under the app own directory, which is exactly
+                // the path the guard has to allow.
+                root_id: None,
+                size_bytes: 16,
+                mtime_ms: at,
+                added_at: at,
+                missing_since: None,
+                container: None,
+                duration_ms: None,
+                video_codec: None,
+                video_profile: None,
+                width: None,
+                height: None,
+                bit_depth: None,
+                hdr_format: None,
+                frame_rate: None,
+                bitrate_kbps: None,
+                audio_codec: None,
+                audio_channels: None,
+                audio_layout: None,
+                audio_languages: None,
+                subtitle_format: None,
+                probe_version: None,
+                probe_json: None,
+                quality_label: None,
+                updated_at: at,
+            })
+            .await
+            .expect("the file");
+
+        runtime
+            .start_external_playback(title_id)
+            .await
+            .expect("the player is handed the file");
+        assert_eq!(player.opened(), vec![film.clone()]);
+        runtime.shutdown().await;
+    }
     /// A second press replaces the first session rather than opening a second listener.
     ///
     /// SECURITY.md T10 asks for a socket that dies with its session, and "one at a time" is what makes

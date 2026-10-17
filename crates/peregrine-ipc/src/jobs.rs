@@ -319,6 +319,11 @@ impl From<RuntimeError> for AppError {
             RuntimeError::Playback(inner) => AppError::new(ErrorCode::Internal)
                 .with_detail("Playback could not be started.")
                 .with_cause(inner.to_string()),
+            // The external player is a separate program: a build with no mpv cannot play this
+            // container, and the sentence names the install rather than a failed spawn.
+            RuntimeError::Player(inner) => AppError::new(ErrorCode::Unsupported)
+                .with_detail("The external player could not be started. Install mpv and try again.")
+                .with_cause(inner.to_string()),
             // The session did not start, so acquisition and streaming cannot answer. The request is
             // not what is wrong, so the sentence says what is unavailable rather than what broke.
             RuntimeError::TorrentEngineUnavailable => AppError::new(ErrorCode::Unsupported)

@@ -21,8 +21,9 @@
  */
 
 import { Button, EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
-import type { LibraryTitleDto } from "@peregrine/ipc-client";
-import type { ReactElement } from "react";
+import { normalizeIpcError, playExternally } from "@peregrine/ipc-client";
+import type { IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
+import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { TitleHero } from "./TitleHero.js";
 import { ReleaseOffers } from "./ReleaseOffers.js";
@@ -106,6 +107,9 @@ export function TitleScreen({
 }: TitleScreenProps): ReactElement {
   const { t } = useTranslation();
   const title: LibraryTitleDto | null = detail.title;
+  // The external player is a process launch rather than a route, so its refusal is this screen's to
+  // say: a Play that opens nothing and explains nothing is the inert control PG-E1-07 forbids.
+  const [playFailure, setPlayFailure] = useState<IpcError | null>(null);
 
   // The route's kind is the fallback, so the page names itself before the read answers and keeps the
   // same heading after — a heading that changed once the core replied would be a visible flicker.
@@ -136,7 +140,14 @@ export function TitleScreen({
               // Play opens the player rather than playing here: the video wants the content area, and
               // the title page's counts, seasons, and feed want to stay where they are (`ARCHITECTURE`
               // §6's `/player/:id`).
-              onPlay={() => {
+              onPlay={(reader) => {
+                if (reader === "external") {
+                  setPlayFailure(null);
+                  void playExternally(title.id).catch((caught: unknown) => {
+                    setPlayFailure(normalizeIpcError(caught));
+                  });
+                  return;
+                }
                 onNavigate({ kind: "player", id: title.id });
               }}
               acquiring={
@@ -157,6 +168,11 @@ export function TitleScreen({
               released={detail.released}
               seasons={seasons.seasons.length}
             />
+            {playFailure === null ? null : (
+              <p className="text-caption text-state-danger" role="status">
+                {messageOf(playFailure)}
+              </p>
+            )}
             {acquire === undefined ||
             acquire.titleId !== title.id ||
             (acquire.outcome === null && !acquire.running) ? null : (

@@ -286,14 +286,13 @@ describe("TitleScreen", () => {
     expect(held).not.toContain(`disabled=""`);
   });
 
-  it("refuses Play for a container this build cannot read, and says which reader is missing", () => {
+  it("routes a container the page cannot read to the external player", () => {
     // The tenth file in this project's own library is HEVC inside Matroska, which a WebKit `<video>`
-    // cannot demux. Pressing Play would buy a black rectangle and a decoder error, so the container is
-    // answered before the press — and the sentence names what is missing rather than what failed.
+    // cannot demux. The Play action starts mpv instead, and the page says so beside the control.
     const mkv = markup(detail({ offer: "play", playSupport: "externalPlayer" }), "show");
 
-    expect(mkv).toContain("cannot read that file&#x27;s format");
-    expect(mkv).toContain(`disabled=""`);
+    expect(mkv).toContain("Opens in mpv");
+    expect(mkv).not.toContain("cannot read that file&#x27;s format");
     expect(mkv).not.toContain("Download");
   });
 
@@ -305,14 +304,14 @@ describe("TitleScreen", () => {
   });
 
   it("offers acquisition, and only acquisition, for a title the library holds nothing of", () => {
-    // `PG-E1-07`: a control this build cannot honour is disabled with the reason it is. Acquisition is
-    // unbuilt (`PG-E13`), so the control is drawn disabled — and it is drawn only here, where the core
-    // says there is nothing to play and nothing arriving.
+    // `PG-E1-07`: a control this build cannot honour is disabled with the reason it is. The fixture
+    // hands the screen no acquisition handler, so both controls are disabled — Play because there is
+    // no file, Download because there is nothing to start.
     const absent = markup(detail({ offer: "acquire", title: title({ items: 0 }) }), "show");
 
     expect(absent).toContain("holds no file");
     expect(absent).toContain("Download");
-    expect(absent).toContain("Acquiring is not built yet");
+    expect(absent).toContain("will find the best release");
     expect(absent.match(/<button[^>]*disabled/gu)?.length).toBe(2);
   });
 

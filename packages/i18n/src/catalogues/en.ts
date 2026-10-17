@@ -393,8 +393,7 @@ export const en = {
         // The container, said before the press rather than after the black rectangle. It names what is
         // missing — an external player — rather than what failed, because nothing has failed yet and a
         // reader can go and get one.
-        container:
-          "This build cannot read that file's format yet. It needs an external player, which is not installed.",
+        external: "Opens in mpv, the external player.",
         // An admission rather than a refusal: the format is not one Peregrine can name, and the
         // system's own decoder may well take it. Saying nothing would make a failure look like a bug.
         unnamedContainer:

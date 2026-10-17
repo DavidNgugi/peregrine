@@ -19,6 +19,9 @@
 //! still carry a video stream the platform's decoder refuses, and no name distinguishes those. That
 //! is the `Webview` answer's honest caveat: it means "this build will try", not "this will play".
 
+use crate::path::SafePath;
+use thiserror::Error;
+
 /// What this build will do with a file, from the container its name states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LocalPlayback {
@@ -99,6 +102,38 @@ impl LocalPlayback {
             Self::Unknown => "unknown",
         }
     }
+}
+
+/// Why an external player could not be started.
+///
+/// Two variants rather than one because the user acts differently: an uninstalled player is
+/// something to install, while a spawn failure is this machine refusing a binary that is there.
+/// Neither sentence names a path (AGENTS R21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PlayerError {
+    /// No mpv binary was found in the places this build looks.
+    #[error("mpv is not installed, so this build has no player for that file yet")]
+    NotInstalled,
+    /// The binary exists but the operating system refused to start it.
+    #[error("mpv is installed but the operating system refused to start it")]
+    Spawn,
+}
+
+/// The player that handles containers the webview cannot demux.
+///
+/// A port rather than a direct spawn because launching an external process is an adapter concern
+/// (AGENTS R8), and because a test can then assert the action without a player on the machine.
+pub trait PlayerBackend: Send + Sync {
+    /// Starts a file in the shared external player, replacing whatever it was showing.
+    ///
+    /// # Errors
+    ///
+    /// [PlayerError::NotInstalled] when there is no binary, and [PlayerError::Spawn] when the
+    /// operating system refused to start one.
+    fn play(&self, file: &SafePath) -> Result<(), PlayerError>;
+
+    /// Stops the player this backend started, if any. Idempotent.
+    fn stop(&self);
 }
 
 #[cfg(test)]

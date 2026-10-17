@@ -11,12 +11,16 @@
 //! over loopback HTTP and the webview's own media stack decodes them, so nine of the ten files in a real
 //! library play with no sidecar, no download, and no media code in this process.
 //!
-//! **Still owed here, named rather than implied:** the `PlayerBackend` port and its mpv adapter, the
-//! probe cache, resume policy, next-up, watch-progress reporting, and ffmpeg orchestration
-//! (`PG-E16-01`…`PG-E16-22`). [`PlaybackSession`] is written so that the mpv adapter answers the same
-//! question with a surface instead of a URL, which is what keeps a screen from having to know which one
-//! is live.
+//! **What also exists now is the external hand-off:** [`MpvPlayer`] spawns the operating system's
+//! mpv with a fixed flag set for a container the webview cannot demux, and stops the child it
+//! started. It is deliberately not the embedded surface ADR 0023 §4 describes — mpv opens its own
+//! window — and the probe cache, resume policy, next-up, watch-progress reporting, and ffmpeg
+//! orchestration remain owed (`PG-E16-02`…`PG-E16-22`). [`PlaybackSession`] is written so that a
+//! future embedded adapter answers the same question with a surface instead of a URL, which is what
+//! keeps a screen from having to know which one is live.
 
+mod mpv;
 mod session;
 
+pub use mpv::MpvPlayer;
 pub use session::{PlaybackError, PlaybackSession};
