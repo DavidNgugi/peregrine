@@ -36,6 +36,7 @@ import {
   useShortcuts,
 } from "../features/settings/index.js";
 import { DownloadProgressProvider } from "../lib/download-progress.js";
+import { useWatchlist } from "../features/watchlist/hooks/useWatchlist.js";
 import { downloadMarks, downloadProgressMarks } from "../lib/download-status.js";
 import { imageUrl } from "../lib/media.js";
 import type { Platform } from "../lib/platform.js";
@@ -232,6 +233,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   }, [managedProwlarrRunning, configuredIndexers, refreshIndexers]);
   const library = useLibraryTitles();
   const downloads = useDownloads();
+  const watchlist = useWatchlist();
   // One status per title, from the queue read the shell already holds. A screen hands a card the
   // mark for its own id rather than each subscribing to the queue: one read, one answer.
   const marks = useMemo(() => downloadMarks(downloads.downloads), [downloads.downloads]);
@@ -372,6 +374,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                answers when the URL carries no `type`. */
               <DiscoverScreen
                 downloads={marks}
+                watchlist={watchlist.rows}
                 onBackdrops={reportBackdrops}
                 onNavigate={navigate}
                 recentDownloads={downloads.downloads}
@@ -471,6 +474,10 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
             {route.kind === "title" ? (
               <TitleScreen
                 detail={title}
+                onWatchlist={() => {
+                  watchlist.toggle(route.id);
+                }}
+                watchlisted={watchlist.has(route.id)}
                 feed={feed}
                 kind={route.titleKind}
                 /* **Keyed by which title it is, and its absence was a bug a reader hit.** Opening a
