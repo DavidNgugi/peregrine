@@ -26,6 +26,13 @@ const HARDENED: &[&str] = &[
     "--sub-auto=no",
     "--script-opts=",
     "--no-terminal",
+    // The app owns the media keys and the Now Playing centre (PG-E16-21); a child that also
+    // registered for them paused when another app sent a play/pause, which looked like the player
+    // freezing. The child is a video surface, not a media application.
+    "--input-media-keys=no",
+    "--media-controls=no",
+    // The app's own watch progress is the resume rule; mpv's watch_later must not override it.
+    "--no-resume-playback",
 ];
 
 /// The variables a window needs, and nothing else, for the same reason the flags are fixed.
@@ -203,6 +210,9 @@ mod tests {
             "--sub-auto=no",
             "--script-opts=",
             "--no-terminal",
+            "--input-media-keys=no",
+            "--media-controls=no",
+            "--no-resume-playback",
         ] {
             assert!(
                 args.iter().any(|arg| arg.to_string_lossy() == flag),
