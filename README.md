@@ -21,7 +21,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 
 ## Roadmap
 
-Packaging and signed releases come first, then subtitles, casting, watchlists with air dates, local accounts with parental gating, MCP access for agents, and a Jellyfin-compatible API so other clients can play from Peregrine.
+Packaging and signed releases come first, then subtitles, casting, watchlists with air dates, local accounts with parental gating (a parent curates a child's library by rating and by hand, and the child cannot download), MCP access for agents, and a Jellyfin-compatible API so other clients can play from Peregrine.
 
 After that, a headless server with a browser client, installable with Docker or on NAS platforms such as UmbrelOS, Unraid, and TrueNAS. Once the core is stable, TV and mobile playback clients: Android TV, Tizen, iOS, and Android, in the way Jellyfin and Plex offer theirs. The full plan, with phases and exit criteria, is in [docs/PLAN.md](docs/PLAN.md).
 
