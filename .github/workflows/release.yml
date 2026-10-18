@@ -168,6 +168,7 @@ jobs:
               ;;
           esac
       - name: Build the signed-or-not bundles
+        if: matrix.os != 'windows-2022'
         shell: bash
         env:
           # Compiled in, never committed. When the secret is absent the app asks for a key.
@@ -175,6 +176,16 @@ jobs:
           # Which pinned mpv to stage; the runner's own arch is not always the target's.
           PEREGRINE_TARGET: ${{ matrix.sidecar }}
         run: pnpm tauri build --target ${{ matrix.target }}
+      # **The MSI target refuses a SemVer pre-release identifier** ("rc.1" is not numeric-only),
+      # while NSIS accepts one. A release candidate is exactly a pre-release, and the plan ships
+      # NSIS; asking for it explicitly keeps the RC buildable without renumbering the version.
+      - name: Build the signed-or-not Windows bundle
+        if: matrix.os == 'windows-2022'
+        shell: bash
+        env:
+          PEREGRINE_TMDB_TOKEN: ${{ secrets.PEREGRINE_TMDB_TOKEN }}
+          PEREGRINE_TARGET: ${{ matrix.sidecar }}
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles nsis
       # Runs after the build because this is the only place the assembled bundle
       # — with its sidecar executables and their notices — exists. A missing
       # notice must stop the archive, not the compile.
