@@ -6577,7 +6577,7 @@ mod tests {
             .expect("the file");
 
         runtime
-            .start_external_playback(title_id)
+            .start_external_playback(title_id, None)
             .await
             .expect("the player is handed the file");
         assert_eq!(player.opened(), vec![film.clone()]);
@@ -6672,7 +6672,7 @@ mod tests {
             .await
             .expect("the seed position is written");
         runtime
-            .start_external_playback(title_id)
+            .start_external_playback(title_id, None)
             .await
             .expect("the player starts");
         assert_eq!(

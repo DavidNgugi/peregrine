@@ -1222,8 +1222,13 @@ fn stop_prowlarr_dead(harness: &Harness) -> Invocation<'_> {
 /// `play_externally` asks the runtime for the player, so it fails when there is none.
 fn play_externally_dead(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::library::play_externally(harness.dead_state(), crate::library::TitleRef { id: 1 })
-            .await
+        crate::library::play_externally(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
+            None,
+        )
+        .await
             .map(drop)
     })
 }
