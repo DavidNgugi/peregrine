@@ -439,6 +439,9 @@ mod tests {
                 files: 0,
                 bytes: 0,
                 missing_files: 0,
+                overview: None,
+                rating: None,
+                added_at: 0,
                 // The poster reference lives on the list row, which is the one place both reads get it
                 // from; this fixture varies it, because it is an input to the rule under test.
                 poster: poster.map(|path| peregrine_storage::ArtworkPath {

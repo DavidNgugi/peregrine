@@ -2437,6 +2437,13 @@ impl Runtime {
         let mut sources: Vec<Option<String>> = Vec::with_capacity(candidates.len());
         for candidate in &candidates {
             if let Some((item, source)) = self.listed_item(candidate, at).await? {
+                // **The opened title is not its own recommendation.** The adapter drops the id it was
+                // asked about, but an answer can reach the same local title through another id — a
+                // duplicate provider entry, or a name the matcher merged — and the rail is drawn by
+                // local id. Filtering here is the one place both routes meet.
+                if item.title_id == title_id {
+                    continue;
+                }
                 items.push(item);
                 sources.push(source);
             }
@@ -6041,7 +6048,10 @@ mod tests {
                 peregrine_domain::id::Provider::Tmdb,
                 Vec::new(),
             )
-            .with_similar_answer(vec![candidate("604", "The Matrix Reloaded")]),
+            .with_similar_answer(vec![
+                candidate("604", "The Matrix Reloaded"),
+                candidate("603", "The Matrix"),
+            ]),
         );
         let (runtime, _sink) = runtime_with_a_provider(&directory, adapter).await;
 
