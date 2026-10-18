@@ -160,6 +160,14 @@ describe("SettingsScreen", () => {
     expect(html).not.toContain("<kbd");
   });
 
+  it("says the VPN tunnel is the reader's to run, and that there is no kill switch", () => {
+    const html = markup(registry([]));
+
+    expect(html).toContain("Network and VPN");
+    expect(html).toContain("does not create a VPN tunnel");
+    expect(html).toContain("no kill switch of its own");
+  });
+
   it("says the list is unknown when the read failed, and never that it is empty", () => {
     // An unreachable core answers nothing. Telling the user they have no shortcuts would
     // be telling them something the app does not know.

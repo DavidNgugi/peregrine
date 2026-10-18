@@ -77,6 +77,10 @@ pnpm typecheck && pnpm lint && pnpm test   # the frontend
 
 A Tauri v2 shell, a Rust core, and a React front end. The core owns all state and the UI projects it; every external system sits behind a trait so it can be replaced with a fake in tests. Design, module map, and rejected alternatives are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the [ADRs](docs/adr/).
 
+## Using a VPN
+
+Peregrine does not create or manage a VPN tunnel: run WireGuard, your VPN provider's app, or a router-level tunnel, and turn on its kill switch. Torrent and provider traffic follows the operating system's route, so a dropped tunnel can expose your address. Settings → Network explains this and how to verify the exit address; binding torrent traffic to an interface or SOCKS5 proxy is still open (`PG-E10-11`).
+
 ## Documentation
 
 | Document | Contents |

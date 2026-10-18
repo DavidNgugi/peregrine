@@ -729,6 +729,17 @@ export const en = {
           best: "Best available",
         },
       },
+      network: {
+        title: "Network and VPN",
+        description: "How Peregrine uses your connection, and what it does not manage.",
+        body: "Peregrine does not create a VPN tunnel. Start WireGuard, your VPN provider's app, or a router-level tunnel before downloading; Peregrine's torrent and provider traffic follows the system route.",
+        verify:
+          "To check that the tunnel is carrying traffic, open ifconfig.me in a browser. If it shows your ISP's address, the VPN is not in use.",
+        killSwitch:
+          "Turn on your VPN's kill switch or lock-down mode. Peregrine has no kill switch of its own, and a dropped tunnel can expose your address.",
+        binding:
+          "Binding torrent traffic to a chosen interface or SOCKS5 proxy is not built yet. Until it is, the operating system's routing and firewall are the only guarantee.",
+      },
       shortcuts: {
         title: "Keyboard shortcuts",
         description: "Every shortcut this build has, written the way this platform writes them.",

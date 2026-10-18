@@ -23,6 +23,7 @@ import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
+import { NetworkSection } from "./NetworkSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
 import { WatchHistorySection } from "./WatchHistorySection.js";
 import { useWatchHistory } from "../hooks/useWatchHistory.js";
@@ -165,6 +166,8 @@ export function SettingsScreen({
       <LibrariesSection libraries={libraries} />
 
       <ProvidersSection providers={providers} />
+
+      <NetworkSection />
 
       <WatchHistorySection history={history} />
 
