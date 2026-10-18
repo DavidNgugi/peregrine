@@ -248,6 +248,8 @@ pub struct BrowseRequest {
     sort: BrowseSort,
     genre: Option<u32>,
     min_rating: Option<u8>,
+    /// The provider's id for one person, when the page is a filmography rather than a catalogue.
+    cast: Option<String>,
 }
 
 impl BrowseRequest {
@@ -267,7 +269,24 @@ impl BrowseRequest {
             sort,
             genre,
             min_rating,
+            cast: None,
         }
+    }
+
+    /// Narrows the page to one person's credits.
+    ///
+    /// The id is the provider's own identifier for the person, not a name: a name would be a search
+    /// with a filter applied after it, and the point of the filter is that the provider does it.
+    #[must_use]
+    pub fn with_cast(mut self, cast: Option<String>) -> Self {
+        self.cast = cast.filter(|value| !value.trim().is_empty());
+        self
+    }
+
+    /// The person's provider id, when the page is narrowed to one.
+    #[must_use]
+    pub fn cast(&self) -> Option<&str> {
+        self.cast.as_deref()
     }
 
     /// Film or series, which is a fact about the endpoint rather than a filter over the answer.

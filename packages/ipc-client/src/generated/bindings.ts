@@ -236,6 +236,14 @@ export const commands = {
 	titles: LibraryTitleDto[],
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_person", { person })),
 	/**
+	 *  The person's credits beyond this library, as the configured provider knows them.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is unavailable or the provider cannot be asked.
+	 */
+	personFilmography: (person: PersonRef) => typedError<RailItemDto[], AppError_Serialize>(__TAURI_INVOKE("person_filmography", { person })),
+	/**
 	 *  Starts playing one of a title's files, replacing whatever was playing.
 	 * 
 	 *  The one command whose answer is a URL. It leaves the machine nowhere: the address it answers with is

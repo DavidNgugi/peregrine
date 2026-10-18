@@ -1063,6 +1063,25 @@ pub async fn get_person(
     ))
 }
 
+/// The person's credits beyond this library, as the configured provider knows them.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is unavailable or the provider cannot be asked.
+#[tauri::command]
+#[specta::specta]
+pub async fn person_filmography(
+    state: State<'_, RuntimeState>,
+    person: PersonRef,
+) -> Result<Vec<crate::discover::RailItemDto>, AppError> {
+    let items = state.runtime()?.person_filmography(person.id).await?;
+    let dtos: Vec<crate::discover::RailItemDto> = items
+        .into_iter()
+        .map(crate::discover::RailItemDto::from)
+        .collect();
+    Ok(guard_response("library::person_filmography", dtos))
+}
+
 /// The wire shape of one title's own read.
 fn title_detail(detail: peregrine_app::LibraryTitleDetail) -> TitleDetailDto {
     TitleDetailDto {

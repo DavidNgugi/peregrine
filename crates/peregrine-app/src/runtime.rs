@@ -3368,6 +3368,48 @@ impl Runtime {
         }))
     }
 
+    /// The person's credits beyond this library, as the configured provider knows them.
+    ///
+    /// Two provider pages, films and series, merged in that order and capped: a person's filmography
+    /// is a catalogue read, not a library read, and the local titles are already the page's own grid.
+    /// Empty when the person carries no provider id — a manual or future provider seam.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the person cannot be read, and the provider's own error when a
+    /// page cannot be fetched.
+    pub async fn person_filmography(
+        &self,
+        id: i64,
+    ) -> Result<Vec<crate::jobs::discover_rails::RailItem>, RuntimeError> {
+        let Some(person) = self.database.person(id).await? else {
+            return Ok(Vec::new());
+        };
+        let Some(cast) = person.provider_id else {
+            return Ok(Vec::new());
+        };
+        let mut items = Vec::new();
+        for kind in [
+            peregrine_domain::catalogue::TitleKind::Movie,
+            peregrine_domain::catalogue::TitleKind::Show,
+        ] {
+            let request = peregrine_providers::BrowseRequest::new(
+                kind,
+                std::num::NonZeroU32::MIN,
+                peregrine_providers::BrowseSort::Popularity,
+                None,
+                None,
+            )
+            .with_cast(Some(cast.clone()));
+            items.extend(self.browse(&request).await?.items);
+            if items.len() >= 40 {
+                break;
+            }
+        }
+        items.truncate(40);
+        Ok(items)
+    }
+
     /// One title's cast, in billing order.
     ///
     /// # Errors

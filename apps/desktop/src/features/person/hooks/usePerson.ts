@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { commands, normalizeIpcError } from "@peregrine/ipc-client";
-import type { IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
+import type { IpcError, LibraryTitleDto, RailItemDto } from "@peregrine/ipc-client";
 
 /** What the person screen knows while its read is in flight. */
 export interface PersonState {
@@ -64,4 +64,27 @@ export function usePerson(id: number | null): PersonState {
   }, [id]);
 
   return state;
+}
+
+/** The person's credits beyond this library, as the configured provider knows them. */
+export function usePersonFilmography(id: number | null): readonly RailItemDto[] {
+  const [items, setItems] = useState<readonly RailItemDto[]>([]);
+
+  useEffect(() => {
+    if (id === null) {
+      setItems([]);
+      return;
+    }
+    let live = true;
+    void commands.personFilmography({ id }).then((result) => {
+      if (live && result.status === "ok") {
+        setItems(result.data);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [id]);
+
+  return items;
 }

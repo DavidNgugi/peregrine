@@ -545,6 +545,11 @@ export const en = {
       grid: {
         label: "Titles with this person",
       },
+      filmography: {
+        title: "Also on TMDB",
+        description: "Credits outside this library, as the configured provider lists them.",
+        label: "The person's other credits",
+      },
     },
     library: {
       search: {

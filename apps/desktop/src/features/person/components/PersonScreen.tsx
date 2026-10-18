@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { EmptyState, ErrorState, Grid, Screen, Section, TitleCard } from "@peregrine/ui";
 import { routePath } from "../../../app/routes.js";
 import { imageUrl } from "../../../lib/media.js";
-import { usePerson } from "../hooks/usePerson.js";
+import { usePerson, usePersonFilmography } from "../hooks/usePerson.js";
 import type { Route } from "../../../app/routes.js";
 
 /** One person's local filmography: the titles in this library that credit them. */
@@ -20,6 +20,7 @@ export function PersonScreen({
 }): ReactElement {
   const { t } = useTranslation();
   const person = usePerson(id);
+  const filmography = usePersonFilmography(id);
 
   return (
     <Screen backLabel={backLabel} onBack={onBack} title={person.name ?? t("person.title")}>
@@ -86,6 +87,44 @@ export function PersonScreen({
           </div>
         )}
       </Section>
+
+      {filmography.length === 0 ? null : (
+        <Section
+          description={t("person.filmography.description")}
+          title={t("person.filmography.title")}
+        >
+          <div className="h-[min(50vh,32rem)] min-h-0">
+            <Grid
+              itemKey={(row) => row.titleId}
+              items={filmography}
+              label={t("person.filmography.label")}
+              renderItem={(row) => (
+                <TitleCard
+                  detailsLabel={t("card.details")}
+                  href={routePath({
+                    kind: "title",
+                    id: row.titleId,
+                    titleKind: row.kind === "show" ? "show" : "movie",
+                  })}
+                  meta={row.year === null ? "" : String(row.year)}
+                  onNavigate={() => {
+                    onNavigate({
+                      kind: "title",
+                      id: row.titleId,
+                      titleKind: row.kind === "show" ? "show" : "movie",
+                    });
+                  }}
+                  poster={imageUrl(row.poster)}
+                  size="lg"
+                  title={row.name}
+                />
+              )}
+              rowHeight={276}
+              tileWidth={176}
+            />
+          </div>
+        </Section>
+      )}
     </Screen>
   );
 }

@@ -763,6 +763,8 @@ pub struct PersonRow {
     pub name: String,
     /// The cached portrait's absolute path, when one is cached.
     pub profile: Option<String>,
+    /// The provider's own id for the person, which a filmography read uses.
+    pub provider_id: Option<String>,
 }
 
 /// One person by row id.
@@ -770,14 +772,18 @@ pub(crate) async fn person(
     pool: &sqlx::SqlitePool,
     id: i64,
 ) -> Result<Option<PersonRow>, StorageError> {
-    let row = sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT name, profile_cache_path FROM person WHERE id = ?1",
+    let row = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+        "SELECT name, profile_cache_path, provider_id FROM person WHERE id = ?1",
     )
     .bind(id)
     .fetch_optional(pool)
     .await
     .map_err(StorageError::from_sqlx)?;
-    Ok(row.map(|(name, profile)| PersonRow { name, profile }))
+    Ok(row.map(|(name, profile, provider_id)| PersonRow {
+        name,
+        profile,
+        provider_id,
+    }))
 }
 
 /// A title's cast, in billing order.

@@ -266,6 +266,9 @@ impl Tmdb {
             if let Some(genre) = request.genre() {
                 pairs.append_pair("with_genres", &genre.to_string());
             }
+            if let Some(cast) = request.cast() {
+                pairs.append_pair("with_cast", cast);
+            }
             if let Some(floor) = request.min_rating().filter(|floor| *floor > 0) {
                 pairs.append_pair("vote_average.gte", &floor.to_string());
             }
@@ -3196,5 +3199,31 @@ mod tests {
             credits.cast[1].profile_path, None,
             "an empty path is no portrait"
         );
+    }
+
+    #[tokio::test]
+    async fn a_cast_filter_asks_the_provider_for_that_person() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/discover/movie"))
+            .and(query_param("with_cast", "6384"))
+            .respond_with(json(r#"{"page":1,"results":[],"total_pages":1}"#))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let request = BrowseRequest::new(
+            TitleKind::Movie,
+            NonZeroU32::new(1).expect("a page"),
+            BrowseSort::Popularity,
+            None,
+            None,
+        )
+        .with_cast(Some("6384".to_owned()));
+
+        adapter(&server)
+            .browse(&request)
+            .await
+            .expect("the filmography page answers");
     }
 }
