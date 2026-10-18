@@ -32,6 +32,9 @@ export const SCREENS: readonly ScreenEntry[] = [
   // After the library, because a download is one of the two ways a title reaches it: what the
   // scanner found on disk, and what the acquisition service is fetching.
   { route: { kind: "downloads" }, labelKey: "downloads.title", icon: "download" },
+  // What has been watched is personal history rather than a catalogue: it belongs beside the
+  // queue, not inside Settings, where two hundred rows would bury every other control.
+  { route: { kind: "history" }, labelKey: "history.title", icon: "history" },
   { route: { kind: "diagnostics" }, labelKey: "jobs.title", icon: "pulse" },
   { route: { kind: "settings" }, labelKey: "settings.title", icon: "tune" },
 ];

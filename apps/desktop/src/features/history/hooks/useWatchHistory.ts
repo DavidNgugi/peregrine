@@ -5,7 +5,7 @@ import type { IpcError, WatchHistoryDto } from "@peregrine/ipc-client";
 
 import { logUiError } from "../../../lib/error-log.js";
 
-/** The account's viewing history, newest first, for the settings list. */
+/** The account's viewing history, newest first. */
 export interface WatchHistoryView {
   readonly rows: readonly WatchHistoryDto[];
   readonly loading: boolean;

@@ -25,8 +25,6 @@ import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
 import { NetworkSection } from "./NetworkSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
-import { WatchHistorySection } from "./WatchHistorySection.js";
-import { useWatchHistory } from "../hooks/useWatchHistory.js";
 
 interface SettingsScreenProps {
   /**
@@ -98,7 +96,6 @@ export function SettingsScreen({
   const { t } = useTranslation();
   const autoStart = useAutoStart();
   const quality = usePreferredQuality();
-  const history = useWatchHistory();
 
   return (
     <Screen backLabel={backLabel} onBack={onBack} title={t("settings.title")}>
@@ -168,8 +165,6 @@ export function SettingsScreen({
       <ProvidersSection providers={providers} />
 
       <NetworkSection />
-
-      <WatchHistorySection history={history} />
 
       <ManagedProwlarrSection prowlarr={prowlarr} />
 

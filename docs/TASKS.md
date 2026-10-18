@@ -915,7 +915,7 @@ graph LR
   - Acceptance: Plays the next episode in the active scheme
 - [ ] **PG-E18-06** `S` · deps PG-E18-01, PG-E7-13 · Mark watched, unwatched, and bulk season marking **Two behaviours found while settling the watched threshold (PG-E4-09) land here:** a manual **watched** mark below the storage floor is still cleared as soon as playback reports a position, because `set_position` re-derives from the floor — so "manual overrides survive subsequent playbacks" is not yet true in that direction, and a test currently documents the opposite. The other direction is deliberate and needs a surface here: a manual **unwatch** outranks a later finished playback, so replaying such a title to the end does not re-mark it watched, which is F10's rule and needs an explicit re-mark affordance rather than a silent reversal.
   - Acceptance: Manual overrides survive subsequent playbacks
-- [ ] **PG-E18-07** `S` · deps PG-E18-01 · Watch history timeline with filtering
+- [ ] **PG-E18-07** `S` · deps PG-E18-01 · Watch history timeline with filtering **Remaining:** Watch history now has its own screen in the sidebar (not a Settings section), drawing 25 rows and growing by 25 on request. That is a client-side window over one `viewing_history(limit)` read: the command still has no cursor, and the filtering the task names is not built, so the keyset page this acceptance asks for is still owed.
   - Acceptance: Accurate and paginated by keyset
 - [ ] **PG-E18-08** `M` · deps PG-E18-01 · Multi-device position merge rules (local wins by recency)
   - Acceptance: Conflict fixtures resolve deterministically

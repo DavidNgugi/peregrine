@@ -32,6 +32,7 @@ export type Route =
   | { readonly kind: "browse"; readonly titleKind?: TitleKind }
   | { readonly kind: "library" }
   | { readonly kind: "downloads" }
+  | { readonly kind: "history" }
   | { readonly kind: "diagnostics" }
   | { readonly kind: "settings" }
   /**
@@ -82,6 +83,7 @@ const PATHS: Readonly<Record<StaticRouteKind, string>> = {
   browse: "/browse",
   library: "/library",
   downloads: "/downloads",
+  history: "/history",
   diagnostics: "/diagnostics",
   settings: "/settings",
 };

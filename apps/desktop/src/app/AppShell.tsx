@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { BrowseScreen } from "../features/browse/index.js";
 import { DiscoverScreen } from "../features/discover/index.js";
 import { DownloadsScreen, useDownloads } from "../features/downloads/index.js";
+import { HistoryScreen } from "../features/history/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
 import { PlayerScreen } from "../features/player/index.js";
 import {
@@ -498,6 +499,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 onNavigate={navigate}
               />
             ) : null}
+            {route.kind === "history" ? <HistoryScreen /> : null}
             {route.kind === "diagnostics" ? (
               <JobsScreen backLabel={t("shell.back")} onBack={canBack ? goBack : undefined} />
             ) : null}

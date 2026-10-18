@@ -704,15 +704,20 @@ export const en = {
         body: "Peregrine's core did not answer, so this list is unknown rather than empty. Reopening the app tries the read again.",
       },
     },
+    history: {
+      title: "Watch history",
+      subtitle: "What this device has watched, newest first.",
+    },
     settings: {
       history: {
-        title: "Watch history",
-        description: "What this device has watched, newest first.",
         empty: "Nothing watched yet.",
         failed: "The history could not be read. Reopen Settings to try again.",
         watched: "Watched",
         progress: "{{percent}}%",
         unknown: "Unknown title",
+        showing: "Showing {{shown}} of {{total}}",
+        more: "Show more",
+        less: "Show less",
       },
       title: "Settings",
       quality: {
