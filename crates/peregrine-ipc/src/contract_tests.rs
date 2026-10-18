@@ -1229,7 +1229,7 @@ fn play_externally_dead(harness: &Harness) -> Invocation<'_> {
             None,
         )
         .await
-            .map(drop)
+        .map(drop)
     })
 }
 
