@@ -138,7 +138,9 @@ pub trait PlayerBackend: Send + Sync {
     /// Starts a file in the shared external player, replacing whatever it was showing.
     ///
     /// `start_ms` is where the app's own watch progress says to resume, or `None` for the
-    /// beginning. `positions` is where the player reports its position as it advances.
+    /// beginning. `subtitle` is the sidecar the session selected, or `None` for no subtitle;
+    /// it is a guarded path for the same reason the media is, because it is handed to another
+    /// process. `positions` is where the player reports its position as it advances.
     ///
     /// # Errors
     ///
@@ -148,6 +150,7 @@ pub trait PlayerBackend: Send + Sync {
         &self,
         file: &SafePath,
         start_ms: Option<i64>,
+        subtitle: Option<&SafePath>,
         positions: Arc<dyn PositionSink>,
     ) -> Result<(), PlayerError>;
 

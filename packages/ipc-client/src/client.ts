@@ -13,6 +13,7 @@
 
 import { commands } from "./generated/bindings.js";
 import type {
+  AttributionDto,
   BrowsePageDto,
   BrowseSortDto,
   BuildInfo,
@@ -48,6 +49,7 @@ import type {
   ProwlarrStatusDto,
   MatchRuleDto,
   TitleDetailDto,
+  WatchAvailabilityDto,
   TitleMatchDto,
   UnmatchedFileDto,
   RootKind,
@@ -85,6 +87,16 @@ export async function unwrap<T, E>(result: Promise<CommandResult<T, E>>): Promis
 /** The running binary's build metadata, or a thrown structured IPC error. */
 export async function getBuildInfo(): Promise<BuildInfo> {
   return unwrap(commands.buildInfo());
+}
+
+/**
+ * What this build is obliged to say about the providers it can talk to (PG-E5-19).
+ *
+ * A read with no runtime behind it: the notices are fixed strings, so an installation with no key
+ * and no started runtime can still show them.
+ */
+export async function getProviderAttribution(): Promise<AttributionDto[]> {
+  return unwrap(commands.providerAttribution());
 }
 
 /**
@@ -336,6 +348,30 @@ export async function recordProgress(report: ProgressReport): Promise<void> {
   await unwrap(commands.recordProgress(report));
 }
 
+/** Marks one episode watched or unwatched, on the user's authority. */
+export async function setEpisodeWatched(
+  titleId: number,
+  season: number,
+  episode: number,
+  watched: boolean,
+): Promise<void> {
+  await unwrap(commands.setEpisodeWatched({ id: titleId }, season, episode, watched));
+}
+
+/** Marks every episode of one season watched or unwatched, answering how many it touched. */
+export async function setSeasonWatched(
+  titleId: number,
+  season: number,
+  watched: boolean,
+): Promise<number> {
+  return unwrap(commands.setSeasonWatched({ id: titleId }, season, watched));
+}
+
+/** Marks a whole title watched or unwatched, for a film rather than for one episode. */
+export async function setTitleWatched(titleId: number, watched: boolean): Promise<void> {
+  await unwrap(commands.setTitleWatched({ id: titleId }, watched));
+}
+
 /**
  * The library roots the user has configured, newest first.
  *
@@ -491,6 +527,19 @@ export async function recommendations(titleId: number): Promise<RecommendationsD
  */
 export async function getTitle(id: number): Promise<TitleDetailDto | null> {
   return unwrap(commands.getTitle({ id }));
+}
+
+/**
+ * Where a title can be watched in one region, as the provider last answered.
+ *
+ * A cache read: fetching is the title refresh the screen already starts when `refreshDue` says so.
+ * `fetchedAt` is what lets the section tell "nobody has asked" from "nothing is streaming it here".
+ */
+export async function watchAvailability(
+  titleId: number,
+  region: string,
+): Promise<WatchAvailabilityDto> {
+  return unwrap(commands.watchAvailability({ id: titleId }, region));
 }
 
 /**

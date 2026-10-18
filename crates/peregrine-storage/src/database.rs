@@ -7,6 +7,7 @@ use sqlx::Connection as _;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use tracing::{info, warn};
 
+use peregrine_domain::catalogue::WatchAvailability;
 use peregrine_domain::{
     AccountScope, DownloadEvent, DownloadState, LibraryRoot, MediaFile, MediaItem, ScanMode,
     SubtitleTrack, TorrentDescription, UnmatchedFile, WatchProgress, WatchlistEntry,
@@ -1733,6 +1734,76 @@ impl Database {
         request: PageRequest,
     ) -> Result<Vec<crate::library::SubtitleTrackRow>, StorageError> {
         crate::library::list_subtitles_for_file(&self.readers, scope, media_file_id, request).await
+    }
+
+    /// Replaces a title's watch availability with what a provider just answered, and records when.
+    ///
+    /// A replace rather than a merge: the answer is the whole truth for the title, and a service
+    /// that stopped carrying it must disappear rather than linger until something else removes it.
+    pub async fn replace_watch_availability(
+        &self,
+        title_id: i64,
+        source: String,
+        regions: Vec<WatchAvailability>,
+        at: i64,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ReplaceWatchAvailability {
+                title_id,
+                source,
+                regions,
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("replace_watch_availability", &other)),
+        }
+    }
+
+    /// Records that a provider answered for this title with no availability data to store.
+    pub async fn mark_watch_availability_synced(
+        &self,
+        title_id: i64,
+        at: i64,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::MarkWatchAvailabilitySynced { title_id, at })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response(
+                "mark_watch_availability_synced",
+                &other,
+            )),
+        }
+    }
+
+    /// When this title's availability was last fetched, or `None` when it never was.
+    pub async fn watch_synced_at(&self, title_id: i64) -> Result<Option<i64>, StorageError> {
+        crate::watch_options::synced_at(&self.readers, title_id).await
+    }
+
+    /// One region's provider page and source, when the scope may see the title.
+    pub async fn watch_region(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        region: &str,
+    ) -> Result<Option<crate::WatchRegionRow>, StorageError> {
+        crate::watch_options::region(&self.readers, scope, title_id, region).await
+    }
+
+    /// One region's offers, when the scope may see the title.
+    pub async fn watch_offers(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        region: &str,
+    ) -> Result<Vec<crate::WatchOfferRow>, StorageError> {
+        crate::watch_options::offers(&self.readers, scope, title_id, region).await
     }
 
     /// Writes one account's progress for one title or episode.

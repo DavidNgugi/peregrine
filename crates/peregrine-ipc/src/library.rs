@@ -293,6 +293,11 @@ pub struct TitleDetailDto {
     /// and `play` is the only one that offers playback, so a title the library holds cannot be
     /// offered for download however its counts read. See [`TitleOfferDto`].
     pub offer: TitleOfferDto,
+    /// Whether the account has marked or finished this title as a whole, which a film's page draws.
+    ///
+    /// Separate from the per-episode state a season list carries: a film is one row, and marking it
+    /// watched is a statement about the title rather than about an episode (`PG-E18-06`).
+    pub watched: bool,
     /// What pressing Play would actually do, or `null` when the library holds no copy on disk.
     ///
     /// **The reason Play can say why it will not work** rather than being inert with no explanation: a
@@ -301,6 +306,36 @@ pub struct TitleDetailDto {
     /// (`ADR 0023 §5`). `null` and `unknown` mean different things: the first is nothing to play, the
     /// second is a file whose container this build cannot name.
     pub play_support: Option<LocalPlaybackDto>,
+}
+
+/// Where one title can be watched in one region.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchAvailabilityDto {
+    /// The region these offers are for, uppercase.
+    pub region: String,
+    /// The provider's own page for every option, when it sent one.
+    pub link: Option<String>,
+    /// When the answer was fetched, or `null` when this title has never been asked about.
+    #[specta(type = Option<Number>)]
+    pub fetched_at: Option<i64>,
+    /// The services, each with the category a screen groups it under.
+    pub offers: Vec<WatchOfferDto>,
+}
+
+/// One service in one category, with its cached logo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchOfferDto {
+    /// `flatrate`, `rent`, `buy`, `free`, or `ads`.
+    pub category: String,
+    /// The provider's own id for the service.
+    #[specta(type = Number)]
+    pub provider_id: i64,
+    /// The service's name, which is the logo's accessible name and its fallback.
+    pub provider: String,
+    /// The absolute path of the cached logo, or `null` when the cache holds none.
+    pub logo: Option<String>,
 }
 
 /// What this build will do with a local file, as the webview spells it.
@@ -1081,6 +1116,7 @@ pub async fn get_title(
     title: TitleRef,
 ) -> Result<Option<TitleDetailDto>, AppError> {
     let runtime = state.runtime()?;
+    let watched = runtime.title_watched(title.id).await.unwrap_or(false);
     let title = runtime.library_title(title.id).await?;
     let cast = runtime
         .title_cast(
@@ -1094,9 +1130,54 @@ pub async fn get_title(
         title.map(|detail| {
             let mut dto = title_detail(detail);
             dto.cast = cast.into_iter().map(CastMemberDto::from).collect();
+            dto.watched = watched;
             dto
         }),
     ))
+}
+
+/// Where one title can be watched in one region, as the provider last answered.
+///
+/// A cache read: fetching is the title refresh job's, and `fetchedAt` is what lets the screen tell
+/// "nobody has asked" from "nothing is streaming it here".
+#[tauri::command]
+#[specta::specta]
+pub async fn watch_availability(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+    region: String,
+) -> Result<WatchAvailabilityDto, AppError> {
+    let region = peregrine_app::Region::new(&region).map_err(|error| {
+        AppError::new(crate::error::ErrorCode::InvalidInput).with_detail(error.to_string())
+    })?;
+    let view = state
+        .runtime()?
+        .watch_availability(title.id, &region)
+        .await?;
+    Ok(guard_response(
+        "library::watch_availability",
+        WatchAvailabilityDto::from(view),
+    ))
+}
+
+impl From<peregrine_app::WatchAvailabilityView> for WatchAvailabilityDto {
+    fn from(view: peregrine_app::WatchAvailabilityView) -> Self {
+        Self {
+            region: view.region.as_str().to_owned(),
+            link: view.link,
+            fetched_at: view.fetched_at,
+            offers: view
+                .offers
+                .into_iter()
+                .map(|offer| WatchOfferDto {
+                    category: offer.category.as_str().to_owned(),
+                    provider_id: offer.provider_id,
+                    provider: offer.provider_name,
+                    logo: artwork_text(offer.logo.as_deref()),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<peregrine_app::CastRow> for CastMemberDto {
@@ -1167,6 +1248,9 @@ fn title_detail(detail: peregrine_app::LibraryTitleDetail) -> TitleDetailDto {
         released: detail.released.map(|date| date.to_string()),
         refresh_due: detail.refresh_due,
         offer: TitleOfferDto::from(detail.playback.offer),
+        // Filled by `get_title`: the mapping has no runtime to ask, and the read that answers it is
+        // the same one the page's Play state already needs.
+        watched: false,
         play_support: detail.playback.support.map(LocalPlaybackDto::from),
     }
 }

@@ -40,6 +40,16 @@ describe("CastRail", () => {
     expect(markup([])).toBe("");
   });
 
+  it("draws the rail's geometry while the credits are still arriving", () => {
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <CastRail cast={[]} loading />
+      </I18nextProvider>,
+    );
+    expect(html).toContain("Cast");
+    expect(html).toContain("rounded-full");
+  });
+
   it("draws a name, a character, and initials when there is no portrait", () => {
     const html = markup([cast()]);
     expect(html).toContain("Matthew McConaughey");

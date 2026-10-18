@@ -338,3 +338,51 @@ pub async fn record_progress(
     let () = guard_response("watch::record_progress", ());
     Ok(())
 }
+
+/// Marks a whole title watched or unwatched, on the user's authority.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_title_watched(
+    state: State<'_, RuntimeState>,
+    title: crate::library::TitleRef,
+    watched: bool,
+) -> Result<(), AppError> {
+    state
+        .runtime()?
+        .set_title_watched(title.id, watched)
+        .await?;
+    Ok(())
+}
+
+/// Marks one episode watched or unwatched, on the user's authority.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_episode_watched(
+    state: State<'_, RuntimeState>,
+    title: crate::library::TitleRef,
+    season: u32,
+    episode: u32,
+    watched: bool,
+) -> Result<(), AppError> {
+    state
+        .runtime()?
+        .set_episode_watched(title.id, season, episode, watched)
+        .await?;
+    Ok(())
+}
+
+/// Marks every episode of one season watched or unwatched, answering how many it touched.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_season_watched(
+    state: State<'_, RuntimeState>,
+    title: crate::library::TitleRef,
+    season: u32,
+    watched: bool,
+) -> Result<u32, AppError> {
+    let touched = state
+        .runtime()?
+        .set_season_watched(title.id, season, watched)
+        .await?;
+    Ok(guard_response("watch::set_season_watched", touched))
+}

@@ -216,6 +216,13 @@ export const commands = {
 	 */
 	offer: TitleOfferDto,
 	/**
+	 *  Whether the account has marked or finished this title as a whole, which a film's page draws.
+	 * 
+	 *  Separate from the per-episode state a season list carries: a film is one row, and marking it
+	 *  watched is a statement about the title rather than about an episode (`PG-E18-06`).
+	 */
+	watched: boolean,
+	/**
 	 *  What pressing Play would actually do, or `null` when the library holds no copy on disk.
 	 * 
 	 *  **The reason Play can say why it will not work** rather than being inert with no explanation: a
@@ -226,6 +233,13 @@ export const commands = {
 	 */
 	playSupport: LocalPlaybackDto | null,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
+	/**
+	 *  Where one title can be watched in one region, as the provider last answered.
+	 * 
+	 *  A cache read: fetching is the title refresh job's, and `fetchedAt` is what lets the screen tell
+	 *  "nobody has asked" from "nothing is streaming it here".
+	 */
+	watchAvailability: (title: TitleRef, region: string) => typedError<WatchAvailabilityDto, AppError_Serialize>(__TAURI_INVOKE("watch_availability", { title, region })),
 	/**
 	 *  One person and the library titles that credit them.
 	 * 
@@ -638,6 +652,12 @@ export const commands = {
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
 	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
+	/**  Marks a whole title watched or unwatched, on the user's authority. */
+	setTitleWatched: (title: TitleRef, watched: boolean) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_title_watched", { title, watched })),
+	/**  Marks one episode watched or unwatched, on the user's authority. */
+	setEpisodeWatched: (title: TitleRef, season: number, episode: number, watched: boolean) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_episode_watched", { title, season, episode, watched })),
+	/**  Marks every episode of one season watched or unwatched, answering how many it touched. */
+	setSeasonWatched: (title: TitleRef, season: number, watched: boolean) => typedError<number, AppError_Serialize>(__TAURI_INVOKE("set_season_watched", { title, season, watched })),
 	/**  The account's viewing history, newest first. */
 	viewingHistory: (limit: number | null) => typedError<WatchHistoryDto[], AppError_Serialize>(__TAURI_INVOKE("viewing_history", { limit })),
 	/**
@@ -2047,6 +2067,13 @@ export type TitleDetailDto = {
 	 */
 	offer: TitleOfferDto,
 	/**
+	 *  Whether the account has marked or finished this title as a whole, which a film's page draws.
+	 * 
+	 *  Separate from the per-episode state a season list carries: a film is one row, and marking it
+	 *  watched is a statement about the title rather than about an episode (`PG-E18-06`).
+	 */
+	watched: boolean,
+	/**
 	 *  What pressing Play would actually do, or `null` when the library holds no copy on disk.
 	 * 
 	 *  **The reason Play can say why it will not work** rather than being inert with no explanation: a
@@ -2149,6 +2176,18 @@ export type UnmatchedRef = {
 	titleId: number | null,
 };
 
+/**  Where one title can be watched in one region. */
+export type WatchAvailabilityDto = {
+	/**  The region these offers are for, uppercase. */
+	region: string,
+	/**  The provider's own page for every option, when it sent one. */
+	link: string | null,
+	/**  When the answer was fetched, or `null` when this title has never been asked about. */
+	fetchedAt: number | null,
+	/**  The services, each with the category a screen groups it under. */
+	offers: WatchOfferDto[],
+};
+
 /**  One day's watched time, for the history graph. */
 export type WatchDayDto = {
 	/**  The local calendar day, `YYYY-MM-DD`. */
@@ -2177,6 +2216,18 @@ export type WatchHistoryDto = {
 	percent: number | null,
 	/**  When the row was last written, in Unix milliseconds. */
 	updatedAt: number,
+};
+
+/**  One service in one category, with its cached logo. */
+export type WatchOfferDto = {
+	/**  `flatrate`, `rent`, `buy`, `free`, or `ads`. */
+	category: string,
+	/**  The provider's own id for the service. */
+	providerId: number,
+	/**  The service's name, which is the logo's accessible name and its fallback. */
+	provider: string,
+	/**  The absolute path of the cached logo, or `null` when the cache holds none. */
+	logo: string | null,
 };
 
 /**  One saved title, as the Discover rail and the title page draw it. */
@@ -2211,6 +2262,7 @@ export const eventTopics = {
 	jobState: { name: "job://state", version: 1 },
 	downloadStats: { name: "download://stats", version: 1 },
 	notificationRaised: { name: "notification://raised", version: 1 },
+	titleRefreshed: { name: "title://refreshed", version: 1 },
 } as const;
 
 /** The wire name of an event topic. */

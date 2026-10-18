@@ -20,13 +20,14 @@ use std::time::Duration;
 use std::num::NonZeroU32;
 
 use crate::notify::{CataloguePreferences, NoOsNotifier, NotificationService, NotifyOffers};
+use peregrine_domain::catalogue::{ImageKind, Region, WatchCategory, watch_brand};
 use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _, NotificationId};
 use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
     AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback,
     PlaybackPosition, PreferredQuality, ProgressSource, SafePath, ScanMode, SubtitleFormat,
-    SubtitleTrack, TokenSource, WatchProgress,
+    SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
 };
 use peregrine_platform::{SystemClock, SystemTrash, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
@@ -77,6 +78,42 @@ pub fn installation_scope() -> peregrine_domain::AccountScope {
     )
 }
 
+/// Writes a position a player reported, preserving a flag the user set by hand.
+///
+/// A free function because two writers need the same rule and only one of them holds the runtime:
+/// the in-page player's command and the external player's socket reader, which runs on its own task.
+/// A manual row moves its position and nothing else; a measured row is written exactly as
+/// [`WatchProgress::record`] describes, because a tick is not evidence that the session ended and
+/// the 0.92 storage floor is not the 0.95 playback threshold.
+async fn write_reported_position(
+    database: &Database,
+    clock: &(dyn Clock + Send + Sync),
+    title_id: i64,
+    episode_id: Option<i64>,
+    position: PlaybackPosition,
+) -> Result<(), StorageError> {
+    let now = clock.now();
+    let progress = match database
+        .watch_progress(installation_scope(), title_id, episode_id)
+        .await?
+    {
+        Some(mut existing) if existing.source() == ProgressSource::Manual => {
+            existing.set_position(position, now);
+            existing
+        }
+        _ => WatchProgress::record(
+            installation_scope().account(),
+            title_id,
+            episode_id,
+            position,
+            ProgressSource::Local,
+            now,
+            None,
+        ),
+    };
+    database.record_watch_progress(progress).await
+}
+
 /// The database file inside the data directory.
 const DATABASE_FILE: &str = "peregrine.sqlite";
 
@@ -91,6 +128,14 @@ const DOWNLOAD_DIRECTORY: &str = "downloads";
 /// A settings-registry entry (`PG-E20-01`) will own it; until then it is one constant here rather
 /// than a number spelled at a call site with none of the reasoning.
 const FREE_SPACE_FLOOR: u64 = 5 * 1024 * 1024 * 1024;
+
+/// How long a title's watch availability is trusted before a visit asks again.
+///
+/// Services change what they carry on their own clock, and seven days is short enough that a film
+/// that just left a service stops being advertised without turning every visit into a request. The
+/// rule lives here rather than in a screen because it is the same kind of question `refresh_due`
+/// answers for metadata, and the screen already follows that answer.
+const WATCH_AVAILABILITY_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 
 /// The directives the runtime logs with when the caller does not choose.
 const DEFAULT_DIRECTIVES: &str = "info";
@@ -486,6 +531,37 @@ pub struct LibraryTitleDetail {
     /// and "this build cannot read that container yet" is a fact about the file that has to be known
     /// before the press (ADR 0023 §5).
     pub playback: TitlePlayback,
+}
+
+/// Where one title can be watched in one region, as a title page draws it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchAvailabilityView {
+    /// The region these offers are for.
+    pub region: Region,
+    /// The provider's own page for every option, when it sent one.
+    pub link: Option<String>,
+    /// When the answer was fetched, or `None` when this title has never been asked about.
+    ///
+    /// The distinction the screen needs: `None` hides the section, and `Some` with no offers says
+    /// that the provider answered and nothing is listed where the reader is.
+    pub fetched_at: Option<i64>,
+    /// The offers, grouped by the screen from their category.
+    pub offers: Vec<WatchOfferView>,
+}
+
+/// One service on a where-to-watch row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchOfferView {
+    /// Subscription, rental, purchase, free, or ad-supported.
+    pub category: WatchCategory,
+    /// The provider's own id for the service.
+    pub provider_id: i64,
+    /// The service's name, which is also the logo's accessible name.
+    pub provider_name: String,
+    /// Where the cached logo is, or `None` when the cache holds none.
+    pub logo: Option<PathBuf>,
+    /// The provider's ordering hint within its category.
+    pub display_priority: Option<u32>,
 }
 
 /// One episode as its card draws it: what the provider said, what the library holds, and where the
@@ -915,6 +991,53 @@ impl NotifyOffers for OfferNotifier {
     }
 }
 
+/// The acquisition path's view of the notification service.
+///
+/// A finished transfer is the one event the job cannot raise for itself: its handle resolves
+/// elsewhere and nothing on the completion path awaits it (PG-E13-08).
+struct DownloadNotifier {
+    service: Arc<Notifications>,
+    bus: Arc<EventBus>,
+}
+
+impl crate::acquisition::DownloadNotices for DownloadNotifier {
+    fn finished<'a>(
+        &'a self,
+        download_id: i64,
+        failed: bool,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let event = if failed {
+                NotificationEvent::DownloadFailed
+            } else {
+                NotificationEvent::DownloadCompleted
+            };
+            // The centre row is the record and the toast is a bonus (R31); a failure here is logged
+            // and never changes the job's outcome.
+            match self
+                .service
+                .notify(
+                    installation_scope(),
+                    event,
+                    download_id,
+                    None,
+                    Focus::default(),
+                )
+                .await
+            {
+                Ok(_) => {
+                    self.bus.publish(Event::new(
+                        NOTIFICATION_RAISED,
+                        download_id.to_string(),
+                        serde_json::json!({ "event": event.as_str() }),
+                    ));
+                }
+                Err(error) => warn!(%error, "the download notification could not be recorded"),
+            }
+        })
+    }
+}
+
 /// The runtime's own clock, handed to the notification service so both read one source.
 struct SharedClock(Arc<dyn Clock + Send + Sync>);
 
@@ -1063,6 +1186,28 @@ impl Runtime {
             "the runtime is ready"
         );
 
+        // The notification service, composed here because this is the only place that may pick the
+        // adapters. The OS notifier is the placeholder until PG-E1-14 and the preferences answer the
+        // catalogue defaults until PG-E20-01; the centre row is written either way, which is R31's
+        // order and the reason a refused toast is not an error.
+        let notification_service: Arc<Notifications> = Arc::new(NotificationService::new(
+            NotificationRepository::new(Arc::clone(&database)),
+            CataloguePreferences,
+            NoOsNotifier,
+            NotificationRepository::new(Arc::clone(&database)),
+            Box::new(SharedClock(Arc::clone(&clock))),
+            Platform::current(),
+        ));
+        let notifications: Arc<dyn NotifyOffers> = Arc::new(OfferNotifier {
+            service: Arc::clone(&notification_service),
+            bus: Arc::clone(&bus),
+        });
+        let download_notices: Arc<dyn crate::acquisition::DownloadNotices> =
+            Arc::new(DownloadNotifier {
+                service: Arc::clone(&notification_service),
+                bus: Arc::clone(&bus),
+            });
+
         // The download root. `RuntimeConfig` carries no configured download directory — library
         // roots live in the database and are read per scan rather than cached here — so the session
         // writes under the data directory, the one directory the app already owns and creates. A
@@ -1103,7 +1248,8 @@ impl Runtime {
                                 FREE_SPACE_FLOOR,
                                 Arc::clone(&bus),
                                 Arc::new(SystemTrash),
-                            );
+                            )
+                            .with_notices(Arc::clone(&download_notices));
                             torrent_engine = Some(torrent);
                             metadata_fetch = Some(fetch);
                             acquisition = Some(Arc::new(service));
@@ -1116,22 +1262,6 @@ impl Runtime {
         let prowlarr = Arc::new(crate::jobs::prowlarr::Managed::discover(
             config.data_directory(),
         ));
-
-        // The notification service, composed here because this is the only place that may pick the
-        // adapters. The OS notifier is the placeholder until PG-E1-14 and the preferences answer the
-        // catalogue defaults until PG-E20-01; the centre row is written either way, which is R31's
-        // order and the reason a refused toast is not an error.
-        let notifications: Arc<dyn NotifyOffers> = Arc::new(OfferNotifier {
-            service: Arc::new(NotificationService::new(
-                NotificationRepository::new(Arc::clone(&database)),
-                CataloguePreferences,
-                NoOsNotifier,
-                NotificationRepository::new(Arc::clone(&database)),
-                Box::new(SharedClock(Arc::clone(&clock))),
-                Platform::current(),
-            )),
-            bus: Arc::clone(&bus),
-        });
 
         let external_player = Arc::clone(&config.player);
         let runtime = Self {
@@ -2678,9 +2808,20 @@ impl Runtime {
             provider_poster.as_deref(),
             self.provider_can_serve(id).await?,
         );
+        // Availability shares the one refresh the screen already follows: a title nobody can be
+        // asked about has no answer to fetch, and a title fetched inside the window is not asked
+        // again just because its details are complete.
+        let watch_due = state.answerable
+            && match self.database.watch_synced_at(id).await? {
+                None => true,
+                Some(at) => {
+                    self.clock.now().as_millisecond().saturating_sub(at)
+                        >= WATCH_AVAILABILITY_TTL_MS
+                }
+            };
         let playback = self.title_playback(id).await?;
         Ok(Some(LibraryTitleDetail {
-            refresh_due: crate::artwork::refresh_due(&state),
+            refresh_due: crate::artwork::refresh_due(&state) || watch_due,
             playback,
             entry: LibraryTitleEntry {
                 row: row.library,
@@ -3328,7 +3469,20 @@ impl Runtime {
             }
             None => None,
         };
-        let (_file, safe) = self.playable(title_id, episode_id).await?;
+        let (file, safe) = self.playable(title_id, episode_id).await?;
+        // The sidecar the webview would have offered, chosen by the same default flag. A sidecar
+        // that cannot be read is not allowed to take the film down with it.
+        let subtitle = match self.playable_subtitles(file.id).await {
+            Ok(tracks) => tracks
+                .iter()
+                .find(|(track, _)| track.is_default)
+                .or_else(|| tracks.first())
+                .map(|(_, path)| path.clone()),
+            Err(error) => {
+                warn!(%error, title = title_id, "the selected subtitle could not be offered to mpv");
+                None
+            }
+        };
         // The app's own watch progress is the resume rule; mpv's watch_later is disabled.
         let resume_ms = self
             .database
@@ -3346,16 +3500,15 @@ impl Runtime {
                 let Ok(position) = PlaybackPosition::new(position_ms, duration_ms) else {
                     continue;
                 };
-                let progress = WatchProgress::record(
-                    installation_scope().account(),
+                if let Err(error) = write_reported_position(
+                    &database,
+                    clock.as_ref(),
                     title_id,
                     episode_id,
                     position,
-                    ProgressSource::Local,
-                    clock.now(),
-                    None,
-                );
-                if let Err(error) = database.record_watch_progress(progress).await {
+                )
+                .await
+                {
                     warn!(%error, title = title_id, "an external player position could not be recorded");
                 }
             }
@@ -3363,9 +3516,11 @@ impl Runtime {
 
         let player = Arc::clone(&self.external_player);
         let positions: Arc<dyn peregrine_domain::PositionSink> = Arc::new(ChannelSink(sender));
-        tokio::task::spawn_blocking(move || player.play(&safe, resume_ms, positions))
-            .await
-            .map_err(|_| peregrine_domain::PlayerError::Spawn)??;
+        tokio::task::spawn_blocking(move || {
+            player.play(&safe, resume_ms, subtitle.as_ref(), positions)
+        })
+        .await
+        .map_err(|_| peregrine_domain::PlayerError::Spawn)??;
         Ok(())
     }
     /// A page of what the installation account is part-way through, most recently updated first.
@@ -3687,6 +3842,91 @@ impl Runtime {
             .await?)
     }
 
+    /// Where this title can be watched in one region, as the provider last answered.
+    ///
+    /// A cache read: the fetching is the title refresh job's, which is also what `refresh_due`
+    /// starts. `fetched_at` is what lets the screen say "nobody has asked" rather than drawing an
+    /// empty section as if the answer were "nothing is streaming it".
+    ///
+    /// The logos are resolved here for the same reason the poster is: the cache key is a hash this
+    /// layer computes, and whether the blob is on disk is a `stat` only this layer can make.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::UnknownTitle`] when the title is not here or the scope may not see it, and
+    /// [`RuntimeError::Storage`] when a read fails.
+    pub async fn watch_availability(
+        &self,
+        title_id: i64,
+        region: &Region,
+    ) -> Result<WatchAvailabilityView, RuntimeError> {
+        if self
+            .database
+            .library_title(installation_scope(), title_id)
+            .await?
+            .is_none()
+        {
+            return Err(RuntimeError::UnknownTitle);
+        }
+        let fetched_at = self.database.watch_synced_at(title_id).await?;
+        let region_row = self
+            .database
+            .watch_region(installation_scope(), title_id, region.as_str())
+            .await?;
+        let source = region_row
+            .as_ref()
+            .and_then(|row| row.source.parse::<peregrine_domain::Provider>().ok());
+        let offers = self
+            .database
+            .watch_offers(installation_scope(), title_id, region.as_str())
+            .await?;
+
+        // TMDB lists subscription tiers and channels as separate providers with the same artwork:
+        // one row of five Paramount+ marks is the failure this collapses. The brand key handles the
+        // named tiers; the logo set catches a variant whose name the key does not recognise. One
+        // mark per category is what the row is for, and the raw rows keep every tier for a later
+        // detail surface.
+        let mut brands = std::collections::HashSet::new();
+        let mut logos = std::collections::HashSet::new();
+        let offers: Vec<_> = offers
+            .into_iter()
+            .filter(|offer| {
+                if !brands.insert((offer.category, watch_brand(&offer.provider_name))) {
+                    return false;
+                }
+                match offer.logo_path.as_deref() {
+                    Some(path) => logos.insert((offer.category, path.to_owned())),
+                    None => true,
+                }
+            })
+            .collect();
+
+        Ok(WatchAvailabilityView {
+            region: region.clone(),
+            link: region_row.and_then(|row| row.link),
+            fetched_at,
+            offers: offers
+                .into_iter()
+                .map(|offer| WatchOfferView {
+                    category: offer.category,
+                    provider_id: offer.provider_id,
+                    provider_name: offer.provider_name,
+                    logo: offer.logo_path.as_deref().and_then(|path| {
+                        source.and_then(|provider| {
+                            crate::artwork::cached_image(
+                                &self.artwork,
+                                provider,
+                                path,
+                                ImageKind::Logo,
+                            )
+                        })
+                    }),
+                    display_priority: offer.display_priority,
+                })
+                .collect(),
+        })
+    }
+
     /// Schedules a download for the first date it may be fetched.
     ///
     /// # Errors
@@ -3815,15 +4055,143 @@ impl Runtime {
                 detail: error.to_string(),
             }
         })?;
-        let progress = WatchProgress::record(
-            installation_scope().account(),
+        write_reported_position(
+            &self.database,
+            self.clock.as_ref(),
             title_id,
             episode_id,
             position,
-            ProgressSource::Local,
-            self.clock.now(),
-            None,
-        );
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Marks one episode watched or unwatched, on the user's authority.
+    ///
+    /// The row is created when the episode has none, so a season can be marked before anything is
+    /// played. A manual mark is exempt from the storage floor (I6), which is why the origin is
+    /// `Manual` rather than `Policy`.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::UnknownTitle`] when the title or episode is not in the library, and
+    /// [`RuntimeError::Storage`] when the read or write fails.
+    pub async fn set_episode_watched(
+        &self,
+        title_id: i64,
+        season: u32,
+        episode: u32,
+        watched: bool,
+    ) -> Result<(), RuntimeError> {
+        let Some(episode_id) = self
+            .database
+            .episode_id_for(title_id, season, episode)
+            .await?
+        else {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "that episode is not in your library".to_owned(),
+            });
+        };
+        self.set_watched(title_id, Some(episode_id), watched).await
+    }
+
+    /// Marks every episode of one season watched or unwatched, answering how many rows it touched.
+    ///
+    /// The episodes are the season read's own rows, so a season the provider described but this
+    /// build has not fetched marks nothing rather than inventing numbers.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when a read or write fails.
+    pub async fn set_season_watched(
+        &self,
+        title_id: i64,
+        season: u32,
+        watched: bool,
+    ) -> Result<u32, RuntimeError> {
+        let episodes = self
+            .database
+            .list_title_episodes(installation_scope(), title_id, Some(season), 500)
+            .await?;
+        let mut touched = 0;
+        for row in episodes {
+            let Some(episode_id) = self
+                .database
+                .episode_id_for(title_id, row.season_number.get(), row.episode_number.get())
+                .await?
+            else {
+                continue;
+            };
+            self.set_watched(title_id, Some(episode_id), watched)
+                .await?;
+            touched += 1;
+        }
+        Ok(touched)
+    }
+
+    /// Marks a whole title watched or unwatched, for a film rather than for one episode.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read or write fails.
+    pub async fn set_title_watched(
+        &self,
+        title_id: i64,
+        watched: bool,
+    ) -> Result<(), RuntimeError> {
+        self.set_watched(title_id, None, watched).await
+    }
+
+    /// Whether the account has marked or finished a whole title, which a film's page draws.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn title_watched(&self, title_id: i64) -> Result<bool, RuntimeError> {
+        Ok(self
+            .database
+            .watch_progress(installation_scope(), title_id, None)
+            .await?
+            .is_some_and(|progress| progress.watched()))
+    }
+
+    /// The one write both marking surfaces share.
+    async fn set_watched(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        watched: bool,
+    ) -> Result<(), RuntimeError> {
+        let now = self.clock.now();
+        let existing = self
+            .database
+            .watch_progress(installation_scope(), title_id, episode_id)
+            .await?;
+        let mut progress = match existing {
+            Some(row) => row,
+            // Unwatching something with no row is already the answer the caller wants.
+            None if !watched => return Ok(()),
+            None => WatchProgress::record(
+                installation_scope().account(),
+                title_id,
+                episode_id,
+                PlaybackPosition::new(0, None).map_err(|error| RuntimeError::InvalidRequest {
+                    detail: error.to_string(),
+                })?,
+                ProgressSource::Manual,
+                now,
+                None,
+            ),
+        };
+        if watched {
+            progress
+                .mark_watched(WatchOrigin::Manual, now)
+                .map_err(|error| RuntimeError::InvalidRequest {
+                    detail: error.to_string(),
+                })?;
+        } else {
+            progress.mark_unwatched(now);
+        }
         self.database.record_watch_progress(progress).await?;
         Ok(())
     }
@@ -4584,6 +4952,7 @@ mod tests {
     struct RecordingPlayer {
         opened: Mutex<Vec<PathBuf>>,
         start: Mutex<Option<i64>>,
+        subtitle: Mutex<Option<PathBuf>>,
     }
 
     impl RecordingPlayer {
@@ -4597,6 +4966,13 @@ mod tests {
         fn start(&self) -> Option<i64> {
             *self.start.lock().expect("the player start is not poisoned")
         }
+
+        fn subtitle(&self) -> Option<PathBuf> {
+            self.subtitle
+                .lock()
+                .expect("the player subtitle is not poisoned")
+                .clone()
+        }
     }
 
     impl peregrine_domain::PlayerBackend for RecordingPlayer {
@@ -4604,6 +4980,7 @@ mod tests {
             &self,
             file: &SafePath,
             start_ms: Option<i64>,
+            subtitle: Option<&SafePath>,
             positions: Arc<dyn peregrine_domain::PositionSink>,
         ) -> Result<(), peregrine_domain::PlayerError> {
             self.opened
@@ -4611,6 +4988,11 @@ mod tests {
                 .expect("the player log is not poisoned")
                 .push(file.as_path().to_path_buf());
             *self.start.lock().expect("the player start is not poisoned") = start_ms;
+            *self
+                .subtitle
+                .lock()
+                .expect("the player subtitle is not poisoned") =
+                subtitle.map(|path| path.as_path().to_path_buf());
             // The position a real mpv would report over its socket, so the write path runs.
             positions.position(84_000, Some(7_200_000));
             Ok(())
@@ -6765,6 +7147,104 @@ mod tests {
         (title_id, film)
     }
 
+    /// A mark the user set outranks a playback report in both directions: watching a film someone
+    /// marked watched must not unmark it, and replaying one they marked unwatched must not mark it.
+    #[tokio::test]
+    async fn a_manual_watch_mark_survives_a_progress_report() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let (title_id, _film) = downloaded_title(&runtime, &directory).await;
+
+        runtime
+            .set_title_watched(title_id, true)
+            .await
+            .expect("the user marks it");
+        assert!(runtime.title_watched(title_id).await.expect("the read"));
+        runtime
+            .record_progress(title_id, None, 60_000, Some(7_200_000))
+            .await
+            .expect("a report lands");
+        assert!(
+            runtime.title_watched(title_id).await.expect("the read"),
+            "a tick is a measurement, not a statement that the mark is wrong"
+        );
+        let row = runtime
+            .database
+            .watch_progress(installation_scope(), title_id, None)
+            .await
+            .expect("the row")
+            .expect("it exists");
+        assert_eq!(row.position_ms(), 60_000, "the position still moves");
+        assert_eq!(row.source(), ProgressSource::Manual);
+
+        runtime
+            .set_title_watched(title_id, false)
+            .await
+            .expect("the user clears it");
+        runtime
+            .record_progress(title_id, None, 7_100_000, Some(7_200_000))
+            .await
+            .expect("a second report lands");
+        assert!(
+            !runtime.title_watched(title_id).await.expect("the read"),
+            "a finished playback does not overwrite a manual unwatch"
+        );
+    }
+
+    /// Tier and channel entries of one service are one mark on the row, which is the defect a
+    /// real answer exposed: five Paramount+ boxes and two Netflix boxes looked like a bug.
+    #[tokio::test]
+    async fn watch_offers_collapse_tiers_of_one_brand() {
+        use peregrine_domain::catalogue::{WatchAvailability, WatchOffer};
+
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let (title_id, _film) = downloaded_title(&runtime, &directory).await;
+        let offer = |category, provider_id, name: &str| WatchOffer {
+            category,
+            provider_id,
+            provider_name: NonEmptyText::new(name).expect("a name"),
+            logo_path: None,
+            display_priority: None,
+        };
+        runtime
+            .database
+            .replace_watch_availability(
+                title_id,
+                "tmdb".to_owned(),
+                vec![WatchAvailability {
+                    region: Region::new("US").expect("a region"),
+                    link: None,
+                    offers: vec![
+                        offer(WatchCategory::Flatrate, 1, "Paramount Plus"),
+                        offer(WatchCategory::Flatrate, 2, "Paramount Plus Premium"),
+                        offer(WatchCategory::Flatrate, 3, "Paramount Plus Essential"),
+                        offer(WatchCategory::Flatrate, 4, "Netflix"),
+                        offer(WatchCategory::Flatrate, 5, "Netflix Standard with Ads"),
+                        offer(WatchCategory::Rent, 6, "Apple TV"),
+                    ],
+                }],
+                1,
+            )
+            .await
+            .expect("the answer is written");
+
+        let view = runtime
+            .watch_availability(title_id, &Region::new("US").expect("a region"))
+            .await
+            .expect("the read answers");
+        let names: Vec<&str> = view
+            .offers
+            .iter()
+            .map(|offer| offer.provider_name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Apple TV", "Netflix", "Paramount Plus"],
+            "one mark per brand per category, in provider order"
+        );
+    }
+
     /// The external player resumes from the app's own watch progress, and the position it reports
     /// is written through the same row the in-page player writes.
     #[tokio::test]
@@ -6786,6 +7266,11 @@ mod tests {
             player.start(),
             Some(42_000),
             "the stored position is where mpv starts"
+        );
+        assert_eq!(
+            player.subtitle(),
+            None,
+            "a fixture with no sidecar hands mpv no subtitle"
         );
 
         // The fake reports 84 s over the sink; the consumer task writes it. Wait for the row rather

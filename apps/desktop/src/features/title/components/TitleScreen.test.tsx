@@ -89,6 +89,10 @@ function seasons(state: Partial<TitleSeasons> = {}): TitleSeasons {
     loading: false,
     failed: null,
     choose: () => undefined,
+    setEpisodeWatched: async () => undefined,
+    setSeasonWatched: async () => undefined,
+    markFailed: null,
+    marking: false,
     ...state,
   };
 }
@@ -100,6 +104,7 @@ function detail(state: Partial<TitleDetail> = {}): TitleDetail {
     // the state a screen cannot reach from a successful read of a title the library holds.
     cast: [],
     playSupport: "webview",
+    watched: false,
     poster: null,
     backdrop: null,
     overview: null,
@@ -114,6 +119,9 @@ function detail(state: Partial<TitleDetail> = {}): TitleDetail {
     // No refresh watched stop: this fixture is drawn from one read, and the season read a stop would
     // re-run has its own fixture.
     refreshes: 0,
+    updates: 0,
+    seasonUpdates: 0,
+    refreshing: false,
     refresh: () => Promise.resolve(),
     ...state,
   };
@@ -170,6 +178,13 @@ describe("TitleScreen", () => {
 
     expect(loading).toContain("Film");
     expect(loading).not.toContain("not here");
+  });
+
+  it("says a refresh is in flight and draws the cast's geometry", () => {
+    const html = markup(detail({ refreshing: true }), "show");
+
+    expect(html).toContain("Fetching details, cast, episodes, and artwork…");
+    expect(html).toContain("Cast");
   });
 
   it("shows the totals the library holds", () => {

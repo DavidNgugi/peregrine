@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import type { CastMemberDto } from "@peregrine/ipc-client";
 import { useTranslation } from "react-i18next";
-import { Section } from "@peregrine/ui";
+import { Section, Skeleton } from "@peregrine/ui";
 import { imageUrl } from "../../../lib/media.js";
 
 /**
@@ -12,15 +12,30 @@ import { imageUrl } from "../../../lib/media.js";
  */
 export function CastRail({
   cast,
+  loading = false,
   onPerson,
 }: {
   cast: readonly CastMemberDto[];
+  /** The refresh is still fetching the credits, so the rail's geometry is drawn as placeholders. */
+  loading?: boolean;
   /** Opens the person's page; a rail drawn without it is still readable, just not clickable. */
   onPerson?: (id: number) => void;
 }): ReactElement | null {
   const { t } = useTranslation();
   if (cast.length === 0) {
-    return null;
+    return loading ? (
+      <Section description={t("title.cast.description")} title={t("title.cast.title")}>
+        <ul className="no-scrollbar flex gap-5 overflow-x-auto pb-2" data-title-cast="">
+          {Array.from({ length: 6 }, (_, index) => (
+            <li className="flex w-24 shrink-0 flex-col items-center gap-1.5" key={index}>
+              <Skeleton className="size-16 rounded-full" />
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-3 w-12" />
+            </li>
+          ))}
+        </ul>
+      </Section>
+    ) : null;
   }
   return (
     <Section description={t("title.cast.description")} title={t("title.cast.title")}>

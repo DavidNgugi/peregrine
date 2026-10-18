@@ -17,13 +17,15 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 - **Your library** — point it at folders you already have. Filenames are parsed and matched to titles, with manual matching for the ones it cannot place. Scanned titles get their own **My library** rail on Discover, and the Library screen searches and filters them. A scanned title still carrying no provider id is matched automatically in the background: the app searches the configured provider by name and kind on its next pass, then fills in the poster and metadata. Nothing is moved or renamed without asking.
 - **Cast** — each refreshed title carries its top-billed cast from TMDB, portraits included, drawn as a rail on the title page. Clicking a person opens their page: the titles in your library that credit them, plus the rest of their credits from TMDB.
 - **Watchlist** — save a title from its page. A bookmark marks it on every rail and grid, and Discover's **My list** rail collects the saved titles.
+- **Where to watch** — a title page carries the services streaming, renting, or selling it in your region, from TMDB's JustWatch data. The marks are all one size, one per service rather than one per subscription tier, subscription first, and the region is named. A title nobody has asked about draws no section rather than an empty one.
 - **Playback** — pick an episode and play that episode, not the title's first file. mpv for containers the webview cannot demux, resume, and continue watching that reopens the exact episode.
-- **Subtitles** — `.srt/.vtt/.ass/.ssa/.sub` sidecars beside a video are indexed and offered in the webview player, served from the same session token as the media. WebVTT renders in-page; SRT/ASS may not, and mpv does not yet receive a selected sidecar. Provider search and download are not built.
-- **Watch state** — a bar along each episode's still fills as you watch and completes when you finish; the first unfinished episode is marked **Next up**, and Settings carries the full viewing history.
+- **Subtitles** — `.srt/.vtt/.ass/.ssa/.sub` sidecars beside a video are indexed and offered in the webview player, served from the same session token as the media, and the selected sidecar is handed to mpv too. WebVTT renders in-page; SRT/ASS may not. Provider search and download are not built.
+- **Watch state** — a bar along each episode's still fills as you watch and completes when you finish; the first unfinished episode is marked **Next up**, and Settings carries the full viewing history. An episode, a whole season, or a film can be marked watched or unwatched by hand, and that mark outranks a later playback report.
 - **Scheduled downloads** — an unreleased episode or title offers Schedule instead of Download; the app fetches it on its release date and the Scheduled list in Downloads cancels it.
 - **Profiles** — a local selector with DiceBear avatars or an uploaded photo. It is device-local scaffolding for the local accounts and parental gating in the roadmap, not a security boundary.
 - **Safety gate** — every torrent is inspected before a byte is written: path traversal, executables, symlinks, unicode spoofing, and size and file-count caps. Downloaded media is never opened with the OS handler.
-- **Notifications** — an in-app centre, because OS delivery can fail silently.
+- **Notifications** — an in-app centre, because OS delivery can fail silently. A finished or failed download is recorded there with a link back to the queue; OS toasts stay off until consent has a place to live.
+- **About** — Settings shows the version, the build target, and the provider notices this build is required to reproduce.
 
 ## Roadmap
 

@@ -65,6 +65,10 @@ export interface EpisodeCardProps {
   readonly onSchedule?: ((episode: EpisodeDto) => void) | undefined;
   /** Whether this episode is already scheduled. */
   readonly scheduled?: boolean | undefined;
+  /** Marks this episode watched, or clears the mark, on the user's authority. */
+  readonly onToggleWatched?: ((episode: EpisodeDto, watched: boolean) => void) | undefined;
+  /** A watch-state write is in flight, so the control waits rather than sending a second. */
+  readonly marking?: boolean | undefined;
 }
 
 /** One episode's card. */
@@ -79,6 +83,8 @@ export function EpisodeCard({
   nextUp = false,
   onSchedule,
   scheduled = false,
+  onToggleWatched,
+  marking = false,
 }: EpisodeCardProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: moving to another season has to give the next still
@@ -230,6 +236,30 @@ export function EpisodeCard({
                   : t("title.episode.download")}
               </Button>
             )}
+          </div>
+        )}
+
+        {/* Always offered, whatever the episode's availability: marking is a statement about what
+            the reader has seen, not about what is on disk. */}
+        {onToggleWatched === undefined ? null : (
+          <div className="flex justify-end pt-1">
+            <Button
+              aria-label={t(
+                watched ? "title.episode.markUnwatchedLabel" : "title.episode.markWatchedLabel",
+                {
+                  number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                  name: episode.name ?? t("title.unnamedEpisode"),
+                },
+              )}
+              disabled={marking}
+              onClick={() => {
+                onToggleWatched(episode, !watched);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {watched ? t("title.episode.markUnwatched") : t("title.episode.markWatched")}
+            </Button>
           </div>
         )}
       </div>

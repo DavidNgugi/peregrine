@@ -46,7 +46,7 @@ pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,
     PlaybackSubtitle, ProwlarrStatus, RailsState, Recommendations, Runtime, RuntimeConfig,
     RuntimeError, SessionId, ShellStatus, StartedCapture, StartedJob, StartedPlayback,
-    TitleEpisodeDetail, TitlePlayback, TitleSeasonDetail,
+    TitleEpisodeDetail, TitlePlayback, TitleSeasonDetail, WatchAvailabilityView, WatchOfferView,
 };
 // What one rail holds, for the reason the block above gives: the command surface answers a DTO
 // built from a `RailItem`, and it may not reach into `peregrine-app`'s job module to name it.
@@ -76,6 +76,7 @@ pub use peregrine_domain::{
 };
 // The notification centre's rows and severity, for the reason above: the commands that list the
 // centre name them, and `peregrine-ipc` may not take a `peregrine-domain` edge (AGENTS R6).
+pub use peregrine_domain::catalogue::{Region, WatchCategory};
 pub use peregrine_domain::notify::Severity;
 pub use peregrine_storage::{
     ArtworkPath, LibraryTitleRow, MatchRuleRow, MetadataState, TitleEpisodeRow, TitleIdentity,

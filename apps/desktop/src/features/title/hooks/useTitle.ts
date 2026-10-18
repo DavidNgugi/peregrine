@@ -57,6 +57,8 @@ export interface TitleDetail {
    * deciding playback in TypeScript (`AGENTS R7`).
    */
   readonly playSupport: LocalPlaybackDto | null;
+  /** Whether the account has marked or finished this title as a whole. */
+  readonly watched: boolean;
   /** Where its cached poster is, as the core reported it, or `null` when there is none. */
   readonly poster: string | null;
   /** Where its cached backdrop is, or `null` when the cache holds none. */
@@ -89,6 +91,18 @@ export interface TitleDetail {
    * reason they must run again, and the title read is not the only thing it changed.
    */
   readonly refreshes: number;
+  /**
+   * How many partial answers the refresh has announced, one per stage it wrote.
+   *
+   * A re-read trigger for the reads beside the title: the job writes the cast before the seasons and
+   * the seasons before the stills, and the screen should draw each as it lands rather than waiting
+   * for the whole job. The payload is never drawn; the read answers what is stored.
+   */
+  readonly updates: number;
+  /** The subset of {@link TitleDetail.updates} that wrote titles' seasons and episodes. */
+  readonly seasonUpdates: number;
+  /** The refresh job this screen started is still running. */
+  readonly refreshing: boolean;
   /** Re-reads the title. */
   readonly refresh: () => Promise<void>;
 }
@@ -99,6 +113,7 @@ interface TitleState {
   readonly cast: readonly CastMemberDto[];
   /** Carried through from the read; see [`TitleDetail::playSupport`]. */
   readonly playSupport: LocalPlaybackDto | null;
+  readonly watched: boolean;
   readonly poster: string | null;
   readonly backdrop: string | null;
   readonly overview: string | null;
@@ -114,6 +129,7 @@ const EMPTY: TitleState = {
   title: null,
   cast: [],
   playSupport: null,
+  watched: false,
   poster: null,
   backdrop: null,
   overview: null,
@@ -137,6 +153,8 @@ const EMPTY: TitleState = {
 export function useTitle(id: number | null): TitleDetail {
   const [state, setState] = useState<TitleState>(EMPTY);
   const [follow, setFollow] = useState<RefreshFollow>(NOT_FOLLOWING);
+  const [updates, setUpdates] = useState(0);
+  const [seasonUpdates, setSeasonUpdates] = useState(0);
   // The id the *current* visit is for. A read that answers after the route has moved on is dropped
   // rather than applied: it would otherwise draw one title's answer under another's name, and — now
   // that a read can start a refresh — spend a provider request for a title nobody is looking at and
@@ -201,6 +219,7 @@ export function useTitle(id: number | null): TitleDetail {
           title: null,
           cast: [],
           playSupport: null,
+          watched: false,
           poster: null,
           backdrop: null,
           overview: null,
@@ -217,6 +236,7 @@ export function useTitle(id: number | null): TitleDetail {
         title: answer.title,
         cast: answer.cast,
         playSupport: answer.playSupport,
+        watched: answer.watched,
         // The poster is the read's own row rather than a field beside it: the title the core answered
         // with carries the cached path, so a page and a tile cannot disagree about what there is to draw.
         poster: answer.title.poster,
@@ -243,6 +263,7 @@ export function useTitle(id: number | null): TitleDetail {
         title: null,
         cast: [],
         playSupport: null,
+        watched: false,
         poster: null,
         backdrop: null,
         overview: null,
@@ -292,6 +313,45 @@ export function useTitle(id: number | null): TitleDetail {
     };
   }, [applyFollow]);
 
+  // **The progressive re-read.** The refresh job announces each part it writes — cast first, then
+  // availability, then the metadata and seasons, then the portraits — so the page draws what has
+  // landed instead of showing an empty cast until the last still is fetched. The event is a trigger:
+  // the payload names the title and the stage, and `read` answers with what is actually stored.
+  useEffect(() => {
+    if (id === null) {
+      return;
+    }
+    let cancelled = false;
+    let unlisten: UnlistenFn | null = null;
+
+    void listen<unknown>(eventTopics.titleRefreshed.name, (event) => {
+      const payload = event.payload;
+      if (typeof payload !== "object" || payload === null) {
+        return;
+      }
+      const record = payload as Record<string, unknown>;
+      if (record["titleId"] !== id) {
+        return;
+      }
+      setUpdates((count) => count + 1);
+      if (record["stage"] === "details" || record["stage"] === "seasons") {
+        setSeasonUpdates((count) => count + 1);
+      }
+      void read();
+    }).then((release) => {
+      if (cancelled) {
+        release();
+      } else {
+        unlisten = release;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [id, read]);
+
   // One effect for both triggers: a new route gives the callback a new identity, and a refresh
   // stopping moves the count. Two separate effects would read twice on the navigation that follows a
   // refresh. The visit is recorded here rather than in the read, because this is the moment the route
@@ -301,5 +361,12 @@ export function useTitle(id: number | null): TitleDetail {
     void read();
   }, [id, read, follow.finished]);
 
-  return { ...state, refresh: read, refreshes: follow.finished };
+  return {
+    ...state,
+    refresh: read,
+    refreshes: follow.finished,
+    refreshing: follow.jobId !== null,
+    updates,
+    seasonUpdates,
+  };
 }

@@ -4,6 +4,7 @@
 export { commands, eventTopics } from "./generated/bindings.js";
 export type {
   AppError,
+  AttributionDto,
   BrowsePageDto,
   BrowseSortDto,
   BuildInfo,
@@ -64,6 +65,8 @@ export type {
   RootScanMode,
   SchedulerHealth,
   ShortcutBinding,
+  WatchAvailabilityDto,
+  WatchOfferDto,
 } from "./generated/bindings.js";
 
 export {
@@ -73,6 +76,7 @@ export {
   recommendations,
   getAutoStartEnabled,
   getBuildInfo,
+  getProviderAttribution,
   isSuccessful,
   listLibraryRoots,
   listLibraryTitles,
@@ -81,6 +85,7 @@ export {
   homeRails,
   refreshRails,
   getTitle,
+  watchAvailability,
   refreshTitle,
   searchTitles,
   listEpisodes,
@@ -132,6 +137,9 @@ export {
   continueWatching,
   publicIp,
   recordProgress,
+  setEpisodeWatched,
+  setSeasonWatched,
+  setTitleWatched,
   viewingHistory,
   watchMetrics,
   clearWatchHistory,

@@ -144,6 +144,7 @@ impl PlayerBackend for MpvPlayer {
         &self,
         file: &SafePath,
         start_ms: Option<i64>,
+        subtitle: Option<&SafePath>,
         positions: Arc<dyn PositionSink>,
     ) -> Result<(), PlayerError> {
         // Replacing the player is the same act as stopping the old one, and doing it first means a
@@ -156,7 +157,13 @@ impl PlayerBackend for MpvPlayer {
         let serial = self.next_socket.fetch_add(1, Ordering::Relaxed);
         let socket = control_path(serial);
         let stop = Arc::new(AtomicBool::new(false));
-        let mut command = command_for(&binary, file.as_path(), &socket, start_ms);
+        let mut command = command_for(
+            &binary,
+            file.as_path(),
+            subtitle.map(SafePath::as_path),
+            &socket,
+            start_ms,
+        );
         let child = command.spawn().map_err(|_| PlayerError::Spawn)?;
         *self.lock() = Some(Session {
             child,
@@ -205,12 +212,27 @@ impl Drop for MpvPlayer {
 }
 
 /// The command for one file, with the fixed flags and the file behind `--`.
-fn command_for(binary: &Path, file: &Path, socket: &Path, start_ms: Option<i64>) -> Command {
+///
+/// A selected sidecar is passed as `--sub-file=`, and it is the same guarded `SafePath` the media
+/// went through: `--sub-auto=no` is what stops mpv loading a neighbour nobody chose.
+fn command_for(
+    binary: &Path,
+    file: &Path,
+    subtitle: Option<&Path>,
+    socket: &Path,
+    start_ms: Option<i64>,
+) -> Command {
     let mut command = Command::new(binary);
     command.args(HARDENED);
     command.arg(format!("--input-ipc-server={}", socket.display()));
     if let Some(milliseconds) = start_ms.filter(|value| *value > 0) {
         command.arg(format!("--start={:.3}", milliseconds as f64 / 1000.0));
+    }
+    if let Some(subtitle) = subtitle {
+        // An OsString rather than a formatted string: a path need not be UTF-8.
+        let mut flag = std::ffi::OsString::from("--sub-file=");
+        flag.push(subtitle.as_os_str());
+        command.arg(flag);
     }
     // The end of option parsing. A canonical path begins with a separator on every platform this
     // build runs on, so this is belt and braces; it is also the rule SECURITY.md T5 states.
@@ -379,6 +401,7 @@ mod tests {
         let command = command_for(
             Path::new("/usr/bin/true"),
             file(&directory).as_path(),
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -416,11 +439,42 @@ mod tests {
     }
 
     #[test]
+    fn a_selected_sidecar_is_passed_while_autoload_stays_off() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let sidecar = directory.path().join("film.en.srt");
+        let command = command_for(
+            Path::new("/usr/bin/true"),
+            file(&directory).as_path(),
+            Some(&sidecar),
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            None,
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.iter()
+                .any(|arg| arg == &format!("--sub-file={}", sidecar.display())),
+            "the chosen sidecar is the one mpv is told to show"
+        );
+        assert!(args.iter().any(|arg| arg == "--sub-auto=no"));
+        let terminator = args.iter().position(|arg| arg == "--").expect("terminator");
+        assert!(
+            args.iter()
+                .position(|arg| arg.starts_with("--sub-file="))
+                .is_some_and(|at| at < terminator),
+            "the flag is an option, not a second file after --"
+        );
+    }
+
+    #[test]
     fn a_resume_position_is_passed_as_whole_and_millisecond_seconds() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let command = command_for(
             Path::new("/usr/bin/true"),
             file(&directory).as_path(),
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(90_500),
         );
@@ -437,6 +491,7 @@ mod tests {
         let command = command_for(
             Path::new("/usr/bin/true"),
             file(&directory).as_path(),
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(0),
         );
@@ -456,10 +511,10 @@ mod tests {
         // the replacement without a player installed.
         let player = MpvPlayer::with_binary("/usr/bin/true");
         player
-            .play(&safe, None, Arc::new(Noop))
+            .play(&safe, None, None, Arc::new(Noop))
             .expect("the binary spawns");
         player
-            .play(&safe, None, Arc::new(Noop))
+            .play(&safe, None, None, Arc::new(Noop))
             .expect("a second press replaces the first");
         player.stop();
     }
@@ -469,7 +524,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let player = MpvPlayer::with_binary("/nonexistent/peregrine-mpv");
         let error = player
-            .play(&file(&directory), None, Arc::new(Noop))
+            .play(&file(&directory), None, None, Arc::new(Noop))
             .expect_err("no such binary");
         assert_eq!(error, PlayerError::Spawn);
     }

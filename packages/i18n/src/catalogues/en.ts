@@ -225,6 +225,12 @@ export const en = {
           title: "Nothing in this rail yet",
           body: "Refresh to ask the providers, or add a provider key in Settings.",
         },
+        // The personal rails after the type switch has hidden everything they held. The heading names
+        // the section, so the sentence does not have to.
+        filtered: {
+          title: "Nothing here for this filter",
+          body: "Switch back to All, or to the other type, to see what this section holds.",
+        },
       },
       continue: {
         percent: "{{percent}}% watched",
@@ -407,6 +413,7 @@ export const en = {
     },
     title: {
       section: "In your library",
+      refreshing: "Fetching details, cast, episodes, and artwork…",
       offers: {
         title: "Other qualities available",
         description: "Nothing matched your preferred quality. These are what the indexers have.",
@@ -438,6 +445,9 @@ export const en = {
         title: "Episodes",
         description: "The season you have chosen, in the order the episodes are watched.",
         failed: "That season's episodes could not be read. Choosing it again tries once more.",
+        markSeasonWatched: "Mark season watched",
+        markSeasonUnwatched: "Mark season unwatched",
+        markFailed: "That watch mark could not be saved. Try again.",
         none: {
           title: "Nothing listed for this season.",
           body: "No provider has described this season's episodes yet, and the library holds none of them.",
@@ -453,6 +463,9 @@ export const en = {
         releases: "Releases {{date}}",
         watchlist: "Add to watchlist",
         watchlisted: "In watchlist",
+        markWatched: "Mark watched",
+        markUnwatched: "Mark unwatched",
+        markFailed: "That watch mark could not be saved. Try again.",
         seasons: "{{count}} season",
         seasons_other: "{{count}} seasons",
         episodes: "{{count}} episode",
@@ -503,6 +516,10 @@ export const en = {
         schedule: "Schedule",
         scheduled: "Scheduled",
         downloadLabel: "Download episode {{number}} ({{name}})",
+        markWatched: "Mark watched",
+        markUnwatched: "Mark unwatched",
+        markWatchedLabel: "Mark episode {{number}} ({{name}}) watched",
+        markUnwatchedLabel: "Mark episode {{number}} ({{name}}) unwatched",
         // The word and not the dot: a card's state is carried by its word (§2.2), and the dot's colour
         // mapping belongs to `TitleCard`, which owns the one copy of it.
         availability: {
@@ -511,6 +528,21 @@ export const en = {
           missing: "Files are gone",
           wanted: "Not acquired",
           unaired: "Not aired",
+        },
+      },
+      // Where the title is streaming, renting, or for sale. The provider marks carry the service
+      // names, so the group labels only say how it is offered.
+      watch: {
+        title: "Where to watch",
+        region: "Availability in {{region}}",
+        empty: "Nothing is listed in {{region}} yet.",
+        attribution: "Streaming data by JustWatch.",
+        category: {
+          flatrate: "Streaming",
+          free: "Free",
+          ads: "With ads",
+          rent: "Rent",
+          buy: "Buy",
         },
       },
       missing: {
@@ -737,6 +769,20 @@ export const en = {
       },
     },
     settings: {
+      about: {
+        title: "About",
+        description: "The version this build reports, and the notices it is required to show.",
+        version: "Version",
+        value: "{{name}} {{version}}",
+        target: "Build",
+        loading: "Reading the build information…",
+        failed: "The build information could not be read. Reopening Settings tries again.",
+        logoRequired:
+          "{{provider}} also requires its logo beside this notice. This build does not ship it yet.",
+        licences: "Licences",
+        licencesBody:
+          "The installer carries the third-party notices in THIRD_PARTY.md, NOTICE, and the licence files for bundled components.",
+      },
       history: {
         empty: "Nothing watched yet.",
         failed: "The history could not be read. Reopen Settings to try again.",

@@ -25,7 +25,13 @@
  * season four back to season one because a poster arrived is a screen that undoes their choice.
  */
 
-import { listEpisodes, listSeasons, normalizeIpcError } from "@peregrine/ipc-client";
+import {
+  listEpisodes,
+  listSeasons,
+  normalizeIpcError,
+  setEpisodeWatched as markEpisodeWatched,
+  setSeasonWatched as markSeasonWatched,
+} from "@peregrine/ipc-client";
 import type { EpisodeDto, IpcError, SeasonDto } from "@peregrine/ipc-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -47,6 +53,14 @@ export interface TitleSeasons {
   readonly failed: IpcError | null;
   /** Shows another season, re-reading its episodes. */
   readonly choose: (seasonNumber: number) => void;
+  /** Marks one episode watched or unwatched, then re-reads the season. */
+  readonly setEpisodeWatched: (episode: EpisodeDto, watched: boolean) => Promise<void>;
+  /** Marks every episode of the season on screen watched or unwatched. */
+  readonly setSeasonWatched: (watched: boolean) => Promise<void>;
+  /** A marking write failed; the list is unchanged. */
+  readonly markFailed: IpcError | null;
+  /** A marking write is in flight, so the controls wait rather than send a second. */
+  readonly marking: boolean;
 }
 
 /**
@@ -71,6 +85,8 @@ export function useSeasons(
     loading: boolean;
     failed: IpcError | null;
   }>({ loading: false, failed: null });
+  const [markFailed, setMarkFailed] = useState<IpcError | null>(null);
+  const [marking, setMarking] = useState(false);
   // Which title, and which season, the answers belong to: a read that lands after the reader moved on
   // is dropped rather than drawn under the wrong heading.
   const version = useRef(0);
@@ -161,6 +177,49 @@ export function useSeasons(
     void load(chosen, version.current);
   }, [chosen, load, refreshes]);
 
+  // One writer for both marking surfaces: the write is the core's, and the only thing left here is
+  // re-reading the season so the bars and the Next up mark follow the new state.
+  const mark = useCallback(
+    async (write: (titleId: number) => Promise<unknown>, seasonNumber: number) => {
+      if (titleId === null) {
+        return;
+      }
+      setMarking(true);
+      setMarkFailed(null);
+      try {
+        await write(titleId);
+        await load(seasonNumber, version.current);
+      } catch (caught: unknown) {
+        const error = normalizeIpcError(caught);
+        logUiError("title.markWatched", error);
+        setMarkFailed(error);
+      } finally {
+        setMarking(false);
+      }
+    },
+    [titleId, load],
+  );
+
+  const setEpisodeWatched = useCallback(
+    async (episode: EpisodeDto, watched: boolean) => {
+      await mark(
+        (title) => markEpisodeWatched(title, episode.seasonNumber, episode.episodeNumber, watched),
+        episode.seasonNumber,
+      );
+    },
+    [mark],
+  );
+
+  const setSeasonWatched = useCallback(
+    async (watched: boolean) => {
+      if (chosen === null) {
+        return;
+      }
+      await mark((title) => markSeasonWatched(title, chosen, watched), chosen);
+    },
+    [mark, chosen],
+  );
+
   return {
     seasons,
     season: seasons.find((one) => one.seasonNumber === chosen) ?? null,
@@ -168,5 +227,9 @@ export function useSeasons(
     loading: state.loading,
     failed: state.failed,
     choose: setChosen,
+    setEpisodeWatched,
+    setSeasonWatched,
+    markFailed,
+    marking,
   };
 }

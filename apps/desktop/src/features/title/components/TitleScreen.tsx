@@ -20,8 +20,13 @@
  * `PG-E5`, and `PG-E16` for the player itself.
  */
 
-import { Button, EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
-import { normalizeIpcError, playExternally, scheduleDownload } from "@peregrine/ipc-client";
+import { Button, EmptyState, ErrorState, Screen, Section, Skeleton, Table } from "@peregrine/ui";
+import {
+  normalizeIpcError,
+  playExternally,
+  scheduleDownload,
+  setTitleWatched as markTitleWatched,
+} from "@peregrine/ipc-client";
 import type { DownloadJobDto, IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
 import { useEffect, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
@@ -37,6 +42,8 @@ import type { TitleDetail } from "../hooks/useTitle.js";
 import type { TitleSeasons } from "../hooks/useSeasons.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
 import { TitleFeedList } from "./TitleFeedList.js";
+import { WatchProviders } from "./WatchProviders.js";
+import { useWatchAvailability } from "../hooks/useWatchAvailability.js";
 import type { Route, TitleKind } from "../../../app/routes.js";
 import { downloadStatusOf, type DownloadMarks } from "../../../lib/download-status.js";
 
@@ -121,9 +128,24 @@ export function TitleScreen({
 }: TitleScreenProps): ReactElement {
   const { t } = useTranslation();
   const title: LibraryTitleDto | null = detail.title;
+  // A projection of the read, not a rule: whether every episode on screen is already marked. One
+  // empty season is not "watched", which is why the length test comes first.
+  const seasonWatched =
+    seasons.episodes.length > 0 && seasons.episodes.every((episode) => episode.watched);
+  // Cache-only, and re-read after the refresh this screen already follows. The section hides until
+  // a provider has answered, so a title nobody has refreshed does not claim there is nothing to watch.
+  const watch = useWatchAvailability(title?.id ?? null, detail.updates + detail.refreshes);
   // The external player is a process launch rather than a route, so its refusal is this screen's to
   // say: a Play that opens nothing and explains nothing is the inert control PG-E1-07 forbids.
   const [playFailure, setPlayFailure] = useState<IpcError | null>(null);
+  // A film's whole-title mark, held here so the hero follows the press before the write lands. The
+  // read is the core's; this mirrors it, and a failed write puts the mirror back.
+  const [titleWatched, setTitleWatched] = useState(detail.watched);
+  const [watchMarking, setWatchMarking] = useState(false);
+  const [watchMarkFailed, setWatchMarkFailed] = useState(false);
+  useEffect(() => {
+    setTitleWatched(detail.watched);
+  }, [detail.watched]);
   const [scheduled, setScheduled] = useState<ReadonlySet<string>>(() => new Set());
   // **A click is not the queue yet.** The acquire job searches before it creates a download row, and
   // one page-wide acquire state would drop the previous episode's label the moment a second one was
@@ -234,6 +256,30 @@ export function TitleScreen({
               scheduled={scheduled.has("t")}
               onWatchlist={onWatchlist}
               watchlisted={watchlisted}
+              watched={titleWatched}
+              watchMarkBusy={watchMarking}
+              onToggleWatched={
+                kind === "movie" && title !== null
+                  ? () => {
+                      if (watchMarking) {
+                        return;
+                      }
+                      const next = !titleWatched;
+                      setTitleWatched(next);
+                      setWatchMarking(true);
+                      setWatchMarkFailed(false);
+                      void markTitleWatched(title.id, next)
+                        .catch((caught: unknown) => {
+                          setTitleWatched(!next);
+                          setWatchMarkFailed(true);
+                          logUiError("setTitleWatched", normalizeIpcError(caught));
+                        })
+                        .finally(() => {
+                          setWatchMarking(false);
+                        });
+                    }
+                  : undefined
+              }
               {...(detail.released === null
                 ? {}
                 : {
@@ -260,6 +306,11 @@ export function TitleScreen({
                 {messageOf(playFailure)}
               </p>
             )}
+            {watchMarkFailed ? (
+              <p className="text-caption text-state-danger" role="status">
+                {t("title.hero.markFailed")}
+              </p>
+            ) : null}
             {acquire === undefined ||
             acquire.titleId !== title.id ||
             (acquire.outcome === null && !acquire.running) ? null : (
@@ -351,14 +402,43 @@ export function TitleScreen({
         )}
       </Section>
 
+      {/* **The page says what it is waiting for.** The refresh is several requests — details,
+          credits, every season's episodes, then the pictures — and each part is drawn as it lands;
+          this line is the one place the fact that more is coming is said in words, because a
+          skeleton is `aria-hidden` and a screen reader should not be told the page is empty. */}
+      {detail.refreshing ? (
+        <p className="text-body text-text-secondary" role="status">
+          {t("title.refreshing")}
+        </p>
+      ) : null}
+
       {/* A film has no season section, and a show whose provider named no seasons draws none either:
           a heading over an empty switcher would be a promise nobody made. */}
+      <WatchProviders data={watch.data} />
+
       <CastRail
         cast={detail.cast}
+        loading={detail.refreshing && detail.cast.length === 0}
         onPerson={(id) => {
           onNavigate({ kind: "person", id });
         }}
       />
+
+      {title?.kind === "shows" && seasons.seasons.length === 0 && detail.refreshing ? (
+        <Section description={t("title.episodes.description")} title={t("title.episodes.title")}>
+          <div className="flex flex-col gap-4">
+            <Skeleton className="h-9 w-64 rounded-full" />
+            <div
+              className="grid auto-rows-fr gap-3"
+              style={{ gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}
+            >
+              {Array.from({ length: 6 }, (_, index) => (
+                <Skeleton className="h-48" key={index} />
+              ))}
+            </div>
+          </div>
+        </Section>
+      ) : null}
 
       {title === null || title.kind === "movies" || seasons.seasons.length === 0 ? null : (
         <Section description={t("title.episodes.description")} title={t("title.episodes.title")}>
@@ -369,9 +449,32 @@ export function TitleScreen({
               seasons={seasons.seasons}
             />
 
+            {seasons.episodes.length === 0 ? null : (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  disabled={seasons.marking}
+                  onClick={() => {
+                    void seasons.setSeasonWatched(!seasonWatched);
+                  }}
+                  size="sm"
+                  variant="secondary"
+                >
+                  {seasonWatched
+                    ? t("title.episodes.markSeasonUnwatched")
+                    : t("title.episodes.markSeasonWatched")}
+                </Button>
+              </div>
+            )}
+
             {seasons.failed === null ? null : (
               <p className="text-caption text-state-danger" role="status">
                 {t("title.episodes.failed")}
+              </p>
+            )}
+
+            {seasons.markFailed === null ? null : (
+              <p className="text-caption text-state-danger" role="status">
+                {t("title.episodes.markFailed")}
               </p>
             )}
 
@@ -384,85 +487,100 @@ export function TitleScreen({
                 a synopsis sits beside one with none — and rows sized to their own content stagger, which
                 reads as a broken grid rather than as missing metadata. Equal rows plus a card that fills
                 its cell (`EpisodeCard`'s `h-full`) makes every card in a season exactly one size. */}
-            <ul
-              className="grid auto-rows-fr list-none gap-3"
-              style={{ gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}
-            >
-              {seasons.episodes.map((episode) => {
-                const nextUp = seasons.episodes.find((row) => !row.watched);
-                const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
-                const job = (downloadRows ?? []).find(
-                  (row) =>
-                    row.titleId === title.id &&
-                    row.seasonNumber === episode.seasonNumber &&
-                    row.episodeNumber === episode.episodeNumber &&
-                    downloadStatusOf(row.state) === "active",
-                );
-                return (
-                  // The season and the number together, because an episode's number is only unique
-                  // within its season — and a title can hold the same number in two of them.
-                  <li
-                    className="h-full"
-                    key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
-                  >
-                    <EpisodeCard
-                      {...(job === undefined
-                        ? {}
-                        : { downloadPercent: Math.round(job.progressPermille / 10) })}
-                      downloading={job !== undefined || requested.has(key)}
-                      episode={episode}
-                      onSchedule={
-                        episode.airDate === null
-                          ? undefined
-                          : (chosen) => {
-                              schedule(
-                                "e" +
-                                  String(chosen.seasonNumber) +
-                                  "-" +
-                                  String(chosen.episodeNumber),
-                                chosen.seasonNumber,
-                                chosen.episodeNumber,
-                                chosen.airDate ?? "",
-                              );
-                            }
-                      }
-                      scheduled={scheduled.has(
-                        "e" + String(episode.seasonNumber) + "-" + String(episode.episodeNumber),
-                      )}
-                      nextUp={
-                        nextUp?.seasonNumber === episode.seasonNumber &&
-                        nextUp?.episodeNumber === episode.episodeNumber
-                      }
-                      progress={episode.progress ?? 0}
-                      watched={episode.watched}
-                      onPlay={(chosen) => {
-                        onNavigate({
-                          kind: "player",
-                          id: title.id,
-                          season: chosen.seasonNumber,
-                          episode: chosen.episodeNumber,
-                        });
-                      }}
-                      onDownload={
-                        acquire === undefined
-                          ? undefined
-                          : (chosen) => {
-                              setRequested((previous) =>
-                                new Set(previous).add(
-                                  episodeKey(chosen.seasonNumber, chosen.episodeNumber),
-                                ),
-                              );
-                              void acquire.start(title.id, {
-                                season: chosen.seasonNumber,
-                                episode: chosen.episodeNumber,
-                              });
-                            }
-                      }
-                    />
-                  </li>
-                );
-              })}
-            </ul>
+            {seasons.loading && seasons.episodes.length === 0 ? (
+              <div
+                className="grid auto-rows-fr gap-3"
+                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}
+              >
+                {Array.from({ length: 6 }, (_, index) => (
+                  <Skeleton className="h-48" key={index} />
+                ))}
+              </div>
+            ) : (
+              <ul
+                className="grid auto-rows-fr list-none gap-3"
+                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}
+              >
+                {seasons.episodes.map((episode) => {
+                  const nextUp = seasons.episodes.find((row) => !row.watched);
+                  const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
+                  const job = (downloadRows ?? []).find(
+                    (row) =>
+                      row.titleId === title.id &&
+                      row.seasonNumber === episode.seasonNumber &&
+                      row.episodeNumber === episode.episodeNumber &&
+                      downloadStatusOf(row.state) === "active",
+                  );
+                  return (
+                    // The season and the number together, because an episode's number is only unique
+                    // within its season — and a title can hold the same number in two of them.
+                    <li
+                      className="h-full"
+                      key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
+                    >
+                      <EpisodeCard
+                        {...(job === undefined
+                          ? {}
+                          : { downloadPercent: Math.round(job.progressPermille / 10) })}
+                        downloading={job !== undefined || requested.has(key)}
+                        episode={episode}
+                        onSchedule={
+                          episode.airDate === null
+                            ? undefined
+                            : (chosen) => {
+                                schedule(
+                                  "e" +
+                                    String(chosen.seasonNumber) +
+                                    "-" +
+                                    String(chosen.episodeNumber),
+                                  chosen.seasonNumber,
+                                  chosen.episodeNumber,
+                                  chosen.airDate ?? "",
+                                );
+                              }
+                        }
+                        scheduled={scheduled.has(
+                          "e" + String(episode.seasonNumber) + "-" + String(episode.episodeNumber),
+                        )}
+                        nextUp={
+                          nextUp?.seasonNumber === episode.seasonNumber &&
+                          nextUp?.episodeNumber === episode.episodeNumber
+                        }
+                        progress={episode.progress ?? 0}
+                        watched={episode.watched}
+                        marking={seasons.marking}
+                        onToggleWatched={(chosen, watched) => {
+                          void seasons.setEpisodeWatched(chosen, watched);
+                        }}
+                        onPlay={(chosen) => {
+                          onNavigate({
+                            kind: "player",
+                            id: title.id,
+                            season: chosen.seasonNumber,
+                            episode: chosen.episodeNumber,
+                          });
+                        }}
+                        onDownload={
+                          acquire === undefined
+                            ? undefined
+                            : (chosen) => {
+                                setRequested((previous) =>
+                                  new Set(previous).add(
+                                    episodeKey(chosen.seasonNumber, chosen.episodeNumber),
+                                  ),
+                                );
+                                void acquire.start(title.id, {
+                                  season: chosen.seasonNumber,
+                                  episode: chosen.episodeNumber,
+                                });
+                              }
+                        }
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
             {seasons.loading || seasons.episodes.length > 0 || seasons.failed !== null ? null : (
               <EmptyState

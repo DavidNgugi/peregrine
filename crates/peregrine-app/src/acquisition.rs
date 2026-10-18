@@ -314,6 +314,8 @@ pub struct AcquisitionService {
     /// Where a deleted file goes. A port rather than a direct call because the trash is the
     /// operating system's and the domain may not reach for it ([AGENTS R8], [AGENTS R22]).
     trash: Arc<dyn Trash>,
+    /// Where a finished or failed transfer is announced (PG-E13-08).
+    notices: Arc<dyn DownloadNotices>,
     /// The handles this process holds, so an engine operation after an add can name its torrent
     /// without the row carrying a number. A job started by another process has no handle here and
     /// is `PG-E10-08`'s to reattach.
@@ -328,6 +330,36 @@ pub struct AcquisitionService {
     /// composition root starts it once a real engine exists and stops it before the bus; a test
     /// that drives [`AcquisitionService::statistics`] directly never starts one.
     pump: Mutex<Option<Pump>>,
+}
+
+/// Told when a download reaches a state a person would want to hear about.
+///
+/// The port exists so acquisition never reaches for the notification service: the service owns the
+/// centre and the toast, and a job's last transition is the one event it cannot raise for itself
+/// (PG-E13-08). The shipping runtime's implementation writes the centre row and publishes the
+/// refresh; a test's does nothing.
+pub trait DownloadNotices: Send + Sync {
+    /// Download `download_id` is finished, `failed` or not. Best effort: a notice that could not
+    /// be written must never change the job's outcome.
+    fn finished<'a>(
+        &'a self,
+        download_id: i64,
+        failed: bool,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+}
+
+/// The notice port until a runtime supplies one.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoDownloadNotices;
+
+impl DownloadNotices for NoDownloadNotices {
+    fn finished<'a>(
+        &'a self,
+        _download_id: i64,
+        _failed: bool,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
 }
 
 /// The task that asks every live engine for its statistics on a tick.
@@ -368,10 +400,19 @@ impl AcquisitionService {
             free_space_floor,
             bus,
             trash,
+            notices: Arc::new(NoDownloadNotices),
             handles: Mutex::new(HashMap::new()),
             written_at: Mutex::new(HashMap::new()),
             pump: Mutex::new(None),
         }
+    }
+
+    /// Replaces the notice port, so the runtime can announce a finished transfer and a test can run
+    /// the same path without a notification service.
+    #[must_use]
+    pub fn with_notices(mut self, notices: Arc<dyn DownloadNotices>) -> Self {
+        self.notices = notices;
+        self
     }
 
     /// The live engine handle for a job this process started, when it still holds one.
@@ -573,7 +614,18 @@ impl AcquisitionService {
     ) -> Result<DownloadState, AcquisitionError> {
         let name = event.to_string();
         match self.database.transition_download_job(id, event).await {
-            Ok(Some(state)) => Ok(state),
+            Ok(Some(state)) => {
+                // The one moment a job cannot announce for itself: the state is the scheduler's,
+                // and nothing on the completion path awaits its handle.
+                if matches!(state, DownloadState::Completed | DownloadState::Failed) {
+                    // The download is the subject, not the title: the queue is the surface a click
+                    // opens, and a row that named a title would point at a different record.
+                    self.notices
+                        .finished(id, state == DownloadState::Failed)
+                        .await;
+                }
+                Ok(state)
+            }
             Ok(None) => Err(AcquisitionError::NotFound),
             Err(DownloadTransitionError::Rejected(source)) => {
                 Err(AcquisitionError::TransitionRefused {
@@ -1336,6 +1388,37 @@ mod tests {
     /// A trash the service can hold, for a test that does not inspect it.
     fn trash() -> Arc<dyn Trash> {
         TrashLog::new()
+    }
+
+    /// Records what a finished transfer would have announced.
+    struct NoticeLog(Mutex<Vec<(i64, bool)>>);
+
+    impl NoticeLog {
+        fn new() -> Arc<Self> {
+            Arc::new(Self(Mutex::new(Vec::new())))
+        }
+
+        fn seen(&self) -> Vec<(i64, bool)> {
+            self.0
+                .lock()
+                .expect("the notice log is not poisoned")
+                .clone()
+        }
+    }
+
+    impl DownloadNotices for NoticeLog {
+        fn finished<'a>(
+            &'a self,
+            download_id: i64,
+            failed: bool,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                self.0
+                    .lock()
+                    .expect("the notice log is not poisoned")
+                    .push((download_id, failed));
+            })
+        }
     }
 
     /// The floor every fixture reserves.
@@ -2208,6 +2291,7 @@ mod tests {
         );
         let guard = PathGuard::new(harness.directory.path().join("downloads")).expect("absolute");
         let trash = TrashLog::new();
+        let notices = NoticeLog::new();
         let service = AcquisitionService::new(
             Arc::clone(&harness.database),
             Arc::clone(&engine) as Arc<dyn TorrentEngine>,
@@ -2217,7 +2301,8 @@ mod tests {
             FLOOR,
             bus(&harness.sink),
             Arc::clone(&trash) as Arc<dyn Trash>,
-        );
+        )
+        .with_notices(Arc::clone(&notices) as Arc<dyn DownloadNotices>);
         let started = service
             .start(request(harness.title_id, 21, description()))
             .await
@@ -2248,6 +2333,7 @@ mod tests {
             DownloadState::Completed,
             "a whole payload is a finished job"
         );
+        assert_eq!(notices.seen(), vec![(started.job.id, false)]);
 
         // The media file is in the library; the subtitle is not a media file and is not imported.
         let media_path = media.to_string_lossy().into_owned();

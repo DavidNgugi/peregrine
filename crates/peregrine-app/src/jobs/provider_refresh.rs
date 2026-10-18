@@ -20,9 +20,9 @@ use peregrine_domain::catalogue::{ImageKind, TitleKind};
 use peregrine_storage::{Database, JobChange, JobPhase};
 use peregrine_sync::{Job, JobContext, JobError, JobFuture, JobOutput};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
-use crate::events::{Event, EventBus, JOB_PROGRESS, JOB_STATE};
+use crate::events::{Event, EventBus, JOB_PROGRESS, JOB_STATE, TITLE_REFRESHED};
 use crate::providers::ProviderRegistry;
 
 /// The kind this job registers under, in the scheduler and in the journal.
@@ -78,6 +78,18 @@ impl ProviderRefreshJob {
         }
     }
 
+    /// Tells any open title screen that one part of its answer was just written.
+    ///
+    /// A trigger to re-read, never a payload to draw: the stage names what changed and the read
+    /// answers with what is stored. The key is the title, so two screens for one title coalesce.
+    fn announce(&self, stage: &'static str) {
+        self.bus.publish(Event::new(
+            TITLE_REFRESHED,
+            self.target.title_id.to_string(),
+            serde_json::json!({ "titleId": self.target.title_id, "stage": stage }),
+        ));
+    }
+
     /// Reports which half is running, so a screen can say so.
     async fn phase(&self, job: ulid::Ulid, attempt: u32, permille: u16) {
         if let Err(error) = self
@@ -113,6 +125,10 @@ impl Job for ProviderRefreshJob {
 
 impl ProviderRefreshJob {
     /// The work, owning everything it borrows so the returned future borrows only `self`.
+    ///
+    /// One function because the order is the design: cheap cast and availability, then details and
+    /// every season, then the pictures. A reader has to be able to see that order in one place.
+    #[allow(clippy::too_many_lines)]
     async fn refresh(
         &mut self,
         job: ulid::Ulid,
@@ -126,18 +142,77 @@ impl ProviderRefreshJob {
 
         self.phase(job, attempt, 100).await;
         let at = self.clock.now().as_millisecond();
+
+        // **The cheap reads go first, and they are announced.** The cast and availability each cost
+        // one request; the details and every season's episodes come after them, and a screen that
+        // waited for the whole job showed nothing until the last still was fetched. The owner is
+        // resolved once here so the cast can be asked for before the expensive road begins.
+        let mut owner = None;
+        for adapter in &adapters {
+            match peregrine_sync::external_id_for(
+                adapter.as_ref(),
+                &self.database,
+                self.target.title_id,
+            )
+            .await
+            {
+                Ok(Some(external)) => {
+                    owner = Some((Arc::clone(adapter), external));
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => return Err(JobError::failed(error.to_string())),
+            }
+        }
+        let mut cast_rows = None;
+        if let Some((provider, external)) = &owner {
+            match peregrine_sync::store_cast_names(
+                provider.as_ref(),
+                &self.database,
+                self.target.title_id,
+                external,
+                self.target.kind,
+                at,
+            )
+            .await
+            {
+                Ok(rows) => {
+                    cast_rows = Some((Arc::clone(provider), rows));
+                    self.announce("cast");
+                }
+                Err(error) => {
+                    warn!(%error, title = self.target.title_id, "the cast names could not be stored");
+                }
+            }
+            if let Err(error) = peregrine_sync::refresh_watch_availability(
+                provider.as_ref(),
+                &self.database,
+                &self.artwork,
+                self.target.title_id,
+                self.target.kind,
+                at,
+            )
+            .await
+            {
+                warn!(%error, title = self.target.title_id, "watch availability could not be refreshed");
+            } else {
+                self.announce("availability");
+            }
+        }
+
         // **The provider that owns one of this title's identifiers, not simply the first one
         // configured.** A title carries ids for several providers, and asking one for another's
         // identifier is what `refresh_title` refuses. A provider with no id for the title answers
         // `None` without a request, so walking the list costs one read each and no network.
         let mut answered = None;
         for adapter in &adapters {
-            match peregrine_sync::refresh_title(
+            match peregrine_sync::refresh_title_with(
                 adapter.as_ref(),
                 &self.database,
                 self.target.title_id,
                 self.target.kind,
                 at,
+                &|_season| self.announce("seasons"),
             )
             .await
             {
@@ -187,9 +262,34 @@ impl ProviderRefreshJob {
             return Err(JobError::Cancelled);
         }
 
-        // The cast is best effort: a title whose credits request fails still gets its poster and
-        // metadata, and a missing cast is not a failed refresh.
-        self.store_cast(provider.as_ref(), at).await;
+        // The metadata and every season's episodes are written now; the screen can draw them even
+        // though the poster and the stills are still coming.
+        self.announce("details");
+
+        // A title matched in this job had no id when the cheap reads ran, so its availability and
+        // cast are fetched here instead. The owner path already did both before the season reads.
+        if owner.is_none() {
+            self.phase(job, attempt, 500).await;
+            if let Err(error) = peregrine_sync::refresh_watch_availability(
+                provider.as_ref(),
+                &self.database,
+                &self.artwork,
+                self.target.title_id,
+                self.target.kind,
+                at,
+            )
+            .await
+            {
+                warn!(%error, title = self.target.title_id, "watch availability could not be refreshed");
+            } else {
+                self.announce("availability");
+            }
+
+            // The cast is best effort: a title whose credits request fails still gets its poster and
+            // metadata, and a missing cast is not a failed refresh.
+            self.store_cast(provider.as_ref(), at).await;
+            self.announce("cast");
+        }
 
         self.phase(job, attempt, 600).await;
         let poster = match refreshed.details.poster_path.as_deref() {
@@ -205,6 +305,27 @@ impl ProviderRefreshJob {
                 .map_err(|error| JobError::failed(error.to_string()))?,
             ),
         };
+
+        // **The cast portraits and the season pictures are best effort, and the title's own poster
+        // is not.** The names are already on screen; a portrait that cannot be fetched leaves
+        // initials, and a still that cannot be fetched leaves a card's placeholder. Failing the job
+        // for either would put a red row in the journal for a title whose metadata arrived.
+        self.phase(job, attempt, 700).await;
+        if let Some((cast_provider, rows)) = cast_rows {
+            if let Err(error) = peregrine_sync::cache_cast_portraits(
+                cast_provider.as_ref(),
+                &self.database,
+                &self.artwork,
+                self.target.title_id,
+                rows,
+                at,
+            )
+            .await
+            {
+                debug!(%error, title = self.target.title_id, "the cast portraits could not be stored");
+            }
+            self.announce("cast");
+        }
 
         // **The season posters and episode stills are best effort, and the title's own poster is not.**
         // The metadata write has already happened, so a picture that cannot be fetched leaves a card

@@ -20,6 +20,7 @@ import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
+import { AboutSection } from "./AboutSection.js";
 import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
@@ -169,6 +170,8 @@ export function SettingsScreen({
       <ManagedProwlarrSection prowlarr={prowlarr} />
 
       <IndexersSection indexers={indexers} />
+
+      <AboutSection />
     </Screen>
   );
 }

@@ -358,11 +358,27 @@ export function DiscoverView({
     onBackdrops?.(backdropKey.length === 0 ? [] : backdropKey.split("|"));
   }, [backdropKey, onBackdrops]);
 
-  // **Continue Watching is a personal rail, not a catalogue view.** The Films/TV switch narrows the
-  // catalogue; applying it here hid a series the moment the reader narrowed Discover to films, which
-  // is the one rail that must survive the filter: it answers "where was I?", not "what is here?".
+  // **The type switch narrows every rail, personal ones included.** A reader who has asked for
+  // films has asked for films everywhere; leaving a series in Continue Watching, My list, or My
+  // library made the control look like it applied to the catalogue alone. A row whose kind is
+  // unknown does not match either side of the switch, because it cannot claim to be one of them.
   const watching = continueWatching?.rows ?? [];
-  const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
+  const narrowing = titleKind !== undefined;
+  const scannedShown =
+    titleKind === undefined
+      ? scanned
+      : scanned.filter((row) => row.kind === (titleKind === "movie" ? "movies" : "shows"));
+  const savedShown =
+    titleKind === undefined ? saved : saved.filter((row) => row.kind === titleKind);
+  const watchingShown =
+    titleKind === undefined ? watching : watching.filter((row) => row.kind === titleKind);
+  // The page-level empty state is about the whole screen, so any personal row counts even when the
+  // current filter hid it: "nothing here yet" beside a populated My library is a false sentence.
+  const nothingAtAll =
+    rails.rails.every((rail) => rail.items.length === 0) &&
+    scanned.length === 0 &&
+    saved.length === 0 &&
+    watching.length === 0;
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
   const firstFetch = rails.state === "fetching";
@@ -499,11 +515,19 @@ export function DiscoverView({
               title={t("discover.empty.title")}
             />
           ) : null}
-          {scanned.length === 0 ? null : (
+          {scannedShown.length === 0 && !(narrowing && scanned.length > 0) ? null : (
             <Rail
-              empty={null}
+              empty={
+                narrowing ? (
+                  <EmptyState
+                    body={t("discover.rail.filtered.body")}
+                    size="inline"
+                    title={t("discover.rail.filtered.title")}
+                  />
+                ) : null
+              }
               itemKey={(row) => String(row.id)}
-              items={scanned}
+              items={scannedShown}
               renderItem={(row, tabIndex) => (
                 <TitleCard
                   detailsLabel={t("card.details")}
@@ -535,11 +559,19 @@ export function DiscoverView({
               title={t("discover.rail.library")}
             />
           )}
-          {saved.length === 0 ? null : (
+          {savedShown.length === 0 && !(narrowing && saved.length > 0) ? null : (
             <Rail
-              empty={null}
+              empty={
+                narrowing ? (
+                  <EmptyState
+                    body={t("discover.rail.filtered.body")}
+                    size="inline"
+                    title={t("discover.rail.filtered.title")}
+                  />
+                ) : null
+              }
               itemKey={(row) => String(row.titleId)}
-              items={saved}
+              items={savedShown}
               renderItem={(row, tabIndex) => (
                 <TitleCard
                   detailsLabel={t("card.details")}
@@ -566,11 +598,19 @@ export function DiscoverView({
               title={t("discover.rail.watchlist")}
             />
           )}
-          {watching.length === 0 ? null : (
+          {watchingShown.length === 0 && !(narrowing && watching.length > 0) ? null : (
             <Rail
-              empty={null}
+              empty={
+                narrowing ? (
+                  <EmptyState
+                    body={t("discover.rail.filtered.body")}
+                    size="inline"
+                    title={t("discover.rail.filtered.title")}
+                  />
+                ) : null
+              }
               itemKey={(row) => String(row.titleId)}
-              items={watching}
+              items={watchingShown}
               renderItem={(row, tabIndex) => {
                 // Resume the episode the row names, now that a series row carries both numbers;
                 // a whole-title row still opens the title's own file.

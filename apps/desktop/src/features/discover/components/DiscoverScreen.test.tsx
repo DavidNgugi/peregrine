@@ -183,7 +183,47 @@ describe("My library", () => {
 });
 
 describe("Continue Watching", () => {
-  it("keeps a series when Discover is narrowed to films", () => {
+  it("narrows to the selected type, like every other rail", () => {
+    const show: ContinueWatchingDto = {
+      titleId: 16,
+      title: "VisionQuest",
+      poster: null,
+      kind: "show",
+      episodeId: 2298,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      positionMs: 60_000,
+      durationMs: 2_400_000,
+      percent: 0.025,
+      updatedAt: 1,
+    };
+    const film: ContinueWatchingDto = {
+      ...show,
+      titleId: 17,
+      title: "The Long Goodbye",
+      kind: "movie",
+      episodeId: null,
+      seasonNumber: null,
+      episodeNumber: null,
+    };
+
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <DiscoverView
+          continueWatching={{ rows: [show, film], loading: false, failed: false }}
+          onNavigate={() => undefined}
+          rails={railsView()}
+          search={{ ...NO_SEARCH }}
+          titleKind="movie"
+        />
+      </I18nextProvider>,
+    );
+
+    expect(html).toContain("The Long Goodbye");
+    expect(html).not.toContain("VisionQuest");
+  });
+
+  it("says the filter hid the section rather than drawing it empty", () => {
     const show: ContinueWatchingDto = {
       titleId: 16,
       title: "VisionQuest",
@@ -210,7 +250,49 @@ describe("Continue Watching", () => {
       </I18nextProvider>,
     );
 
-    expect(html).toContain("VisionQuest");
+    expect(html).toContain("Continue Watching");
+    expect(html).toContain("Nothing here for this filter");
+  });
+});
+
+describe("the type filter", () => {
+  it("narrows My library and My list to the selected type too", () => {
+    const film: LibraryTitleDto = {
+      id: 1,
+      name: "A Film",
+      kind: "movies",
+      stub: false,
+      items: 1,
+      files: 1,
+      bytes: 1,
+      missingFiles: 0,
+      addedAt: 2,
+      overview: null,
+      rating: null,
+      poster: null,
+      needsPoster: false,
+    };
+    const series: LibraryTitleDto = { ...film, id: 2, name: "A Series", kind: "shows" };
+    const saved: WatchlistEntryDto[] = [
+      { titleId: 1, title: "A Film", poster: null, kind: "movie", addedAt: 1 },
+      { titleId: 2, title: "A Series", poster: null, kind: "show", addedAt: 0 },
+    ];
+
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <DiscoverView
+          libraryTitles={[film, series]}
+          onNavigate={() => undefined}
+          rails={railsView()}
+          search={{ ...NO_SEARCH }}
+          titleKind="show"
+          watchlist={saved}
+        />
+      </I18nextProvider>,
+    );
+
+    expect(html).toContain("A Series");
+    expect(html).not.toContain("A Film");
   });
 });
 

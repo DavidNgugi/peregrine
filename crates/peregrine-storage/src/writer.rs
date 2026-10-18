@@ -6,6 +6,7 @@
 //! is serialized behind the writer task instead of failing with `SQLITE_BUSY`.
 
 use jiff::Timestamp;
+use peregrine_domain::catalogue::WatchAvailability;
 use peregrine_domain::{AccountScope, Event, ScanMode};
 use sqlx::Connection as _;
 use tokio::sync::{mpsc, oneshot};
@@ -44,6 +45,24 @@ pub(crate) enum WriteRequest {
         cast: Vec<crate::catalogue::CastWrite>,
         /// Unix milliseconds.
         at: Timestamp,
+    },
+    /// Replace a title's watch availability with what a provider just answered.
+    ReplaceWatchAvailability {
+        /// The title the answer is about.
+        title_id: i64,
+        /// The metadata provider that answered.
+        source: String,
+        /// Every region the provider holds, with its offers.
+        regions: Vec<WatchAvailability>,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Record that a provider answered for a title and held no availability data.
+    MarkWatchAvailabilitySynced {
+        /// The title the answer was about.
+        title_id: i64,
+        /// Unix milliseconds.
+        at: i64,
     },
     /// Write a scheduled download, replacing any existing one for the same title or episode.
     UpsertSchedule(Box<crate::schedule::NewSchedule>),
@@ -822,6 +841,50 @@ async fn apply_schedule(
     }
 }
 
+async fn apply_job(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::InsertJob(job) => crate::jobs::insert(connection, &job)
+            .await
+            .map(|id| WriteResponse::JobInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::UpdateJob { id, change } => apply_update_job(connection, id, &change).await,
+        _ => Err(StorageError::UnexpectedValue {
+            column: "job",
+            found: "a request that is not a job".to_owned(),
+        }),
+    }
+}
+
+async fn apply_watch_options(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::ReplaceWatchAvailability {
+            title_id,
+            source,
+            regions,
+            at,
+        } => crate::watch_options::replace(connection, title_id, &source, &regions, at)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::MarkWatchAvailabilitySynced { title_id, at } => {
+            crate::watch_options::mark_synced(connection, title_id, at)
+                .await
+                .map(|()| WriteResponse::Applied)
+                .map_err(StorageError::from_sqlx)
+        }
+        _ => Err(StorageError::UnexpectedValue {
+            column: "watch_options",
+            found: "a request that is not watch availability".to_owned(),
+        }),
+    }
+}
+
 async fn apply(
     connection: &mut sqlx::SqliteConnection,
     request: WriteRequest,
@@ -837,14 +900,16 @@ async fn apply(
             cast,
             at,
         } => apply_replace_cast(connection, title_id, &provider, cast, at).await,
+        other @ (WriteRequest::ReplaceWatchAvailability { .. }
+        | WriteRequest::MarkWatchAvailabilitySynced { .. }) => {
+            apply_watch_options(connection, other).await
+        }
         other @ (WriteRequest::UpsertSchedule(_)
         | WriteRequest::SetScheduleState { .. }
         | WriteRequest::DeleteSchedule { .. }) => apply_schedule(connection, other).await,
-        WriteRequest::InsertJob(job) => crate::jobs::insert(connection, &job)
-            .await
-            .map(|id| WriteResponse::JobInserted { id })
-            .map_err(StorageError::from_sqlx),
-        WriteRequest::UpdateJob { id, change } => apply_update_job(connection, id, &change).await,
+        request @ (WriteRequest::InsertJob(_) | WriteRequest::UpdateJob { .. }) => {
+            apply_job(connection, request).await
+        }
         WriteRequest::AttachExternalIds { title_id, ids } => {
             apply_attach_external_ids(connection, title_id, ids).await
         }

@@ -88,6 +88,12 @@ export interface TitleHeroProps {
   readonly onWatchlist?: (() => void) | undefined;
   /** Whether the title is on the watchlist. */
   readonly watchlisted?: boolean | undefined;
+  /** Marks the film watched or unwatched. Absent for a series, whose state is per episode. */
+  readonly onToggleWatched?: (() => void) | undefined;
+  /** Whether the account has marked or finished this film. */
+  readonly watched?: boolean | undefined;
+  /** A watch-state write is in flight, so the control waits rather than sending a second. */
+  readonly watchMarkBusy?: boolean | undefined;
   /** Schedules the title for its release date, when it has not been released. */
   readonly onSchedule?: (() => void) | undefined;
   /** Whether this title is already scheduled. */
@@ -115,6 +121,9 @@ export function TitleHero({
   scheduled = false,
   onWatchlist,
   watchlisted = false,
+  onToggleWatched,
+  watched = false,
+  watchMarkBusy = false,
 }: TitleHeroProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: another title's page has to give the next backdrop
@@ -207,6 +216,11 @@ export function TitleHero({
             {onWatchlist === undefined ? null : (
               <Button onClick={onWatchlist} variant="secondary">
                 {watchlisted ? t("title.hero.watchlisted") : t("title.hero.watchlist")}
+              </Button>
+            )}
+            {onToggleWatched === undefined ? null : (
+              <Button disabled={watchMarkBusy} onClick={onToggleWatched} variant="ghost">
+                {watched ? t("title.hero.markUnwatched") : t("title.hero.markWatched")}
               </Button>
             )}
             {upcoming && onSchedule !== undefined ? (

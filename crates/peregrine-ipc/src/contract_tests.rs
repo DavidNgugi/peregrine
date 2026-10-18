@@ -371,6 +371,61 @@ fn get_title_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `watch_availability` reads through the runtime, so it fails the same way.
+fn watch_availability_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::watch_availability(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            "US".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `set_title_watched` writes through the runtime, so it fails the same way.
+fn set_title_watched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::set_title_watched(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            true,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `set_episode_watched` writes through the runtime, so it fails the same way.
+fn set_episode_watched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::set_episode_watched(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            1,
+            1,
+            true,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// `set_season_watched` writes through the runtime, so it fails the same way.
+fn set_season_watched_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::set_season_watched(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            1,
+            true,
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// `list_episodes` reads through the runtime, so it fails the same way.
 fn list_episodes_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
@@ -1450,6 +1505,38 @@ fn autostart_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: get_title_without_a_runtime,
+        },
+        ContractCase {
+            command: "watch_availability",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: watch_availability_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_title_watched",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_title_watched_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_episode_watched",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_episode_watched_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_season_watched",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_season_watched_without_a_runtime,
         },
         ContractCase {
             command: "list_episodes",

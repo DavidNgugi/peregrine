@@ -358,7 +358,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const seasons = useSeasons(
     route.kind === "title" ? route.id : null,
     titleKind,
-    title.refreshes + acquiredRevision,
+    title.refreshes + title.seasonUpdates + acquiredRevision,
   );
   const openScreen = useCallback(
     (action: string) => {

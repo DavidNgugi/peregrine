@@ -86,3 +86,7 @@ sha256 = "1da45e3e24322a3bad9c059ff9b8ac45dc7d258b41b99ebf2f49940642df2bc7"
 [[migration]]
 file = "0021_person_provider.sql"
 sha256 = "8776b7c362a3f89de3dd1fc562608e18695d7dea6b25c13dbcf6f57f3bb1f655"
+
+[[migration]]
+file = "0022_watch_availability.sql"
+sha256 = "7532539a50ba6480feaad88aae64bbf31edd26f37eb764eae15c19ce89a37c0e"

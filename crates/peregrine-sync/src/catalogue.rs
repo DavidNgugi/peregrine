@@ -5,6 +5,7 @@
 //! the rule calls ambiguous is counted and left alone, because the wrong answer there merges two titles
 //! or splits one.
 
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 
 use peregrine_domain::catalogue::{ImageKind, MetadataState, TitleDetails, TitleKind};
@@ -157,6 +158,27 @@ pub async fn refresh_title(
     kind: peregrine_domain::catalogue::TitleKind,
     at: i64,
 ) -> Result<Option<RefreshedTitle>, SyncError> {
+    refresh_title_with(provider, database, id, kind, at, &|_| {}).await
+}
+
+/// The same refresh, telling the caller after each season's episodes are written.
+///
+/// The callback is how the job lets a title screen draw its first season while the later ones are
+/// still being fetched: a show with ten seasons is ten requests, and waiting for all of them to
+/// announce the first is the slowness a screen cannot hide. The default [`refresh_title`] passes a
+/// no-op, so every existing caller is unchanged.
+///
+/// # Errors
+///
+/// As [`refresh_title`].
+pub async fn refresh_title_with(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    id: i64,
+    kind: peregrine_domain::catalogue::TitleKind,
+    at: i64,
+    on_season: &(dyn Fn(u32) + Send + Sync),
+) -> Result<Option<RefreshedTitle>, SyncError> {
     // The id of *this* provider: a title may carry several, and asking the wrong provider for the wrong
     // one's identifier is how a film gets another film's synopsis.
     let external = database
@@ -189,8 +211,16 @@ pub async fn refresh_title(
 
     let artwork = match kind {
         TitleKind::Show => {
-            let artwork =
-                refresh_seasons(provider, database, id, &external, &provider_name, at).await?;
+            let artwork = refresh_seasons(
+                provider,
+                database,
+                id,
+                &external,
+                &provider_name,
+                at,
+                on_season,
+            )
+            .await?;
             // **After the step, never before it.** The details were written above and they are what
             // makes the title look filled in; this is the only record that the *season* read
             // happened, and a marker written before it would turn a failed season read into a
@@ -202,6 +232,77 @@ pub async fn refresh_title(
         TitleKind::Movie => Vec::new(),
     };
     Ok(Some(RefreshedTitle { details, artwork }))
+}
+
+/// Fetches where a title can be watched and stores every region the provider answered with.
+///
+/// **Best-effort by contract, not by caller.** Availability is a bonus on a title page; a provider
+/// that has no availability data marks the title as answered and returns zero, so the title is not
+/// asked again. A transport failure is returned, because asking again later is what fixes it and a
+/// marker written now would suppress that retry.
+///
+/// The logos are cached here rather than on read: the row stores the provider-relative path, the
+/// image cache stores the bytes under its own variant, and a screen then resolves a path it already
+/// owns. A logo that cannot be fetched is not a reason to fail the answer — the UI falls back to the
+/// service's name.
+///
+/// # Errors
+///
+/// [`SyncError::Provider`] when the provider failed, and [`SyncError::Storage`] when a read or write
+/// did.
+pub async fn refresh_watch_availability(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    cache: &ImageCache,
+    title_id: i64,
+    kind: TitleKind,
+    at: i64,
+) -> Result<usize, SyncError> {
+    let external = database
+        .external_ids_of(title_id)
+        .await?
+        .into_iter()
+        .map(|held| held.id)
+        .find(|external| external.provider() == provider.descriptor().provider());
+    let Some(external) = external else {
+        return Ok(0);
+    };
+
+    let regions = match provider.watch_providers(&external, kind).await {
+        Ok(regions) => regions,
+        Err(ProviderError::Unsupported { .. }) => {
+            database
+                .mark_watch_availability_synced(title_id, at)
+                .await?;
+            return Ok(0);
+        }
+        Err(error) => return Err(SyncError::Provider(error)),
+    };
+
+    // One request per distinct logo, not one per offer: the same Netflix mark appears in every
+    // region on the answer, and a hundred regions would otherwise be a hundred cache checks.
+    let mut cached: HashSet<&str> = HashSet::new();
+    for region in &regions {
+        for offer in &region.offers {
+            let Some(path) = offer.logo_path.as_deref() else {
+                continue;
+            };
+            if cached.insert(path) {
+                let _ = cache_image(provider, cache, path, ImageKind::Logo).await;
+            }
+        }
+    }
+
+    let count = regions.len();
+    database
+        .replace_watch_availability(
+            title_id,
+            provider.descriptor().provider().as_str().to_owned(),
+            regions,
+            at,
+        )
+        .await?;
+    Ok(count)
 }
 
 /// Reads a series' seasons and their episodes, and writes what the provider said about each.
@@ -222,6 +323,7 @@ async fn refresh_seasons(
     external: &peregrine_domain::ExternalId,
     provider_name: &str,
     at: i64,
+    on_season: &(dyn Fn(u32) + Send + Sync),
 ) -> Result<Vec<(ImageKind, String)>, SyncError> {
     let seasons = match provider.seasons(external, TitleKind::Show).await {
         Ok(seasons) => seasons,
@@ -265,6 +367,9 @@ async fn refresh_seasons(
                 .upsert_episode_details(title_id, season_id, episode, provider_name.to_owned(), at)
                 .await?;
         }
+        // Announced only after the episodes are written: a screen that re-read on the season row
+        // alone would find the season and no episodes, which is the state it is waiting to leave.
+        on_season(number.get());
     }
     Ok(artwork)
 }
@@ -466,15 +571,111 @@ fn candidate_input(
     })
 }
 
-/// Replaces one title's cast with the provider's current billing, caching each portrait.
+/// The identifier `provider` owns for one title, when it holds one.
 ///
-/// A portrait that cannot be fetched leaves the person without a picture rather than losing the
-/// credit: the cast list is the information, and the photograph is an improvement on it.
+/// The same lookup `refresh_title` makes, exposed so a job can ask a provider for cheap things —
+/// credits, availability — before the expensive season reads begin. A title may carry several
+/// providers' ids, and asking the wrong provider for the wrong one's identifier is how a film gets
+/// another film's synopsis.
+///
+/// # Errors
+///
+/// [`SyncError::Storage`] when the ids cannot be read.
+pub async fn external_id_for(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    title_id: i64,
+) -> Result<Option<peregrine_domain::ExternalId>, SyncError> {
+    Ok(database
+        .external_ids_of(title_id)
+        .await?
+        .into_iter()
+        .map(|held| held.id)
+        .find(|external| external.provider() == provider.descriptor().provider()))
+}
+
+/// Writes one title's cast names and characters, before any portrait is fetched.
+///
+/// **Names first is the point.** The old writer fetched up to forty portraits before its single
+/// write, so a screen that reads the cast saw nothing until the last face arrived. The rows are now
+/// written with no cached path, which is exactly the state a rail already draws as initials, and the
+/// portraits follow in [`cache_cast_portraits`].
 ///
 /// # Errors
 ///
 /// [`SyncError::Provider`] when the credits request fails, [`SyncError::Storage`] when the cast
 /// cannot be written.
+pub async fn store_cast_names(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    title_id: i64,
+    external: &peregrine_domain::ExternalId,
+    kind: TitleKind,
+    at: i64,
+) -> Result<Vec<peregrine_storage::CastWrite>, SyncError> {
+    let credits = provider.credits(external, kind).await?;
+    let provider_name = provider.descriptor().provider().as_str().to_owned();
+    let rows: Vec<_> = credits
+        .cast
+        .into_iter()
+        .map(|member| peregrine_storage::CastWrite {
+            provider_id: member.provider_id,
+            name: member.name,
+            character: member.character,
+            order: member.order,
+            profile_path: member.profile_path,
+            profile_cache_path: None,
+        })
+        .collect();
+    database
+        .replace_cast(title_id, &provider_name, rows.clone(), at)
+        .await?;
+    Ok(rows)
+}
+
+/// Fetches the portraits for rows [`store_cast_names`] already wrote, and replaces them with the
+/// paths. A portrait that cannot be fetched leaves that person with initials rather than losing the
+/// credit.
+///
+/// # Errors
+///
+/// [`SyncError::Storage`] when the second write fails. Image failures are not errors: the cast is
+/// already on screen.
+pub async fn cache_cast_portraits(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    cache: &ImageCache,
+    title_id: i64,
+    rows: Vec<peregrine_storage::CastWrite>,
+    at: i64,
+) -> Result<(), SyncError> {
+    let provider_name = provider.descriptor().provider().as_str().to_owned();
+    let mut updated = Vec::with_capacity(rows.len());
+    for mut row in rows {
+        row.profile_cache_path = match row.profile_path.as_deref() {
+            Some(path) => cache_image(provider, cache, path, ImageKind::Poster)
+                .await
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_owned)),
+            None => None,
+        };
+        updated.push(row);
+    }
+    database
+        .replace_cast(title_id, &provider_name, updated, at)
+        .await?;
+    Ok(())
+}
+
+/// Replaces one title's cast with the provider's current billing, portraits included.
+///
+/// Kept for callers that want one call; the refresh job uses the two halves so the names can reach
+/// the screen before the pictures do.
+///
+/// # Errors
+///
+/// [`SyncError::Provider`] when the credits request fails, [`SyncError::Storage`] when either write
+/// fails.
 pub async fn store_cast(
     provider: &dyn MetadataProvider,
     database: &Database,
@@ -484,30 +685,8 @@ pub async fn store_cast(
     kind: TitleKind,
     at: i64,
 ) -> Result<(), SyncError> {
-    let credits = provider.credits(external, kind).await?;
-    let provider_name = provider.descriptor().provider().as_str().to_owned();
-    let mut rows = Vec::with_capacity(credits.cast.len());
-    for member in credits.cast {
-        let cached = match member.profile_path.as_deref() {
-            Some(path) => cache_image(provider, cache, path, ImageKind::Poster)
-                .await
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_owned)),
-            None => None,
-        };
-        rows.push(peregrine_storage::CastWrite {
-            provider_id: member.provider_id,
-            name: member.name,
-            character: member.character,
-            order: member.order,
-            profile_path: member.profile_path,
-            profile_cache_path: cached,
-        });
-    }
-    database
-        .replace_cast(title_id, &provider_name, rows, at)
-        .await?;
-    Ok(())
+    let rows = store_cast_names(provider, database, title_id, external, kind, at).await?;
+    cache_cast_portraits(provider, database, cache, title_id, rows, at).await
 }
 
 /// Finds the provider's entry for a title the library scanned, attaches its id, and fills it in.

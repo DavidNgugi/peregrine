@@ -69,6 +69,8 @@ pub enum ImageVariant {
     BackdropW780,
     /// One episode's own wide image.
     StillW300,
+    /// A streaming service's logo.
+    LogoW154,
     /// A poster this machine generated from a frame of the title's own file.
     ///
     /// Sized by whatever the capture produced rather than by a provider's ladder, so there is no width
@@ -79,10 +81,11 @@ pub enum ImageVariant {
 
 impl ImageVariant {
     /// Every variant the cache keeps.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::PosterW342,
         Self::BackdropW780,
         Self::StillW300,
+        Self::LogoW154,
         Self::LocalPoster,
     ];
 
@@ -97,6 +100,7 @@ impl ImageVariant {
             Self::PosterW342 => "w342",
             Self::BackdropW780 => "w780",
             Self::StillW300 => "w300",
+            Self::LogoW154 => "w154",
             Self::LocalPoster => "local",
         }
     }
@@ -112,6 +116,7 @@ impl ImageVariant {
             ImageKind::Poster => Self::PosterW342,
             ImageKind::Backdrop => Self::BackdropW780,
             ImageKind::Still => Self::StillW300,
+            ImageKind::Logo => Self::LogoW154,
         }
     }
 }
@@ -476,10 +481,10 @@ mod tests {
     }
 
     #[test]
-    fn the_kept_variants_are_the_four_the_screens_ask_for() {
+    fn the_kept_variants_are_the_five_the_screens_ask_for() {
         let named: Vec<&str> = ImageVariant::ALL.iter().map(|one| one.as_str()).collect();
 
-        assert_eq!(named, ["w342", "w780", "w300", "local"]);
+        assert_eq!(named, ["w342", "w780", "w300", "w154", "local"]);
     }
 
     #[test]
@@ -529,14 +534,23 @@ mod tests {
             ImageVariant::for_kind(ImageKind::Still),
             ImageVariant::StillW300
         );
+        assert_eq!(
+            ImageVariant::for_kind(ImageKind::Logo),
+            ImageVariant::LogoW154
+        );
         // **Every *provider* variant is some kind's**, because a variant nothing maps to is a size fetched
         // by nothing. The one exception is asserted rather than skipped: `LocalPoster` is deliberately no
         // kind's variant — it holds a frame this machine generated, not a size a provider serves, and a
         // `for_kind` that answered it would make a poster lookup read a capture.
         for variant in ImageVariant::ALL {
-            let named = [ImageKind::Poster, ImageKind::Backdrop, ImageKind::Still]
-                .into_iter()
-                .any(|kind| ImageVariant::for_kind(kind) == variant);
+            let named = [
+                ImageKind::Poster,
+                ImageKind::Backdrop,
+                ImageKind::Still,
+                ImageKind::Logo,
+            ]
+            .into_iter()
+            .any(|kind| ImageVariant::for_kind(kind) == variant);
             if variant == ImageVariant::LocalPoster {
                 assert!(
                     !named,

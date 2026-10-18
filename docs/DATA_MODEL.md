@@ -499,6 +499,35 @@ CREATE TABLE watchlist_entry (
 );
 CREATE INDEX watchlist_added_idx ON watchlist_entry (account_id, added_at DESC);
 
+-- Where a metadata provider says a title can be watched. Provider data, not the user's:
+-- `watch_sync` is the marker that separates "the provider answered, nothing is listed here"
+-- from "nobody has asked yet", which is the difference between an empty section and a hidden one.
+CREATE TABLE watch_sync (
+  title_id  INTEGER PRIMARY KEY REFERENCES title(id) ON DELETE CASCADE,
+  synced_at INTEGER NOT NULL
+);
+
+CREATE TABLE watch_availability (
+  title_id INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
+  region   TEXT NOT NULL CHECK (length(region) = 2 AND region = upper(region)),
+  source   TEXT NOT NULL,
+  link     TEXT,
+  PRIMARY KEY (title_id, region)
+);
+
+CREATE TABLE watch_offer (
+  title_id        INTEGER NOT NULL,
+  region          TEXT NOT NULL,
+  category        TEXT NOT NULL CHECK (category IN ('flatrate', 'rent', 'buy', 'free', 'ads')),
+  provider_id     INTEGER NOT NULL,
+  provider_name   TEXT NOT NULL CHECK (length(provider_name) > 0),
+  logo_path       TEXT,
+  display_priority INTEGER,
+  PRIMARY KEY (title_id, region, category, provider_id),
+  FOREIGN KEY (title_id, region) REFERENCES watch_availability(title_id, region) ON DELETE CASCADE
+);
+CREATE INDEX watch_offer_title_idx ON watch_offer (title_id, region);
+
 CREATE TABLE smart_collection (
   id          INTEGER PRIMARY KEY,
   name        TEXT NOT NULL,
@@ -511,6 +540,8 @@ CREATE TABLE smart_collection (
 ```
 
 The partial index on `watch_progress` is what makes the Continue Watching rail a single cheap index scan rather than a filter over the whole table — the rail is on the first screen, so it must never be a table scan.
+
+The watch-availability tables are **provider data, not progress**. `watch_sync` records that a title was asked about, even when the answer held no regions; without it an empty answer would be indistinguishable from an unfetched one and the title would either be asked forever or never. `watch_availability` holds one row per region with the provider's own page, and `watch_offer` holds the services in their five categories. A refresh replaces every row for the title rather than merging, because a service that stopped carrying a film must disappear. The data is licensed from JustWatch through TMDB, so the UI carries the attribution and TMDB's own link; the logo paths are provider-relative and resolved through the image cache's `w154` variant.
 
 ### 2.7 Acquisition
 
@@ -1235,6 +1266,7 @@ Keyset pagination (`WHERE (sort_key, id) < (?, ?)`) is required everywhere: `OFF
 | `release_decision` | 30 days | Daily |
 | `download_job` completed | Kept until the user clears history; seeding rows kept while seeding | User action or `seeding_until` expiry |
 | `watch_progress` | Forever | — |
+| `watch_availability` / `watch_offer` / `watch_sync` | Replaced by the next fetch; deleted with the title | Title refresh, seven-day window |
 | FTS index | Rebuilt on dataset reimport or `probe_version` schema change | Maintenance job |
 | `VACUUM` | After bulk deletes exceeding 20% of the file, or monthly | Maintenance job, only while idle and not playing |
 | `ANALYZE` | Weekly and after large imports | Maintenance job |

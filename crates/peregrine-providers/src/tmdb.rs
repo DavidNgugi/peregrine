@@ -14,11 +14,13 @@
 //! `AGENTS R14` forbids it and a test that needed a key would be a test nobody could run. When the
 //! first live call happens (`PG-E5-20`'s "test connection"), the shapes here are what to check.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use jiff::civil::Date;
 use peregrine_domain::catalogue::{
-    EpisodeDetails, EpisodeNumber, SeasonDetails, SeasonNumber, TitleDetails, TitleKind,
+    EpisodeDetails, EpisodeNumber, Region, SeasonDetails, SeasonNumber, TitleDetails, TitleKind,
+    WatchAvailability, WatchCategory, WatchOffer,
 };
 use peregrine_domain::{ExternalId, NonEmptyText, Provider};
 use reqwest::Url;
@@ -820,6 +822,66 @@ impl MetadataProvider for Tmdb {
         })
     }
 
+    fn watch_providers(
+        &self,
+        id: &ExternalId,
+        kind: TitleKind,
+    ) -> ProviderFuture<'_, Vec<WatchAvailability>> {
+        // Availability is part of a title's record, so the title capability is what gates it. A
+        // provider that cannot read a title has no record to describe.
+        if !self.descriptor.capabilities().contains(Capability::Title) {
+            let unsupported = ProviderError::Unsupported {
+                provider: Provider::Tmdb,
+                capability: "watch_providers",
+            };
+            return Box::pin(async move { Err(unsupported) });
+        }
+        let endpoint = match kind {
+            TitleKind::Movie => "movie",
+            TitleKind::Show => "tv",
+        };
+        let url = format!("{}/{endpoint}/{}/watch/providers", self.base, id.value());
+        let credential = self.credential.clone();
+
+        Box::pin(async move {
+            let fetched = self
+                .client
+                .fetch(
+                    Provider::Tmdb,
+                    Request {
+                        url: &url,
+                        credential: Some(&credential),
+                    },
+                )
+                .await?;
+            let answer: WatchProvidersAnswer =
+                Body::new(Provider::Tmdb, &fetched.bytes, fetched.media_type())
+                    .decode(SEARCH_BODY_CAP)?;
+
+            // A region key is untrusted text on its way into a primary key. `Region::new` refuses
+            // anything that is not two ASCII letters, and the answer is sorted so a refresh writes
+            // the same rows in the same order on every run.
+            let mut regions = Vec::new();
+            for (code, entry) in answer.results {
+                let Ok(region) = Region::new(&code) else {
+                    continue;
+                };
+                let offers = entry.offers();
+                let link = entry.link.filter(|value| !value.trim().is_empty());
+                if link.is_none() && offers.is_empty() {
+                    continue;
+                }
+                regions.push(WatchAvailability {
+                    region,
+                    link,
+                    offers,
+                });
+            }
+            regions.sort_by(|left, right| left.region.cmp(&right.region));
+            Ok(regions)
+        })
+    }
+
     fn image(
         &self,
         path: &str,
@@ -841,6 +903,9 @@ impl MetadataProvider for Tmdb {
             peregrine_domain::catalogue::ImageKind::Poster => "w342",
             peregrine_domain::catalogue::ImageKind::Backdrop => "w780",
             peregrine_domain::catalogue::ImageKind::Still => "w300",
+            // A logo is a wide mark shown at roughly 56×32 in a row, so the smallest ladder step
+            // that stays legible on a 2× display is the one to fetch.
+            peregrine_domain::catalogue::ImageKind::Logo => "w154",
         };
         // A path from a provider is untrusted input on its way into a URL. Cleaning it a segment at a
         // time is what makes it safe *and* correct: `..` would climb out of the size directory, `.` and
@@ -1263,6 +1328,81 @@ struct SearchAnswer {
 struct CollectionRef {
     #[serde(default)]
     id: Option<u32>,
+}
+
+/// What `/movie|tv/{id}/watch/providers` answers, as much of it as this adapter reads.
+///
+/// `results` is keyed by ISO 3166-1 code, which is untrusted text until `Region::new` has seen it.
+#[derive(Debug, Deserialize)]
+struct WatchProvidersAnswer {
+    #[serde(default)]
+    results: HashMap<String, WatchRegionAnswer>,
+}
+
+/// One country's availability, in the five categories TMDB documents.
+#[derive(Debug, Default, Deserialize)]
+struct WatchRegionAnswer {
+    #[serde(default)]
+    link: Option<String>,
+    #[serde(default)]
+    flatrate: Option<Vec<WatchProviderAnswer>>,
+    #[serde(default)]
+    rent: Option<Vec<WatchProviderAnswer>>,
+    #[serde(default)]
+    buy: Option<Vec<WatchProviderAnswer>>,
+    #[serde(default)]
+    free: Option<Vec<WatchProviderAnswer>>,
+    #[serde(default)]
+    ads: Option<Vec<WatchProviderAnswer>>,
+}
+
+impl WatchRegionAnswer {
+    /// Flattens the categories into domain offers, skipping an entry with no usable name.
+    fn offers(&self) -> Vec<WatchOffer> {
+        let groups = [
+            (WatchCategory::Flatrate, &self.flatrate),
+            (WatchCategory::Rent, &self.rent),
+            (WatchCategory::Buy, &self.buy),
+            (WatchCategory::Free, &self.free),
+            (WatchCategory::Ads, &self.ads),
+        ];
+        let mut offers = Vec::new();
+        for (category, entries) in groups {
+            for entry in entries.iter().flatten() {
+                let name = entry.provider_name.as_deref().unwrap_or_default().trim();
+                let Ok(provider_name) = NonEmptyText::new(name) else {
+                    continue;
+                };
+                offers.push(WatchOffer {
+                    category,
+                    provider_id: entry.provider_id,
+                    provider_name,
+                    logo_path: entry
+                        .logo_path
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|path| !path.is_empty())
+                        .map(str::to_owned),
+                    display_priority: entry
+                        .display_priority
+                        .and_then(|value| u32::try_from(value).ok()),
+                });
+            }
+        }
+        offers
+    }
+}
+
+/// One service in one category.
+#[derive(Debug, Deserialize)]
+struct WatchProviderAnswer {
+    provider_id: i64,
+    #[serde(default)]
+    provider_name: Option<String>,
+    #[serde(default)]
+    logo_path: Option<String>,
+    #[serde(default)]
+    display_priority: Option<i64>,
 }
 
 /// What `/collection/{id}` answers, as much of it as this adapter reads.
@@ -3198,6 +3338,63 @@ mod tests {
         assert_eq!(
             credits.cast[1].profile_path, None,
             "an empty path is no portrait"
+        );
+    }
+
+    #[tokio::test]
+    async fn watch_providers_are_mapped_per_region_and_category() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/movie/603/watch/providers"))
+            .respond_with(json(
+                r#"{
+                  "id": 603,
+                  "results": {
+                    "US": {
+                      "link": "https://www.themoviedb.org/movie/603/watch?locale=US",
+                      "flatrate": [
+                        {"provider_id": 8, "provider_name": "Netflix", "logo_path": "/netflix.jpg", "display_priority": 0}
+                      ],
+                      "rent": [
+                        {"provider_id": 2, "provider_name": "Apple TV", "logo_path": "/apple.jpg", "display_priority": 1}
+                      ],
+                      "buy": [
+                        {"provider_id": 2, "provider_name": "Apple TV", "logo_path": "/apple.jpg", "display_priority": 1}
+                      ],
+                      "free": [],
+                      "ads": []
+                    },
+                    "DE": {"link": "https://www.themoviedb.org/movie/603/watch?locale=DE"},
+                    "USA": {"link": "ignored", "flatrate": [{"provider_id": 9, "provider_name": "Nope"}]}
+                  }
+                }"#,
+            ))
+            .mount(&server)
+            .await;
+
+        let regions = adapter(&server)
+            .watch_providers(
+                &peregrine_domain::ExternalId::new(Provider::Tmdb, "603").expect("an id"),
+                TitleKind::Movie,
+            )
+            .await
+            .expect("the answer maps");
+
+        assert_eq!(regions.len(), 2, "a code that is not a region is skipped");
+        assert_eq!(regions[0].region.as_str(), "DE");
+        assert_eq!(regions[1].region.as_str(), "US");
+        assert_eq!(regions[1].offers.len(), 3);
+        let netflix = regions[1]
+            .offers
+            .iter()
+            .find(|offer| offer.provider_name.as_str() == "Netflix")
+            .expect("the subscription offer");
+        assert_eq!(netflix.category.as_str(), "flatrate");
+        assert_eq!(netflix.logo_path.as_deref(), Some("/netflix.jpg"));
+        assert_eq!(netflix.display_priority, Some(0));
+        assert_eq!(
+            regions[1].link.as_deref(),
+            Some("https://www.themoviedb.org/movie/603/watch?locale=US")
         );
     }
 

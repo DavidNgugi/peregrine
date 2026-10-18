@@ -40,7 +40,9 @@ use std::pin::Pin;
 
 use jiff::civil::Date;
 
-use peregrine_domain::catalogue::{EpisodeDetails, SeasonDetails, SeasonNumber, TitleKind};
+use peregrine_domain::catalogue::{
+    EpisodeDetails, SeasonDetails, SeasonNumber, TitleKind, WatchAvailability,
+};
 use peregrine_domain::id::ExternalId;
 use peregrine_domain::text::NonEmptyText;
 
@@ -904,6 +906,34 @@ pub trait MetadataProvider: Send + Sync {
         let unsupported = ProviderError::Unsupported {
             provider: self.descriptor().provider(),
             capability: "credits",
+        };
+        Box::pin(async move { Err(unsupported) })
+    }
+
+    /// Reads where a title can be watched, per region.
+    ///
+    /// **The answer is every region the provider holds, not one caller's.** The provider's endpoint
+    /// is region-keyed already, so a caller that asked for one region would either read the whole
+    /// answer and discard most of it or spend one request per region; this port hands over what the
+    /// provider said and lets the layer above decide which region a screen draws. The region is part
+    /// of each value rather than a parameter for the same reason.
+    ///
+    /// A provider that has no availability data refuses with [`ProviderError::Unsupported`] rather
+    /// than answering an empty list: "nothing is streaming this" and "this provider does not know"
+    /// are different facts, and a screen that hid the difference would say the first when it meant
+    /// the second.
+    ///
+    /// Gated on [`crate::capability::Capability::Title`]: availability is part of a title's record,
+    /// and a provider that cannot read a title has none to describe. The capability set stays at the
+    /// eight `ARCHITECTURE` §13 documents.
+    fn watch_providers(
+        &self,
+        _id: &ExternalId,
+        _kind: TitleKind,
+    ) -> ProviderFuture<'_, Vec<WatchAvailability>> {
+        let unsupported = ProviderError::Unsupported {
+            provider: self.descriptor().provider(),
+            capability: "watch_providers",
         };
         Box::pin(async move { Err(unsupported) })
     }

@@ -304,6 +304,215 @@ pub enum ImageKind {
     /// which is a wrong picture that looks like a right one — the failure a cache key exists to make
     /// impossible.
     Still,
+    /// A streaming service's logo, drawn in a where-to-watch row.
+    ///
+    /// A fourth kind rather than a reuse of [`ImageKind::Poster`] because a logo is a wide mark
+    /// with its own aspect ratio, cache variant, and use: hashing one under the poster's key would
+    /// let a grid draw a service's mark where a film's poster belongs.
+    Logo,
+}
+
+/// How a service offers a title, in the order the interface lists the groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WatchCategory {
+    /// Included with a subscription.
+    Flatrate,
+    /// Paid for a single rental.
+    Rent,
+    /// Paid for a permanent copy.
+    Buy,
+    /// Free with no subscription.
+    Free,
+    /// Free, supported by advertising.
+    Ads,
+}
+
+impl WatchCategory {
+    /// Every variant, in the order the database constraint lists them.
+    pub const ALL: [Self; 5] = [Self::Flatrate, Self::Rent, Self::Buy, Self::Free, Self::Ads];
+
+    /// The value the `CHECK` constraint accepts.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Flatrate => "flatrate",
+            Self::Rent => "rent",
+            Self::Buy => "buy",
+            Self::Free => "free",
+            Self::Ads => "ads",
+        }
+    }
+
+    /// Parses the stored value, or `None` for one this build does not know.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|category| category.as_str() == value)
+    }
+}
+
+/// One region's ISO 3166-1 alpha-2 code, uppercase.
+///
+/// A newtype because the value is a key: TMDB keys its answer by region, the storage table keys on
+/// it, and a caller that passed `"us"` on one path and `"US"` on another would read the rows it
+/// just wrote as absent. Parsing is the one place that normalizes.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Region(String);
+
+impl Region {
+    /// Parses a two-letter code, trimming and uppercasing it.
+    ///
+    /// # Errors
+    ///
+    /// [`RegionError::NotARegion`] when the value is not exactly two ASCII letters.
+    pub fn new(value: &str) -> Result<Self, RegionError> {
+        let trimmed = value.trim();
+        if trimmed.len() == 2
+            && trimmed
+                .chars()
+                .all(|character| character.is_ascii_alphabetic())
+        {
+            Ok(Self(trimmed.to_ascii_uppercase()))
+        } else {
+            Err(RegionError::NotARegion)
+        }
+    }
+
+    /// The uppercase code.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Region {
+    type Error = RegionError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(&value)
+    }
+}
+
+impl From<Region> for String {
+    fn from(value: Region) -> Self {
+        value.0
+    }
+}
+
+/// Why a region code is not one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum RegionError {
+    /// The value was not two ASCII letters.
+    #[error("a region is two ASCII letters")]
+    NotARegion,
+}
+
+/// One service offering a title in one region.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchOffer {
+    /// Subscription, rental, purchase, free, or ad-supported.
+    pub category: WatchCategory,
+    /// The provider's own id for the service.
+    pub provider_id: i64,
+    /// The service's name, which is what a missing logo falls back to.
+    pub provider_name: NonEmptyText,
+    /// The provider-relative path of its logo, when it has one.
+    pub logo_path: Option<String>,
+    /// The provider's ordering hint within its category.
+    pub display_priority: Option<u32>,
+}
+
+/// What one region offers for one title.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchAvailability {
+    /// The region these offers are for.
+    pub region: Region,
+    /// The provider's own page for every option, when it sent one.
+    pub link: Option<String>,
+    /// The offers, in whatever order the provider sent them.
+    pub offers: Vec<WatchOffer>,
+}
+
+/// The brand one service name belongs to, for a row that shows one mark per brand.
+///
+/// TMDB lists subscription **tiers and channels** as separate providers with separate ids and the
+/// same artwork: "Paramount Plus", "Paramount Plus Premium", "Paramount Plus Essential",
+/// "Paramount+ with Ads", and "Paramount Plus Apple TV Channel" are five entries a reader sees as
+/// one logo. The key folds punctuation, strips the tier and channel words, and aliases Amazon's and
+/// HBO's spellings so those five collapse to `paramount plus` and Netflix's tiered entries to
+/// `netflix`.
+///
+/// **This is a display key, not an identity.** Two entries that share it may offer different terms,
+/// and the raw rows keep their provider ids so a future detail view can say which tier was which.
+#[must_use]
+pub fn watch_brand(name: &str) -> String {
+    // Tier and channel words, longest and most specific first, so "apple tv channel" is stripped
+    // before the bare "channel" can leave "apple tv" behind.
+    const SUFFIXES: &[&str] = &[
+        "with ads",
+        "ad supported",
+        "ad-free",
+        "amazon channel",
+        "apple tv channel",
+        "apple tv",
+        "channel",
+        "essential",
+        "premium",
+        "standard",
+        "basic",
+    ];
+
+    let mut key = String::with_capacity(name.len());
+    let mut pending_space = false;
+    for character in name.chars() {
+        if character == '+' {
+            key.push_str(" plus ");
+            pending_space = false;
+        } else if character.is_alphanumeric() {
+            if pending_space && !key.ends_with(' ') {
+                key.push(' ');
+            }
+            key.extend(character.to_lowercase());
+            pending_space = false;
+        } else {
+            pending_space = true;
+        }
+    }
+    let mut key = key.trim().to_owned();
+
+    loop {
+        let mut stripped = false;
+        for suffix in SUFFIXES {
+            if let Some(rest) = key.strip_suffix(suffix) {
+                let rest = rest.trim_end().to_owned();
+                if !rest.is_empty() {
+                    key = rest;
+                    stripped = true;
+                }
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+
+    // Prefix aliases run after the suffix loop so "HBO Max Amazon Channel" folds to "max" rather
+    // than stopping at "hbo max".
+    // "Amazon Prime Video" is the same mark as "Prime Video".
+    if let Some(rest) = key.strip_prefix("amazon prime ") {
+        key = format!("prime {rest}");
+    }
+    // "HBO Max" and "Max" are the same mark; "HBO" alone keeps its name.
+    if let Some(rest) = key.strip_prefix("hbo ") {
+        let rest = rest.to_owned();
+        if !rest.is_empty() {
+            key = rest;
+        }
+    }
+    key
 }
 
 /// The fields a provider supplies for one title.
@@ -1175,5 +1384,55 @@ mod tests {
             let json = serde_json::to_string(&season).expect("serializes");
             prop_assert_eq!(serde_json::from_str::<SeasonNumber>(&json).expect("deserializes"), season);
         }
+    }
+}
+
+#[cfg(test)]
+mod watch_brand_tests {
+    use super::watch_brand;
+
+    #[test]
+    fn subscription_tiers_of_one_service_fold_to_one_brand() {
+        for name in [
+            "Paramount Plus",
+            "Paramount+",
+            "Paramount Plus Premium",
+            "Paramount Plus Essential",
+            "Paramount+ with Ads",
+            "Paramount Plus Apple TV Channel",
+            "Paramount Plus Apple TV",
+            "Paramount+ Amazon Channel",
+        ] {
+            assert_eq!(watch_brand(name), "paramount plus", "{name}");
+        }
+        for name in [
+            "Netflix",
+            "Netflix Standard with Ads",
+            "Netflix basic with Ads",
+            "Netflix ad-supported",
+        ] {
+            assert_eq!(watch_brand(name), "netflix", "{name}");
+        }
+    }
+
+    #[test]
+    fn punctuation_and_known_aliases_do_not_split_a_brand() {
+        assert_eq!(watch_brand("Disney+"), watch_brand("Disney Plus"));
+        assert_eq!(watch_brand("Apple TV+"), watch_brand("Apple TV Plus"));
+        assert_eq!(watch_brand("Amazon Prime Video"), "prime video");
+        assert_eq!(watch_brand("Amazon Prime Video with Ads"), "prime video");
+        assert_eq!(watch_brand("Prime Video"), "prime video");
+        assert_eq!(watch_brand("HBO Max"), "max");
+        assert_eq!(watch_brand("HBO Max Amazon Channel"), "max");
+        assert_eq!(watch_brand("Max"), "max");
+        assert_eq!(watch_brand("Hulu (With Ads)"), "hulu");
+    }
+
+    #[test]
+    fn different_services_stay_different() {
+        assert_ne!(watch_brand("Paramount Plus"), watch_brand("Peacock"));
+        assert_ne!(watch_brand("Netflix"), watch_brand("Netflix DVD"));
+        assert_ne!(watch_brand("HBO"), watch_brand("Max"));
+        assert_eq!(watch_brand("The Roku Channel"), "the roku");
     }
 }

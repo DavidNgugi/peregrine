@@ -428,16 +428,15 @@ impl WatchProgress {
     /// policy's: a row above the floor but below [`crate::watch::WATCHED_PERCENT`] is left
     /// unwatched by [`WatchProgress::record`] and is unaffected either way.
     ///
-    /// One row is exempt from all of that: one the user marked unwatched. Its percentage still
-    /// follows the position, but the flag and the manual source stay, so that the next
-    /// [`WatchProgress::apply_finalize`] — the only caller that closes a session — can still see
-    /// the intent after the position has moved it past the floor. A hand-set *watched* flag is
-    /// not exempt: it cannot persist below the floor anyway (I6 refuses to read it back), and
-    /// keeping a manual watched mark across a playback belongs to `PG-E18-06`, which owns the
-    /// marking surface.
+    /// A row the user set by hand is exempt from all of that: its percentage still follows the
+    /// position, but the flag, its stamp, and the manual source stay. The two intents differ — a
+    /// manual *watched* mark means "I have seen this", a manual *unwatched* one means "I have
+    /// not" — and a playback report is a measurement, so it does not overwrite either. That is
+    /// what lets [`WatchProgress::apply_finalize`] — the only caller that closes a session —
+    /// still see the intent after the position has moved past the floor.
     pub fn set_position(&mut self, position: PlaybackPosition, at: Timestamp) {
         let percent = position.percent();
-        if self.source == ProgressSource::Manual && !self.watched {
+        if self.source == ProgressSource::Manual {
             self.position_ms = position.position_ms();
             self.duration_ms = position.duration_ms();
             self.percent = percent;
@@ -509,10 +508,11 @@ impl WatchProgress {
     ///
     /// - A policy mark is routed through [`WatchProgress::mark_watched`], so a decision the
     ///   storage floor cannot hold is refused instead of written.
-    /// - A row the user has marked unwatched keeps that flag. I6 calls a manual row a statement
-    ///   of intent and a measured row a measurement; a finalize is a measurement, so it does
-    ///   not overwrite the intent. The user marks a re-watch watched again from the library,
-    ///   which is `PG-E18-06`'s surface.
+    /// - A row the user set by hand keeps its flag, in both directions. I6 calls a manual row a
+    ///   statement of intent and a measured row a measurement; a finalize is a measurement, so it
+    ///   does not overwrite the intent. An unfinished re-watch does not clear a manual watched
+    ///   mark, and a finished one does not set a manual unwatched one. The user changes either
+    ///   from the title page, which is `PG-E18-06`'s surface.
     ///
     /// Returns whether the row changed, so a caller closing a session can skip a write that
     /// would say nothing new.
@@ -526,8 +526,15 @@ impl WatchProgress {
         outcome: crate::watch::FinalizeOutcome,
         at: Timestamp,
     ) -> Result<bool, WatchProgressError> {
-        if self.source == ProgressSource::Manual && !self.watched {
-            return Ok(false);
+        if self.source == ProgressSource::Manual {
+            // A manual unwatch is closed already; a manual watch is counted but not cleared by an
+            // unfinished session. Neither flag is the policy's to overwrite.
+            if !self.watched {
+                return Ok(false);
+            }
+            self.play_count = self.play_count.saturating_add(outcome.play_count);
+            self.updated_at = at;
+            return Ok(true);
         }
         if outcome.watched && !self.watched {
             self.mark_watched(WatchOrigin::Policy, at)?;
@@ -1513,19 +1520,21 @@ mod tests {
     }
 
     #[test]
-    fn a_hand_set_watch_flag_does_not_survive_a_reported_position() {
+    fn a_hand_set_watch_flag_survives_a_reported_position() {
         let mut progress = record(100, Some(1000));
+        let marked = at(1_700_000_050_000);
         progress
-            .mark_watched(WatchOrigin::Manual, now())
+            .mark_watched(WatchOrigin::Manual, marked)
             .expect("the user may mark it by hand");
         assert!(progress.watched());
 
+        // A playback report is a measurement, and the user's statement outranks it: marking a
+        // title watched then playing two minutes of it must not silently unmark it.
         progress.set_position(position(200, Some(1000)), at(1_700_000_100_000));
-        assert!(
-            !progress.watched(),
-            "the position is the only writer of the derived fields (I6); the library surface that \
-             has to keep a manual override is PG-E18-06's"
-        );
+        assert!(progress.watched());
+        assert_eq!(progress.watched_at(), Some(marked));
+        assert_eq!(progress.source(), ProgressSource::Manual);
+        assert_eq!(progress.position_ms(), 200);
     }
 
     #[test]
@@ -1570,6 +1579,29 @@ mod tests {
             0,
             "an ignored finalize counts nothing"
         );
+    }
+
+    #[test]
+    fn a_manual_watch_mark_survives_an_unfinished_finalize() {
+        let mut progress = record(100, Some(1000));
+        let marked = at(1_700_000_100_000);
+        progress
+            .mark_watched(WatchOrigin::Manual, marked)
+            .expect("the user may mark it by hand");
+
+        let ended = at(1_700_000_200_000);
+        let outcome = crate::watch::finalize(position(200, Some(1000)), false, ended);
+        progress.set_position(position(200, Some(1000)), ended);
+        assert!(
+            progress
+                .apply_finalize(outcome, ended)
+                .expect("the manual row is counted"),
+            "the play is recorded"
+        );
+        assert!(progress.watched());
+        assert_eq!(progress.watched_at(), Some(marked));
+        assert_eq!(progress.source(), ProgressSource::Manual);
+        assert_eq!(progress.play_count(), 1);
     }
 
     #[test]

@@ -39,9 +39,11 @@ mod schedule;
 mod test_support;
 mod usage;
 mod watch;
+mod watch_options;
 mod writer;
 
 pub use offers::{ChosenOfferRow, NewOffer, OfferRow};
+pub use watch_options::{WatchOfferRow, WatchRegionRow};
 
 pub use catalogue::{CastRow, CastWrite, PersonRow};
 pub use catalogue::{

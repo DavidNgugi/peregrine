@@ -132,12 +132,26 @@ pub const DOWNLOAD_STATS: Topic = Topic::new("download://stats", 1);
 /// cannot render a row the centre has not answered with.
 pub const NOTIFICATION_RAISED: Topic = Topic::new("notification://raised", 1);
 
+/// A title's refresh wrote something a screen can draw.
+///
+/// A trigger to re-read and never a source of truth: the payload carries the title id and the stage
+/// (`details`, `cast`, `availability`, `seasons`), and the read answers what is actually stored. It
+/// exists because the refresh is one job with slow parts at the end — a screen that waited for the
+/// terminal state showed nothing until the last season still had been fetched.
+pub const TITLE_REFRESHED: Topic = Topic::new("title://refreshed", 1);
+
 /// Every topic this build emits, declared once.
 ///
 /// `cargo xtask gen-ipc` writes this list into the generated TypeScript, so a topic the
 /// backend emits is a topic the UI can name, and the drift gate fails the build when the
 /// two disagree. `topics_are_pinned` fails when one is renamed, added, or renumbered.
-pub const TOPICS: &[Topic] = &[JOB_PROGRESS, JOB_STATE, DOWNLOAD_STATS, NOTIFICATION_RAISED];
+pub const TOPICS: &[Topic] = &[
+    JOB_PROGRESS,
+    JOB_STATE,
+    DOWNLOAD_STATS,
+    NOTIFICATION_RAISED,
+    TITLE_REFRESHED,
+];
 
 /// One value on one topic.
 #[derive(Debug, Clone, PartialEq)]
@@ -444,6 +458,7 @@ mod tests {
                 ("job://state", 1),
                 ("download://stats", 1),
                 ("notification://raised", 1),
+                ("title://refreshed", 1),
             ],
             "the event manifest changed; regenerate the bindings in the same commit"
         );

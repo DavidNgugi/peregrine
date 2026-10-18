@@ -171,8 +171,8 @@ mod tests {
         "title_fts_idx",
     ];
 
-    /// The forty-two tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 43] = [
+    /// The tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
+    const DOCUMENTED_TABLES: [&str; 46] = [
         "account",
         "cast_session",
         "company",
@@ -214,7 +214,10 @@ mod tests {
         "title_genre",
         "title_keyword",
         "unmatched_file",
+        "watch_availability",
+        "watch_offer",
         "watch_progress",
+        "watch_sync",
         "watchlist_entry",
     ];
 
@@ -574,6 +577,31 @@ mod tests {
         ("device_label", "TEXT", 0, None, 0),
     ];
 
+    // Migration 0022.
+    const WATCH_SYNC: &[ColumnShape] = &[
+        // A single-column INTEGER PRIMARY KEY is SQLite's rowid alias, which PRAGMA reports as
+        // nullable even though it never is.
+        ("title_id", "INTEGER", 0, None, 1),
+        ("synced_at", "INTEGER", 1, None, 0),
+    ];
+
+    const WATCH_AVAILABILITY: &[ColumnShape] = &[
+        ("title_id", "INTEGER", 1, None, 1),
+        ("region", "TEXT", 1, None, 2),
+        ("source", "TEXT", 1, None, 0),
+        ("link", "TEXT", 0, None, 0),
+    ];
+
+    const WATCH_OFFER: &[ColumnShape] = &[
+        ("title_id", "INTEGER", 1, None, 1),
+        ("region", "TEXT", 1, None, 2),
+        ("category", "TEXT", 1, None, 3),
+        ("provider_id", "INTEGER", 1, None, 4),
+        ("provider_name", "TEXT", 1, None, 0),
+        ("logo_path", "TEXT", 0, None, 0),
+        ("display_priority", "INTEGER", 0, None, 0),
+    ];
+
     const WATCHLIST_ENTRY: &[ColumnShape] = &[
         ("account_id", "INTEGER", 1, None, 1),
         ("title_id", "INTEGER", 1, None, 2),
@@ -808,7 +836,7 @@ mod tests {
     ];
 
     /// Every documented table with the column shape its migration must produce.
-    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 41] = [
+    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 44] = [
         ("account", ACCOUNT),
         ("cast_session", CAST_SESSION),
         ("company", COMPANY),
@@ -848,7 +876,10 @@ mod tests {
         ("title_genre", TITLE_GENRE),
         ("title_keyword", TITLE_KEYWORD),
         ("unmatched_file", UNMATCHED_FILE),
+        ("watch_availability", WATCH_AVAILABILITY),
+        ("watch_offer", WATCH_OFFER),
         ("watch_progress", WATCH_PROGRESS),
+        ("watch_sync", WATCH_SYNC),
         ("watchlist_entry", WATCHLIST_ENTRY),
     ];
 
@@ -973,6 +1004,22 @@ mod tests {
             "id",
             "NO ACTION",
         ),
+        ("watch_availability", "title", "title_id", "id", "CASCADE"),
+        (
+            "watch_offer",
+            "watch_availability",
+            "region",
+            "region",
+            "CASCADE",
+        ),
+        (
+            "watch_offer",
+            "watch_availability",
+            "title_id",
+            "title_id",
+            "CASCADE",
+        ),
+        ("watch_sync", "title", "title_id", "id", "CASCADE"),
         ("watch_progress", "account", "account_id", "id", "CASCADE"),
         ("watch_progress", "episode", "episode_id", "id", "CASCADE"),
         ("watch_progress", "title", "title_id", "id", "CASCADE"),
@@ -981,7 +1028,7 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 44] = [
+    const DOCUMENTED_INDICES: [&str; 45] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "discover_rail_title_idx",
@@ -1023,6 +1070,7 @@ mod tests {
         "title_kind_release_idx",
         "title_sort_name_idx",
         "title_sync_idx",
+        "watch_offer_title_idx",
         "watch_progress_account_idx",
         "watch_progress_continue_idx",
         "watchlist_added_idx",
@@ -1053,6 +1101,7 @@ mod tests {
         ),
         ("title_sort_name_idx", "(sort_name)"),
         ("title_sync_idx", "(metadata_state, last_synced_at)"),
+        ("watch_offer_title_idx", "(title_id, region)"),
         ("title_alias_alias_idx", "(alias)"),
         ("external_id_title_idx", "(title_id)"),
         ("external_id_episode_idx", "(episode_id)"),
@@ -2270,6 +2319,12 @@ mod tests {
         "INSERT INTO image_cache \
          (key, provider, path, variant, disk_path, bytes, created_at, last_used_at) \
          VALUES ('sha256:image', 'tmdb', '/poster.jpg', 'w342', '/cache/ab.webp', 1, 0, 0)",
+        "INSERT INTO watch_sync (title_id, synced_at) VALUES (1, 0)",
+        "INSERT INTO watch_availability (title_id, region, source, link) \
+         VALUES (1, 'US', 'tmdb', 'https://example.test/watch')",
+        "INSERT INTO watch_offer \
+         (title_id, region, category, provider_id, provider_name, logo_path, display_priority) \
+         VALUES (1, 'US', 'flatrate', 8, 'Netflix', '/netflix.jpg', 0)",
     ];
 
     /// One `COUNT(*)` per user-data table, as a single static query. A dynamic
@@ -2354,7 +2409,13 @@ mod tests {
         UNION ALL
         SELECT 'unmatched_file' AS table_name, COUNT(*) AS n FROM unmatched_file
         UNION ALL
+        SELECT 'watch_availability' AS table_name, COUNT(*) AS n FROM watch_availability
+        UNION ALL
+        SELECT 'watch_offer' AS table_name, COUNT(*) AS n FROM watch_offer
+        UNION ALL
         SELECT 'watch_progress' AS table_name, COUNT(*) AS n FROM watch_progress
+        UNION ALL
+        SELECT 'watch_sync' AS table_name, COUNT(*) AS n FROM watch_sync
         UNION ALL
         SELECT 'watchlist_entry' AS table_name, COUNT(*) AS n FROM watchlist_entry
     ";
