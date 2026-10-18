@@ -44,9 +44,9 @@ pub use peregrine_storage::{
 };
 pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,
-    ProwlarrStatus, RailsState, Recommendations, Runtime, RuntimeConfig, RuntimeError, SessionId,
-    ShellStatus, StartedCapture, StartedJob, StartedPlayback, TitleEpisodeDetail, TitlePlayback,
-    TitleSeasonDetail,
+    PlaybackSubtitle, ProwlarrStatus, RailsState, Recommendations, Runtime, RuntimeConfig,
+    RuntimeError, SessionId, ShellStatus, StartedCapture, StartedJob, StartedPlayback,
+    TitleEpisodeDetail, TitlePlayback, TitleSeasonDetail,
 };
 // What one rail holds, for the reason the block above gives: the command surface answers a DTO
 // built from a `RailItem`, and it may not reach into `peregrine-app`'s job module to name it.

@@ -744,7 +744,43 @@ fn download_cases() -> Vec<ContractCase> {
         fails_internal("list_release_offers", list_release_offers_dead),
         fails_internal("choose_release_offer", choose_release_offer_dead),
         fails_internal("dismiss_release_offer", dismiss_release_offer_dead),
+        fails_internal("schedule_download", schedule_download_dead),
+        fails_internal("download_schedules", download_schedules_dead),
+        fails_internal("cancel_download_schedule", cancel_download_schedule_dead),
     ]
+}
+
+fn schedule_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::schedule_download(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            None,
+            None,
+            "2030-01-01".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn download_schedules_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::download_schedules(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn cancel_download_schedule_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::cancel_download_schedule(
+            harness.dead_state(),
+            crate::downloads::ScheduleRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
 }
 
 fn acquire_dead(harness: &Harness) -> Invocation<'_> {
@@ -1075,7 +1111,46 @@ fn watch_cases() -> Vec<ContractCase> {
     vec![
         fails_internal("continue_watching", continue_watching_dead),
         fails_internal("record_progress", record_progress_dead),
+        fails_internal("add_to_watchlist", add_to_watchlist_dead),
+        fails_internal("remove_from_watchlist", remove_from_watchlist_dead),
+        fails_internal("viewing_history", viewing_history_dead),
+        fails_internal("watchlist", watchlist_dead),
     ]
+}
+
+fn add_to_watchlist_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::add_to_watchlist(harness.dead_state(), crate::library::TitleRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+fn remove_from_watchlist_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::remove_from_watchlist(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn viewing_history_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::viewing_history(harness.dead_state(), None)
+            .await
+            .map(drop)
+    })
+}
+
+fn watchlist_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::watchlist(harness.dead_state())
+            .await
+            .map(drop)
+    })
 }
 
 fn continue_watching_dead(harness: &Harness) -> Invocation<'_> {
@@ -1263,7 +1338,28 @@ fn library_cases() -> Vec<ContractCase> {
             },
             drive: remove_root_without_a_runtime,
         },
+        fails_internal("get_person", get_person_dead),
+        fails_internal("person_filmography", person_filmography_dead),
     ]
+}
+
+fn get_person_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::get_person(harness.dead_state(), crate::library::PersonRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+fn person_filmography_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::person_filmography(
+            harness.dead_state(),
+            crate::library::PersonRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
 }
 
 /// The commands the shell's own chrome reaches.

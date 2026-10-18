@@ -15,7 +15,9 @@
 use std::sync::Arc;
 
 use peregrine_domain::{SafePath, SessionToken};
-use peregrine_stream::{Capture, MediaServer, StreamError, ThumbnailSink, TorrentMedia};
+use peregrine_stream::{
+    Capture, MediaServer, SidecarSubtitle, StreamError, ThumbnailSink, TorrentMedia,
+};
 use thiserror::Error;
 
 /// Why a session could not be opened.
@@ -48,9 +50,11 @@ impl PlaybackSession {
     /// [`peregrine_domain::TokenSource`] rather than here, because randomness belongs to an adapter
     /// (`AGENTS R14`).
     ///
-    /// `posters` is where a frame the renderer captures is stored. `None` opens a session that plays and
-    /// keeps no poster, which is what a caller with no image cache gets: the session still serves the
-    /// file, and the route that would store a frame is not offered (`ADR 0023`'s capture).
+    /// `subtitles` are the sidecar tracks this session may serve, each already shown to be inside a
+    /// configured root. `posters` is where a frame the renderer captures is stored. `None` opens a
+    /// session that plays and keeps no poster, which is what a caller with no image cache gets: the
+    /// session still serves the file, and the route that would store a frame is not offered (`ADR
+    /// 0023`'s capture).
     ///
     /// # Errors
     ///
@@ -61,13 +65,14 @@ impl PlaybackSession {
         title_id: i64,
         file: &SafePath,
         token: SessionToken,
+        subtitles: Vec<SidecarSubtitle>,
         posters: Option<Arc<dyn ThumbnailSink>>,
     ) -> Result<Self, PlaybackError> {
         // The title is attached to the capture here rather than by the caller, because a caller that
         // supplied a sink for one title and a session for another would be a poster filed under the wrong
         // film — a defect nothing downstream could detect.
         let capture = posters.map(|sink| Capture { title_id, sink });
-        let server = MediaServer::start(file, token, capture).await?;
+        let server = MediaServer::start(file, token, subtitles, capture).await?;
         let url = server.url();
         let thumbnail_url = (server.has_capture()).then(|| server.thumbnail_url());
         Ok(Self {
@@ -111,6 +116,15 @@ impl PlaybackSession {
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// Where the renderer points a track element for one sidecar subtitle.
+    ///
+    /// The id is the `subtitle_track` row the DTO carries; the session decides what it serves, and the
+    /// route answers `404` for an id it was not opened with.
+    #[must_use]
+    pub fn subtitle_url(&self, track_id: i64) -> String {
+        self.server.subtitle_url(track_id)
     }
 
     /// Where the renderer posts a frame it captured, or `None` when this session keeps no poster.

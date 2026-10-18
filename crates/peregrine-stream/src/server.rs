@@ -38,6 +38,7 @@
 //! are §6 of the ADR, both are bounded by the same token as the read, and the route is absent from a
 //! session whose caller has nowhere to store a frame.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::io;
@@ -50,7 +51,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -119,6 +120,25 @@ const THUMBNAIL_ROUTE: &str = "/thumbnail/{token}";
 /// The prefix [`THUMBNAIL_ROUTE`] matches, and the token's other home.
 const THUMBNAIL_PREFIX: &str = "/thumbnail/";
 
+/// The route one sidecar subtitle is served at.
+///
+/// The session token comes first, exactly as it does on the media and capture routes, so every byte
+/// this listener hands out is behind the same per-session credential. The second segment is the
+/// `subtitle_track` row id the session was opened with — **and only that**: the route never takes a
+/// path, so a request cannot name a file the session did not register.
+const SUBTITLE_ROUTE: &str = "/subtitle/{token}/{track}";
+
+/// The prefix [`SUBTITLE_ROUTE`] matches, for the guard to strip the token out of a request path.
+const SUBTITLE_PREFIX: &str = "/subtitle/";
+
+/// The largest sidecar subtitle this build will serve in one response.
+///
+/// A text sidecar is kilobytes, and a full ASS track with styling can be a few megabytes; eight is an
+/// order of magnitude over that and still a ceiling that stops a mislabelled library file from asking
+/// this process to hold a whole film's worth of bytes. The route reads the file itself rather than
+/// streaming it, so the bound is what makes that safe.
+const MAX_SUBTITLE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// The largest frame this build will read from a capture.
 ///
 /// A 640-wide JPEG at quality 0.8 is around 60 KB, so this is an order of magnitude of headroom and
@@ -142,6 +162,22 @@ const JPEG_START: [u8; 3] = [0xff, 0xd8, 0xff];
 /// anything that is not a whole JPEG by its own framing; it does not promise the pixels are valid, which
 /// is the same guarantee the provider path has for a poster it fetched.
 const JPEG_END: [u8; 2] = [0xff, 0xd9];
+
+/// One sidecar subtitle a session can serve.
+///
+/// The path arrives as a [`SafePath`], which only `PathGuard` can produce, so a session cannot be
+/// handed a sidecar that has not already been shown to be inside a configured root — the same rule the
+/// media file follows. The id is the row id the track DTO carries, which is what the route serves and
+/// what makes an unregistered request a `404` rather than a path read.
+#[derive(Clone)]
+pub struct SidecarSubtitle {
+    /// The `subtitle_track` row id, which is the route's only variable segment.
+    pub track_id: i64,
+    /// The sidecar file.
+    pub path: SafePath,
+    /// The content type the bytes are, from the row's stored format.
+    pub content_type: &'static str,
+}
 
 /// The frame capture a session offers, when its caller can store one.
 #[derive(Clone)]
@@ -173,6 +209,11 @@ struct Guard {
     /// by something that cannot store a poster does not offer one, and a route that said so with a
     /// different status would be telling a caller about a capability it does not have.
     capture: Option<Capture>,
+    /// The sidecar subtitles this session serves, by `subtitle_track` row id.
+    ///
+    /// Empty for a session opened without any, and for a torrent-backed session, which has no library
+    /// file row for sidecars to hang from. An id that is not here is a route this session does not offer.
+    subtitles: Arc<HashMap<i64, SidecarSubtitle>>,
     /// The torrent-backed media this session serves, or `None` when it serves a local file.
     ///
     /// `None` is the file case rather than a broken one: a file session's bytes come from
@@ -233,9 +274,14 @@ impl MediaServer {
     /// `capture` is what makes the session able to keep a poster: `None` serves the file and offers no
     /// way to store a frame, which is what a caller with no image cache gets rather than a route that
     /// fails when it is used.
+    ///
+    /// `subtitles` are the sidecars this session may serve. Each one is already a [`SafePath`], and the
+    /// route serves only the ids in this list: an id the caller did not register is a `404`, which is
+    /// what keeps a request from naming a file the session was not opened for.
     pub async fn start(
         file: &SafePath,
         token: SessionToken,
+        subtitles: Vec<SidecarSubtitle>,
         capture: Option<Capture>,
     ) -> Result<Self, StreamError> {
         let path = file.as_path().to_path_buf();
@@ -256,10 +302,17 @@ impl MediaServer {
             .map_err(|source| StreamError::Bind { source })?;
 
         let has_capture = capture.is_some();
+        let subtitle_count = subtitles.len();
         let guard = Guard {
             token: token.clone(),
             port: address.port(),
             capture,
+            subtitles: Arc::new(
+                subtitles
+                    .into_iter()
+                    .map(|subtitle| (subtitle.track_id, subtitle))
+                    .collect(),
+            ),
             media: None,
             asked: Arc::new(AtomicBool::new(false)),
         };
@@ -269,6 +322,7 @@ impl MediaServer {
             // write is a path that matches nothing and falls through to a `404` with no body.
             .route_service(MEDIA_ROUTE, ServeFile::new(&path))
             .route(THUMBNAIL_ROUTE, post(capture_frame))
+            .route(SUBTITLE_ROUTE, get(serve_subtitle))
             .with_state(guard.clone())
             // **`no-store` on the *media* route, and deliberately not on the capture.** They are
             // different kinds of response: a film must never be written to a cache on the way to an
@@ -317,6 +371,7 @@ impl MediaServer {
         // the port is what anyone debugging a session actually needs to know.
         debug!(
             port = address.port(),
+            subtitles = subtitle_count,
             "a media session is listening on loopback"
         );
 
@@ -356,6 +411,9 @@ impl MediaServer {
             token: token.clone(),
             port: address.port(),
             capture,
+            // A torrent has no library file row for a sidecar to belong to, so this session offers no
+            // subtitle route.
+            subtitles: Arc::new(HashMap::new()),
             media: Some(media),
             asked: Arc::new(AtomicBool::new(false)),
         };
@@ -430,6 +488,22 @@ impl MediaServer {
             self.address,
             THUMBNAIL_PREFIX,
             self.token.as_str()
+        )
+    }
+
+    /// The URL one sidecar subtitle track is served at.
+    ///
+    /// Answers a URL for any id: the session decides what it serves, and the handler refuses an id that
+    /// was not registered with a `404`. Building it here rather than in a renderer keeps the token, and
+    /// the route, in the one place that already spells both.
+    #[must_use]
+    pub fn subtitle_url(&self, track_id: i64) -> String {
+        format!(
+            "http://{}{}{}/{}",
+            self.address,
+            SUBTITLE_PREFIX,
+            self.token.as_str(),
+            track_id
         )
     }
 
@@ -516,18 +590,18 @@ async fn authorize(State(guard): State<Guard>, request: Request, next: Next) -> 
     // (see `route_of`), the query is dropped, and the `Host` is logged as a yes/no rather than a value.
     let route = route_of(request.uri().path());
     if !host_is_loopback(request.headers(), guard.port) {
-        warn!(%route, method = %request.method(), "a media request was refused: the Host is not loopback");
+        warn!(%route, method = %request.method(), "a session request was refused: the Host is not loopback");
         return refusal(StatusCode::FORBIDDEN, "loopback Host required");
     }
     if !guard.token.matches(offered_token(request.uri().path())) {
-        warn!(%route, method = %request.method(), "a media request was refused: no session token");
+        warn!(%route, method = %request.method(), "a session request was refused: no session token");
         return refusal(StatusCode::UNAUTHORIZED, "session token required");
     }
     // Once per session at `info`, and every later request at `debug`: "the renderer asked for the bytes"
     // is the fact that separates a refused stream from one that was never requested, and a film is a
     // stream of range requests after it.
     if guard.asked.swap(true, Ordering::Relaxed) {
-        debug!(%route, method = %request.method(), "a media request was authorised");
+        debug!(%route, method = %request.method(), "a session request was authorised");
     } else {
         info!(%route, method = %request.method(), "the renderer asked this session for its file");
     }
@@ -546,18 +620,25 @@ fn route_of(path: &str) -> &'static str {
     if path.starts_with(THUMBNAIL_PREFIX) {
         return THUMBNAIL_ROUTE;
     }
+    if path.starts_with(SUBTITLE_PREFIX) {
+        return SUBTITLE_ROUTE;
+    }
     "unrecognised"
 }
 
 /// The credential a request path carries, or the empty string when it carries none.
 ///
-/// Both routes put the token in the same place, so both are read here rather than in two `strip_prefix`
-/// calls that could disagree — and a path this build did not write answers the empty string, which no
-/// minted token can be, so it is refused by the same comparison as a wrong one.
+/// Every route puts the token immediately after its own prefix, so every route is read here rather than
+/// in three `strip_prefix` calls that could disagree — and a path this build did not write answers the
+/// empty string, which no minted token can be, so it is refused by the same comparison as a wrong one.
+///
+/// The token is the **first** segment after the prefix, not the whole remainder: the subtitle route puts
+/// the track id after it. A route whose remainder has further segments still has to match its route
+/// pattern to be served at all, which is the router's job and not this comparison's.
 fn offered_token(path: &str) -> &str {
-    for prefix in [MEDIA_PREFIX, THUMBNAIL_PREFIX] {
+    for prefix in [MEDIA_PREFIX, THUMBNAIL_PREFIX, SUBTITLE_PREFIX] {
         if let Some(offered) = path.strip_prefix(prefix) {
-            return offered;
+            return offered.split('/').next().unwrap_or_default();
         }
     }
     ""
@@ -616,6 +697,44 @@ async fn capture_frame(State(guard): State<Guard>, headers: HeaderMap, body: Byt
             // most, and a body would only be a string it does not read.
             refusal(StatusCode::BAD_REQUEST, "that frame could not be stored")
         }
+    }
+}
+
+/// Serves one sidecar subtitle the session registered.
+///
+/// **The request names an id, never a path.** The path was fixed when the session opened, from a
+/// [`SafePath`] `PathGuard` produced, so there is no file name on the wire to traverse with — and an id
+/// the session did not register is the same answer as a route that does not exist.
+///
+/// The read is bounded by [`MAX_SUBTITLE_BYTES`] rather than streamed: a text track is small, and a
+/// ceiling read in one piece is simpler than a second body-streaming path for bytes that are already
+/// kilobytes.
+async fn serve_subtitle(
+    State(guard): State<Guard>,
+    Path((_token, track)): Path<(String, String)>,
+) -> Response {
+    let Some(subtitle) = track
+        .parse::<i64>()
+        .ok()
+        .and_then(|id| guard.subtitles.get(&id))
+    else {
+        return refusal(StatusCode::NOT_FOUND, "no such subtitle");
+    };
+    let path = subtitle.path.as_path();
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_SUBTITLE_BYTES => {}
+        Ok(_) | Err(_) => return refusal(StatusCode::NOT_FOUND, "no such subtitle"),
+    }
+    match tokio::fs::read(path).await {
+        Ok(bytes) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, subtitle.content_type)
+            .body(Body::from(bytes))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        // A sidecar the scan indexed and something removed since: the track list the renderer already
+        // holds is the stale half, and a 404 is what makes the element report a missing resource
+        // rather than an empty one.
+        Err(_) => refusal(StatusCode::NOT_FOUND, "no such subtitle"),
     }
 }
 

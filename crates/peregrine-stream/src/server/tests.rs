@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, timeout};
 
-use super::{Capture, LOOPBACK_HOSTS, MediaServer, split_host};
+use super::{Capture, LOOPBACK_HOSTS, MediaServer, SidecarSubtitle, split_host};
 use crate::error::StreamError;
 use crate::thumbnail::{ThumbnailError, ThumbnailSink};
 
@@ -222,7 +222,7 @@ async fn ok(server: &MediaServer, extra: &[(&str, &str)]) -> Answer {
 /// A server over a fresh fixture, and the fixture it serves.
 async fn served(length: usize) -> (Fixture, MediaServer) {
     let fixture = Fixture::new(length);
-    let server = MediaServer::start(&fixture.safe(), token('a'), None)
+    let server = MediaServer::start(&fixture.safe(), token('a'), Vec::new(), None)
         .await
         .expect("the fixture is servable");
     (fixture, server)
@@ -494,10 +494,10 @@ async fn one_session_s_token_does_not_open_another_session() {
     // token was not what scoped the read.
     let first = Fixture::new(512);
     let second = Fixture::new(1024);
-    let a = MediaServer::start(&first.safe(), token('a'), None)
+    let a = MediaServer::start(&first.safe(), token('a'), Vec::new(), None)
         .await
         .expect("the first session opens");
-    let b = MediaServer::start(&second.safe(), token('b'), None)
+    let b = MediaServer::start(&second.safe(), token('b'), Vec::new(), None)
         .await
         .expect("the second session opens");
 
@@ -564,7 +564,7 @@ async fn a_file_that_is_gone_is_refused_when_the_session_opens_rather_than_when_
     let safe = fixture.safe();
     std::fs::remove_file(fixture.path()).expect("the fixture removes");
 
-    let refused = MediaServer::start(&safe, token('a'), None)
+    let refused = MediaServer::start(&safe, token('a'), Vec::new(), None)
         .await
         .expect_err("a gone file cannot be served");
 
@@ -582,7 +582,7 @@ async fn a_directory_is_refused_rather_than_served_as_an_empty_file() {
         .resolve(directory.path())
         .expect("the directory is inside its own root");
 
-    let refused = MediaServer::start(&safe, token('a'), None)
+    let refused = MediaServer::start(&safe, token('a'), Vec::new(), None)
         .await
         .expect_err("a directory is not a file");
 
@@ -615,7 +615,7 @@ async fn a_session_that_is_dropped_without_being_shut_down_still_stops_listening
     // The runtime that replaces a session may simply drop the old one, and a listener that outlived its
     // owner would be a socket nobody can close.
     let fixture = Fixture::new(64);
-    let server = MediaServer::start(&fixture.safe(), token('a'), None)
+    let server = MediaServer::start(&fixture.safe(), token('a'), Vec::new(), None)
         .await
         .expect("the fixture is servable");
     let port = server.port();
@@ -690,6 +690,7 @@ async fn capturing() -> (Fixture, Arc<RecordingSink>, MediaServer) {
     let server = MediaServer::start(
         &fixture.safe(),
         token('a'),
+        Vec::new(),
         Some(Capture {
             title_id: 7,
             sink: Arc::clone(&sink) as Arc<dyn ThumbnailSink>,
@@ -894,6 +895,7 @@ async fn a_sink_that_refuses_is_reported_rather_than_answered_with_success() {
     let server = MediaServer::start(
         &fixture.safe(),
         token('a'),
+        Vec::new(),
         Some(Capture {
             title_id: 7,
             sink: Arc::clone(&sink) as Arc<dyn ThumbnailSink>,
@@ -969,4 +971,181 @@ async fn a_frame_may_declare_a_jpeg_with_parameters() {
     assert_eq!(sink.frames().len(), 1);
 
     server.shutdown().await;
+}
+/// A session over the fixture with one sidecar subtitle registered.
+async fn subtitled() -> (Fixture, SidecarSubtitle, MediaServer) {
+    let fixture = Fixture::new(512);
+    let path = fixture.directory.path().join("film.en.srt");
+    std::fs::write(&path, b"1\n00:00:01,000 --> 00:00:02,000\nHello\n")
+        .expect("the sidecar writes");
+    let safe = PathGuard::new(fixture.directory.path())
+        .expect("the scratch directory is absolute")
+        .resolve(&path)
+        .expect("the sidecar is inside its own root");
+    let sidecar = SidecarSubtitle {
+        track_id: 11,
+        path: safe,
+        content_type: "application/x-subrip",
+    };
+    let server = MediaServer::start(&fixture.safe(), token('a'), vec![sidecar.clone()], None)
+        .await
+        .expect("the fixture is servable");
+    (fixture, sidecar, server)
+}
+
+#[tokio::test]
+async fn a_sidecar_subtitle_is_served_over_the_session_s_token() {
+    // The whole reason the sidecar route lives on this listener: the renderer's track element needs a
+    // URL, and the bytes must not travel over the asset protocol or IPC (AGENTS R11).
+    let (_fixture, _sidecar, server) = subtitled().await;
+    let path = format!("/subtitle/{}/11", server.token().as_str());
+
+    let answer = ask(
+        server.port(),
+        &bytes(request(
+            "GET",
+            &path,
+            Some(&format!("127.0.0.1:{}", server.port())),
+            &[],
+        )),
+    )
+    .await;
+
+    assert_eq!(answer.status, 200);
+    assert_eq!(answer.body, b"1\n00:00:01,000 --> 00:00:02,000\nHello\n");
+    assert_eq!(answer.header("content-type"), Some("application/x-subrip"));
+    assert_eq!(
+        answer.header("cache-control"),
+        Some("no-store"),
+        "a sidecar is a response like any other under SECURITY.md T10"
+    );
+    assert_eq!(answer.header("x-content-type-options"), Some("nosniff"));
+    assert_eq!(
+        answer.header("access-control-allow-origin"),
+        Some("*"),
+        "a cross-origin track element reads the response with CORS"
+    );
+    assert_eq!(
+        server.subtitle_url(11),
+        format!("http://127.0.0.1:{}{path}", server.port()),
+        "the URL the core hands the renderer is the route the server serves"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_subtitle_id_the_session_does_not_offer_is_refused() {
+    // The route takes an id and never a path, so an id the session was not opened with has no file
+    // behind it and is the same answer as a route that does not exist.
+    let (_fixture, _sidecar, server) = subtitled().await;
+    let port = server.port();
+    let host = format!("127.0.0.1:{port}");
+    let right = server.token().as_str();
+
+    for track in ["12", "notanumber", "-1", "0"] {
+        let answer = ask(
+            port,
+            &bytes(request(
+                "GET",
+                &format!("/subtitle/{right}/{track}"),
+                Some(&host),
+                &[],
+            )),
+        )
+        .await;
+        assert_eq!(answer.status, 404, "track {track}");
+    }
+
+    // A session opened without sidecars offers none of them, even for an id another session serves.
+    let plain = MediaServer::start(&Fixture::new(64).safe(), token('b'), Vec::new(), None)
+        .await
+        .expect("the fixture is servable");
+    let answer = ask(
+        plain.port(),
+        &bytes(request(
+            "GET",
+            &format!("/subtitle/{}/11", plain.token().as_str()),
+            Some(&format!("127.0.0.1:{}", plain.port())),
+            &[],
+        )),
+    )
+    .await;
+    assert_eq!(answer.status, 404);
+
+    server.shutdown().await;
+    plain.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_sidecar_needs_the_same_token_and_the_same_loopback_host_as_the_media() {
+    let (_fixture, _sidecar, server) = subtitled().await;
+    let port = server.port();
+    let path = format!("/subtitle/{}/11", server.token().as_str());
+
+    let wrong = token('b');
+    for offered in [
+        format!("/subtitle/{}/11", wrong.as_str()),
+        "/subtitle/".to_owned(),
+        format!("/subtitle/{}/11/extra", server.token().as_str()),
+    ] {
+        let answer = ask(
+            port,
+            &bytes(request(
+                "GET",
+                &offered,
+                Some(&format!("127.0.0.1:{port}")),
+                &[],
+            )),
+        )
+        .await;
+        assert_ne!(answer.status, 200, "{offered}");
+    }
+
+    // A page that rebound DNS to loopback is refused before the token is read, exactly as on the media
+    // route. The correct token is used so a pass cannot be the token check doing the work.
+    for host in ["evil.com", "127.0.0.1.evil.com"] {
+        let answer = ask(port, &bytes(request("GET", &path, Some(host), &[]))).await;
+        assert_eq!(answer.status, 403, "Host: {host}");
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_sidecar_that_is_gone_is_refused_when_it_is_read() {
+    // The row outlives the file: a scan wrote it and something removed the sidecar since. The track list
+    // the renderer holds is the stale half, and the request must answer 404 rather than an empty track.
+    let (fixture, _sidecar, server) = subtitled().await;
+    std::fs::remove_file(fixture.directory.path().join("film.en.srt"))
+        .expect("the sidecar removes");
+
+    let answer = ask(
+        server.port(),
+        &bytes(request(
+            "GET",
+            &format!("/subtitle/{}/11", server.token().as_str()),
+            Some(&format!("127.0.0.1:{}", server.port())),
+            &[],
+        )),
+    )
+    .await;
+
+    assert_eq!(answer.status, 404);
+
+    server.shutdown().await;
+}
+
+#[test]
+fn a_sidecar_outside_its_root_has_no_safe_path_to_register() {
+    // The route never takes a path, so containment is decided before a session opens: a row that names
+    // a file outside every root cannot produce the SafePath the server's constructor requires.
+    let fixture = Fixture::new(64);
+    let guard = PathGuard::new(fixture.directory.path()).expect("an absolute root");
+
+    let refused = guard
+        .resolve(Path::new("/etc/passwd"))
+        .expect_err("a sidecar outside the root has no SafePath");
+
+    assert_ne!(refused.to_string(), "");
 }

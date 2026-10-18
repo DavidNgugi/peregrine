@@ -17,13 +17,18 @@
 //! exposing the library root (ADR [0023](../../../docs/adr/0023-in-app-video-surface.md), SECURITY.md
 //! T10).
 //!
+//! **Sidecar subtitles are served from the same listener, under the same token.** A session is opened
+//! with the sidecar files it may serve — each already a `SafePath` — and the route names a
+//! `subtitle_track` row id rather than a file, so a request cannot ask for a path the session was not
+//! opened with.
+//!
 //! Still owed here: the LAN listener and its separate token scope (`PG-E19`), cast streams (`PG-E18`),
-//! subtitle sidecars (`PG-E17`), and bandwidth accounting (`PG-E10-16`).
+//! and bandwidth accounting (`PG-E10-16`).
 
 mod error;
 mod server;
 mod thumbnail;
 
 pub use error::StreamError;
-pub use server::{Capture, MediaReader, MediaServer, TorrentMedia};
+pub use server::{Capture, MediaReader, MediaServer, SidecarSubtitle, TorrentMedia};
 pub use thumbnail::{ThumbnailError, ThumbnailSink};

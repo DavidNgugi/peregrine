@@ -343,6 +343,49 @@ pub struct SessionRef {
     pub id: u64,
 }
 
+/// One sidecar subtitle track a playback session can show, and where its bytes are.
+///
+/// **A URL and not a path**, for the reason the session's own URL is one: the bytes are served by the
+/// session's loopback listener under its token, so the webview never needs the asset protocol and IPC
+/// never carries a blob (AGENTS R11). The row's facts are the core's read of `subtitle_track`; a
+/// renderer draws them and does not derive them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleTrackDto {
+    /// The `subtitle_track` row id, which is the session's route segment.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// The language, as a BCP-47 tag.
+    pub language: String,
+    /// The label to show instead of the language.
+    pub label: Option<String>,
+    /// The container, as `subtitle_track.format` spells it (`srt`, `ass`, `vtt`, …).
+    pub format: String,
+    /// Whether the track only covers forced narrative.
+    pub forced: bool,
+    /// Whether the track carries captions for the hard of hearing.
+    pub sdh: bool,
+    /// Whether the core would choose this track when nothing else is chosen.
+    pub default: bool,
+    /// The loopback URL a track element follows.
+    pub url: String,
+}
+
+impl From<peregrine_app::PlaybackSubtitle> for SubtitleTrackDto {
+    fn from(track: peregrine_app::PlaybackSubtitle) -> Self {
+        Self {
+            id: track.id,
+            language: track.language,
+            label: track.label,
+            format: track.format,
+            forced: track.forced,
+            sdh: track.sdh,
+            default: track.default,
+            url: track.url,
+        }
+    }
+}
+
 /// One open playback session: what is playing, and where the bytes come from.
 ///
 /// **A URL and not a path**, and that is the surface `ADR 0023` decides: the asset protocol never
@@ -376,6 +419,11 @@ pub struct PlaybackSessionDto {
     /// token, and a renderer that swapped one path segment for another would be a second place the route
     /// is spelled — which is exactly the kind of drift a bearer credential makes expensive.
     pub thumbnail_url: Option<String>,
+    /// The sidecar subtitle tracks this session can serve.
+    ///
+    /// Empty when the file has none the library indexed. Each carries its own loopback URL, for the same
+    /// reason the poster route does: one credential, and one place the route is spelled.
+    pub subtitles: Vec<SubtitleTrackDto>,
     /// Whether the renderer should capture a poster frame while it plays.
     ///
     /// The core's answer, and it is `true` only for a title with no poster to draw: capturing costs a
@@ -401,6 +449,11 @@ impl From<peregrine_app::StartedPlayback> for PlaybackSessionDto {
             support: LocalPlaybackDto::from(started.support),
             url: started.url,
             thumbnail_url: started.thumbnail_url,
+            subtitles: started
+                .subtitles
+                .into_iter()
+                .map(SubtitleTrackDto::from)
+                .collect(),
             needs_poster: started.needs_poster,
             resume_position_ms: started.resume_position_ms,
         }
@@ -1704,5 +1757,72 @@ mod tests {
         );
 
         crate::runtime::shutdown(app.handle()).await;
+    }
+
+    /// The wire shape of a playback session's sidecar tracks.
+    ///
+    /// Three things cross that a screen cannot decide: which tracks the file has, which one is the
+    /// core's default, and the URL each track's bytes come from. The flags travel under their camelCase
+    /// names because that is what the renderer switches on.
+    #[test]
+    fn a_playback_session_carries_its_sidecar_tracks_and_their_urls() {
+        let started = peregrine_app::StartedPlayback {
+            session_id: peregrine_app::SessionId::from_raw(3),
+            title_id: 7,
+            episode_id: None,
+            media_file_id: 42,
+            support: peregrine_app::LocalPlayback::Webview,
+            url: "http://127.0.0.1:5000/media/token".to_owned(),
+            thumbnail_url: None,
+            subtitles: vec![
+                peregrine_app::PlaybackSubtitle {
+                    id: 11,
+                    language: "en".to_owned(),
+                    label: None,
+                    format: "srt".to_owned(),
+                    forced: false,
+                    sdh: true,
+                    default: true,
+                    url: "http://127.0.0.1:5000/subtitle/token/11".to_owned(),
+                },
+                peregrine_app::PlaybackSubtitle {
+                    id: 12,
+                    language: "fr".to_owned(),
+                    label: Some("Français".to_owned()),
+                    format: "vtt".to_owned(),
+                    forced: true,
+                    sdh: false,
+                    default: false,
+                    url: "http://127.0.0.1:5000/subtitle/token/12".to_owned(),
+                },
+            ],
+            needs_poster: false,
+            resume_position_ms: None,
+        };
+
+        let dto = PlaybackSessionDto::from(started);
+
+        assert_eq!(dto.session_id, 3);
+        assert_eq!(dto.subtitles.len(), 2);
+        assert_eq!(dto.subtitles[0].id, 11);
+        assert_eq!(dto.subtitles[0].language, "en");
+        assert_eq!(dto.subtitles[0].format, "srt");
+        assert!(dto.subtitles[0].sdh);
+        assert!(dto.subtitles[0].default);
+        assert!(!dto.subtitles[0].forced);
+        assert_eq!(dto.subtitles[1].label.as_deref(), Some("Français"));
+        assert!(dto.subtitles[1].forced);
+        assert_eq!(
+            dto.subtitles[1].url,
+            "http://127.0.0.1:5000/subtitle/token/12"
+        );
+
+        // The renderer reads these names literally, so the wire spelling is asserted rather than assumed.
+        let value = serde_json::to_value(&dto).expect("serializes");
+        let first = &value["subtitles"][0];
+        assert_eq!(first["default"].as_bool(), Some(true));
+        assert_eq!(first["sdh"].as_bool(), Some(true));
+        assert_eq!(first["forced"].as_bool(), Some(false));
+        assert_eq!(first["id"].as_i64(), Some(11));
     }
 }

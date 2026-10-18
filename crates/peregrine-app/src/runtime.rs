@@ -25,8 +25,8 @@ use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
     AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback,
-    PlaybackPosition, PreferredQuality, ProgressSource, SafePath, ScanMode, TokenSource,
-    WatchProgress,
+    PlaybackPosition, PreferredQuality, ProgressSource, SafePath, ScanMode, SubtitleFormat,
+    SubtitleTrack, TokenSource, WatchProgress,
 };
 use peregrine_platform::{SystemClock, SystemTrash, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
@@ -345,6 +345,31 @@ pub struct StartedCapture {
     pub thumbnail_url: Option<String>,
 }
 
+/// One sidecar subtitle track a playback session can serve.
+///
+/// The track's own facts come from the `subtitle_track` row a scan wrote; the URL is the session's,
+/// because only the core knows the listener's port and token. A renderer hands the URL to a track
+/// element and never assembles one (AGENTS R11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackSubtitle {
+    /// The `subtitle_track` row id, which is the route segment.
+    pub id: i64,
+    /// The language, as a BCP-47 tag.
+    pub language: String,
+    /// The label to show instead of the language.
+    pub label: Option<String>,
+    /// The container, as `subtitle_track.format` spells it.
+    pub format: String,
+    /// Whether the track only covers forced narrative.
+    pub forced: bool,
+    /// Whether the track carries captions for the hard of hearing.
+    pub sdh: bool,
+    /// Whether the track is preferred when nothing else is chosen.
+    pub default: bool,
+    /// The loopback URL a track element follows.
+    pub url: String,
+}
+
 /// One playback session a screen can draw: what is playing, and where the bytes come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartedPlayback {
@@ -368,6 +393,12 @@ pub struct StartedPlayback {
     /// Built by the core rather than spliced together by the renderer, because the token is in both URLs
     /// and a second place the route is spelled is a second place it can drift.
     pub thumbnail_url: Option<String>,
+    /// The sidecar subtitle tracks this session can serve, from `subtitle_track`.
+    ///
+    /// Empty when the file has no sidecar the library indexed, when the caller opened a torrent session,
+    /// and when every row's path was refused by the path guard. A session with none answers no track id,
+    /// which is a fact about the film rather than about a request.
+    pub subtitles: Vec<PlaybackSubtitle>,
     /// Whether this title has no poster for the renderer to capture one for.
     ///
     /// **The rule that stops a film still overwriting real artwork.** A capture costs a decode of the
@@ -2924,6 +2955,91 @@ impl Runtime {
         Ok((file.clone(), safe))
     }
 
+    /// The sidecar subtitles a playback session may serve for one file, with their metadata.
+    ///
+    /// Only a row with a path is offered: an embedded or generated track has no sidecar file to serve,
+    /// and extraction is not this slice's. A path outside every configured root is refused track by
+    /// track rather than failing the play — a stale or tampered row must not take a film down with it —
+    /// and the refusal is logged without the path (SECURITY.md T13).
+    async fn playable_subtitles(
+        &self,
+        media_file_id: i64,
+    ) -> Result<Vec<(SubtitleTrack, SafePath)>, RuntimeError> {
+        if media_file_id == 0 {
+            return Ok(Vec::new());
+        }
+        let rows = self
+            .database
+            .list_subtitle_tracks(
+                installation_scope(),
+                media_file_id,
+                PageRequest::first(MAX_SUBTITLE_TRACKS),
+            )
+            .await?;
+        let mut playable = Vec::new();
+        for row in rows {
+            let Some(path) = row.track.path.as_deref() else {
+                continue;
+            };
+            match self.guarded_media_path(Path::new(path)).await {
+                Ok(safe) => playable.push((row.track, safe)),
+                Err(RuntimeError::FileOutsideRoots) => {
+                    warn!(
+                        track = row.track.id,
+                        "a subtitle sidecar outside every configured root was not offered"
+                    );
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(playable)
+    }
+
+    /// Opens a session for a library file and answers the sidecar tracks it can serve.
+    ///
+    /// The sidecars are read before the listener opens, so the session is registered with the exact set
+    /// it may serve: a request cannot name a track the session was not opened with.
+    async fn open_file_session(
+        &self,
+        media_file_id: i64,
+        title_id: i64,
+        file: &SafePath,
+    ) -> Result<(peregrine_playback::PlaybackSession, Vec<PlaybackSubtitle>), RuntimeError> {
+        let tracks = self.playable_subtitles(media_file_id).await?;
+        let sidecars = tracks
+            .iter()
+            .map(|(track, path)| peregrine_stream::SidecarSubtitle {
+                track_id: track.id,
+                path: path.clone(),
+                content_type: subtitle_content_type(track.format),
+            })
+            .collect();
+        let session = peregrine_playback::PlaybackSession::open(
+            media_file_id,
+            title_id,
+            file,
+            self.tokens.next_token(),
+            sidecars,
+            Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
+        )
+        .await
+        .map_err(playback_error)?;
+        let subtitles = tracks
+            .into_iter()
+            .map(|(track, _)| PlaybackSubtitle {
+                id: track.id,
+                language: track.language.as_str().to_owned(),
+                label: track.label,
+                format: track.format.as_str().to_owned(),
+                forced: track.is_forced,
+                sdh: track.is_sdh,
+                default: track.is_default,
+                url: session.subtitle_url(track.id),
+            })
+            .collect();
+        Ok((session, subtitles))
+    }
+
     /// Opens a session for one of a title's files so the renderer can capture a poster frame.
     ///
     /// **The same machinery as [`Runtime::start_playback`] and a separate command on purpose.** One file,
@@ -2959,6 +3075,7 @@ impl Runtime {
             title_id,
             &safe,
             self.tokens.next_token(),
+            Vec::new(),
             Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
         )
         .await
@@ -3104,7 +3221,7 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
-        let (media_file_id, support, needs_poster, session) =
+        let (media_file_id, support, needs_poster, session, subtitles) =
             match self.playable(title_id, episode_id).await {
                 Ok((file, safe)) => {
                     let support = LocalPlayback::of_name(file.path.as_str());
@@ -3112,16 +3229,11 @@ impl Runtime {
                     // needs: only when there is nothing to draw, which is the rule that stops a film still
                     // replacing real artwork.
                     let needs_poster = self.needs_poster(title_id).await?;
-                    let session = peregrine_playback::PlaybackSession::open(
-                        file.id,
-                        title_id,
-                        &safe,
-                        self.tokens.next_token(),
-                        Some(Arc::clone(&self.posters) as Arc<dyn peregrine_stream::ThumbnailSink>),
-                    )
-                    .await
-                    .map_err(playback_error)?;
-                    (file.id, support, needs_poster, session)
+                    let media_file_id = file.id;
+                    let (session, subtitles) = self
+                        .open_file_session(media_file_id, title_id, &safe)
+                        .await?;
+                    (media_file_id, support, needs_poster, session, subtitles)
                 }
                 // A title with nothing on disk may still be downloading: serve it from the engine so a film
                 // can be watched while its last pieces arrive.
@@ -3137,7 +3249,7 @@ impl Runtime {
                             )
                             .await
                             .map_err(playback_error)?;
-                            (0, LocalPlayback::Unknown, false, session)
+                            (0, LocalPlayback::Unknown, false, session, Vec::new())
                         }
                         None => return Err(RuntimeError::NoPlayableFile),
                     }
@@ -3177,6 +3289,7 @@ impl Runtime {
             support,
             url,
             thumbnail_url,
+            subtitles,
             needs_poster,
             resume_position_ms,
         })
@@ -4146,6 +4259,28 @@ async fn newest_log_file(directory: &Path) -> Option<PathBuf> {
         }
     }
     newest
+}
+
+/// How many sidecar subtitle tracks one session reads for the file it plays.
+///
+/// A page rather than an unbounded read, like every other list. A hundred tracks on one file is far
+/// past any real release, and the tracks past the bound are simply not offered.
+const MAX_SUBTITLE_TRACKS: u32 = 100;
+
+/// The content type a sidecar subtitle is served as, from its stored format.
+///
+/// `WebVTT` has a registered type; `SRT`, `ASS`, and `SSA` have the de-facto ones their parsers
+/// accept; the bitmap formats are labelled as bytes because no track element renders them as text.
+/// The mapping lives here because it is the app's composition of a stored column, not the domain's
+/// rule.
+const fn subtitle_content_type(format: SubtitleFormat) -> &'static str {
+    match format {
+        SubtitleFormat::Srt => "application/x-subrip",
+        SubtitleFormat::Vtt => "text/vtt",
+        SubtitleFormat::Ass | SubtitleFormat::Ssa => "text/x-ssa",
+        SubtitleFormat::Sub => "text/plain",
+        SubtitleFormat::Pgs | SubtitleFormat::Vobsub => "application/octet-stream",
+    }
 }
 
 /// How many configured roots are checked when deciding whether a media path may be served.
@@ -6124,9 +6259,16 @@ mod tests {
     /// would be asserting a shape no scan produces, and the containment check is exactly the kind of
     /// thing that passes such a fixture and fails a real library.
     async fn scanned(directory: &TempDir, name: &str) -> (Runtime, i64) {
+        scanned_files(directory, &[(name, vec![9_u8; 4096])]).await
+    }
+
+    /// The same scan over a folder holding several files: a film and the sidecars beside it.
+    async fn scanned_files(directory: &TempDir, files: &[(&str, Vec<u8>)]) -> (Runtime, i64) {
         let movies = directory.path().join("Movies");
         std::fs::create_dir_all(&movies).expect("the library folder is creatable");
-        std::fs::write(movies.join(name), vec![9_u8; 4096]).expect("the fixture file writes");
+        for (name, bytes) in files {
+            std::fs::write(movies.join(name), bytes).expect("the fixture file writes");
+        }
         let (runtime, _sink) = runtime(directory).await;
         runtime
             .add_library_root(
@@ -6205,6 +6347,137 @@ mod tests {
             "a stop that names the session it opened closes it"
         );
         assert!(!runtime.is_playing(), "and stopping ends it");
+
+        runtime.shutdown().await;
+    }
+
+    /// A sidecar the scan indexed is offered by the session and served over its own URL.
+    ///
+    /// This is the wiring `peregrine-stream` cannot assert alone: the row the scanner wrote, the path
+    /// guard's verdict, the session's registration, and the route that answers — one path from a file on
+    /// disk to bytes a track element can follow.
+    #[tokio::test]
+    async fn a_scanned_sidecar_is_offered_by_the_session_and_served_over_its_url() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        const SUBTITLE: &str = "1\n00:00:01,000 --> 00:00:02,000\nHello\n";
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned_files(
+            &directory,
+            &[
+                ("Alien (1979).mp4", vec![9_u8; 4096]),
+                ("Alien (1979).en.srt", SUBTITLE.as_bytes().to_vec()),
+            ],
+        )
+        .await;
+
+        let started = runtime
+            .start_playback(id, None)
+            .await
+            .expect("the film plays");
+
+        assert_eq!(started.subtitles.len(), 1, "the sidecar the scan indexed");
+        let track = &started.subtitles[0];
+        assert_eq!(track.language, "en");
+        assert_eq!(track.format, "srt");
+        assert_eq!(track.label, None);
+        assert!(!track.forced);
+        assert!(!track.sdh);
+        assert!(!track.default, "a scan writes no default");
+        assert!(
+            track.url.starts_with("http://127.0.0.1:"),
+            "the bytes go over the session's own listener, not the asset protocol: {}",
+            track.url
+        );
+        assert!(track.url.contains("/subtitle/"));
+        assert!(track.url.ends_with(&format!("/{}", track.id)));
+
+        // The route really answers, which a URL alone cannot show. A track element sends exactly this.
+        let port: u16 = track
+            .url
+            .strip_prefix("http://127.0.0.1:")
+            .and_then(|rest| rest.split('/').next())
+            .and_then(|text| text.parse().ok())
+            .expect("the track URL carries a port");
+        let path = track
+            .url
+            .strip_prefix(&format!("http://127.0.0.1:{port}"))
+            .expect("the track URL is loopback");
+        let request =
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("the session is listening");
+        socket.write_all(request.as_bytes()).await.unwrap();
+        socket.flush().await.unwrap();
+        let mut answer = String::new();
+        socket.read_to_string(&mut answer).await.unwrap();
+        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+        assert!(
+            answer.contains(SUBTITLE),
+            "the served bytes are the sidecar's: {answer}"
+        );
+
+        runtime.shutdown().await;
+    }
+
+    /// A sidecar row whose path is outside every configured root is refused track by track.
+    ///
+    /// The database is not the filesystem: a row can name anything (a stale scan, a moved library, a
+    /// tampered database). Serving that path would hand the loopback listener a file the user never
+    /// pointed the library at, so the guard refuses it and the film still plays.
+    #[tokio::test]
+    async fn a_sidecar_outside_the_guarded_roots_is_not_offered() {
+        use peregrine_domain::{
+            NonEmptyText, SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack,
+        };
+
+        let directory = TempDir::new().unwrap();
+        let (runtime, id) = scanned(&directory, "Alien (1979).mp4").await;
+
+        // The media file's row id, which the scan wrote and the session reads sidecars by.
+        let first = runtime
+            .start_playback(id, None)
+            .await
+            .expect("the film plays");
+        let media_file_id = first.media_file_id;
+        runtime.stop_playback(first.session_id).await;
+
+        runtime
+            .database
+            .insert_subtitle_track(SubtitleTrack {
+                id: 0,
+                owner: SubtitleOwner::File { media_file_id },
+                origin: SubtitleOrigin::External,
+                format: SubtitleFormat::Srt,
+                language: NonEmptyText::new("en").expect("a language tag"),
+                label: None,
+                is_forced: false,
+                is_sdh: false,
+                is_default: false,
+                stream_index: None,
+                path: Some("/etc/passwd".to_owned()),
+                provider: None,
+                provider_subtitle_id: None,
+                provider_url: None,
+                release_name: None,
+                encoding: None,
+                offset_ms: 0,
+                hash_matched: false,
+                downloaded_at: None,
+                last_used_at: None,
+            })
+            .await
+            .expect("the row writes");
+
+        let started = runtime
+            .start_playback(id, None)
+            .await
+            .expect("the film plays");
+        assert!(
+            started.subtitles.is_empty(),
+            "a path outside every root is never served: {:?}",
+            started.subtitles
+        );
 
         runtime.shutdown().await;
     }

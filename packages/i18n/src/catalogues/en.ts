@@ -401,6 +401,12 @@ export const en = {
       },
       // What the external branch says when mpv is the reader: no picture in the page, and the reason.
       external: "The film is open in mpv. Watch progress is saved as you go.",
+      // The track menu beside the picture. "Off" is the absence of a sidecar, which is the state a
+      // session with tracks opens in when the core marks none as default.
+      subtitles: {
+        title: "Subtitles",
+        off: "Off",
+      },
     },
     title: {
       section: "In your library",

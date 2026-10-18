@@ -34,6 +34,7 @@ export type {
   LocalPlaybackDto,
   MatchAsDto,
   PlaybackSessionDto,
+  SubtitleTrackDto,
   ProwlarrStatusDto,
   MatchRuleDto,
   ProviderDto,

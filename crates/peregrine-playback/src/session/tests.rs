@@ -1,6 +1,7 @@
 //! What a session promises: where it is served, what it is serving, and that it stops.
 
 use peregrine_domain::{PathGuard, SafePath, SessionToken};
+use peregrine_stream::SidecarSubtitle;
 use tokio::net::TcpStream;
 
 use super::{PlaybackError, PlaybackSession};
@@ -58,7 +59,7 @@ fn port_of(url: &str) -> u16 {
 async fn a_session_serves_the_file_it_was_opened_for_and_says_which_file_that_was() {
     let fixture = Fixture::new();
 
-    let session = PlaybackSession::open(42, 7, &fixture.safe(), token(), None)
+    let session = PlaybackSession::open(42, 7, &fixture.safe(), token(), Vec::new(), None)
         .await
         .expect("the fixture is servable");
 
@@ -87,7 +88,7 @@ async fn a_session_serves_the_file_it_was_opened_for_and_says_which_file_that_wa
 #[tokio::test]
 async fn closing_a_session_closes_its_socket() {
     let fixture = Fixture::new();
-    let session = PlaybackSession::open(1, 1, &fixture.safe(), token(), None)
+    let session = PlaybackSession::open(1, 1, &fixture.safe(), token(), Vec::new(), None)
         .await
         .expect("the fixture is servable");
     let port = port_of(session.url());
@@ -105,7 +106,7 @@ async fn a_session_that_is_simply_dropped_also_stops_listening() {
     // The runtime replaces a session by assigning over it, and a listener left behind by the value that
     // used to own it would be a socket nobody holds.
     let fixture = Fixture::new();
-    let session = PlaybackSession::open(1, 1, &fixture.safe(), token(), None)
+    let session = PlaybackSession::open(1, 1, &fixture.safe(), token(), Vec::new(), None)
         .await
         .expect("the fixture is servable");
     let port = port_of(session.url());
@@ -132,7 +133,7 @@ async fn the_capture_url_exists_exactly_when_the_caller_brought_a_place_to_put_a
     // A session that answered a URL it would refuse would make every play post a frame into a 404.
     let fixture = Fixture::new();
 
-    let without = PlaybackSession::open(1, 1, &fixture.safe(), token(), None)
+    let without = PlaybackSession::open(1, 1, &fixture.safe(), token(), Vec::new(), None)
         .await
         .expect("the fixture is servable");
     assert_eq!(without.thumbnail_url(), None);
@@ -142,6 +143,7 @@ async fn the_capture_url_exists_exactly_when_the_caller_brought_a_place_to_put_a
         1,
         &fixture.safe(),
         token(),
+        Vec::new(),
         Some(std::sync::Arc::new(Nowhere)),
     )
     .await
@@ -165,7 +167,7 @@ async fn a_file_that_is_gone_is_refused_when_the_session_opens() {
     let safe = fixture.safe();
     std::fs::remove_file(fixture.directory.path().join("film.mp4")).expect("the fixture removes");
 
-    let refused = PlaybackSession::open(1, 1, &safe, token(), None)
+    let refused = PlaybackSession::open(1, 1, &safe, token(), Vec::new(), None)
         .await
         .expect_err("a gone file cannot be served");
 
@@ -182,7 +184,7 @@ async fn two_sessions_are_two_sockets_with_two_tokens() {
     let first = Fixture::new();
     let second = Fixture::new();
 
-    let a = PlaybackSession::open(1, 1, &first.safe(), token(), None)
+    let a = PlaybackSession::open(1, 1, &first.safe(), token(), Vec::new(), None)
         .await
         .expect("the first session opens");
     let b = PlaybackSession::open(
@@ -190,6 +192,7 @@ async fn two_sessions_are_two_sockets_with_two_tokens() {
         8,
         &second.safe(),
         SessionToken::new("z".repeat(32)).unwrap(),
+        Vec::new(),
         None,
     )
     .await
@@ -203,4 +206,40 @@ async fn two_sessions_are_two_sockets_with_two_tokens() {
 
     a.close().await;
     b.close().await;
+}
+#[tokio::test]
+async fn a_session_answers_a_subtitle_url_on_the_route_it_serves() {
+    // The renderer is handed a URL, never a path, and the token is in the same place it is for media
+    // and capture: one credential, three routes on one listener.
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.directory.path().join("film.en.srt"),
+        b"1\n00:00:01,000 --> 00:00:02,000\nHello\n",
+    )
+    .expect("the sidecar writes");
+    let sidecar = SidecarSubtitle {
+        track_id: 9,
+        path: PathGuard::new(fixture.directory.path())
+            .expect("the scratch directory is absolute")
+            .resolve(&fixture.directory.path().join("film.en.srt"))
+            .expect("the sidecar is inside its own root"),
+        content_type: "application/x-subrip",
+    };
+
+    let session = PlaybackSession::open(1, 1, &fixture.safe(), token(), vec![sidecar], None)
+        .await
+        .expect("the fixture is servable");
+
+    assert_eq!(
+        session.subtitle_url(9),
+        format!(
+            "http://127.0.0.1:{}/subtitle/{}/9",
+            port_of(session.url()),
+            token().as_str()
+        )
+    );
+    // The same listener as the media, which is the whole reason the route lives here.
+    assert_eq!(port_of(&session.subtitle_url(9)), port_of(session.url()));
+
+    session.close().await;
 }

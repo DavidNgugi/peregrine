@@ -27,7 +27,12 @@
  */
 
 import { Button, EmptyState, ErrorState, Screen } from "@peregrine/ui";
-import { normalizeIpcError, playExternally, type IpcError } from "@peregrine/ipc-client";
+import {
+  normalizeIpcError,
+  playExternally,
+  type IpcError,
+  type SubtitleTrackDto,
+} from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,6 +41,14 @@ import { messageOf } from "../../../lib/ipc-message.js";
 import { useFrameCapture } from "../hooks/useFrameCapture.js";
 import { usePlayback, type Playback } from "../hooks/usePlayback.js";
 import { usePlaybackProgress } from "../hooks/usePlaybackProgress.js";
+import { initialSubtitleTrack, subtitleTrackLabel } from "../lib/track-selection.js";
+
+/** No tracks, as one stable value so the selection effect does not run on every render. */
+const NO_SUBTITLES: readonly SubtitleTrackDto[] = [];
+
+/** The menu, sized to sit beside the support sentence rather than over the picture. */
+const TRACK_SELECT_CLASS =
+  "h-8 min-w-0 rounded-full border border-border-subtle bg-surface-0/70 px-3 text-caption text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 export interface PlayerViewProps {
   /** What the hook answered: the session, or why there is none. */
@@ -67,6 +80,41 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
     setBlocked(false);
   }, [session?.url]);
 
+  // **The sidecars are the session's, and the selection is the screen's.** The core answers which
+  // tracks the file has and which one it would choose; a menu choice lives for this session only,
+  // because "always this language" is a preference ('PG-E17-12'/'PG-E17-13') and not this slice's.
+  const subtitles = session?.subtitles ?? NO_SUBTITLES;
+  const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
+  useEffect(() => {
+    setSelectedTrack(initialSubtitleTrack(subtitles));
+  }, [session?.sessionId, subtitles]);
+
+  // **The mode is set on the element's own track objects, not by an attribute.** A track is added to
+  // the list when the element loads it, so a single pass at mount would be a pass before the list
+  // exists; `addtrack` is what makes the choice survive the load.
+  useEffect(() => {
+    const element = surface.current;
+    if (element === null) {
+      return;
+    }
+    const apply = (): void => {
+      for (let index = 0; index < element.textTracks.length; index += 1) {
+        const entry = element.textTracks[index];
+        const track = subtitles[index];
+        if (entry === undefined || track === undefined) {
+          continue;
+        }
+        entry.mode = track.id === selectedTrack ? "showing" : "disabled";
+      }
+    };
+    apply();
+    const list = element.textTracks;
+    list.addEventListener("addtrack", apply);
+    return () => {
+      list.removeEventListener("addtrack", apply);
+    };
+  }, [subtitles, selectedTrack, session?.sessionId]);
+
   const start = (): void => {
     const element = surface.current;
     if (element === null) {
@@ -90,13 +138,40 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
           <Button onClick={onClose} size="sm" variant="ghost">
             {t("player.back")}
           </Button>
-          {/* Which reader is doing the work, said beside the picture rather than as a refusal: it is an
-              explanation for a container the webview cannot name, and reassurance otherwise. */}
-          {session === null ? null : (
-            <span className="text-caption text-text-tertiary">
-              {t(`player.support.${session.support}`)}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {/* **The track menu, and only for the surface that can show a track.** An external
+                session's sidecars are mpv's to pick, so offering a menu here would be a control that
+                changes nothing this page can see. */}
+            {external || subtitles.length === 0 ? null : (
+              <label className="flex items-center gap-2 text-caption text-text-tertiary">
+                {t("player.subtitles.title")}
+                <select
+                  aria-label={t("player.subtitles.title")}
+                  className={TRACK_SELECT_CLASS}
+                  data-player-subtitles=""
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setSelectedTrack(value === "" ? null : Number(value));
+                  }}
+                  value={selectedTrack === null ? "" : String(selectedTrack)}
+                >
+                  <option value="">{t("player.subtitles.off")}</option>
+                  {subtitles.map((track) => (
+                    <option key={track.id} value={String(track.id)}>
+                      {subtitleTrackLabel(track)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {/* Which reader is doing the work, said beside the picture rather than as a refusal: it is
+                an explanation for a container the webview cannot name, and reassurance otherwise. */}
+            {session === null ? null : (
+              <span className="text-caption text-text-tertiary">
+                {t(`player.support.${session.support}`)}
+              </span>
+            )}
+          </div>
         </div>
 
         {playback.failed === null ? null : (
@@ -146,6 +221,10 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
                 autoPlay
                 className="h-full max-h-full w-full rounded-md bg-black"
                 controls
+                // The tracks are cross-origin, so the element has to fetch them in CORS mode for the
+                // text to be usable; the session's listener sends `Access-Control-Allow-Origin` for
+                // exactly this reason, and the capture element already sets the same flag.
+                crossOrigin="anonymous"
                 data-player-surface=""
                 // The engine's own account of the autoplay attempt: `canplay` is where `play()` is worth
                 // asking again, and `playing` is what says it worked.
@@ -157,6 +236,21 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
                 ref={surface}
                 src={session.url}
               >
+                {/* **The sidecars, exactly as the library indexed them.** Each URL comes from the
+                    session, so the webview never builds a route and never sees a path. The container
+                    is the platform's limit: the webview's track parser reads WebVTT, so an SRT, ASS,
+                    or SSA row is listed and served but may not render in this surface. mpv owns those
+                    formats when it is the reader ('PG-E17-07'/'PG-E17-08'); hiding them here would
+                    misreport what the library holds. */}
+                {subtitles.map((track) => (
+                  <track
+                    key={track.id}
+                    kind="subtitles"
+                    label={subtitleTrackLabel(track)}
+                    src={track.url}
+                    srcLang={track.language}
+                  />
+                ))}
                 {t("player.unsupported")}
               </video>
             )}

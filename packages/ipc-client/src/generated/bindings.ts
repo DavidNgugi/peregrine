@@ -1538,6 +1538,13 @@ export type PlaybackSessionDto = {
 	 */
 	thumbnailUrl: string | null,
 	/**
+	 *  The sidecar subtitle tracks this session can serve.
+	 * 
+	 *  Empty when the file has none the library indexed. Each carries its own loopback URL, for the same
+	 *  reason the poster route does: one credential, and one place the route is spelled.
+	 */
+	subtitles: SubtitleTrackDto[],
+	/**
 	 *  Whether the renderer should capture a poster frame while it plays.
 	 * 
 	 *  The core's answer, and it is `true` only for a title with no poster to draw: capturing costs a
@@ -1925,6 +1932,33 @@ export type ShortcutBinding = {
 	alt: boolean,
 	/**  Whether Shift is held. */
 	shift: boolean,
+};
+
+/**
+ *  One sidecar subtitle track a playback session can show, and where its bytes are.
+ * 
+ *  **A URL and not a path**, for the reason the session's own URL is one: the bytes are served by the
+ *  session's loopback listener under its token, so the webview never needs the asset protocol and IPC
+ *  never carries a blob (AGENTS R11). The row's facts are the core's read of `subtitle_track`; a
+ *  renderer draws them and does not derive them.
+ */
+export type SubtitleTrackDto = {
+	/**  The `subtitle_track` row id, which is the session's route segment. */
+	id: number,
+	/**  The language, as a BCP-47 tag. */
+	language: string,
+	/**  The label to show instead of the language. */
+	label: string | null,
+	/**  The container, as `subtitle_track.format` spells it (`srt`, `ass`, `vtt`, …). */
+	format: string,
+	/**  Whether the track only covers forced narrative. */
+	forced: boolean,
+	/**  Whether the track carries captions for the hard of hearing. */
+	sdh: boolean,
+	/**  Whether the core would choose this track when nothing else is chosen. */
+	default: boolean,
+	/**  The loopback URL a track element follows. */
+	url: string,
 };
 
 /**

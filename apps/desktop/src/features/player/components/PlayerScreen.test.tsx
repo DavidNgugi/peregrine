@@ -1,5 +1,5 @@
 import { createI18n } from "@peregrine/i18n";
-import type { IpcError, PlaybackSessionDto } from "@peregrine/ipc-client";
+import type { IpcError, PlaybackSessionDto, SubtitleTrackDto } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { describe, expect, it } from "vitest";
@@ -24,8 +24,25 @@ function session(overrides: Partial<PlaybackSessionDto> = {}): PlaybackSessionDt
     // there would be a decode of the film to overwrite real artwork.
     needsPoster: false,
     thumbnailUrl: null,
+    // No sidecars: a file without a subtitle the library indexed is the ordinary case.
+    subtitles: [],
     // No stored position: a first watch, which is the ordinary case.
     resumePositionMs: null,
+    ...overrides,
+  };
+}
+
+/** One sidecar as the core answers it, with only the field under test varying. */
+function sidecar(overrides: Partial<SubtitleTrackDto> = {}): SubtitleTrackDto {
+  return {
+    id: 11,
+    language: "en",
+    label: null,
+    format: "srt",
+    forced: false,
+    sdh: false,
+    default: false,
+    url: "http://127.0.0.1:51234/subtitle/abc123abc123abc123abc123abc123abc123/11",
     ...overrides,
   };
 }
@@ -84,6 +101,62 @@ describe("PlayerView", () => {
     expect(html).not.toContain("<video");
     expect(html).toContain('data-player-external=""');
     expect(html).toContain("The film is open in mpv.");
+  });
+
+  it("renders one track element per sidecar, from the URL the core answered with", () => {
+    // The sidecar travels the same way the film does: a URL from the core, never a path and never a
+    // blob over IPC. The element is the platform's own text-track surface.
+    const html = markup({
+      session: session({
+        subtitles: [
+          sidecar({ id: 11, language: "en", sdh: true }),
+          sidecar({
+            id: 12,
+            language: "fr",
+            label: "Français",
+            format: "vtt",
+            forced: true,
+            url: "http://127.0.0.1:51234/subtitle/abc123abc123abc123abc123abc123abc123/12",
+          }),
+        ],
+      }),
+    });
+
+    expect(html).toContain('kind="subtitles"');
+    expect(html).toContain('srcLang="en"');
+    expect(html).toContain(
+      'src="http://127.0.0.1:51234/subtitle/abc123abc123abc123abc123abc123abc123/11"',
+    );
+    expect(html).toContain(
+      'src="http://127.0.0.1:51234/subtitle/abc123abc123abc123abc123abc123abc123/12"',
+    );
+    expect(html).toContain("en · SDH · SRT");
+    expect(html).toContain("Français · Forced · VTT");
+    // The menu itself, with the way out of it.
+    expect(html).toContain('data-player-subtitles=""');
+    expect(html).toContain("Subtitles");
+    expect(html).toContain("Off");
+    // Tracks are cross-origin text, so the element has to fetch them in CORS mode.
+    expect(html).toContain('crossorigin="anonymous"');
+  });
+
+  it("draws no track menu for a file with no sidecars", () => {
+    const html = markup({ session: session() });
+
+    expect(html).not.toContain("<track");
+    expect(html).not.toContain('data-player-subtitles=""');
+    expect(html).not.toContain("Subtitles");
+  });
+
+  it("leaves the track menu to mpv on a session the external player owns", () => {
+    // The sidecars may exist, but this page cannot show one and a menu that changed nothing would be
+    // a control that lies about what it does.
+    const html = markup({
+      session: session({ support: "externalPlayer", subtitles: [sidecar()] }),
+    });
+
+    expect(html).not.toContain('data-player-subtitles=""');
+    expect(html).not.toContain("<track");
   });
 
   it("says why the external player could not be started", () => {
