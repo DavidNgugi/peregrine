@@ -31,7 +31,7 @@ export function NetworkSection(): ReactElement {
       description={t("settings.network.description")}
       title={t("settings.network.title")}
     >
-      <div className="flex max-w-prose flex-col gap-3 text-body text-text-secondary">
+      <div className="flex w-full max-w-prose flex-col gap-3 px-3 py-2 text-body text-text-secondary">
         <p>{t("settings.network.body")}</p>
         <p>{t("settings.network.verify")}</p>
         <div className="flex flex-wrap items-center gap-3">
