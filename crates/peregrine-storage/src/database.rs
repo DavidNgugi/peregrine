@@ -1693,6 +1693,29 @@ impl Database {
         }
     }
 
+    /// Replaces one file's external subtitle tracks with what a scan found beside it.
+    ///
+    /// The set is the filesystem's answer rather than a merge: a sidecar removed between scans
+    /// takes its row with it, and re-running the same scan writes the same rows instead of a
+    /// second copy. Tracks of any other origin are not touched.
+    pub async fn replace_external_subtitles(
+        &self,
+        media_file_id: i64,
+        tracks: Vec<SubtitleTrack>,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ReplaceExternalSubtitles {
+                media_file_id,
+                tracks,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("replace_external_subtitles", &other)),
+        }
+    }
+
     /// One subtitle track, when `scope` may see the media it belongs to.
     pub async fn subtitle_track(
         &self,

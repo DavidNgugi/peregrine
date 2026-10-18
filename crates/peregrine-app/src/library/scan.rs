@@ -31,7 +31,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use peregrine_domain::{Freshness, ScanPolicy, ScanVerdict, SkipReason, Stamp};
+use peregrine_domain::{Freshness, ScanPolicy, ScanVerdict, SkipReason, Stamp, SubtitleFormat};
 use thiserror::Error;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -383,6 +383,112 @@ impl Scanner {
     }
 }
 
+/// One subtitle file beside a video, with what its name says about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubtitleSidecar {
+    /// The sidecar's path.
+    pub(crate) path: PathBuf,
+    /// The container its extension names.
+    pub(crate) format: SubtitleFormat,
+    /// The language tag its suffix names, or `und` when it names none.
+    pub(crate) language: String,
+    /// Whether its suffix marks it as forced narrative.
+    pub(crate) is_forced: bool,
+    /// Whether its suffix marks it as captions for the hard of hearing.
+    pub(crate) is_sdh: bool,
+}
+
+/// The subtitle files that sit beside `video` and share its stem.
+///
+/// One directory read per indexed video, and a link is not read: the scan's walk refuses a link
+/// for the reason its module doc gives, and a sidecar reached through one would be a file the user
+/// never pointed the library at.
+///
+/// # Errors
+///
+/// The directory's own `read_dir` error. A caller indexing a video treats that as "no sidecars":
+/// a folder that cannot be listed a second time is not a reason to lose the video.
+pub(crate) fn subtitle_sidecars(video: &Path) -> io::Result<Vec<SubtitleSidecar>> {
+    let Some(video_stem) = video.file_stem().and_then(|stem| stem.to_str()) else {
+        return Ok(Vec::new());
+    };
+    let Some(directory) = video.parent() else {
+        return Ok(Vec::new());
+    };
+
+    let mut sidecars = Vec::new();
+    for entry in read_sorted(directory)? {
+        let Ok(file_type) = entry.file_type() else {
+            // The entry vanished between the listing and the stat, as it can for a candidate.
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if let Some(sidecar) = sidecar_named(&path, video_stem) {
+            sidecars.push(sidecar);
+        }
+    }
+    Ok(sidecars)
+}
+
+/// Parses one candidate sidecar's name against the video's stem.
+fn sidecar_named(path: &Path, video_stem: &str) -> Option<SubtitleSidecar> {
+    let file_name = path.file_name()?.to_str()?;
+    let file_stem = Path::new(file_name).file_stem()?.to_str()?;
+    let suffix = file_stem.strip_prefix(video_stem)?;
+    let suffix = if suffix.is_empty() {
+        ""
+    } else {
+        suffix.strip_prefix('.')?
+    };
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let format = subtitle_format(&extension)?;
+
+    let mut language = None;
+    let mut is_forced = false;
+    let mut is_sdh = false;
+    for token in suffix.split('.').filter(|token| !token.is_empty()) {
+        let token = token.to_ascii_lowercase();
+        if token == "forced" {
+            is_forced = true;
+        } else if token == "sdh" || token == "cc" {
+            is_sdh = true;
+        } else if language.is_none() && is_language_tag(&token) {
+            language = Some(token);
+        }
+    }
+
+    Some(SubtitleSidecar {
+        path: path.to_path_buf(),
+        format,
+        language: language.unwrap_or_else(|| "und".to_owned()),
+        is_forced,
+        is_sdh,
+    })
+}
+
+/// The subtitle container a sidecar extension names, if it is one a sidecar can be.
+fn subtitle_format(extension: &str) -> Option<SubtitleFormat> {
+    match extension {
+        "srt" => Some(SubtitleFormat::Srt),
+        "vtt" => Some(SubtitleFormat::Vtt),
+        "ass" => Some(SubtitleFormat::Ass),
+        "ssa" => Some(SubtitleFormat::Ssa),
+        "sub" => Some(SubtitleFormat::Sub),
+        _ => None,
+    }
+}
+
+/// Whether a suffix token is a language tag: a two- or three-letter alphabetic code.
+fn is_language_tag(token: &str) -> bool {
+    (2..=3).contains(&token.len())
+        && token
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())
+}
+
 /// Records a skip and logs it.
 ///
 /// The log is `debug` because a large library has thousands of skips and every one of them is
@@ -524,6 +630,72 @@ mod tests {
                 "Shows/Breaking Bad/Season 1/S01E01.mkv"
             ],
             "exactly the two titles, in a stable order"
+        );
+    }
+
+    #[test]
+    fn subtitle_sidecars_are_parsed_from_the_files_beside_a_video() {
+        let corpus = Corpus::new("sidecars");
+        let video = corpus.file("Movies/Alien (1979).mkv", b"a film");
+        for name in [
+            "Alien (1979).srt",
+            "Alien (1979).en.srt",
+            "Alien (1979).eng.forced.srt",
+            "Alien (1979).fr.cc.ass",
+            "Alien (1979).de.sdh.vtt",
+            "Alien (1979).es.ssa",
+            "Alien (1979).it.sub",
+            // The same stem with another year, a non-subtitle extension, and a directory are
+            // not sidecars of this film.
+            "Alien (1986).en.srt",
+            "Alien (1979).en.nfo",
+            "Alien (1979).en.txt",
+        ] {
+            corpus.file(&format!("Movies/{name}"), b"not the film");
+        }
+        fs::create_dir_all(corpus.root.join("Movies/Alien (1979).pgs.srt")).unwrap();
+
+        let sidecars = subtitle_sidecars(&video).unwrap();
+
+        let find = |name: &str| {
+            sidecars
+                .iter()
+                .find(|sidecar| {
+                    sidecar.path.file_name().and_then(|file| file.to_str()) == Some(name)
+                })
+                .unwrap_or_else(|| panic!("{name} is a sidecar"))
+        };
+        let plain = find("Alien (1979).srt");
+        assert_eq!(plain.format, SubtitleFormat::Srt);
+        assert_eq!(plain.language, "und");
+        assert!(!plain.is_forced && !plain.is_sdh);
+
+        let english = find("Alien (1979).en.srt");
+        assert_eq!(english.format, SubtitleFormat::Srt);
+        assert_eq!(english.language, "en");
+        assert!(!english.is_forced && !english.is_sdh);
+
+        let forced = find("Alien (1979).eng.forced.srt");
+        assert_eq!(forced.language, "eng");
+        assert!(forced.is_forced);
+        assert!(!forced.is_sdh);
+
+        let captions = find("Alien (1979).fr.cc.ass");
+        assert_eq!(captions.format, SubtitleFormat::Ass);
+        assert_eq!(captions.language, "fr");
+        assert!(captions.is_sdh);
+        assert!(!captions.is_forced);
+
+        let sdh = find("Alien (1979).de.sdh.vtt");
+        assert_eq!(sdh.format, SubtitleFormat::Vtt);
+        assert!(sdh.is_sdh);
+
+        assert_eq!(find("Alien (1979).es.ssa").format, SubtitleFormat::Ssa);
+        assert_eq!(find("Alien (1979).it.sub").format, SubtitleFormat::Sub);
+        assert_eq!(
+            sidecars.len(),
+            7,
+            "the other year, the non-subtitle files, and the directory are not sidecars"
         );
     }
 

@@ -165,6 +165,13 @@ pub(crate) enum WriteRequest {
     },
     /// Insert one row into `subtitle_track`.
     InsertSubtitleTrack(Box<peregrine_domain::SubtitleTrack>),
+    /// Replace one file's external subtitle tracks with the set a scan found beside it.
+    ReplaceExternalSubtitles {
+        /// The file the tracks belong to.
+        media_file_id: i64,
+        /// The sidecar tracks, all with `origin = external`.
+        tracks: Vec<peregrine_domain::SubtitleTrack>,
+    },
     /// Record that a library root was scanned.
     RemoveLibraryRoot {
         id: i64,
@@ -553,6 +560,13 @@ async fn apply_library_write(
                 .await
                 .map_err(StorageError::from_sqlx),
         ),
+        WriteRequest::ReplaceExternalSubtitles {
+            media_file_id,
+            tracks,
+        } => crate::library::replace_external_subtitles(connection, media_file_id, &tracks)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
         WriteRequest::RemoveLibraryRoot { id } => crate::library::remove_root(connection, id)
             .await
             .map(|removed| WriteResponse::RowChanged { changed: removed })

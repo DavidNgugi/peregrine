@@ -38,11 +38,12 @@
 //! what makes the incremental walk's answer — "this file is unchanged" — a statement about rows that
 //! are already correct rather than about work that was skipped.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use peregrine_domain::{
-    LibraryName, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, TitleKind,
-    TitleSubtype, UnmatchedFile,
+    LibraryName, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, SubtitleOrigin,
+    SubtitleOwner, SubtitleTrack, TitleKind, TitleSubtype, UnmatchedFile,
 };
 use peregrine_storage::{Database, NewMatchRule, StorageError, StubTitle};
 use thiserror::Error;
@@ -162,6 +163,9 @@ pub async fn index_candidates(
             {
                 report.refreshed_files += 1;
             }
+            // A sidecar added, removed, or renamed since the last pass is a change the file's
+            // stamp cannot see: the video did not change, the folder beside it did.
+            sync_external_subtitles(database, known.id, &candidate.path).await?;
             continue;
         }
 
@@ -672,6 +676,9 @@ async fn episode(
 }
 
 /// Writes one file row, which is the same row for a film and for an episode.
+///
+/// The sidecars follow the row because they belong to it: their `media_file_id` is the id this
+/// insert assigns, so there is nothing to hang them off until the insert has answered.
 async fn write_file(
     database: &Arc<Database>,
     root_id: Option<i64>,
@@ -679,8 +686,8 @@ async fn write_file(
     item_id: i64,
     candidate: &CandidateFile,
     at: jiff::Timestamp,
-) -> Result<(), IndexError> {
-    database
+) -> Result<i64, IndexError> {
+    let id = database
         .insert_media_file(MediaFile {
             id: 0,
             media_item_id: item_id,
@@ -713,6 +720,82 @@ async fn write_file(
             quality_label: None,
             updated_at: at,
         })
+        .await?;
+    sync_external_subtitles(database, id, Path::new(path)).await?;
+    Ok(id)
+}
+
+/// Replaces the external subtitle tracks stored for one indexed video.
+///
+/// The sidecars are the folder's answer, so the stored set is replaced rather than appended to: a
+/// second pass writes the same rows, and a sidecar removed between passes takes its row with it.
+/// A directory the walk just read can still refuse a second read — a mount removed mid-scan is the
+/// case this is written for — and a film with unreadable neighbours is still a film, so a failed
+/// listing leaves the video indexed with no sidecars.
+async fn sync_external_subtitles(
+    database: &Arc<Database>,
+    media_file_id: i64,
+    video: &Path,
+) -> Result<(), IndexError> {
+    // The indexer runs on the runtime, and a library on a network volume is why the walk reads its
+    // directories on the blocking pool; this second read is no different.
+    let listing = video.to_path_buf();
+    let sidecars = match tokio::task::spawn_blocking(move || {
+        crate::library::scan::subtitle_sidecars(&listing)
+    })
+    .await
+    {
+        Ok(Ok(sidecars)) => sidecars,
+        Ok(Err(error)) => {
+            debug!(
+                path = %video.display(),
+                %error,
+                "the subtitle sidecars could not be listed"
+            );
+            return Ok(());
+        }
+        Err(error) => {
+            debug!(
+                path = %video.display(),
+                %error,
+                "the subtitle sidecar listing did not finish"
+            );
+            return Ok(());
+        }
+    };
+
+    let tracks = sidecars
+        .into_iter()
+        .filter_map(|sidecar| {
+            let path = sidecar.path.to_str()?;
+            let language = NonEmptyText::new(&sidecar.language).ok()?;
+            Some(SubtitleTrack {
+                id: 0,
+                owner: SubtitleOwner::File { media_file_id },
+                origin: SubtitleOrigin::External,
+                format: sidecar.format,
+                language,
+                label: None,
+                is_forced: sidecar.is_forced,
+                is_sdh: sidecar.is_sdh,
+                is_default: false,
+                stream_index: None,
+                path: Some(path.to_owned()),
+                provider: None,
+                provider_subtitle_id: None,
+                provider_url: None,
+                release_name: None,
+                encoding: None,
+                offset_ms: 0,
+                hash_matched: false,
+                downloaded_at: None,
+                last_used_at: None,
+            })
+        })
+        .collect();
+
+    database
+        .replace_external_subtitles(media_file_id, tracks)
         .await?;
     Ok(())
 }
@@ -850,7 +933,9 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use peregrine_domain::{AccountId, AccountScope, LibraryRoot, LibraryRootKind, ScanMode};
+    use peregrine_domain::{
+        AccountId, AccountScope, LibraryRoot, LibraryRootKind, ScanMode, SubtitleFormat,
+    };
     use peregrine_storage::{MetadataState, PageRequest};
     use tempfile::TempDir;
 
@@ -959,6 +1044,33 @@ mod tests {
             }
         }
 
+        /// The id of the one file row the corpus wrote under `name`.
+        async fn file_id(&self, name: &str) -> i64 {
+            let path = self.database_root_path().join(name);
+            self.database
+                .recorded_file_at_path(path.to_str().unwrap())
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name} is indexed"))
+                .id
+        }
+
+        /// The subtitle tracks stored for one of the corpus's files.
+        async fn subtitle_tracks(&self, name: &str) -> Vec<SubtitleTrack> {
+            let file_id = self.file_id(name).await;
+            self.database
+                .list_subtitle_tracks(
+                    AccountScope::unrestricted(AccountId::new(1).expect("account one")),
+                    file_id,
+                    PageRequest::first(50),
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|row| row.track)
+                .collect()
+        }
+
         /// Every episode the corpus placed, as `(season, episode)` pairs.
         async fn episodes(&self) -> Vec<(u32, u32)> {
             self.database
@@ -1040,6 +1152,117 @@ mod tests {
         assert_eq!(report.created_files, 1);
         assert_eq!(report.unmatched, 0);
         assert_eq!(corpus.titles().await, vec!["Alien"]);
+    }
+
+    #[tokio::test]
+    async fn subtitle_sidecars_beside_a_film_become_external_tracks() {
+        let corpus = corpus(
+            "sidecar-tracks",
+            &[
+                "Alien (1979).mkv",
+                "Alien (1979).en.srt",
+                "Alien (1979).eng.forced.srt",
+                // The same suffix under another year belongs to the other film, not this one.
+                "Alien (1986).en.srt",
+            ],
+        )
+        .await;
+
+        let report = corpus.index().await;
+
+        assert_eq!(report.created_files, 1, "the sidecars are not media files");
+        let file_id = corpus.file_id("Alien (1979).mkv").await;
+        let tracks = corpus.subtitle_tracks("Alien (1979).mkv").await;
+        assert_eq!(tracks.len(), 2);
+        for track in &tracks {
+            assert_eq!(
+                track.owner,
+                SubtitleOwner::File {
+                    media_file_id: file_id
+                }
+            );
+            assert_eq!(track.origin, SubtitleOrigin::External);
+            assert_eq!(track.format, SubtitleFormat::Srt);
+            assert!(track.path.as_deref().is_some_and(|path| {
+                Path::new(path)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("srt"))
+            }));
+        }
+
+        let english = tracks
+            .iter()
+            .find(|track| track.language.as_str() == "en")
+            .expect("the plain English sidecar is a track");
+        assert!(!english.is_forced && !english.is_sdh);
+        assert!(
+            english
+                .path
+                .as_deref()
+                .unwrap()
+                .ends_with("Alien (1979).en.srt")
+        );
+
+        let forced = tracks
+            .iter()
+            .find(|track| track.language.as_str() == "eng")
+            .expect("the forced English sidecar is a track");
+        assert!(forced.is_forced);
+        assert!(!forced.is_sdh);
+        assert!(
+            forced
+                .path
+                .as_deref()
+                .unwrap()
+                .ends_with("Alien (1979).eng.forced.srt")
+        );
+    }
+
+    #[tokio::test]
+    async fn rescanning_a_film_replaces_its_subtitle_tracks() {
+        let corpus = corpus(
+            "sidecar-rescan",
+            &["Alien (1979).mkv", "Alien (1979).en.srt"],
+        )
+        .await;
+        corpus.index().await;
+        assert_eq!(corpus.subtitle_tracks("Alien (1979).mkv").await.len(), 1);
+
+        corpus.index().await;
+        assert_eq!(
+            corpus.subtitle_tracks("Alien (1979).mkv").await.len(),
+            1,
+            "a second pass writes no second copy"
+        );
+
+        corpus.add(&["Alien (1979).fr.srt"]);
+        corpus.index().await;
+        assert_eq!(
+            corpus.subtitle_tracks("Alien (1979).mkv").await.len(),
+            2,
+            "a sidecar added since the last pass is found"
+        );
+
+        fs::remove_file(corpus.database_root_path().join("Alien (1979).fr.srt")).unwrap();
+        corpus.index().await;
+        assert_eq!(
+            corpus.subtitle_tracks("Alien (1979).mkv").await.len(),
+            1,
+            "a sidecar removed since the last pass takes its row with it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_film_with_no_sidecar_has_no_subtitle_tracks() {
+        let corpus = corpus("no-sidecar", &["Alien (1979).mkv"]).await;
+
+        corpus.index().await;
+
+        assert_eq!(
+            corpus.subtitle_tracks("Alien (1979).mkv").await,
+            Vec::new(),
+            "no sidecar means no track"
+        );
     }
 
     #[tokio::test]

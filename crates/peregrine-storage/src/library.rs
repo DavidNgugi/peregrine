@@ -311,6 +311,28 @@ pub(crate) async fn insert_subtitle(
     Ok(result.last_insert_rowid())
 }
 
+/// Replaces one file's external subtitle tracks with the set a scan found beside it.
+///
+/// One transaction, because the delete and the inserts are one answer: failing between them would
+/// leave the file with fewer tracks than the folder holds. Only `external` rows are touched — an
+/// embedded stream or a downloaded track is not the scan's to remove.
+pub(crate) async fn replace_external_subtitles(
+    connection: &mut sqlx::SqliteConnection,
+    media_file_id: i64,
+    tracks: &[SubtitleTrack],
+) -> Result<(), sqlx::Error> {
+    let mut transaction = connection.begin().await?;
+    sqlx::query("DELETE FROM subtitle_track WHERE media_file_id = ?1 AND origin = 'external'")
+        .bind(media_file_id)
+        .execute(&mut *transaction)
+        .await?;
+    for track in tracks {
+        insert_subtitle(&mut transaction, track).await?;
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
 /// Records that a root was scanned at `at`, reporting whether the row was there.
 pub(crate) async fn record_root_scan(
     connection: &mut sqlx::SqliteConnection,
@@ -2338,6 +2360,14 @@ mod tests {
         }
     }
 
+    /// One external sidecar track for a file, with the path a scan would store.
+    fn external(media_file_id: i64, path: &str) -> SubtitleTrack {
+        SubtitleTrack {
+            path: Some(path.to_owned()),
+            ..subtitle(SubtitleOwner::File { media_file_id })
+        }
+    }
+
     // One fill, three times over: the poster path and the metadata state are the only things that
     // differ, and repeating two eight-line argument lists is what pushed this test past the line budget
     // the lint enforces.
@@ -2993,6 +3023,71 @@ mod tests {
             "the file's own track and the one matched to both owners"
         );
         assert_eq!(item_id, item_id, "the item is the one the file belongs to");
+    }
+
+    #[tokio::test]
+    async fn replacing_a_files_external_subtitles_keeps_the_other_origins() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _) = populated(&directory).await;
+        let (_item_id, file_id) = item_with_file(&database, certified, "/media/Alien.mkv").await;
+        database
+            .insert_subtitle_track(SubtitleTrack {
+                origin: SubtitleOrigin::Embedded,
+                path: None,
+                ..subtitle(SubtitleOwner::File {
+                    media_file_id: file_id,
+                })
+            })
+            .await
+            .unwrap();
+
+        database
+            .replace_external_subtitles(
+                file_id,
+                vec![
+                    external(file_id, "/media/Alien.en.srt"),
+                    external(file_id, "/media/Alien.eng.forced.srt"),
+                ],
+            )
+            .await
+            .unwrap();
+        database
+            .replace_external_subtitles(
+                file_id,
+                vec![external(file_id, "/media/Alien.eng.forced.srt")],
+            )
+            .await
+            .unwrap();
+        database
+            .replace_external_subtitles(
+                file_id,
+                vec![external(file_id, "/media/Alien.eng.forced.srt")],
+            )
+            .await
+            .unwrap();
+
+        let stored = database
+            .list_subtitle_tracks(any_account(), file_id, PageRequest::first(10))
+            .await
+            .unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .filter(|row| row.track.origin == SubtitleOrigin::Embedded)
+                .count(),
+            1,
+            "an embedded stream is not a sidecar and is left alone"
+        );
+        let external_paths: Vec<&str> = stored
+            .iter()
+            .filter(|row| row.track.origin == SubtitleOrigin::External)
+            .filter_map(|row| row.track.path.as_deref())
+            .collect();
+        assert_eq!(
+            external_paths,
+            ["/media/Alien.eng.forced.srt"],
+            "the old sidecar is gone and the surviving one is not duplicated"
+        );
     }
 
     // ---- constraints the database guards (I2, I3) --------------------------------
