@@ -714,7 +714,7 @@ pub(crate) async fn list_library_titles(
 ) -> Result<Vec<LibraryTitleRow>, StorageError> {
     let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
-                t.poster_provider, t.poster_path, t.overview, t.vote_average, \
+                t.poster_provider, t.poster_path, t.overview, t.tmdb_rating AS rating, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files, \
@@ -745,7 +745,7 @@ pub(crate) async fn list_library_titles_for_person(
 ) -> Result<Vec<LibraryTitleRow>, StorageError> {
     let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
-                t.poster_provider, t.poster_path, t.overview, t.vote_average, \
+                t.poster_provider, t.poster_path, t.overview, t.tmdb_rating AS rating, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files, \
