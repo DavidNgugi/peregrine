@@ -11,6 +11,7 @@ import {
 } from "@peregrine/ui";
 import type {
   DownloadJobDto,
+  LibraryTitleDto,
   RailItemDto,
   RailKindDto,
   TitleMatchDto,
@@ -135,6 +136,8 @@ export interface DiscoverViewProps {
   readonly downloads?: DownloadMarks | undefined;
   /** The account's saved titles, drawn as the first rail. */
   readonly watchlist?: readonly WatchlistEntryDto[] | undefined;
+  /** The account's own scanned titles, drawn as their own rail. */
+  readonly libraryTitles?: readonly LibraryTitleDto[] | undefined;
   /**
    * The selected type, or `undefined` for **All**.
    *
@@ -285,6 +288,7 @@ export function DiscoverView({
   continueWatching,
   recentDownloads,
   watchlist,
+  libraryTitles,
   search,
   onPlay,
   onNavigate,
@@ -297,6 +301,7 @@ export function DiscoverView({
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
   const saved = watchlist ?? [];
+  const scanned = libraryTitles ?? [];
   const progress = useDownloadProgress();
 
   const routeFor = (item: RailItemDto): Route => ({
@@ -504,6 +509,36 @@ export function DiscoverView({
               title={t("discover.empty.title")}
             />
           ) : null}
+          {scanned.length === 0 ? null : (
+            <Rail
+              empty={null}
+              itemKey={(row) => String(row.id)}
+              items={scanned}
+              renderItem={(row, tabIndex) => (
+                <TitleCard
+                  detailsLabel={t("card.details")}
+                  href={routePath({
+                    kind: "title",
+                    id: row.id,
+                    titleKind: row.kind === "shows" ? "show" : "movie",
+                  })}
+                  meta={t("library.tiles.items", { count: row.items })}
+                  onNavigate={() => {
+                    onNavigate({
+                      kind: "title",
+                      id: row.id,
+                      titleKind: row.kind === "shows" ? "show" : "movie",
+                    });
+                  }}
+                  poster={imageUrl(row.poster)}
+                  size="lg"
+                  tabIndex={tabIndex}
+                  title={row.name}
+                />
+              )}
+              title={t("discover.rail.library")}
+            />
+          )}
           {saved.length === 0 ? null : (
             <Rail
               empty={null}
@@ -663,6 +698,7 @@ export function DiscoverScreen({
   onNavigate,
   onBackdrops,
   watchlist,
+  libraryTitles,
   titleKind,
   trailing,
   downloads,
@@ -677,6 +713,8 @@ export function DiscoverScreen({
   readonly downloads?: DownloadMarks | undefined;
   /** The account's saved titles, drawn as the first rail. */
   readonly watchlist?: readonly WatchlistEntryDto[] | undefined;
+  /** The account's own scanned titles, drawn as their own rail. */
+  readonly libraryTitles?: readonly LibraryTitleDto[] | undefined;
   /** The queue's recent rows, for the Recent Downloads rail. */
   readonly recentDownloads?: readonly DownloadJobDto[] | undefined;
 }): ReactElement {
@@ -693,6 +731,7 @@ export function DiscoverScreen({
     <DiscoverView
       downloads={downloads}
       watchlist={watchlist}
+      libraryTitles={libraryTitles}
       onBackdrops={onBackdrops}
       onNavigate={onNavigate}
       titleKind={titleKind}

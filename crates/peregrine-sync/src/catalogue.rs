@@ -5,6 +5,8 @@
 //! the rule calls ambiguous is counted and left alone, because the wrong answer there merges two titles
 //! or splits one.
 
+use std::num::NonZeroU32;
+
 use peregrine_domain::catalogue::{ImageKind, MetadataState, TitleDetails, TitleKind};
 use peregrine_domain::matching::{Candidate, MatchDecision, match_candidate, sort_name};
 use peregrine_domain::text::NonEmptyText;
@@ -462,6 +464,50 @@ fn candidate_input(
         kind: candidate.kind(),
         released: candidate.released(),
     })
+}
+
+/// Finds the provider's entry for a title the library scanned, attaches its id, and fills it in.
+///
+/// A scanned title carries no external id, so `refresh_title` has nothing to ask about and returns
+/// `None`; this is the search that gives it one. The candidate must name the same title and be the
+/// same kind, compared by the catalogue's own sort name, so a fuzzy provider result cannot attach
+/// itself to a film nobody asked it about. An ambiguous answer stays unattached.
+pub async fn match_title(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    id: i64,
+    kind: TitleKind,
+    at: i64,
+) -> Result<Option<RefreshedTitle>, SyncError> {
+    let Some(identity) = database.title_identity_unrestricted(id).await? else {
+        return Ok(None);
+    };
+    if identity.kind != kind {
+        return Ok(None);
+    }
+    let Some(text) = NonEmptyText::new(identity.name.as_str()).ok() else {
+        return Ok(None);
+    };
+    let Some(limit) = NonZeroU32::new(10) else {
+        return Ok(None);
+    };
+    let candidates = provider
+        .search(&SearchQuery::new(text, limit, Some(kind)))
+        .await?;
+    let wanted = sort_name(identity.name.as_str());
+    let Some(candidate) = candidates.into_iter().find(|candidate| {
+        candidate.kind() == kind && sort_name(candidate.name().as_str()) == wanted
+    }) else {
+        return Ok(None);
+    };
+    match database
+        .attach_external_ids(id, &[held(candidate.external_id(), at)])
+        .await
+    {
+        Ok(()) | Err(StorageError::Conflict { .. }) => {}
+        Err(error) => return Err(SyncError::Storage(error)),
+    }
+    refresh_title(provider, database, id, kind, at).await
 }
 
 /// One external id, in the shape the storage layer attaches.

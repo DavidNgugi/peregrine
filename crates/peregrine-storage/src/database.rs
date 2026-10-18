@@ -538,6 +538,14 @@ impl Database {
         }
     }
 
+    /// One title's identity without an account's scope, for the library matcher.
+    pub async fn title_identity_unrestricted(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::TitleIdentity>, StorageError> {
+        crate::catalogue::identity_unrestricted(&self.readers, id).await
+    }
+
     /// One title's identity, when `scope` may see it.
     ///
     /// A title outside the scope reads as `None` rather than as a refusal: an account must

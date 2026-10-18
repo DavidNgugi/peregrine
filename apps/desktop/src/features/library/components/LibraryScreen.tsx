@@ -30,6 +30,7 @@ import {
   Screen,
   Section,
   Table,
+  TextInput,
   TitleCard,
 } from "@peregrine/ui";
 import type { TableColumn } from "@peregrine/ui";
@@ -414,6 +415,18 @@ export function LibraryScreen({
   const [forgetting, setForgetting] = useState<MatchRuleDto | null>(null);
   // Which parked file the picker is open for, if any.
   const [choosing, setChoosing] = useState<UnmatchedFileDto | null>(null);
+  // The search and the kind are this screen's own: they narrow a list the core already answered,
+  // and neither changes what the library holds.
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<"all" | "movies" | "shows">("all");
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return titles.titles.filter(
+      (row) =>
+        (kind === "all" || row.kind === kind) &&
+        (needle.length === 0 || row.name.toLowerCase().includes(needle)),
+    );
+  }, [titles.titles, query, kind]);
 
   // A scan is the only thing that changes this list, so watching one finish is the whole of the
   // subscription: the counter changes once per finished scan, and a boolean would refresh once and
@@ -497,10 +510,48 @@ export function LibraryScreen({
           )}
         </div>
 
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[16rem] flex-1">
+            <TextInput
+              label={t("library.search.label")}
+              onChange={(event) => {
+                setQuery(event.target.value);
+              }}
+              placeholder={t("library.search.placeholder")}
+              value={query}
+            />
+          </div>
+          <div
+            className="flex items-center gap-1"
+            role="group"
+            aria-label={t("library.filter.label")}
+          >
+            {(["all", "movies", "shows"] as const).map((option) => (
+              <Button
+                aria-pressed={kind === option}
+                key={option}
+                onClick={() => {
+                  setKind(option);
+                }}
+                size="sm"
+                variant={kind === option ? "secondary" : "ghost"}
+              >
+                {t("library.filter." + option)}
+              </Button>
+            ))}
+          </div>
+        </div>
+
         {titles.loading ? null : titles.failed ? (
           <ErrorState body={t("library.unavailable.body")} title={t("library.unavailable.title")} />
         ) : titles.titles.length === 0 ? (
           <EmptyState body={t("library.empty.body")} size="page" title={t("library.empty.title")} />
+        ) : shown.length === 0 ? (
+          <EmptyState
+            body={t("library.filter.none.body")}
+            size="page"
+            title={t("library.filter.none.title")}
+          />
         ) : view === "grid" ? (
           /* **The height is load-bearing rather than cosmetic.** `Grid` scrolls itself, and a scroller
              with no height constraint grows to its content — which makes the "viewport" the whole grid
@@ -510,7 +561,7 @@ export function LibraryScreen({
           <div className="h-[min(60vh,40rem)] min-h-0" data-library-grid="">
             <Grid
               itemKey={(row) => row.id}
-              items={titles.titles}
+              items={shown}
               label={t("library.grid.label")}
               renderItem={(row) => (
                 <TitleCard

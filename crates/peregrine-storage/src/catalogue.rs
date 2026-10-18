@@ -658,6 +658,25 @@ pub(crate) async fn identity(
     row.map(TryInto::try_into).transpose()
 }
 
+/// One title's identity without an account's scope.
+///
+/// The library matcher asks what a scanned title is called so it can search a provider for it.
+/// That is not a read on an account's behalf: it happens before any account has chosen to look at
+/// the title, and the id came from the scanner's own placement. Every screen read still takes a scope.
+pub(crate) async fn identity_unrestricted(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> Result<Option<TitleIdentity>, StorageError> {
+    let row = sqlx::query_as::<_, IdentityRow>(
+        "SELECT id, kind, subtype, name, sort_name, metadata_state, adult FROM title WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    row.map(TryInto::try_into).transpose()
+}
+
 /// Reads one page of titles the scope may see, newest first.
 ///
 /// The scope is the first branch of the `WHERE` clause and the cursor the second, so a

@@ -375,6 +375,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               <DiscoverScreen
                 downloads={marks}
                 watchlist={watchlist.rows}
+                libraryTitles={library.titles}
                 onBackdrops={reportBackdrops}
                 onNavigate={navigate}
                 recentDownloads={downloads.downloads}

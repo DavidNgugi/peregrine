@@ -22,7 +22,7 @@ mod tests;
 
 pub use backoff::Backoff;
 pub use catalogue::{
-    CacheError, ListedTitle, RefreshedTitle, SyncError, SyncOutcome, cache_image,
+    CacheError, ListedTitle, RefreshedTitle, SyncError, SyncOutcome, cache_image, match_title,
     record_list_answer, refresh_title, sync_search, upsert_list_candidate,
 };
 pub use core::{

@@ -150,10 +150,35 @@ impl ProviderRefreshJob {
             }
         }
 
-        // **A title nobody can be asked about is a success, not a failure.** No configured provider
-        // holds an id for it — a title the library scanned and no search has matched — so there is
-        // nothing to fill in and nothing to fetch. A failure here would put a red row in the journal
-        // for a library that is simply not matched yet, which is a fact rather than a fault.
+        // **A scanned title has no id yet, so it is searched for before it is given up on.** This is
+        // the difference between a library that fills itself in and one whose titles stay stubs until
+        // somebody happens to search for them by hand. The matcher only attaches an id when the
+        // provider names the same title and kind, so a near miss stays a stub rather than becoming
+        // another film.
+        if answered.is_none() {
+            for adapter in &adapters {
+                match peregrine_sync::match_title(
+                    adapter.as_ref(),
+                    &self.database,
+                    self.target.title_id,
+                    self.target.kind,
+                    at,
+                )
+                .await
+                {
+                    Ok(Some(details)) => {
+                        answered = Some((Arc::clone(adapter), details));
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(error) => return Err(JobError::failed(error.to_string())),
+                }
+            }
+        }
+
+        // **A title neither the catalogue nor a match can place is a success, not a failure.** No
+        // provider named it, so there is nothing to fill in and nothing to fetch. A failure here
+        // would put a red row in the journal for a library that is simply not matched yet.
         let Some((provider, refreshed)) = answered else {
             return self.succeeded(job, attempt, None).await;
         };

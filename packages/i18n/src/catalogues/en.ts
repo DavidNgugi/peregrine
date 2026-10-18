@@ -223,6 +223,7 @@ export const en = {
         recentDownloads: "Recent Downloads",
         continueWatching: "Continue Watching",
         watchlist: "My list",
+        library: "My library",
         unknown: "More to watch",
         empty: {
           title: "Nothing in this rail yet",
@@ -524,8 +525,26 @@ export const en = {
       },
     },
     library: {
+      search: {
+        label: "Search your library",
+        placeholder: "Title name",
+      },
+      filter: {
+        label: "Filter by kind",
+        all: "All",
+        movies: "Movies",
+        shows: "Shows",
+        none: {
+          title: "No titles match",
+          body: "Clear the search or choose All.",
+        },
+      },
       title: "Library",
       section: "What is here",
+      tiles: {
+        items: "{{count}} item",
+        items_other: "{{count}} items",
+      },
       description:
         "Every title the scans have found in your folders, with how many copies and how much space it takes. Nothing here is downloaded or moved.",
       scan: {
