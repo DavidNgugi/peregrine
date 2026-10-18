@@ -4056,6 +4056,12 @@ dependencies = [
 [[package]]
 name = "peregrine-cast"
 version = "0.1.0"
+dependencies = [
+ "peregrine-domain",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+]
 
 [[package]]
 name = "peregrine-desktop"
