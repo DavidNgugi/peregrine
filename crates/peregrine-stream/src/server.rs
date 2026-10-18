@@ -352,7 +352,15 @@ impl MediaServer {
                 CorsLayer::new()
                     .allow_origin(Any)
                     .allow_methods([Method::GET, Method::HEAD, Method::POST])
-                    .allow_headers([header::CONTENT_TYPE]),
+                    // Range makes a cross-origin video seekable; the element sets crossorigin for its
+                    // text tracks, so the media request is under CORS and needs Range allowed and the
+                    // range headers exposed, or it paints an error over a file the server can serve.
+                    .allow_headers([header::CONTENT_TYPE, header::RANGE])
+                    .expose_headers([
+                        header::CONTENT_RANGE,
+                        header::ACCEPT_RANGES,
+                        header::CONTENT_LENGTH,
+                    ]),
             );
 
         let (stop, stopped) = oneshot::channel();
@@ -435,7 +443,15 @@ impl MediaServer {
                 CorsLayer::new()
                     .allow_origin(Any)
                     .allow_methods([Method::GET, Method::HEAD, Method::POST])
-                    .allow_headers([header::CONTENT_TYPE]),
+                    // Range makes a cross-origin video seekable; the element sets crossorigin for its
+                    // text tracks, so the media request is under CORS and needs Range allowed and the
+                    // range headers exposed, or it paints an error over a file the server can serve.
+                    .allow_headers([header::CONTENT_TYPE, header::RANGE])
+                    .expose_headers([
+                        header::CONTENT_RANGE,
+                        header::ACCEPT_RANGES,
+                        header::CONTENT_LENGTH,
+                    ]),
             );
 
         let (stop, stopped) = oneshot::channel();

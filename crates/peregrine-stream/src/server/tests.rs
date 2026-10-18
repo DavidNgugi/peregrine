@@ -956,6 +956,42 @@ async fn the_capture_route_is_readable_by_the_renderer_that_captured_the_frame()
 }
 
 #[tokio::test]
+async fn a_cross_origin_media_request_may_ask_for_a_range() {
+    // The player sets `crossorigin` so its text tracks are readable, which puts the media request
+    // under CORS; a browser seeking that media sends a Range request. Without Range on the
+    // preflight the element paints an error over a file the server can serve.
+    let (_fixture, _sink, server) = capturing().await;
+    let path = format!("/media/{}", server.token().as_str());
+    let host = format!("127.0.0.1:{}", server.port());
+
+    let answer = ask(
+        server.port(),
+        &bytes(request(
+            "OPTIONS",
+            &path,
+            Some(&host),
+            &[
+                ("Origin", "http://tauri.localhost"),
+                ("Access-Control-Request-Method", "GET"),
+                ("Access-Control-Request-Headers", "range"),
+            ],
+        )),
+    )
+    .await;
+
+    assert_eq!(answer.status, 200);
+    assert!(
+        answer
+            .header("access-control-allow-headers")
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .contains("range"),
+        "a cross-origin video must be allowed to ask for a range"
+    );
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_frame_may_declare_a_jpeg_with_parameters() {
     // `image/jpeg; charset=binary` is the same declaration as `image/jpeg`, and a check that refused it
     // would be refusing a correct client.
