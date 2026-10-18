@@ -102,4 +102,4 @@ pub use peregrine_providers::provider::RailKind;
 // the runtime takes rather than a second copy of it that could drift.
 pub use peregrine_providers::provider::{BrowseRequest, BrowseSort, GenreRef, ProviderPage};
 
-pub use peregrine_storage::{CastRow, DownloadScheduleRow};
+pub use peregrine_storage::{CastRow, DownloadScheduleRow, PersonRow};

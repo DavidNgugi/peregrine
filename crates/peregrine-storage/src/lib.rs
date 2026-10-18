@@ -43,7 +43,7 @@ mod writer;
 
 pub use offers::{ChosenOfferRow, NewOffer, OfferRow};
 
-pub use catalogue::{CastRow, CastWrite};
+pub use catalogue::{CastRow, CastWrite, PersonRow};
 pub use catalogue::{
     MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StubEpisode, StubSeason, StubTitle,
     TitleExternalId, TitleIdentity, TitleKind, TitleSubtype,

@@ -193,10 +193,37 @@ impl From<peregrine_app::TitleOffer> for TitleOfferDto {
     }
 }
 
+/// Which person a person page names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonRef {
+    /// The local person row id.
+    #[specta(type = Number)]
+    pub id: i64,
+}
+
+/// One person and the library titles that credit them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonPageDto {
+    /// The person's local row id.
+    #[specta(type = Number)]
+    pub id: i64,
+    /// Their name.
+    pub name: String,
+    /// The cached portrait's absolute path, when one is cached.
+    pub profile: Option<String>,
+    /// The library titles that credit them, newest first.
+    pub titles: Vec<LibraryTitleDto>,
+}
+
 /// One person in a title's cast, as the page draws them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CastMemberDto {
+    /// The local person row id, which the cast rail links to.
+    #[specta(type = Number)]
+    pub id: i64,
     /// The person's name.
     pub name: String,
     /// The character played, when the provider said.
@@ -1003,11 +1030,37 @@ pub async fn get_title(
 impl From<peregrine_app::CastRow> for CastMemberDto {
     fn from(row: peregrine_app::CastRow) -> Self {
         Self {
+            id: row.person_id,
             name: row.name,
             character: row.character,
             profile: row.profile,
         }
     }
+}
+
+/// One person and the library titles that credit them.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is unavailable or a read fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_person(
+    state: State<'_, RuntimeState>,
+    person: PersonRef,
+) -> Result<Option<PersonPageDto>, AppError> {
+    let id = person.id;
+    let runtime = state.runtime()?;
+    let page = runtime.person_page(id, 200).await?;
+    Ok(guard_response(
+        "library::get_person",
+        page.map(|page| PersonPageDto {
+            id,
+            name: page.name,
+            profile: page.profile,
+            titles: page.titles.into_iter().map(LibraryTitleDto::from).collect(),
+        }),
+    ))
 }
 
 /// The wire shape of one title's own read.

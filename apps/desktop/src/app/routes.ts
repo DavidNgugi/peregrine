@@ -42,6 +42,8 @@ export type Route =
    * alone, so the page names itself immediately rather than waiting (PG-E7-02's acceptance).
    */
   | { readonly kind: "title"; readonly titleKind: TitleKind; readonly id: number }
+  /** One person's local filmography: the titles in this library that credit them. */
+  | { readonly kind: "person"; readonly id: number }
   /**
    * The player: one title's file, playing.
    *
@@ -65,7 +67,7 @@ export type TitleKind = "movie" | "show";
 export type RouteKind = Route["kind"];
 
 /** The routes that are one fixed path, which are the ones a table can hold. */
-type StaticRouteKind = Exclude<RouteKind, "title" | "player">;
+type StaticRouteKind = Exclude<RouteKind, "title" | "player" | "person">;
 
 /**
  * The path each route lives at, taken from `docs/ARCHITECTURE.md` §6.
@@ -136,6 +138,15 @@ export function parseRoute(path: string): Route | null {
     }
   }
 
+  // `/person/:id`, the credit rail's destination. A person is local — the id is the person row the
+  // cast read returned — so the path names this library rather than a provider's filmography.
+  if (parts.length === 3 && parts[0] === "" && parts[1] === "person") {
+    const id = Number(parts[2]);
+    if (Number.isSafeInteger(id) && id > 0) {
+      return { kind: "person", id };
+    }
+  }
+
   // `/player/:id`, which is the map's row for the player. An id this build cannot act on is a path
   // this build does not open, for the reason the title route gives: a route that could not resolve
   // would be a screen that opened and then failed.
@@ -171,6 +182,9 @@ export function routePath(route: Route): string {
   }
   if (route.kind === "title") {
     return `/title/${route.titleKind}/${String(route.id)}`;
+  }
+  if (route.kind === "person") {
+    return `/person/${String(route.id)}`;
   }
   if (route.kind === "player") {
     return route.season !== undefined && route.episode !== undefined

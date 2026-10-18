@@ -219,6 +219,23 @@ export const commands = {
 	playSupport: LocalPlaybackDto | null,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
 	/**
+	 *  One person and the library titles that credit them.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is unavailable or a read fails.
+	 */
+	getPerson: (person: PersonRef) => typedError<{
+	/**  The person's local row id. */
+	id: number,
+	/**  Their name. */
+	name: string,
+	/**  The cached portrait's absolute path, when one is cached. */
+	profile: string | null,
+	/**  The library titles that credit them, newest first. */
+	titles: LibraryTitleDto[],
+} | null, AppError_Serialize>(__TAURI_INVOKE("get_person", { person })),
+	/**
 	 *  Starts playing one of a title's files, replacing whatever was playing.
 	 * 
 	 *  The one command whose answer is a URL. It leaves the machine nowhere: the address it answers with is
@@ -762,6 +779,8 @@ export type CaptureSessionDto = {
 
 /**  One person in a title's cast, as the page draws them. */
 export type CastMemberDto = {
+	/**  The local person row id, which the cast rail links to. */
+	id: number,
 	/**  The person's name. */
 	name: string,
 	/**  The character played, when the provider said. */
@@ -1447,6 +1466,24 @@ export type NotificationRef = {
 /**  A release offer's id, as a listing returned it. */
 export type OfferRef = {
 	/**  The row a choice names. */
+	id: number,
+};
+
+/**  One person and the library titles that credit them. */
+export type PersonPageDto = {
+	/**  The person's local row id. */
+	id: number,
+	/**  Their name. */
+	name: string,
+	/**  The cached portrait's absolute path, when one is cached. */
+	profile: string | null,
+	/**  The library titles that credit them, newest first. */
+	titles: LibraryTitleDto[],
+};
+
+/**  Which person a person page names. */
+export type PersonRef = {
+	/**  The local person row id. */
 	id: number,
 };
 

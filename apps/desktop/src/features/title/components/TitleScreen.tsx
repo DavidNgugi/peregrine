@@ -303,7 +303,12 @@ export function TitleScreen({
 
       {/* A film has no season section, and a show whose provider named no seasons draws none either:
           a heading over an empty switcher would be a promise nobody made. */}
-      <CastRail cast={detail.cast} />
+      <CastRail
+        cast={detail.cast}
+        onPerson={(id) => {
+          onNavigate({ kind: "person", id });
+        }}
+      />
 
       {title === null || title.kind === "movies" || seasons.seasons.length === 0 ? null : (
         <Section description={t("title.episodes.description")} title={t("title.episodes.title")}>

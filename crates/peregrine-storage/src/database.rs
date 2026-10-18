@@ -1257,6 +1257,25 @@ impl Database {
         crate::library::list_library_titles(&self.readers, scope, request).await
     }
 
+    /// Titles one person is credited on, in the library shape.
+    pub async fn library_titles_for_person(
+        &self,
+        scope: AccountScope,
+        person_id: i64,
+        request: PageRequest,
+    ) -> Result<Vec<crate::library::LibraryTitleRow>, StorageError> {
+        crate::library::list_library_titles_for_person(&self.readers, scope, person_id, request)
+            .await
+    }
+
+    /// One person's name and cached portrait.
+    pub async fn person(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::catalogue::PersonRow>, StorageError> {
+        crate::catalogue::person(&self.readers, id).await
+    }
+
     /// One title, with the counts a screen shows and the artwork a provider fill recorded, or `None`
     /// when `scope` may not see it.
     ///

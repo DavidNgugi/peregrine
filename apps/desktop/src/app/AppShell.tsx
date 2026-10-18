@@ -36,6 +36,7 @@ import {
   useShortcuts,
 } from "../features/settings/index.js";
 import { DownloadProgressProvider } from "../lib/download-progress.js";
+import { PersonScreen } from "../features/person/components/PersonScreen.js";
 import { useWatchlist } from "../features/watchlist/hooks/useWatchlist.js";
 import { downloadMarks, downloadProgressMarks } from "../lib/download-status.js";
 import { imageUrl } from "../lib/media.js";
@@ -433,6 +434,14 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 titles={library}
                 unmatched={unmatched}
                 view={libraryView.view}
+              />
+            ) : null}
+            {route.kind === "person" ? (
+              <PersonScreen
+                backLabel={t("shell.back")}
+                id={route.id}
+                onBack={canBack ? goBack : undefined}
+                onNavigate={navigate}
               />
             ) : null}
             {route.kind === "downloads" ? (

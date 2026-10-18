@@ -528,6 +528,24 @@ export const en = {
         },
       },
     },
+    person: {
+      title: "Person",
+      description_one: "{{count}} title in your library",
+      description_other: "{{count}} titles in your library",
+      local: "Titles this library holds with this person credited.",
+      loading: "Reading this person's titles…",
+      failed: {
+        title: "This person could not be read",
+        body: "Peregrine's core did not answer, so this page is unknown rather than empty.",
+      },
+      empty: {
+        title: "Nothing with this person yet",
+        body: "No title in your library credits them. Scan or add one and it will appear here.",
+      },
+      grid: {
+        label: "Titles with this person",
+      },
+    },
     library: {
       search: {
         label: "Search your library",

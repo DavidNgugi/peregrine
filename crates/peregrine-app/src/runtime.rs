@@ -409,6 +409,17 @@ pub struct LibraryTitleEntry {
     pub needs_poster: bool,
 }
 
+/// One person and the library titles they are credited on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersonPage {
+    /// Their name.
+    pub name: String,
+    /// The cached portrait's absolute path, when one is cached.
+    pub profile: Option<String>,
+    /// The titles in the library that credit them, newest first.
+    pub titles: Vec<LibraryTitleEntry>,
+}
+
 /// One title's own screen: what the library holds, where the cached poster is, whether the
 /// screen should ask the provider for it, and what its page may offer.
 #[derive(Debug, Clone, PartialEq)]
@@ -3329,6 +3340,32 @@ impl Runtime {
             }
         }
         Ok(queued)
+    }
+
+    /// One person and the library titles that credit them.
+    ///
+    /// `None` when no person row holds the id, which a route naming a deleted credit reaches.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when either read fails.
+    pub async fn person_page(
+        &self,
+        id: i64,
+        limit: u32,
+    ) -> Result<Option<PersonPage>, RuntimeError> {
+        let Some(person) = self.database.person(id).await? else {
+            return Ok(None);
+        };
+        let rows = self
+            .database
+            .library_titles_for_person(installation_scope(), id, PageRequest::first(limit))
+            .await?;
+        Ok(Some(PersonPage {
+            name: person.name,
+            profile: person.profile,
+            titles: rows.into_iter().map(|row| self.listed_title(row)).collect(),
+        }))
     }
 
     /// One title's cast, in billing order.

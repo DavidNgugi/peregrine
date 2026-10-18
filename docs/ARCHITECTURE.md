@@ -315,6 +315,7 @@ Rules that keep it fast:
 | `/browse/:type?` | Browse | Full filter surface + saved smart collections. |
 | `/search` | Search | Local FTS5 instant results, remote fallback after 250 ms of idle. |
 | `/title/:kind/:id` | Detail | Movie or show; seasons, episodes, cast, availability, actions. |
+| `/person/:id` | Person | One credited person, with the titles in this library that cast them. |
 | `/library` | Library | All local media, unmatched files, storage usage, re-scan. |
 | `/downloads` | Queue | Active, queued, seeding, completed, failed; global limits. |
 | `/player/:id?season=&episode=` | Player | Own window/fullscreen; mpv child surface + HTML overlay. The id names the *title*; an optional season/episode pair names the episode to open, and both travel together or not at all. `PG-E16-02`'s session registry is what makes a session addressable in its own right (ADR [0023](./adr/0023-in-app-video-surface.md)) |

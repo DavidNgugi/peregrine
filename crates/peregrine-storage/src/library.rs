@@ -729,6 +729,38 @@ pub(crate) async fn list_library_titles(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Titles a person is credited on, in the same shape the library grid reads.
+pub(crate) async fn list_library_titles_for_person(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    person_id: i64,
+    request: PageRequest,
+) -> Result<Vec<LibraryTitleRow>, StorageError> {
+    let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
+        "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
+                t.poster_provider, t.poster_path, \
+                COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
+                COALESCE(SUM(f.size_bytes), 0) AS bytes, \
+                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
+           FROM title t \
+           JOIN media_item m ON m.title_id = t.id \
+           LEFT JOIN media_file f ON f.media_item_id = m.id \
+          WHERE (?1 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+            AND (?2 IS NULL OR t.id < ?2) \
+            AND EXISTS (SELECT 1 FROM credit c WHERE c.title_id = t.id AND c.person_id = ?4) \
+          GROUP BY t.id \
+          ORDER BY t.id DESC LIMIT ?3",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(request.bindable_cursor())
+    .bind(request.bindable_limit())
+    .bind(person_id)
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// One episode of a title: what a provider said about it, and what the library holds of it.
 ///
 /// **Widened from the counts a totals table needed to what a card draws.** The first shape carried

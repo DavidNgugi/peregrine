@@ -678,6 +678,8 @@ pub struct CastWrite {
 /// One cast row as a title page reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CastRow {
+    /// The local person row id.
+    pub person_id: i64,
     /// The person's name.
     pub name: String,
     /// The character played.
@@ -754,6 +756,30 @@ pub(crate) async fn replace_cast(
     Ok(())
 }
 
+/// One person row, for the page a cast member opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonRow {
+    /// Their name.
+    pub name: String,
+    /// The cached portrait's absolute path, when one is cached.
+    pub profile: Option<String>,
+}
+
+/// One person by row id.
+pub(crate) async fn person(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> Result<Option<PersonRow>, StorageError> {
+    let row = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT name, profile_cache_path FROM person WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(row.map(|(name, profile)| PersonRow { name, profile }))
+}
+
 /// A title's cast, in billing order.
 pub(crate) async fn cast_for_title(
     pool: &sqlx::SqlitePool,
@@ -761,7 +787,7 @@ pub(crate) async fn cast_for_title(
     limit: u32,
 ) -> Result<Vec<CastRow>, StorageError> {
     let rows = sqlx::query_as::<_, CastQueryRow>(
-        "SELECT p.name, c.character, p.profile_cache_path FROM credit c JOIN person p ON p.id = c.person_id WHERE c.title_id = ?1 AND c.kind = 'cast' ORDER BY COALESCE(c.order_index, 9999) ASC, p.name ASC LIMIT ?2",
+        "SELECT p.id, p.name, c.character, p.profile_cache_path FROM credit c JOIN person p ON p.id = c.person_id WHERE c.title_id = ?1 AND c.kind = 'cast' ORDER BY COALESCE(c.order_index, 9999) ASC, p.name ASC LIMIT ?2",
     )
     .bind(title_id)
     .bind(i64::from(limit))
@@ -771,6 +797,7 @@ pub(crate) async fn cast_for_title(
     Ok(rows
         .into_iter()
         .map(|row| CastRow {
+            person_id: row.id,
             name: row.name,
             character: row.character,
             profile: row.profile_cache_path,
@@ -780,6 +807,7 @@ pub(crate) async fn cast_for_title(
 
 #[derive(sqlx::FromRow)]
 struct CastQueryRow {
+    id: i64,
     name: String,
     character: Option<String>,
     profile_cache_path: Option<String>,
