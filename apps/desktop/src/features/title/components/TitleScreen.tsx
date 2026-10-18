@@ -175,7 +175,7 @@ export function TitleScreen({
                   });
                   return;
                 }
-                onNavigate({ kind: "player", id: title.id });
+                onNavigate({ kind: "player", id: title.id, titleKind: kind });
               }}
               acquiring={
                 acquire?.titleId === title.id &&

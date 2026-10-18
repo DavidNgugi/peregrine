@@ -32,7 +32,7 @@ Peregrine is an unsigned, unnotarised, and unpublished v1.0 release candidate. O
 
 **Working now.** Discovery: TMDB rails, search, browse, and title pages with seasons, episodes, top-billed cast, and person pages with both the local credits and the provider's filmography, cached in SQLite. Acquisition: a managed or an existing Prowlarr, indexer search, quality ranking, and magnet download. The queue: progress, pause, resume, remove, and deletion that plans before it acts. Playback: streaming from the torrent engine while a download runs, episode-level play with the season/episode pair in the player route, mpv for containers the webview cannot demux, resume, and continue watching that reopens the exact episode. Watch state: per-episode bars, a Next up marker, and a viewing history in Settings. Scheduling: an unreleased episode or title stores a request and the app's ticker starts it on its release date, with a Scheduled list that cancels it. Library: scanning folders you already have, parsing filenames, automatic matching of a scanned title to a provider's exact name, manual matching for the rest, a Library screen with search and a kind filter, and a My library rail on Discover ordered by arrival. Watchlist: save a title from its page, and a bookmark marks it on every rail and grid. Safety: torrent inspection before a byte is written, path guarding, keyring secrets, redacted logs. Plus an in-app notification centre and a device-local profile selector.
 
-**Still missing.** Subtitles beyond the domain parser, with no search, download, or sync. Casting to a device. Crew credits: the adapter stores the cast only, so directors and writers have no page. Air-date monitoring and watchlist auto-acquire. MCP. Local accounts and parental gating. The Jellyfin-compatible server and its LAN listener. Windows and Linux verification. Signing, notarisation, and publishing the bundles. Performance budgets, end-to-end tests, and fuzz targets.
+**Still missing.** Subtitle search, download, sync, and mpv-sidecar selection; local sidecar indexing and in-page display now exist. Casting to a device. Crew credits: the adapter stores the cast only, so directors and writers have no page. Air-date monitoring and watchlist auto-acquire. MCP. Local accounts and parental gating. The Jellyfin-compatible server and its LAN listener. Windows and Linux verification. Signing, notarisation, and publishing the bundles. Performance budgets, end-to-end tests, and fuzz targets.
 
 The tree was built in eight days on top of these documents: over 380 commits and roughly 164,000 lines of Rust and TypeScript, against the acceptance criteria this backlog states. [AGENTS.md](../AGENTS.md) §3 is the contract for what a change owes, and the README is the user-facing status.
 
@@ -891,6 +891,10 @@ graph LR
   - Acceptance: Two tracks rendered simultaneously per style config
 - [ ] **PG-E17-20** `S` · deps PG-E17-02 · Subtitle provider attribution and terms compliance
   - Acceptance: Attribution string present where required
+- [x] **PG-E17-21** `S` · External sidecar discovery during a scan: same-stem `.srt/.vtt/.ass/.ssa/.sub` files become `subtitle_track` rows owned by the video, with language, forced, and SDH parsed from the suffix; a rescan replaces the external set without duplication
+  - Acceptance: Added, removed, and unchanged sidecars reconcile; embedded and downloaded tracks are untouched
+- [x] **PG-E17-22** `M` · Sidecar playback: the session registers guarded tracks and serves them over the same loopback listener and token as the media, addressed by track id; the webview player draws the track list and a Subtitle/Off menu
+  - Acceptance: A track outside every root is refused; an unregistered id is 404; the webview renders WebVTT. **Remaining:** mpv selection needs a subtitle parameter on the player trait and spawn arguments; SRT/ASS may not render in the webview parser
 
 ## E18 · Watch progress and resume
 
@@ -1512,21 +1516,21 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | 0 Foundations | E0–E4 | 93 | 178 |
 | 1 Discovery | E5–E9 | 85 | 203 |
 | 2 Acquisition and library | E10–E15 | 98 | 238 |
-| 3 Playback and subtitles | E16–E18 | 57 | 142 |
+| 3 Playback and subtitles | E16–E18 | 59 | 145 |
 | 4 Platform and distribution | E19–E27 | 133 | 327 |
 | 5 1.0 hardening and community | E28–E29 | 24 | 58 |
 | 6 Roadmap: monitoring and agent access | E30–E31 | 22 | 66 |
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
 | 9 Roadmap: homelab deployment | E36 written; E37 pending | 17 written | 56 |
-| **Full backlog (phases 0–5)** | | **490** | **1 144** |
+| **Full backlog (phases 0–5)** | | **492** | **1 147** |
 
 Two numbers matter, and they are different by design.
 
 | Scope | Content | Tasks | Ideal days | Why |
 | --- | --- | --- | --- | --- |
 | **Core 1.0** | Working discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, plus signed installers and updates | 225 | 577 (+30% contingency ≈ **750**) | This is a genuinely usable, shippable app |
-| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 484 | **1 139** | This is what "no known defects, every platform, every edge case" costs |
+| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 492 | **1 147** | This is what "no known defects, every platform, every edge case" costs |
 
 Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
 

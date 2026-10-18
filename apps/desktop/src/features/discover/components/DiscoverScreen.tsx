@@ -358,12 +358,10 @@ export function DiscoverView({
     onBackdrops?.(backdropKey.length === 0 ? [] : backdropKey.split("|"));
   }, [backdropKey, onBackdrops]);
 
-  // The Discover kind filter applies to the two rails this screen owns as well as to the provider
-  // ones: a film must not appear under TV shows, and a series must not appear under Films.
-  // undefined is All, which admits both.
-  const watching = (continueWatching?.rows ?? []).filter(
-    (row) => titleKind === undefined || row.kind === titleKind,
-  );
+  // **Continue Watching is a personal rail, not a catalogue view.** The Films/TV switch narrows the
+  // catalogue; applying it here hid a series the moment the reader narrowed Discover to films, which
+  // is the one rail that must survive the filter: it answers "where was I?", not "what is here?".
+  const watching = continueWatching?.rows ?? [];
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
@@ -583,8 +581,13 @@ export function DiscoverView({
                         id: row.titleId,
                         season: row.seasonNumber,
                         episode: row.episodeNumber,
+                        ...(row.kind === null ? {} : { titleKind: row.kind }),
                       }
-                    : { kind: "player" as const, id: row.titleId };
+                    : {
+                        kind: "player" as const,
+                        id: row.titleId,
+                        ...(row.kind === null ? {} : { titleKind: row.kind }),
+                      };
                 return (
                   <TitleCard
                     {...downloadCardProps(marks, row.titleId, t, progress)}

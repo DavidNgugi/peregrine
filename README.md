@@ -6,7 +6,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 
 ![The Discover screen, showing a featured title, its details, and a trending rail](assets/screenshots/discover.webp)
 
-> **Status: v1.0 release candidate, unsigned.** Discovery, acquisition, library scanning, episode-level playback, watch state, the watchlist, and scheduled downloads work end to end on macOS. The release workflow builds macOS, Windows, and Linux bundles, but they are unsigned, unnotarised, and unpublished; Windows and Linux have not been run. Subtitles, casting to a device, and accounts still do not exist. Treat it as a release candidate, not a supported release.
+> **Status: v1.0 release candidate, unsigned.** Discovery, acquisition, library scanning, episode-level playback, watch state, the watchlist, and scheduled downloads work end to end on macOS. The release workflow builds macOS, Windows, and Linux bundles, but they are unsigned, unnotarised, and unpublished; Windows and Linux have not been run. Subtitle search/download, mpv subtitle selection, casting to a device, and accounts still do not exist. Treat it as a release candidate, not a supported release.
 
 ## What works today
 
@@ -18,6 +18,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 - **Cast** — each refreshed title carries its top-billed cast from TMDB, portraits included, drawn as a rail on the title page. Clicking a person opens their page: the titles in your library that credit them, plus the rest of their credits from TMDB.
 - **Watchlist** — save a title from its page. A bookmark marks it on every rail and grid, and Discover's **My list** rail collects the saved titles.
 - **Playback** — pick an episode and play that episode, not the title's first file. mpv for containers the webview cannot demux, resume, and continue watching that reopens the exact episode.
+- **Subtitles** — `.srt/.vtt/.ass/.ssa/.sub` sidecars beside a video are indexed and offered in the webview player, served from the same session token as the media. WebVTT renders in-page; SRT/ASS may not, and mpv does not yet receive a selected sidecar. Provider search and download are not built.
 - **Watch state** — a bar along each episode's still fills as you watch and completes when you finish; the first unfinished episode is marked **Next up**, and Settings carries the full viewing history.
 - **Scheduled downloads** — an unreleased episode or title offers Schedule instead of Download; the app fetches it on its release date and the Scheduled list in Downloads cancels it.
 - **Profiles** — a local selector with DiceBear avatars or an uploaded photo. It is device-local scaffolding for the local accounts and parental gating in the roadmap, not a security boundary.

@@ -110,6 +110,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // Leaving the player is Back when there is a place behind it, and the title it was opened for
   // when the window opened straight onto the player — a reload keeps the path but not the stack.
   const playerId = route.kind === "player" ? route.id : null;
+  const playerKind = route.kind === "player" ? (route.titleKind ?? "movie") : "movie";
   const leavePlayer = useCallback(() => {
     setHistory((current) => {
       if (canGoBack(current)) {
@@ -117,9 +118,9 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       }
       return playerId === null
         ? current
-        : navigateTo(current, { kind: "title", titleKind: "movie", id: playerId });
+        : navigateTo(current, { kind: "title", titleKind: playerKind, id: playerId });
     });
-  }, [playerId]);
+  }, [playerId, playerKind]);
 
   // And the window's path follows it, so the two cannot drift: a reload — which a webview performs
   // for reasons it does not announce — returns the user to the screen they were on rather than to

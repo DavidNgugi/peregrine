@@ -1,5 +1,6 @@
 import { createI18n } from "@peregrine/i18n";
 import type {
+  ContinueWatchingDto,
   HomeRailDto,
   IpcError,
   LibraryTitleDto,
@@ -178,6 +179,38 @@ describe("My library", () => {
     // And the tile that is not on the list says so by omission: no mark, no word, same meta.
     expect(html).toContain("Other Arrival, Series · 2 items");
     expect(html).not.toContain("Other Arrival, On My list");
+  });
+});
+
+describe("Continue Watching", () => {
+  it("keeps a series when Discover is narrowed to films", () => {
+    const show: ContinueWatchingDto = {
+      titleId: 16,
+      title: "VisionQuest",
+      poster: null,
+      kind: "show",
+      episodeId: 2298,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      positionMs: 60_000,
+      durationMs: 2_400_000,
+      percent: 0.025,
+      updatedAt: 1,
+    };
+
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <DiscoverView
+          continueWatching={{ rows: [show], loading: false, failed: false }}
+          onNavigate={() => undefined}
+          rails={railsView()}
+          search={{ ...NO_SEARCH }}
+          titleKind="movie"
+        />
+      </I18nextProvider>,
+    );
+
+    expect(html).toContain("VisionQuest");
   });
 });
 

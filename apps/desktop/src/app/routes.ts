@@ -58,6 +58,8 @@ export type Route =
       /** The episode to open, when the play named one; absent plays the title's own file. */
       readonly season?: number;
       readonly episode?: number;
+      /** Film or series, so Back can name the right title when there is no stack entry. */
+      readonly titleKind?: TitleKind;
     };
 
 /** Which of the two a title is, as a path spells it. */
@@ -156,6 +158,8 @@ export function parseRoute(path: string): Route | null {
       // The pair travels together or not at all, the same rule acquisition states: a season
       // without an episode names nothing the player could open.
       const query = new URLSearchParams(path.split("?")[1]?.split("#")[0]);
+      const kindParam = query.get("type");
+      const titleKind = kindParam === "movie" || kindParam === "show" ? kindParam : undefined;
       const season = Number(query.get("season"));
       const episode = Number(query.get("episode"));
       if (
@@ -164,9 +168,9 @@ export function parseRoute(path: string): Route | null {
         Number.isSafeInteger(episode) &&
         episode > 0
       ) {
-        return { kind: "player", id, season, episode };
+        return { kind: "player", id, season, episode, ...(titleKind ? { titleKind } : {}) };
       }
-      return { kind: "player", id };
+      return { kind: "player", id, ...(titleKind ? { titleKind } : {}) };
     }
   }
   return null;
@@ -187,9 +191,16 @@ export function routePath(route: Route): string {
     return `/person/${String(route.id)}`;
   }
   if (route.kind === "player") {
-    return route.season !== undefined && route.episode !== undefined
-      ? `/player/${String(route.id)}?season=${String(route.season)}&episode=${String(route.episode)}`
-      : `/player/${String(route.id)}`;
+    const query = new URLSearchParams();
+    if (route.season !== undefined && route.episode !== undefined) {
+      query.set("season", String(route.season));
+      query.set("episode", String(route.episode));
+    }
+    if (route.titleKind !== undefined) {
+      query.set("type", route.titleKind);
+    }
+    const suffix = query.toString();
+    return `/player/${String(route.id)}${suffix.length === 0 ? "" : `?${suffix}`}`;
   }
   return PATHS[route.kind];
 }

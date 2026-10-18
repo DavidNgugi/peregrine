@@ -132,12 +132,14 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
   };
 
   return (
-    <Screen title={t("player.title")} subtitle={session === null ? undefined : t("player.playing")}>
+    <Screen
+      backLabel={t("player.back")}
+      onBack={onClose}
+      subtitle={session === null ? undefined : t("player.playing")}
+      title={t("player.title")}
+    >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <Button onClick={onClose} size="sm" variant="ghost">
-            {t("player.back")}
-          </Button>
+        <div className="flex items-center justify-end gap-3">
           <div className="flex items-center gap-3">
             {/* **The track menu, and only for the surface that can show a track.** An external
                 session's sidecars are mpv's to pick, so offering a menu here would be a control that
@@ -324,10 +326,23 @@ export function PlayerScreen({ id, season, episode, onClose }: PlayerScreenProps
       return;
     }
     launched.current = session.sessionId;
-    void playExternally(session.titleId).catch((caught: unknown) => {
-      setExternalFailure(normalizeIpcError(caught));
-    });
-  }, [session]);
+    // **The app has nothing left to show once mpv owns the file.** Leaving this screen open with a
+    // sentence about mpv is a dead end the reader has to back out of; returning to where the play
+    // came from is the whole of what this page can do after a successful launch.
+    let cancelled = false;
+    void playExternally(session.titleId)
+      .then(() => {
+        if (!cancelled) {
+          onClose();
+        }
+      })
+      .catch((caught: unknown) => {
+        setExternalFailure(normalizeIpcError(caught));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, onClose]);
 
   return <PlayerView externalFailure={externalFailure} onClose={onClose} playback={playback} />;
 }

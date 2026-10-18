@@ -172,7 +172,7 @@ mod tests {
     ];
 
     /// The forty-two tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 42] = [
+    const DOCUMENTED_TABLES: [&str; 43] = [
         "account",
         "cast_session",
         "company",
@@ -182,6 +182,7 @@ mod tests {
         "discover_rail",
         "download_file",
         "download_job",
+        "download_schedule",
         "episode",
         "episode_ordering",
         "event_log",
@@ -391,6 +392,8 @@ mod tests {
         ("profile_path", "TEXT", 0, None, 0),
         ("profile_blurhash", "TEXT", 0, None, 0),
         ("updated_at", "INTEGER", 0, None, 0),
+        ("provider_id", "TEXT", 0, None, 0),
+        ("profile_cache_path", "TEXT", 0, None, 0),
     ];
 
     const CREDIT: &[ColumnShape] = &[
@@ -889,6 +892,21 @@ mod tests {
             "SET NULL",
         ),
         ("download_job", "title", "title_id", "id", "CASCADE"),
+        (
+            "download_schedule",
+            "account",
+            "account_id",
+            "id",
+            "CASCADE",
+        ),
+        (
+            "download_schedule",
+            "episode",
+            "episode_id",
+            "id",
+            "CASCADE",
+        ),
+        ("download_schedule", "title", "title_id", "id", "CASCADE"),
         ("episode", "season", "season_id", "id", "CASCADE"),
         ("episode", "title", "title_id", "id", "CASCADE"),
         ("episode_ordering", "episode", "episode_id", "id", "CASCADE"),
@@ -963,13 +981,14 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 42] = [
+    const DOCUMENTED_INDICES: [&str; 44] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "discover_rail_title_idx",
         "download_job_active_idx",
         "download_job_hash_uq",
         "download_job_title_idx",
+        "download_schedule_due_idx",
         "episode_absolute_idx",
         "episode_air_date_idx",
         "episode_ordering_lookup_idx",
@@ -990,6 +1009,7 @@ mod tests {
         "notification_pending_idx",
         "notification_unread_idx",
         "person_name_idx",
+        "person_provider_idx",
         "provider_cache_expiry_idx",
         "provider_cache_resource_idx",
         "provider_cache_size_idx",
@@ -2231,6 +2251,8 @@ mod tests {
          VALUES (1, 'queued', 'Alien 1979 1080p', '/downloads', 0)",
         "INSERT INTO download_file (download_job_id, torrent_file_index, path, size_bytes) \
          VALUES (1, 0, 'alien.mkv', 1)",
+        "INSERT INTO download_schedule (account_id, title_id, release_on, created_at, updated_at) \
+         VALUES (1, 1, '2030-01-01', 0, 0)",
         "INSERT INTO release_decision \
          (download_job_id, title_id, release_title, score, rank_position, reasons_json, created_at) \
          VALUES (1, 1, 'Alien 1979 1080p', 1.0, 1, '{}', 0)",
@@ -2271,6 +2293,8 @@ mod tests {
         SELECT 'download_file' AS table_name, COUNT(*) AS n FROM download_file
         UNION ALL
         SELECT 'download_job' AS table_name, COUNT(*) AS n FROM download_job
+        UNION ALL
+        SELECT 'download_schedule' AS table_name, COUNT(*) AS n FROM download_schedule
         UNION ALL
         SELECT 'episode' AS table_name, COUNT(*) AS n FROM episode
         UNION ALL

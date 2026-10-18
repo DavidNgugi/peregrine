@@ -15,6 +15,7 @@ const ROUTES: readonly Route[] = [
   { kind: "title", titleKind: "show", id: 12_345 },
   { kind: "person", id: 7 },
   { kind: "player", id: 7 },
+  { kind: "player", id: 7, titleKind: "show" },
 ];
 
 describe("parseRoute", () => {
