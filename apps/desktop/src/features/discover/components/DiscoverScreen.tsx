@@ -287,6 +287,7 @@ export function DiscoverView({
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
   const saved = watchlist ?? [];
+  const watchlisted = new Set(saved.map((row) => row.titleId));
   // Newest arrival first, because this rail answers "what did I just add?" rather than "what do I
   // own?". `addedAt` is the newest file's arrival, so a download that filled an older title's last
   // season moves that title to the front.
@@ -517,6 +518,8 @@ export function DiscoverView({
                   size="lg"
                   tabIndex={tabIndex}
                   title={row.name}
+                  watchlistLabel={t("card.watchlisted")}
+                  watchlisted={watchlisted.has(row.id)}
                 />
               )}
               title={t("discover.rail.library")}
@@ -627,6 +630,8 @@ export function DiscoverView({
                   size="lg"
                   tabIndex={tabIndex}
                   title={item.name}
+                  watchlistLabel={t("card.watchlisted")}
+                  watchlisted={watchlisted.has(item.titleId)}
                 />
               )}
               title={t(RAIL_HEADINGS[rail.rail] ?? "discover.rail.unknown")}

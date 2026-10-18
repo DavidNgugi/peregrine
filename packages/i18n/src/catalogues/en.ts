@@ -359,6 +359,7 @@ export const en = {
     // `discover` because every screen that draws a tile reads them.
     card: {
       details: "View More",
+      watchlisted: "On My list",
       rating: "rated {{score}} out of 10",
       // **Both plural forms, because a count of one is not a count of many.** `TitleCard` passes
       // `count` alongside a `formatted` string it has already grouped by locale, so the number reads

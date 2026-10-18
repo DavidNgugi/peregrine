@@ -98,6 +98,8 @@ export interface BrowseViewProps {
   readonly downloads?: DownloadMarks | undefined;
   /** The queue rows, which is what puts a download above the provider's page. */
   readonly downloadRows?: readonly DownloadTitleSource[] | undefined;
+  /** Titles on the account's watchlist, so their tiles carry the bookmark. */
+  readonly watchlisted?: ReadonlySet<number> | undefined;
   /** The shell's back control, present only when there is somewhere behind this screen. */
   readonly onBack?: (() => void) | undefined;
   readonly backLabel?: string | undefined;
@@ -113,6 +115,7 @@ export function BrowseView({
   onNavigate,
   downloads,
   downloadRows,
+  watchlisted,
   onBack,
   backLabel,
 }: BrowseViewProps): ReactElement {
@@ -157,6 +160,8 @@ export function BrowseView({
       ratingLabel={ratingLabel(item)}
       size="lg"
       title={item.name}
+      watchlistLabel={t("card.watchlisted")}
+      watchlisted={watchlisted?.has(item.titleId) ?? false}
     />
   );
 
@@ -423,6 +428,7 @@ export function BrowseScreen({
   titleKind,
   downloads,
   downloadRows,
+  watchlisted,
   onBack,
   backLabel,
 }: {
@@ -431,6 +437,7 @@ export function BrowseScreen({
   readonly titleKind?: TitleKind | undefined;
   readonly downloads?: DownloadMarks | undefined;
   readonly downloadRows?: readonly DownloadTitleSource[] | undefined;
+  readonly watchlisted?: ReadonlySet<number> | undefined;
   readonly onBack?: (() => void) | undefined;
   readonly backLabel?: string | undefined;
 }): ReactElement {
@@ -457,6 +464,7 @@ export function BrowseScreen({
       genres={genres}
       kind={kind}
       search={search}
+      watchlisted={watchlisted}
       onBack={onBack}
       onKind={(selected) => {
         onNavigate({ kind: "browse", titleKind: selected });

@@ -117,6 +117,8 @@ interface LibraryScreenProps {
   readonly onView: (view: LibraryView) => void;
   /** A download status per title, so a tile wears the mark of a transfer in flight. */
   readonly downloads?: DownloadMarks | undefined;
+  /** Titles on the account's watchlist, so their tiles carry the bookmark. */
+  readonly watchlisted?: ReadonlySet<number> | undefined;
   /** The shell's back control, present only when there is somewhere behind this screen. */
   readonly onBack?: (() => void) | undefined;
   readonly backLabel?: string | undefined;
@@ -393,6 +395,7 @@ export function LibraryScreen({
   view,
   onView,
   downloads,
+  watchlisted,
   onBack,
   backLabel,
 }: LibraryScreenProps): ReactElement {
@@ -575,6 +578,8 @@ export function LibraryScreen({
                   // The core resolved this against the cache for every row, which is the whole reason
                   // the poster travels on the list read (AGENTS R7): a tile cannot hash a cache key.
                   poster={imageUrl(row.poster)}
+                  watchlistLabel={t("card.watchlisted")}
+                  watchlisted={watchlisted?.has(row.id) ?? false}
                   // **Not lifted, and that is the grid's geometry rather than a preference.** A grid's
                   // columns are derived to fit the measured width, so it has no room to reserve for a 30 %
                   // enlargement — and a scroller clips on both axes, so scaling anyway cut the outer tiles

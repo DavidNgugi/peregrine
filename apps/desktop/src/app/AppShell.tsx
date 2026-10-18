@@ -235,6 +235,10 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const library = useLibraryTitles();
   const downloads = useDownloads();
   const watchlist = useWatchlist();
+  const watchlistedIds = useMemo(
+    () => new Set(watchlist.rows.map((row) => row.titleId)),
+    [watchlist.rows],
+  );
   // One status per title, from the queue read the shell already holds. A screen hands a card the
   // mark for its own id rather than each subscribing to the queue: one read, one answer.
   const marks = useMemo(() => downloadMarks(downloads.downloads), [downloads.downloads]);
@@ -419,6 +423,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 onBack={canBack ? goBack : undefined}
                 onNavigate={navigate}
                 titleKind={route.titleKind}
+                watchlisted={watchlistedIds}
               />
             ) : null}
             {route.kind === "library" ? (
@@ -432,6 +437,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 scan={scan}
                 titles={library}
                 unmatched={unmatched}
+                watchlisted={watchlistedIds}
                 view={libraryView.view}
               />
             ) : null}
@@ -441,6 +447,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 id={route.id}
                 onBack={canBack ? goBack : undefined}
                 onNavigate={navigate}
+                watchlisted={watchlistedIds}
               />
             ) : null}
             {route.kind === "downloads" ? (

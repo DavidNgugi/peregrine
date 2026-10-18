@@ -59,6 +59,9 @@ const PATHS = {
       <path d="M17.5 5.2 20.4 19" />
     </>
   ),
+  /** Watchlist: a bookmark, which is the same mark the title page's control uses. */
+  bookmark: <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1Z" />,
+
   /** Diagnostics: a pulse, read from left to right. */
   pulse: <path d="M3 12h3.5l2.5-6 4 12 2.5-6H21" />,
   /** Settings: two sliders, which read as preferences on all three platforms. */

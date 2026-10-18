@@ -383,6 +383,16 @@ export interface TitleCardProps {
    * number without a status would be a progress bar for something the card cannot name.
    */
   readonly downloadProgress?: number | null;
+  /**
+   * Whether the title is on the account's watchlist, drawn as a bookmark on the poster.
+   *
+   * A mark rather than a chip: it is a fact about the tile the reader chose, not a state the
+   * catalogue is in, and it must not compete with the availability chip's colour. The word beside
+   * it is the caller's, because the kit holds no copy.
+   */
+  readonly watchlisted?: boolean;
+  /** The watchlist mark's word, for the accessible name. */
+  readonly watchlistLabel?: string | null;
   readonly size?: CardSize;
   /**
    * Loads eagerly and at high priority.
@@ -419,6 +429,8 @@ export function TitleCard({
   downloadStatus,
   downloadLabel,
   downloadProgress,
+  watchlisted = false,
+  watchlistLabel,
   size,
   // The container's answer to the tile's enlargement. A rail reserves the room and a grid cannot,
   // so the name is the room's rather than the interaction's: `previewLift` below is the stacking
@@ -519,8 +531,10 @@ export function TitleCard({
   const showsProgress = downloadStatus === "active" && percent !== null;
 
   const metaLine = said(meta);
+  const watchWord = watchlisted ? said(watchlistLabel) : null;
   const spoken = [
     title,
+    watchWord,
     metaLine,
     said(ratingLabel),
     showsChip ? chip : null,
@@ -632,6 +646,18 @@ export function TitleCard({
           />
         ) : null}
       </span>
+      {watchlisted ? (
+        <span
+          aria-hidden="true"
+          className={clsx(
+            "absolute top-1 left-1 z-10 inline-flex items-center justify-center rounded-sm border",
+            "border-border-subtle bg-surface-0 p-0.5 text-text-primary",
+          )}
+          data-watchlisted=""
+        >
+          <Icon name="bookmark" size={16} />
+        </span>
+      ) : null}
       {rating === undefined || rating === null || !badgeVisible(preview, focused) ? null : (
         <span className="absolute bottom-1 left-1">
           <span

@@ -152,6 +152,18 @@ describe("TitleCard badges", () => {
     }
   });
 
+  it("marks a watchlisted title with a bookmark and says so", () => {
+    const markup = card({ watchlisted: true, watchlistLabel: "On My list" });
+    expect(markup).toContain('data-watchlisted=""');
+    expect(markup).toContain("On My list");
+  });
+
+  it("draws no watchlist mark for a title that is not on the list", () => {
+    const markup = card({ watchlisted: false, watchlistLabel: "On My list" });
+    expect(markup).not.toContain('data-watchlisted=""');
+    expect(markup).not.toContain("On My list");
+  });
+
   it("holds no copy of its own for a state", () => {
     // The kit is a leaf with no i18n, so a chip without the caller's word is not drawn rather than
     // guessed at in English.

@@ -12,11 +12,13 @@ export function PersonScreen({
   id,
   onBack,
   onNavigate,
+  watchlisted,
 }: {
   backLabel: string;
   id: number;
   onBack: (() => void) | undefined;
   onNavigate: (route: Route) => void;
+  watchlisted?: ReadonlySet<number> | undefined;
 }): ReactElement {
   const { t } = useTranslation();
   const person = usePerson(id);
@@ -82,6 +84,8 @@ export function PersonScreen({
                   poster={imageUrl(row.poster)}
                   size="lg"
                   title={row.name}
+                  watchlistLabel={t("card.watchlisted")}
+                  watchlisted={watchlisted?.has(row.id) ?? false}
                 />
               )}
             />
@@ -119,6 +123,8 @@ export function PersonScreen({
                   poster={imageUrl(row.poster)}
                   size="lg"
                   title={row.name}
+                  watchlistLabel={t("card.watchlisted")}
+                  watchlisted={watchlisted?.has(row.titleId) ?? false}
                 />
               )}
               rowHeight={276}
