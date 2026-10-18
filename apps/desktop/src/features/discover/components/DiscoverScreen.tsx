@@ -10,7 +10,6 @@ import {
   TitleCard,
 } from "@peregrine/ui";
 import type {
-  DownloadJobDto,
   LibraryTitleDto,
   RailItemDto,
   RailKindDto,
@@ -21,11 +20,7 @@ import { useEffect, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route } from "../../../app/routes.js";
-import {
-  downloadCardProps,
-  downloadStatusOf,
-  type DownloadMarks,
-} from "../../../lib/download-status.js";
+import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
 import { useDownloadProgress } from "../../../lib/download-progress.js";
 import { imageUrl } from "../../../lib/media.js";
 import { MIN_QUERY_CHARS, useTitleSearch, type SearchSource } from "../../../lib/title-search.js";
@@ -92,14 +87,6 @@ export interface DiscoverViewProps {
    * invent rows it is not testing; an absent rail is an empty one.
    */
   readonly continueWatching?: ContinueWatchingView;
-  /**
-   * The download queue's recent rows, drawn as their own rail above Continue Watching.
-   *
-   * In-progress first and completed second — the same order Browse hoists them in — and only those
-   * two groups: a failed or blocked row is the queue's business, not a shelf. Absent or empty draws
-   * no rail at all.
-   */
-  readonly recentDownloads?: readonly DownloadJobDto[];
   readonly search: {
     readonly results: readonly TitleMatchDto[];
     readonly searching: boolean;
@@ -286,7 +273,6 @@ export function DiscoverToolbar({
 export function DiscoverView({
   rails,
   continueWatching,
-  recentDownloads,
   watchlist,
   libraryTitles,
   search,
@@ -301,7 +287,10 @@ export function DiscoverView({
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
   const saved = watchlist ?? [];
-  const scanned = libraryTitles ?? [];
+  // Newest arrival first, because this rail answers "what did I just add?" rather than "what do I
+  // own?". `addedAt` is the newest file's arrival, so a download that filled an older title's last
+  // season moves that title to the front.
+  const scanned = [...(libraryTitles ?? [])].sort((left, right) => right.addedAt - left.addedAt);
   const progress = useDownloadProgress();
 
   const routeFor = (item: RailItemDto): Route => ({
@@ -360,16 +349,6 @@ export function DiscoverView({
   const watching = (continueWatching?.rows ?? []).filter(
     (row) => titleKind === undefined || row.kind === titleKind,
   );
-  // In-progress ahead of completed, each group in the queue's own newest-first order. Two filter
-  // passes rather than a sort: the partition is the rule, and a comparator would make it depend on
-  // the engine's sort stability.
-  const queue = (recentDownloads ?? []).filter(
-    (row) => titleKind === undefined || row.titleKind === titleKind,
-  );
-  const recent = [
-    ...queue.filter((row) => downloadStatusOf(row.state) === "active"),
-    ...queue.filter((row) => downloadStatusOf(row.state) === "done"),
-  ];
   const nothingAtAll = rails.rails.every((rail) => rail.items.length === 0);
   // The one state the screen says out loud rather than drawing as an empty catalogue: a provider is
   // configured and the fetch is in the air, so the answer is "coming", not "nothing" (`FLOWS F2`).
@@ -568,44 +547,6 @@ export function DiscoverView({
               title={t("discover.rail.watchlist")}
             />
           )}
-          {recent.length === 0 ? null : (
-            <Rail
-              empty={null}
-              itemKey={(row) => String(row.titleId)}
-              items={recent}
-              renderItem={(row, tabIndex) => {
-                const label = t(`downloads.state.${row.state}`);
-                const percent =
-                  downloadStatusOf(row.state) === "active" && row.progressPermille > 0
-                    ? ` · ${Math.round(row.progressPermille / 10)}%`
-                    : "";
-                return (
-                  <TitleCard
-                    {...downloadCardProps(marks, row.titleId, t, progress)}
-                    detailsLabel={t("card.details")}
-                    href={routePath({
-                      kind: "title",
-                      id: row.titleId,
-                      titleKind: row.titleKind ?? "movie",
-                    })}
-                    meta={`${label}${percent}`}
-                    onNavigate={() => {
-                      onNavigate({
-                        kind: "title",
-                        id: row.titleId,
-                        titleKind: row.titleKind ?? "movie",
-                      });
-                    }}
-                    poster={imageUrl(row.poster)}
-                    size="lg"
-                    tabIndex={tabIndex}
-                    title={row.title ?? row.releaseTitle}
-                  />
-                );
-              }}
-              title={t("discover.rail.recentDownloads")}
-            />
-          )}
           {watching.length === 0 ? null : (
             <Rail
               empty={null}
@@ -702,7 +643,6 @@ export function DiscoverScreen({
   titleKind,
   trailing,
   downloads,
-  recentDownloads,
 }: {
   readonly onNavigate: (route: Route) => void;
   /** The featured title's backdrop, reported so the profile selector can draw the same picture. */
@@ -715,8 +655,6 @@ export function DiscoverScreen({
   readonly watchlist?: readonly WatchlistEntryDto[] | undefined;
   /** The account's own scanned titles, drawn as their own rail. */
   readonly libraryTitles?: readonly LibraryTitleDto[] | undefined;
-  /** The queue's recent rows, for the Recent Downloads rail. */
-  readonly recentDownloads?: readonly DownloadJobDto[] | undefined;
 }): ReactElement {
   const rails = useHomeRails(titleKind);
   // What this account watched most recently, drawn above the provider rails; one read per visit,
@@ -735,7 +673,6 @@ export function DiscoverScreen({
       onBackdrops={onBackdrops}
       onNavigate={onNavigate}
       titleKind={titleKind}
-      {...(recentDownloads === undefined ? {} : { recentDownloads })}
       {...(trailing === undefined ? {} : { trailing })}
       onKindChange={(kind) => {
         // All is the absence of the parameter rather than `type=all`: `/` is the home screen, and a

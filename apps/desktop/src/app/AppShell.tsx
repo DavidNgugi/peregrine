@@ -379,7 +379,6 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 libraryTitles={library.titles}
                 onBackdrops={reportBackdrops}
                 onNavigate={navigate}
-                recentDownloads={downloads.downloads}
                 titleKind={route.titleKind}
                 trailing={
                   <>

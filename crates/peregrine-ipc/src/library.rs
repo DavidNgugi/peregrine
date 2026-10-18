@@ -119,6 +119,12 @@ pub struct LibraryTitleDto {
     /// How many of them are marked missing.
     #[specta(type = Number)]
     pub missing_files: i64,
+    /// When the newest file behind this title entered the library, in Unix milliseconds.
+    ///
+    /// The library's own recency rather than the title's: a download that filled an older title's
+    /// last season moves it to the front of "My library", which a title-id order could not do.
+    #[specta(type = Number)]
+    pub added_at: i64,
     /// The absolute path of the cached poster, or `null` when the cache holds none.
     ///
     /// A path this platform cannot spell as UTF-8 is reported as `null` rather than lossily: the value
@@ -149,6 +155,7 @@ impl From<peregrine_app::LibraryTitleEntry> for LibraryTitleDto {
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
+            added_at: row.added_at,
             poster: artwork_text(entry.poster.as_deref()),
             needs_poster: entry.needs_poster,
         }
@@ -1281,6 +1288,7 @@ mod tests {
                     files: 2,
                     bytes: 4_000_000_000,
                     missing_files: 1,
+                    added_at: 0,
                     // The provider's own reference, which the list row now carries: the fixture states it
                     // because it is what a grid's tile is resolved *from*, and a fixture that left it out
                     // could not tell a read that resolved the poster from one that invented it.

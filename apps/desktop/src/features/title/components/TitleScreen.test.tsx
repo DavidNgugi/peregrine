@@ -39,6 +39,7 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
     files: 3,
     bytes: 12 * 1024 * 1024 * 1024,
     missingFiles: 1,
+    addedAt: 0,
     poster: null,
     needsPoster: false,
     ...overrides,

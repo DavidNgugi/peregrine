@@ -616,6 +616,8 @@ pub struct LibraryTitleRow {
     pub bytes: i64,
     /// How many of them are marked missing.
     pub missing_files: i64,
+    /// When the newest file behind the title entered the library, in Unix milliseconds.
+    pub added_at: i64,
     /// The primary poster the last provider fill recorded, when one ever did.
     ///
     /// A *reference* rather than a path on disk: turning it into one is the cache's answer, which
@@ -711,7 +713,8 @@ pub(crate) async fn list_library_titles(
                 t.poster_provider, t.poster_path, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
-                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
+                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files, \
+                COALESCE(MAX(f.added_at), MAX(m.created_at), 0) AS added_at \
            FROM title t \
            JOIN media_item m ON m.title_id = t.id \
            LEFT JOIN media_file f ON f.media_item_id = m.id \
@@ -741,7 +744,8 @@ pub(crate) async fn list_library_titles_for_person(
                 t.poster_provider, t.poster_path, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
-                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files \
+                COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files, \
+                COALESCE(MAX(f.added_at), MAX(m.created_at), 0) AS added_at \
            FROM title t \
            JOIN media_item m ON m.title_id = t.id \
            LEFT JOIN media_file f ON f.media_item_id = m.id \
@@ -1088,6 +1092,7 @@ struct LibraryTitleQueryRow {
     files: i64,
     bytes: i64,
     missing_files: i64,
+    added_at: i64,
 }
 
 /// The columns [`TitleDetailRow`] is built from: a superset of the list's, and no duplicate of them.
@@ -1134,6 +1139,9 @@ impl From<TitleDetailQueryRow> for LibraryTitleQueryRow {
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
+            // The detail read does not select a recency aggregate: it answers one title, and only
+            // the list screens order by when a title entered the library.
+            added_at: 0,
         }
     }
 }
@@ -1243,6 +1251,7 @@ impl TryFrom<LibraryTitleQueryRow> for LibraryTitleRow {
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
+            added_at: row.added_at,
             poster,
         })
     }

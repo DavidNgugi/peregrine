@@ -1373,6 +1373,13 @@ export type LibraryTitleDto = {
 	/**  How many of them are marked missing. */
 	missingFiles: number,
 	/**
+	 *  When the newest file behind this title entered the library, in Unix milliseconds.
+	 * 
+	 *  The library's own recency rather than the title's: a download that filled an older title's
+	 *  last season moves it to the front of "My library", which a title-id order could not do.
+	 */
+	addedAt: number,
+	/**
 	 *  The absolute path of the cached poster, or `null` when the cache holds none.
 	 * 
 	 *  A path this platform cannot spell as UTF-8 is reported as `null` rather than lossily: the value

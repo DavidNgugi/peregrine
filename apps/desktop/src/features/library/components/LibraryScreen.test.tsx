@@ -41,6 +41,7 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
     files: 2,
     bytes: 8 * 1024 * 1024 * 1024,
     missingFiles: 0,
+    addedAt: 0,
     poster: null,
     // False by default: a fixture is not a title the backfill should ask the core about, and a test that
     // wants one says so.
