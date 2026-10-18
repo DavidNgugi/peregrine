@@ -501,7 +501,7 @@ export function DiscoverView({
                     id: row.id,
                     titleKind: row.kind === "shows" ? "show" : "movie",
                   })}
-                  meta={t("library.tiles.items", { count: row.items })}
+                  meta={`${row.kind === "shows" ? t("discover.kind.show") : t("discover.kind.movie")} · ${t("library.tiles.items", { count: row.items })}`}
                   onNavigate={() => {
                     onNavigate({
                       kind: "title",
@@ -509,7 +509,11 @@ export function DiscoverView({
                       titleKind: row.kind === "shows" ? "show" : "movie",
                     });
                   }}
+                  overview={row.overview}
                   poster={imageUrl(row.poster)}
+                  rating={row.rating}
+                  ratingLabel={row.rating === null ? null : t("card.rating", { score: row.rating })}
+                  showTitle
                   size="lg"
                   tabIndex={tabIndex}
                   title={row.name}

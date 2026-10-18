@@ -71,6 +71,7 @@ export function PersonScreen({
                     titleKind: row.kind === "shows" ? "show" : "movie",
                   })}
                   meta={t("library.tiles.items", { count: row.items })}
+                  lift={false}
                   onNavigate={() => {
                     onNavigate({
                       kind: "title",
@@ -107,6 +108,7 @@ export function PersonScreen({
                     titleKind: row.kind === "show" ? "show" : "movie",
                   })}
                   meta={row.year === null ? "" : String(row.year)}
+                  lift={false}
                   onNavigate={() => {
                     onNavigate({
                       kind: "title",

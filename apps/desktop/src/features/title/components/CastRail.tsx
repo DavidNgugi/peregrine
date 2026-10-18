@@ -24,7 +24,7 @@ export function CastRail({
   }
   return (
     <Section description={t("title.cast.description")} title={t("title.cast.title")}>
-      <ul className="flex gap-5 overflow-x-auto pb-2" data-title-cast="">
+      <ul className="no-scrollbar flex gap-5 overflow-x-auto pb-2" data-title-cast="">
         {cast.map((member) => (
           <li className="w-24 shrink-0" key={`${member.name}-${member.character ?? ""}`}>
             <button

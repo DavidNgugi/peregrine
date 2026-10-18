@@ -1379,6 +1379,10 @@ export type LibraryTitleDto = {
 	 *  last season moves it to the front of "My library", which a title-id order could not do.
 	 */
 	addedAt: number,
+	/**  The provider's synopsis, when one has been written. */
+	overview: string | null,
+	/**  The provider's score out of ten, when it has one. */
+	rating: number | null,
 	/**
 	 *  The absolute path of the cached poster, or `null` when the cache holds none.
 	 * 

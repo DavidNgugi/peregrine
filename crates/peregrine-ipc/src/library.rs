@@ -93,7 +93,7 @@ impl From<RootScanMode> for ScanMode {
 /// a path and never bytes: `apps/desktop/src/lib/media.ts` is the only module that names the asset
 /// protocol (AGENTS R11). `null` covers both "no provider has named one" and "one was named and the blob
 /// is not here", which draw the same reserved box.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryTitleDto {
     /// The row id, which is the paging cursor.
@@ -125,6 +125,10 @@ pub struct LibraryTitleDto {
     /// last season moves it to the front of "My library", which a title-id order could not do.
     #[specta(type = Number)]
     pub added_at: i64,
+    /// The provider's synopsis, when one has been written.
+    pub overview: Option<String>,
+    /// The provider's score out of ten, when it has one.
+    pub rating: Option<f64>,
     /// The absolute path of the cached poster, or `null` when the cache holds none.
     ///
     /// A path this platform cannot spell as UTF-8 is reported as `null` rather than lossily: the value
@@ -156,6 +160,8 @@ impl From<peregrine_app::LibraryTitleEntry> for LibraryTitleDto {
             bytes: row.bytes,
             missing_files: row.missing_files,
             added_at: row.added_at,
+            overview: row.overview,
+            rating: row.rating,
             poster: artwork_text(entry.poster.as_deref()),
             needs_poster: entry.needs_poster,
         }
@@ -1288,6 +1294,8 @@ mod tests {
                     files: 2,
                     bytes: 4_000_000_000,
                     missing_files: 1,
+                    overview: None,
+                    rating: None,
                     added_at: 0,
                     // The provider's own reference, which the list row now carries: the fixture states it
                     // because it is what a grid's tile is resolved *from*, and a fixture that left it out

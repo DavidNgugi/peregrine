@@ -95,3 +95,11 @@ textarea,
     transition-duration: 0.01ms !important;
   }
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

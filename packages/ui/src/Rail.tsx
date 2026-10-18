@@ -289,6 +289,7 @@ export function Rail<T>({
       // overhang *without* becoming a scroll container, so it cannot swallow the vertical room the
       // enlarged card needs and cannot add a second horizontal scrollbar of its own.
       className={twMerge(clsx("flex flex-col gap-2 overflow-x-clip"), className)}
+      style={{ overflowClipMargin: `${String(ROOM.sides)}px` }}
     >
       <h2 className="text-title-2 text-text-primary" id={titleId}>
         {title}
@@ -315,7 +316,7 @@ export function Rail<T>({
               offset off zero, which is what decides whether the back chevron is lit, and the
               choreography of a scroll in flight is PG-E21-10's rather than a class guessed at now. */}
           <ul
-            className="flex gap-3 overflow-x-auto"
+            className="no-scrollbar flex gap-3 overflow-x-auto"
             onKeyDown={(event) => {
               const next = nextRailIndex(active, event.key, items.length);
               if (next === null) {

@@ -110,6 +110,8 @@ describe("My library", () => {
       bytes: 1,
       missingFiles: 0,
       addedAt: 1,
+      overview: null,
+      rating: null,
       poster: null,
       needsPoster: false,
     };
@@ -127,6 +129,8 @@ describe("My library", () => {
     );
 
     expect(html.indexOf("Newer Arrival")).toBeLessThan(html.indexOf("Older Arrival"));
+    // The tile carries the same line a provider rail's tile does, rather than a bare item count.
+    expect(html).toContain("Film · 1 item");
   });
 });
 

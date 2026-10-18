@@ -604,7 +604,7 @@ pub(crate) async fn item(
 /// columns of `title` in a statement that already reads that table, so the list stays one query and
 /// the reference stays in one place — [`TitleDetailRow`] used to hold its own copy of the same pair,
 /// which is two places for one fact to drift apart.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LibraryTitleRow {
     /// The title's identity, which a scoped read may only return when the scope may see it.
     pub title: crate::catalogue::TitleIdentity,
@@ -616,6 +616,10 @@ pub struct LibraryTitleRow {
     pub bytes: i64,
     /// How many of them are marked missing.
     pub missing_files: i64,
+    /// The provider's synopsis, when one has been written.
+    pub overview: Option<String>,
+    /// The provider's score out of ten, when it has one.
+    pub rating: Option<f64>,
     /// When the newest file behind the title entered the library, in Unix milliseconds.
     pub added_at: i64,
     /// The primary poster the last provider fill recorded, when one ever did.
@@ -710,7 +714,7 @@ pub(crate) async fn list_library_titles(
 ) -> Result<Vec<LibraryTitleRow>, StorageError> {
     let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
-                t.poster_provider, t.poster_path, \
+                t.poster_provider, t.poster_path, t.overview, t.vote_average, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files, \
@@ -741,7 +745,7 @@ pub(crate) async fn list_library_titles_for_person(
 ) -> Result<Vec<LibraryTitleRow>, StorageError> {
     let rows = sqlx::query_as::<_, LibraryTitleQueryRow>(
         "SELECT t.id, t.kind, t.subtype, t.name, t.sort_name, t.metadata_state, t.adult, \
-                t.poster_provider, t.poster_path, \
+                t.poster_provider, t.poster_path, t.overview, t.vote_average, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
                 COALESCE(SUM(f.missing_since IS NOT NULL), 0) AS missing_files, \
@@ -1088,6 +1092,8 @@ struct LibraryTitleQueryRow {
     adult: i64,
     poster_provider: Option<String>,
     poster_path: Option<String>,
+    overview: Option<String>,
+    rating: Option<f64>,
     items: i64,
     files: i64,
     bytes: i64,
@@ -1138,6 +1144,8 @@ impl From<TitleDetailQueryRow> for LibraryTitleQueryRow {
             items: row.items,
             files: row.files,
             bytes: row.bytes,
+            overview: row.overview,
+            rating: row.tmdb_rating,
             missing_files: row.missing_files,
             // The detail read does not select a recency aggregate: it answers one title, and only
             // the list screens order by when a title entered the library.
@@ -1251,6 +1259,8 @@ impl TryFrom<LibraryTitleQueryRow> for LibraryTitleRow {
             files: row.files,
             bytes: row.bytes,
             missing_files: row.missing_files,
+            overview: row.overview,
+            rating: row.rating,
             added_at: row.added_at,
             poster,
         })
