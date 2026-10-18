@@ -24,6 +24,7 @@
 
 import { eventTopics, getTitle, normalizeIpcError, refreshTitle } from "@peregrine/ipc-client";
 import type {
+  CastMemberDto,
   IpcError,
   LibraryTitleDto,
   LocalPlaybackDto,
@@ -45,6 +46,8 @@ import {
 export interface TitleDetail {
   /** The title, once the read has answered. */
   readonly title: LibraryTitleDto | null;
+  /** The top-billed cast, portraits included when cached. */
+  readonly cast: readonly CastMemberDto[];
   /**
    * What pressing Play would do, as the core classified the file's container, or `null` when the
    * library holds no copy on disk.
@@ -93,6 +96,7 @@ export interface TitleDetail {
 /** Everything the hook holds about the read itself. */
 interface TitleState {
   readonly title: LibraryTitleDto | null;
+  readonly cast: readonly CastMemberDto[];
   /** Carried through from the read; see [`TitleDetail::playSupport`]. */
   readonly playSupport: LocalPlaybackDto | null;
   readonly poster: string | null;
@@ -108,6 +112,7 @@ interface TitleState {
 
 const EMPTY: TitleState = {
   title: null,
+  cast: [],
   playSupport: null,
   poster: null,
   backdrop: null,
@@ -194,6 +199,7 @@ export function useTitle(id: number | null): TitleDetail {
       if (answer === null) {
         setState({
           title: null,
+          cast: [],
           playSupport: null,
           poster: null,
           backdrop: null,
@@ -209,6 +215,7 @@ export function useTitle(id: number | null): TitleDetail {
       }
       setState({
         title: answer.title,
+        cast: answer.cast,
         playSupport: answer.playSupport,
         // The poster is the read's own row rather than a field beside it: the title the core answered
         // with carries the cached path, so a page and a tile cannot disagree about what there is to draw.
@@ -234,6 +241,7 @@ export function useTitle(id: number | null): TitleDetail {
       logUiError("getTitle", error);
       setState({
         title: null,
+        cast: [],
         playSupport: null,
         poster: null,
         backdrop: null,

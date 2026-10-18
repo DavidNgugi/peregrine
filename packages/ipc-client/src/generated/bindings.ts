@@ -162,6 +162,8 @@ export const commands = {
 	getTitle: (title: TitleRef) => typedError<{
 	/**  The title itself, exactly as the library screen lists it, its cached poster included. */
 	title: LibraryTitleDto,
+	/**  The top-billed cast, with each portrait's cached path when the cache holds one. */
+	cast: CastMemberDto[],
 	/**
 	 *  The absolute path of the cached backdrop, or `null` when the cache holds none.
 	 * 
@@ -756,6 +758,16 @@ export type CaptureSessionDto = {
 	url: string,
 	/**  Where the frame is posted, or `null` when this session keeps no poster. */
 	thumbnailUrl: string | null,
+};
+
+/**  One person in a title's cast, as the page draws them. */
+export type CastMemberDto = {
+	/**  The person's name. */
+	name: string,
+	/**  The character played, when the provider said. */
+	character: string | null,
+	/**  The cached portrait's absolute path, or `null` when no photograph was cached. */
+	profile: string | null,
 };
 
 /**  One indexer already configured in Prowlarr. */
@@ -1872,6 +1884,8 @@ export type ShortcutBinding = {
 export type TitleDetailDto = {
 	/**  The title itself, exactly as the library screen lists it, its cached poster included. */
 	title: LibraryTitleDto,
+	/**  The top-billed cast, with each portrait's cached path when the cache holds one. */
+	cast: CastMemberDto[],
 	/**
 	 *  The absolute path of the cached backdrop, or `null` when the cache holds none.
 	 * 

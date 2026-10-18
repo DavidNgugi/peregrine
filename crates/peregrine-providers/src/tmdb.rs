@@ -30,8 +30,8 @@ use crate::error::ProviderError;
 use crate::http::{HttpClient, HttpPolicy, Request};
 use crate::hygiene::{Body, BodyCap};
 use crate::provider::{
-    BrowseRequest, BrowseSort, GenreRef, MetadataProvider, ProviderFuture, ProviderPage, RailKind,
-    SearchCandidate, SearchQuery,
+    BrowseRequest, BrowseSort, CastMember, GenreRef, MetadataProvider, ProviderFuture,
+    ProviderPage, RailKind, SearchCandidate, SearchQuery, TitleCredits,
 };
 
 /// The largest search answer this adapter will read.
@@ -772,6 +772,51 @@ impl MetadataProvider for Tmdb {
         })
     }
 
+    fn credits(&self, id: &ExternalId, kind: TitleKind) -> ProviderFuture<'_, TitleCredits> {
+        let endpoint = match kind {
+            TitleKind::Movie => "movie",
+            TitleKind::Show => "tv",
+        };
+        let url = format!("{}/{endpoint}/{}/credits", self.base, id.value());
+        let credential = self.credential.clone();
+
+        Box::pin(async move {
+            let fetched = self
+                .client
+                .fetch(
+                    Provider::Tmdb,
+                    Request {
+                        url: &url,
+                        credential: Some(&credential),
+                    },
+                )
+                .await?;
+            let answer: CreditsAnswer =
+                Body::new(Provider::Tmdb, &fetched.bytes, fetched.media_type())
+                    .decode(SEARCH_BODY_CAP)?;
+
+            let mut cast = Vec::new();
+            for member in answer.cast.into_iter().take(40) {
+                let name = member.name.trim().to_owned();
+                if name.is_empty() {
+                    continue;
+                }
+                let character = member.character.and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+                });
+                cast.push(CastMember {
+                    provider_id: member.id.to_string(),
+                    name,
+                    character,
+                    order: member.order,
+                    profile_path: member.profile_path,
+                });
+            }
+            Ok(TitleCredits { cast })
+        })
+    }
+
     fn image(
         &self,
         path: &str,
@@ -1165,7 +1210,22 @@ fn read_date(value: Option<String>) -> Option<Date> {
         .and_then(|date| date.parse().ok())
 }
 
-/// Where TMDB serves images, and the two widths this build asks for.
+#[derive(Deserialize)]
+struct CreditsAnswer {
+    #[serde(default)]
+    cast: Vec<CastAnswer>,
+}
+
+#[derive(Deserialize)]
+struct CastAnswer {
+    id: u64,
+    name: String,
+    character: Option<String>,
+    order: Option<u32>,
+    profile_path: Option<String>,
+}
+
+/// Where TMDB serves images, and the widths this build asks for.
 ///
 /// A second host, which is why it is a constant here rather than something a caller supplies: the image
 /// CDN is public, needs no credential, and — per `AGENTS R24`'s documented exception — cannot

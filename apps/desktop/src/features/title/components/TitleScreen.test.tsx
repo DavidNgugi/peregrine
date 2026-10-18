@@ -95,6 +95,7 @@ function detail(state: Partial<TitleDetail> = {}): TitleDetail {
     title: title(),
     // Unknown rather than absent: this fixture is about what the page draws, and a null container is
     // the state a screen cannot reach from a successful read of a title the library holds.
+    cast: [],
     playSupport: "webview",
     poster: null,
     backdrop: null,

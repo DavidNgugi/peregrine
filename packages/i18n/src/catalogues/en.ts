@@ -420,6 +420,10 @@ export const en = {
         alt: "Poster for {{name}}",
         none: "No poster yet",
       },
+      cast: {
+        title: "Cast",
+        description: "Top billed, with the character each one plays.",
+      },
       episodes: {
         title: "Episodes",
         description: "The season you have chosen, in the order the episodes are watched.",

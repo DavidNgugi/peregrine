@@ -23,7 +23,7 @@ mod tests;
 pub use backoff::Backoff;
 pub use catalogue::{
     CacheError, ListedTitle, RefreshedTitle, SyncError, SyncOutcome, cache_image, match_title,
-    record_list_answer, refresh_title, sync_search, upsert_list_candidate,
+    record_list_answer, refresh_title, store_cast, sync_search, upsert_list_candidate,
 };
 pub use core::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_CONCURRENCY, Scheduler, SchedulerClasses, SchedulerConfig,

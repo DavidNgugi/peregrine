@@ -466,6 +466,50 @@ fn candidate_input(
     })
 }
 
+/// Replaces one title's cast with the provider's current billing, caching each portrait.
+///
+/// A portrait that cannot be fetched leaves the person without a picture rather than losing the
+/// credit: the cast list is the information, and the photograph is an improvement on it.
+///
+/// # Errors
+///
+/// [`SyncError::Provider`] when the credits request fails, [`SyncError::Storage`] when the cast
+/// cannot be written.
+pub async fn store_cast(
+    provider: &dyn MetadataProvider,
+    database: &Database,
+    cache: &ImageCache,
+    title_id: i64,
+    external: &peregrine_domain::ExternalId,
+    kind: TitleKind,
+    at: i64,
+) -> Result<(), SyncError> {
+    let credits = provider.credits(external, kind).await?;
+    let provider_name = provider.descriptor().provider().as_str().to_owned();
+    let mut rows = Vec::with_capacity(credits.cast.len());
+    for member in credits.cast {
+        let cached = match member.profile_path.as_deref() {
+            Some(path) => cache_image(provider, cache, path, ImageKind::Poster)
+                .await
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_owned)),
+            None => None,
+        };
+        rows.push(peregrine_storage::CastWrite {
+            provider_id: member.provider_id,
+            name: member.name,
+            character: member.character,
+            order: member.order,
+            profile_path: member.profile_path,
+            profile_cache_path: cached,
+        });
+    }
+    database
+        .replace_cast(title_id, &provider_name, rows, at)
+        .await?;
+    Ok(())
+}
+
 /// Finds the provider's entry for a title the library scanned, attaches its id, and fills it in.
 ///
 /// A scanned title carries no external id, so `refresh_title` has nothing to ask about and returns

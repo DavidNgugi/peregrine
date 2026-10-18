@@ -25,6 +25,7 @@ import { normalizeIpcError, playExternally, scheduleDownload } from "@peregrine/
 import type { IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
+import { CastRail } from "./CastRail.js";
 import { TitleHero } from "./TitleHero.js";
 import { ReleaseOffers } from "./ReleaseOffers.js";
 import { EpisodeCard } from "./EpisodeCard.js";
@@ -302,6 +303,8 @@ export function TitleScreen({
 
       {/* A film has no season section, and a show whose provider named no seasons draws none either:
           a heading over an empty switcher would be a promise nobody made. */}
+      <CastRail cast={detail.cast} />
+
       {title === null || title.kind === "movies" || seasons.seasons.length === 0 ? null : (
         <Section description={t("title.episodes.description")} title={t("title.episodes.title")}>
           <div className="flex flex-col gap-4">

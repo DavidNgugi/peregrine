@@ -193,6 +193,18 @@ impl From<peregrine_app::TitleOffer> for TitleOfferDto {
     }
 }
 
+/// One person in a title's cast, as the page draws them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CastMemberDto {
+    /// The person's name.
+    pub name: String,
+    /// The character played, when the provider said.
+    pub character: Option<String>,
+    /// The cached portrait's absolute path, or `null` when no photograph was cached.
+    pub profile: Option<String>,
+}
+
 /// One title as its own screen reads it: the library's answer, plus what a provider could still add.
 ///
 /// Nested rather than a wider [`LibraryTitleDto`] because the two answer different questions and are
@@ -206,6 +218,8 @@ impl From<peregrine_app::TitleOffer> for TitleOfferDto {
 pub struct TitleDetailDto {
     /// The title itself, exactly as the library screen lists it, its cached poster included.
     pub title: LibraryTitleDto,
+    /// The top-billed cast, with each portrait's cached path when the cache holds one.
+    pub cast: Vec<CastMemberDto>,
     /// The absolute path of the cached backdrop, or `null` when the cache holds none.
     ///
     /// The wide picture a hero draws behind the title, carried on the same terms as the poster: a path
@@ -967,16 +981,39 @@ pub async fn get_title(
     state: State<'_, RuntimeState>,
     title: TitleRef,
 ) -> Result<Option<TitleDetailDto>, AppError> {
-    let title = state.runtime()?.library_title(title.id).await?;
+    let runtime = state.runtime()?;
+    let title = runtime.library_title(title.id).await?;
+    let cast = runtime
+        .title_cast(
+            title.as_ref().map_or(0, |detail| detail.entry.row.title.id),
+            20,
+        )
+        .await
+        .unwrap_or_default();
     Ok(guard_response(
         "library::get_title",
-        title.map(title_detail),
+        title.map(|detail| {
+            let mut dto = title_detail(detail);
+            dto.cast = cast.into_iter().map(CastMemberDto::from).collect();
+            dto
+        }),
     ))
+}
+
+impl From<peregrine_app::CastRow> for CastMemberDto {
+    fn from(row: peregrine_app::CastRow) -> Self {
+        Self {
+            name: row.name,
+            character: row.character,
+            profile: row.profile,
+        }
+    }
 }
 
 /// The wire shape of one title's own read.
 fn title_detail(detail: peregrine_app::LibraryTitleDetail) -> TitleDetailDto {
     TitleDetailDto {
+        cast: Vec::new(),
         title: LibraryTitleDto::from(detail.entry),
         // A path this platform cannot spell as UTF-8 is no reference at all: the webview would have
         // to guess, and a lossy path is a request the asset protocol refuses.

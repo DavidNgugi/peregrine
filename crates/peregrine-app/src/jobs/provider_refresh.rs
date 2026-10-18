@@ -187,6 +187,10 @@ impl ProviderRefreshJob {
             return Err(JobError::Cancelled);
         }
 
+        // The cast is best effort: a title whose credits request fails still gets its poster and
+        // metadata, and a missing cast is not a failed refresh.
+        self.store_cast(provider.as_ref(), at).await;
+
         self.phase(job, attempt, 600).await;
         let poster = match refreshed.details.poster_path.as_deref() {
             None => None,
@@ -235,6 +239,43 @@ impl ProviderRefreshJob {
     /// The state event is what a screen following this job waits for, and *every* success publishes
     /// it: a title with nothing to fill in is the common case for a fresh library, and a job that
     /// completed without saying so is a screen waiting for a stop that cannot arrive.
+    /// Stores the cast of the title this job is for, when the provider that answered owns its id.
+    ///
+    /// The portrait cache is the same one the poster uses, so a person's photograph is fetched once
+    /// and evicted under the same LRU. A credits request that fails leaves the title without a cast
+    /// rather than failing a refresh whose metadata and poster already landed.
+    async fn store_cast(
+        &self,
+        provider: &dyn peregrine_providers::provider::MetadataProvider,
+        at: i64,
+    ) {
+        let held = self
+            .database
+            .external_ids_of(self.target.title_id)
+            .await
+            .unwrap_or_default();
+        let external = held
+            .into_iter()
+            .map(|held| held.id)
+            .find(|id| id.provider() == provider.descriptor().provider());
+        let Some(external) = external else {
+            return;
+        };
+        if let Err(error) = peregrine_sync::store_cast(
+            provider,
+            &self.database,
+            &self.artwork,
+            self.target.title_id,
+            &external,
+            self.target.kind,
+            at,
+        )
+        .await
+        {
+            tracing::warn!(%error, "the cast could not be stored");
+        }
+    }
+
     async fn succeeded(
         &self,
         job: ulid::Ulid,

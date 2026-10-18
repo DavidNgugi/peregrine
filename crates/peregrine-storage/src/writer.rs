@@ -34,6 +34,17 @@ pub(crate) enum WriteRequest {
     /// enum's size is the size of its largest variant, and a job row is much larger than
     /// the alternative.
     InsertJob(Box<NewJob>),
+    /// Replace one title's cast with what a provider just said.
+    ReplaceCast {
+        /// The title the cast belongs to.
+        title_id: i64,
+        /// The provider that answered.
+        provider: String,
+        /// The cast, in billing order.
+        cast: Vec<crate::catalogue::CastWrite>,
+        /// Unix milliseconds.
+        at: Timestamp,
+    },
     /// Write a scheduled download, replacing any existing one for the same title or episode.
     UpsertSchedule(Box<crate::schedule::NewSchedule>),
     /// Record what the scheduler did with one schedule.
@@ -715,6 +726,42 @@ async fn apply_cache_write(
     }
 }
 
+/// One journal update, kept out of `apply` for the same reason as the cast.
+async fn apply_update_job(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    change: &crate::jobs::JobChange,
+) -> Result<WriteResponse, StorageError> {
+    crate::jobs::update(connection, id, change)
+        .await
+        .map(|changed| WriteResponse::JobUpdated { changed })
+        .map_err(StorageError::from_sqlx)
+}
+
+/// One cast replacement, kept out of `apply` so the dispatch stays inside its line budget.
+async fn apply_replace_cast(
+    connection: &mut sqlx::SqliteConnection,
+    title_id: i64,
+    provider: &str,
+    cast: Vec<crate::catalogue::CastWrite>,
+    at: Timestamp,
+) -> Result<WriteResponse, StorageError> {
+    crate::catalogue::replace_cast(connection, title_id, provider, &cast, at.as_millisecond())
+        .await
+        .map(|()| WriteResponse::Applied)
+}
+
+/// One external-id attachment, kept out of `apply` for the same reason.
+async fn apply_attach_external_ids(
+    connection: &mut sqlx::SqliteConnection,
+    title_id: i64,
+    ids: Vec<crate::catalogue::TitleExternalId>,
+) -> Result<WriteResponse, StorageError> {
+    crate::catalogue::attach_external_ids(connection, title_id, &ids)
+        .await
+        .map(|()| WriteResponse::ExternalIdsAttached)
+}
+
 async fn apply_schedule(
     connection: &mut sqlx::SqliteConnection,
     request: WriteRequest,
@@ -750,6 +797,12 @@ async fn apply(
             .await
             .map(|id| WriteResponse::EventAppended { id })
             .map_err(StorageError::from_sqlx),
+        WriteRequest::ReplaceCast {
+            title_id,
+            provider,
+            cast,
+            at,
+        } => apply_replace_cast(connection, title_id, &provider, cast, at).await,
         other @ (WriteRequest::UpsertSchedule(_)
         | WriteRequest::SetScheduleState { .. }
         | WriteRequest::DeleteSchedule { .. }) => apply_schedule(connection, other).await,
@@ -757,14 +810,9 @@ async fn apply(
             .await
             .map(|id| WriteResponse::JobInserted { id })
             .map_err(StorageError::from_sqlx),
-        WriteRequest::UpdateJob { id, change } => crate::jobs::update(connection, id, &change)
-            .await
-            .map(|changed| WriteResponse::JobUpdated { changed })
-            .map_err(StorageError::from_sqlx),
+        WriteRequest::UpdateJob { id, change } => apply_update_job(connection, id, &change).await,
         WriteRequest::AttachExternalIds { title_id, ids } => {
-            crate::catalogue::attach_external_ids(connection, title_id, &ids)
-                .await
-                .map(|()| WriteResponse::ExternalIdsAttached)
+            apply_attach_external_ids(connection, title_id, ids).await
         }
         WriteRequest::RecordNotification(entry) => {
             crate::notify::insert_or_refresh(connection, &entry)

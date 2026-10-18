@@ -658,6 +658,133 @@ pub(crate) async fn identity(
     row.map(TryInto::try_into).transpose()
 }
 
+/// One cast row to write, with the portrait already cached when it had one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CastWrite {
+    /// The provider's stable id for the person.
+    pub provider_id: String,
+    /// Their name.
+    pub name: String,
+    /// The character played, when known.
+    pub character: Option<String>,
+    /// Billing order, lowest first.
+    pub order: Option<u32>,
+    /// The provider-relative portrait path.
+    pub profile_path: Option<String>,
+    /// Where the cached portrait is on this machine.
+    pub profile_cache_path: Option<String>,
+}
+
+/// One cast row as a title page reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CastRow {
+    /// The person's name.
+    pub name: String,
+    /// The character played.
+    pub character: Option<String>,
+    /// The cached portrait's absolute path, when it has one.
+    pub profile: Option<String>,
+}
+
+/// Replaces a title's cast with what a provider just said.
+pub(crate) async fn replace_cast(
+    connection: &mut sqlx::SqliteConnection,
+    title_id: i64,
+    provider: &str,
+    cast: &[CastWrite],
+    at: i64,
+) -> Result<(), StorageError> {
+    sqlx::query("DELETE FROM credit WHERE title_id = ?1 AND kind = 'cast'")
+        .bind(title_id)
+        .execute(&mut *connection)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    for member in cast {
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM person WHERE profile_provider = ?1 AND provider_id = ?2",
+        )
+        .bind(provider)
+        .bind(&member.provider_id)
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+        let person_id = match existing {
+            Some(id) => {
+                sqlx::query(
+                    "UPDATE person SET name = ?2, sort_name = ?3, profile_path = ?4, profile_cache_path = ?5, updated_at = ?6 WHERE id = ?1",
+                )
+                .bind(id)
+                .bind(&member.name)
+                .bind(peregrine_domain::matching::sort_name(&member.name))
+                .bind(&member.profile_path)
+                .bind(&member.profile_cache_path)
+                .bind(at)
+                .execute(&mut *connection)
+                .await
+                .map_err(StorageError::from_sqlx)?;
+                id
+            }
+            None => {
+                sqlx::query_scalar(
+                    "INSERT INTO person (name, sort_name, known_for_department, profile_provider, profile_path, profile_cache_path, provider_id, updated_at) VALUES (?1, ?2, 'Acting', ?3, ?4, ?5, ?6, ?7) RETURNING id",
+                )
+                .bind(&member.name)
+                .bind(peregrine_domain::matching::sort_name(&member.name))
+                .bind(provider)
+                .bind(&member.profile_path)
+                .bind(&member.profile_cache_path)
+                .bind(&member.provider_id)
+                .bind(at)
+                .fetch_one(&mut *connection)
+                .await
+                .map_err(StorageError::from_sqlx)?
+            }
+        };
+        sqlx::query(
+            "INSERT OR IGNORE INTO credit (title_id, person_id, kind, character, order_index) VALUES (?1, ?2, 'cast', ?3, ?4)",
+        )
+        .bind(title_id)
+        .bind(person_id)
+        .bind(&member.character)
+        .bind(member.order.map(i64::from))
+        .execute(&mut *connection)
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    }
+    Ok(())
+}
+
+/// A title's cast, in billing order.
+pub(crate) async fn cast_for_title(
+    pool: &sqlx::SqlitePool,
+    title_id: i64,
+    limit: u32,
+) -> Result<Vec<CastRow>, StorageError> {
+    let rows = sqlx::query_as::<_, CastQueryRow>(
+        "SELECT p.name, c.character, p.profile_cache_path FROM credit c JOIN person p ON p.id = c.person_id WHERE c.title_id = ?1 AND c.kind = 'cast' ORDER BY COALESCE(c.order_index, 9999) ASC, p.name ASC LIMIT ?2",
+    )
+    .bind(title_id)
+    .bind(i64::from(limit))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| CastRow {
+            name: row.name,
+            character: row.character,
+            profile: row.profile_cache_path,
+        })
+        .collect())
+}
+
+#[derive(sqlx::FromRow)]
+struct CastQueryRow {
+    name: String,
+    character: Option<String>,
+    profile_cache_path: Option<String>,
+}
+
 /// One title's identity without an account's scope.
 ///
 /// The library matcher asks what a scanned title is called so it can search a provider for it.

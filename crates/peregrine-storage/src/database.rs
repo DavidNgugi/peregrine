@@ -25,7 +25,7 @@ use crate::pragmas;
 use crate::retention::{RetentionOutcome, RetentionPlan};
 use crate::usage::{DiskUsage, LibraryUsageRow};
 use crate::writer::{NewEvent, WriteRequest, WriteResponse, WriterHandle};
-use crate::{DownloadScheduleRow, NewSchedule};
+use crate::{CastRow, CastWrite, DownloadScheduleRow, NewSchedule};
 
 /// ARCHITECTURE §10: readers use a pool sized to `min(4, cores)`.
 const READER_POOL_MAX: u32 = 4;
@@ -536,6 +536,43 @@ impl Database {
             WriteResponse::ExternalIdsAttached => Ok(()),
             other => Err(unexpected_response("attach_external_ids", &other)),
         }
+    }
+
+    /// Replaces one title's cast with what a provider just said.
+    pub async fn replace_cast(
+        &self,
+        title_id: i64,
+        provider: &str,
+        cast: Vec<CastWrite>,
+        at: i64,
+    ) -> Result<(), StorageError> {
+        let at =
+            jiff::Timestamp::from_millisecond(at).map_err(|_| StorageError::UnexpectedValue {
+                column: "at",
+                found: at.to_string(),
+            })?;
+        match self
+            .writer
+            .send(WriteRequest::ReplaceCast {
+                title_id,
+                provider: provider.to_owned(),
+                cast,
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("replace_cast", &other)),
+        }
+    }
+
+    /// One title's cast, in billing order.
+    pub async fn cast_for_title(
+        &self,
+        title_id: i64,
+        limit: u32,
+    ) -> Result<Vec<CastRow>, StorageError> {
+        crate::catalogue::cast_for_title(&self.readers, title_id, limit).await
     }
 
     /// One title's identity without an account's scope, for the library matcher.

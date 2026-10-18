@@ -667,6 +667,28 @@ impl SearchCandidate {
     }
 }
 
+/// One person in a title's cast, as a provider names them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CastMember {
+    /// The provider's own stable id for the person.
+    pub provider_id: String,
+    /// Their name.
+    pub name: String,
+    /// The character they play, when the provider says.
+    pub character: Option<String>,
+    /// Their billing position, lowest first.
+    pub order: Option<u32>,
+    /// The provider-relative path of their portrait, when it has one.
+    pub profile_path: Option<String>,
+}
+
+/// A title's cast, in billing order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TitleCredits {
+    /// The cast the provider named.
+    pub cast: Vec<CastMember>,
+}
+
 /// A source of catalogue metadata.
 ///
 /// Implementors are adapters: `peregrine-providers` keeps every provider's own types inside
@@ -854,6 +876,18 @@ pub trait MetadataProvider: Send + Sync {
     /// [`crate::capability::Capability::Trending`], and otherwise as [`MetadataProvider::search`].
     fn similar(&self, id: &ExternalId, kind: TitleKind)
     -> ProviderFuture<'_, Vec<SearchCandidate>>;
+
+    /// Reads one title's cast.
+    ///
+    /// A provider that does not serve credits refuses with [`ProviderError::Unsupported`] rather
+    /// than spending a request finding out, the same rule every other port method states.
+    fn credits(&self, _id: &ExternalId, _kind: TitleKind) -> ProviderFuture<'_, TitleCredits> {
+        let unsupported = ProviderError::Unsupported {
+            provider: self.descriptor().provider(),
+            capability: "credits",
+        };
+        Box::pin(async move { Err(unsupported) })
+    }
 
     /// Reads one image's bytes.
     ///

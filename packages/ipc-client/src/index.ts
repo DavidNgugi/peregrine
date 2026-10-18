@@ -7,6 +7,7 @@ export type {
   BrowsePageDto,
   BrowseSortDto,
   BuildInfo,
+  CastMemberDto,
   ErrorCode,
   EventHealth,
   EventTopicName,

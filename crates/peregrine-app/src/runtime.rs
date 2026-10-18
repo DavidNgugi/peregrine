@@ -3331,6 +3331,19 @@ impl Runtime {
         Ok(queued)
     }
 
+    /// One title's cast, in billing order.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn title_cast(
+        &self,
+        title_id: i64,
+        limit: u32,
+    ) -> Result<Vec<peregrine_storage::CastRow>, RuntimeError> {
+        Ok(self.database.cast_for_title(title_id, limit).await?)
+    }
+
     /// Adds a title to the account's watchlist, or refreshes the row that is already there.
     ///
     /// # Errors
