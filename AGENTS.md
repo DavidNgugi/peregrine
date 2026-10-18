@@ -114,6 +114,8 @@ cargo xtask check-dead-deps  # unused Rust dependencies (requires cargo-machete 
 cargo xtask check-docs       # broken links and mermaid block parity — NOT IMPLEMENTED YET (PG-E28-07); this line documents the intended command
 cargo xtask check-theme      # theme schema and contrast gate
 cargo xtask check-notices    # sidecar, Rust, and bundled-frontend attribution
+cargo xtask release-check    # version agreement, sidecar pins, release workflow, signing status
+cargo xtask release-check --allow-unsigned  # the same, for a deliberately unsigned release candidate
 cargo xtask icons --check    # platform icon sizes and formats — NOT IMPLEMENTED YET (PG-E22-02); this line documents the intended command
 cargo xtask gen-ipc          # regenerate TS bindings
 cargo xtask backlog-stats    # task and effort roll-up

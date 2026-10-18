@@ -6,21 +6,25 @@
 # must be given a `v*`-shaped tag because the version check below compares that
 # input against tauri.conf.json before anything is built.
 #
-# The artefact is `dist/artifacts.manifest.json`: every published file with its
-# size and SHA-256, plus the version and the commit, signed with minisign. The
-# signing key is CI-only, because a manifest signed with a key a contributor
-# holds is not evidence of anything; the minisign public key is the only half
-# that belongs in the repository.
+# The release record is `dist/release/`: `artifacts.manifest.json` (every
+# published file with its size and SHA-256, plus the version and the commit),
+# `SHA256SUMS` (every published bundle and SBOM), and `CHANGELOG.md`. When
+# signing is configured the manifest also gets a detached minisign signature.
 #
-# Required repository secrets. A missing one is a failed release, never an
-# unsigned one — the signing job checks `vars.RELEASE_SIGNING_CONFIGURED`
-# before it touches a bundle:
+# The v1.0 release candidate is deliberately unsigned: the four bundles are
+# built and uploaded with no signing secret present, and `SHA256SUMS` is what a
+# downloader verifies. Signing is opt-in, gated on the repository variable
+# below, and a missing secret is a failed release only when that variable says
+# signing is configured — never a silently unsigned one.
+#
+# Required repository secrets only for a signed manifest (never for the
+# unsigned release candidate):
 #   RELEASE_MINISIGN_SECRET_KEY  base64 of a minisign secret key file
 #                                (`minisign -G` then `base64 -w0`)
 #   RELEASE_MINISIGN_PASSWORD    the passphrase protecting that key
 #   RELEASE_MINISIGN_PUBLIC_KEY  the public key file's contents, used to verify
 #                                the signature before it is published
-# Required repository variable (Settings → Variables):
+# Required repository variable (Settings → Variables) for a signed manifest:
 #   RELEASE_SIGNING_CONFIGURED   the literal string `true`
 #
 # Tag conventions, since ADR 0009 makes the version a legal statement and not a
@@ -34,8 +38,8 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # A dry run of the whole pipeline from an existing tag-shaped ref. The bundles
-  # and the signed manifest are still produced; only the GitHub release is
+  # A dry run of the whole pipeline from an existing tag-shaped ref. The bundles,
+  # the manifest, and SHA256SUMS are still produced; only the GitHub release is
   # skipped, so a dry run proves the artefact, not the upload.
   workflow_dispatch:
     inputs:
@@ -262,11 +266,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Assembles and signs. No `contents: write` here: given this job only reads and
-  # uploads artefacts, the most valuable thing an attacker who lands in it can
-  # steal is the signing key, and nothing else.
+  # Assembles, checksums, and optionally signs. No `contents: write` here: the
+  # job only reads and uploads artefacts, so the only signing material it can
+  # touch is the optional manifest key, and nothing else.
   release:
-    name: manifest and changelog
+    name: manifest, checksums, and changelog
     needs: [bundle, sbom]
     runs-on: ubuntu-24.04
     steps:
@@ -279,23 +283,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      # minisign does not publish a `/latest` download or an apt package, so the
-      # version, the archive, and its digest are all pinned here. The digest is
-      # what makes the pin meaningful.
-      - name: Install minisign 0.12 (digest-pinned)
-        shell: bash
-        env:
-          MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location \
-            --output "$RUNNER_TEMP/minisign.tar.gz" \
-            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
-          echo "${MINISIGN_SHA256}  ${RUNNER_TEMP}/minisign.tar.gz" | sha256sum --check --strict
-          tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign
-          mkdir -p "$RUNNER_TEMP/bin"
-          install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$RUNNER_TEMP/bin/minisign"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       # PG-E0-18 also covers the third-party attribution file. It is not called
       # here: this job has no bundle to inspect, and `bundle` already called it
       # before anything was archived.
@@ -304,43 +291,20 @@ jobs:
           # docs/DEPENDENCIES.md §4 lists git-cliff as the project's changelog
           # tool; `git log` would be a second, weaker formatter to maintain.
           tool: git-cliff@2.14.2
-      - name: A release with no signing key fails here
-        shell: bash
-        env:
-          SECRET_KEY: ${{ secrets.RELEASE_MINISIGN_SECRET_KEY }}
-          PASSWORD: ${{ secrets.RELEASE_MINISIGN_PASSWORD }}
-          PUBLIC_KEY: ${{ secrets.RELEASE_MINISIGN_PUBLIC_KEY }}
-        run: |
-          set -euo pipefail
-          missing=0
-          for name in RELEASE_MINISIGN_SECRET_KEY RELEASE_MINISIGN_PASSWORD RELEASE_MINISIGN_PUBLIC_KEY; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::repository secret $name is not set; see the secret list at the top of .github/workflows/release.yml"
-              missing=1
-            fi
-          done
-          [ "$missing" -eq 0 ] || exit 1
-          if [ "${{ vars.RELEASE_SIGNING_CONFIGURED }}" != "true" ]; then
-            echo "::error::set the repository variable RELEASE_SIGNING_CONFIGURED=true to state that signing is configured; the workflow cannot tell an unset secret from an empty one on its own"
-            exit 1
-          fi
-          printf '%s' "$PASSWORD" > "$RUNNER_TEMP/minisign.pass"
-          printf '%s' "$SECRET_KEY" | base64 --decode > "$RUNNER_TEMP/minisign.key"
-          printf '%s' "$PUBLIC_KEY" > "$RUNNER_TEMP/minisign.pub"
       - uses: actions/download-artifact@v6
         with:
           path: dist
-      # The artefact this job signs is a checksum list, so the checksums have to
-      # describe what a downloader will actually get. Each build job archived
-      # `target/<target>/release/bundle` wholesale, so the digest covers the
-      # installer, the app image, and the sidecars ADR 0013 requires in the same
-      # bundle — not a hand-picked subset.
+      # The manifest has to describe what a downloader will actually get. Each
+      # build job archived `target/<target>/release/bundle` wholesale, so the
+      # digest covers the installer, the app image, and the sidecars ADR 0013
+      # requires in the same bundle — not a hand-picked subset.
       - name: Manifest — names, sizes, SHA-256, version, commit
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          mkdir -p dist/release
           version="${RELEASE_TAG#v}"
           commit="$(git rev-parse HEAD)"
           artifacts='[]'
@@ -360,10 +324,11 @@ jobs:
               '. + [{name: $n, size_bytes: $s, sha256: $h}]' <<<"$sboms")"
           done < <(find dist -maxdepth 2 -type f \( -name '*.cdx.json' -o -name 'node-licenses.json' \) | sort)
           # ADR 0009 §Decision 4 requires a *written* offer beside the binaries.
-          # The manifest is the one document that is published with them, is
-          # signed, and names the exact commit, so the offer lives here rather
-          # than in a file nobody opens — plus notices/SOURCE-OFFER.md, which is
-          # inside the bundle and is what `check-notices` gates.
+          # The manifest is the one document that is published with them, names
+          # the exact commit, and is signed when signing is configured, so the
+          # offer lives here rather than in a file nobody opens — plus
+          # notices/SOURCE-OFFER.md, which is inside the bundle and is what
+          # `check-notices` gates.
           offer="Peregrine ${version} (commit ${commit}) is an aggregate of the following separate executables. mpv is distributed under GPL-2.0-or-later; ffmpeg and ffprobe are distributed under LGPL-2.1-or-later. The complete corresponding source for each is the upstream release recorded in notices/SOURCE-OFFER.md together with the build configuration reproduced in that file and in docs/DEPENDENCIES.md §5. Peregrine's own code is MIT OR Apache-2.0. Written offer, valid for three years from this release: see this release's assets and the repository at commit ${commit}."
           jq -n \
             --arg tag "$RELEASE_TAG" \
@@ -382,10 +347,76 @@ jobs:
                source_offer: $source_offer,
                artifacts: $artifacts,
                sboms: $sboms
-             }' > dist/artifacts.manifest.json
-          count="$(jq '.artifacts | length' dist/artifacts.manifest.json)"
-          [ "$count" -gt 0 ] || { echo "::error::no bundles were collected for the manifest"; exit 1; }
+             }' > dist/release/artifacts.manifest.json
+          count="$(jq '.artifacts | length' dist/release/artifacts.manifest.json)"
+          [ "$count" -eq 4 ] || { echo "::error::expected four bundle archives in the manifest, found $count"; exit 1; }
+      # The unsigned release candidate is verifiable without a key: one list of
+      # digests covering every published archive and SBOM. Entries are basenames
+      # so a downloader can verify a flat directory of assets with
+      # `sha256sum -c SHA256SUMS`.
+      - name: SHA256SUMS over the four bundles and the SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          bundles="$(find dist -maxdepth 2 -type f -path 'dist/bundle-*/*.tar.gz' | wc -l)"
+          [ "$bundles" -eq 4 ] || { echo "::error::expected four bundle archives, found $bundles"; exit 1; }
+          while IFS= read -r file; do
+            ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
+          done < <(find dist -maxdepth 2 -type f \( -path 'dist/bundle-*/*.tar.gz' -o -path 'dist/sbom/*' \) | sort) > dist/release/SHA256SUMS
+          test -s dist/release/SHA256SUMS
+      - name: State whether this is a signed or unsigned release
+        shell: bash
+        env:
+          SIGNING_CONFIGURED: ${{ vars.RELEASE_SIGNING_CONFIGURED }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGNING_CONFIGURED" = "true" ]; then
+            echo "signing configured; the manifest will be signed"
+          else
+            echo "signing not configured; producing an unsigned release candidate"
+          fi
+      # minisign does not publish a `/latest` download or an apt package, so the
+      # version, the archive, and its digest are all pinned here. The digest is
+      # what makes the pin meaningful. Every step below is skipped unless the
+      # repository variable explicitly asks for a signed manifest.
+      - name: Install minisign 0.12 (digest-pinned)
+        if: vars.RELEASE_SIGNING_CONFIGURED == 'true'
+        shell: bash
+        env:
+          MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/minisign.tar.gz" \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          echo "${MINISIGN_SHA256}  ${RUNNER_TEMP}/minisign.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" "$RUNNER_TEMP/bin/minisign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Signing is configured, so every signing secret must be present
+        if: vars.RELEASE_SIGNING_CONFIGURED == 'true'
+        shell: bash
+        env:
+          SECRET_KEY: ${{ secrets.RELEASE_MINISIGN_SECRET_KEY }}
+          PASSWORD: ${{ secrets.RELEASE_MINISIGN_PASSWORD }}
+          PUBLIC_KEY: ${{ secrets.RELEASE_MINISIGN_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in RELEASE_MINISIGN_SECRET_KEY RELEASE_MINISIGN_PASSWORD RELEASE_MINISIGN_PUBLIC_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::repository secret $name is not set; see the secret list at the top of .github/workflows/release.yml"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          printf '%s' "$PASSWORD" > "$RUNNER_TEMP/minisign.pass"
+          printf '%s' "$SECRET_KEY" | base64 --decode > "$RUNNER_TEMP/minisign.key"
+          printf '%s' "$PUBLIC_KEY" > "$RUNNER_TEMP/minisign.pub"
       - name: Sign the manifest
+        if: vars.RELEASE_SIGNING_CONFIGURED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -393,32 +424,33 @@ jobs:
           # so it never reaches the process table or a step log.
           minisign -S -s "$RUNNER_TEMP/minisign.key" -p "$RUNNER_TEMP/minisign.pub" \
             -t "peregrine release manifest" -c "peregrine CI" \
-            -x dist/artifacts.manifest.json.minisig -m dist/artifacts.manifest.json \
+            -x dist/release/artifacts.manifest.json.minisig -m dist/release/artifacts.manifest.json \
             < "$RUNNER_TEMP/minisign.pass"
       # A signature nobody checked is a file with a `.minisig` extension. This is
       # the verification the release job's read-only token has to be worth.
       - name: The signature verifies against the published key
+        if: vars.RELEASE_SIGNING_CONFIGURED == 'true'
         shell: bash
-        run: minisign -V -p "$RUNNER_TEMP/minisign.pub" -m dist/artifacts.manifest.json -x dist/artifacts.manifest.json.minisig
+        run: minisign -V -p "$RUNNER_TEMP/minisign.pub" -m dist/release/artifacts.manifest.json -x dist/release/artifacts.manifest.json.minisig
       - name: Changelog from the conventional-commit history
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          git-cliff --tag "$RELEASE_TAG" --output dist/CHANGELOG.md
-          test -s dist/CHANGELOG.md
+          git-cliff --tag "$RELEASE_TAG" --output dist/release/CHANGELOG.md
+          test -s dist/release/CHANGELOG.md
       - uses: actions/upload-artifact@v7
         with:
-          # The manifest and everything it hashes travel as one artefact, so the
-          # job that publishes them cannot pair a manifest with bundles it does
-          # not describe. No retention-days: this is the signed release record,
-          # and a failed publish must not leave the only signed copy to expire.
+          # The manifest, SHA256SUMS, and everything they describe travel as one
+          # artefact, so the job that publishes them cannot pair a digest list
+          # with bundles it does not describe. No retention-days: this is the
+          # release record, and a failed publish must not leave the only copy to
+          # expire. The signature pattern is absent on an unsigned run and
+          # upload-artifact accepts a path that matches nothing.
           name: release
           path: |
-            dist/release/artifacts.manifest.json
-            dist/release/artifacts.manifest.json.minisig
-            dist/release/CHANGELOG.md
+            dist/release/
             dist/bundle-*/*.tar.gz
             dist/sbom/*
           if-no-files-found: error
@@ -442,14 +474,14 @@ jobs:
           tag_name: ${{ inputs.tag || github.ref_name }}
           body_path: dist/release/CHANGELOG.md
           # A tagged release of a 0.x project is still a pre-release, and the file
-          # name comes from the tag, so it announces itself.
-          prerelease: ${{ !startsWith(github.ref_name, 'v1.') }}
+          # name comes from the tag, so it announces itself. A v1.0 release
+          # candidate is one too: it is unsigned until the signing policy changes.
+          prerelease: ${{ !startsWith(github.ref_name, 'v1.') || contains(github.ref_name, '-rc.') }}
           # A release that matched nothing is a release that shipped nothing.
           fail_on_unmatched_files: true
+          # The release directory carries the manifest, SHA256SUMS, the changelog,
+          # and the optional signature; the glob publishes whichever are present.
           files: |
-            dist/release/artifacts.manifest.json
-            dist/release/artifacts.manifest.json.minisig
-            dist/release/CHANGELOG.md
+            dist/release/*
             dist/bundle-*/*.tar.gz
-            dist/sbom/*.cdx.json
-            dist/sbom/node-licenses.json
+            dist/sbom/*

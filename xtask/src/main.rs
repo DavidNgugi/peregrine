@@ -7,8 +7,8 @@ use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use xtask::{
-    arch, backlog, commands, deaddeps, determinism, genipc, migrations, notices, offset, theme,
-    todos, workspace,
+    arch, backlog, commands, deaddeps, determinism, genipc, migrations, notices, offset, release,
+    theme, todos, workspace,
 };
 
 fn main() -> ExitCode {
@@ -32,6 +32,7 @@ fn run() -> Result<bool> {
     let mut root_flag: Option<PathBuf> = None;
     let mut update = false;
     let mut check = false;
+    let mut allow_unsigned = false;
     let mut index = 0;
     while index < rest.len() {
         match rest[index].as_str() {
@@ -50,11 +51,18 @@ fn run() -> Result<bool> {
                 check = true;
                 index += 1;
             }
+            "--allow-unsigned" => {
+                allow_unsigned = true;
+                index += 1;
+            }
             other => bail!("unrecognised argument `{other}`; run `cargo xtask help`"),
         }
     }
     if update && check {
         bail!("--update and --check ask for opposite things; pass one");
+    }
+    if allow_unsigned && command != "release-check" {
+        bail!("--allow-unsigned applies only to release-check");
     }
 
     let root = if let Some(root) = root_flag {
@@ -94,6 +102,7 @@ fn run() -> Result<bool> {
         "backlog-stats" => backlog::run(&root),
         "check-dead-deps" => deaddeps::run(&root),
         "check-theme" => theme::run(&root),
+        "release-check" => release::run(&root, allow_unsigned),
         "check-notices" => {
             let mode = if update {
                 notices::Mode::Update
@@ -134,6 +143,8 @@ cargo xtask — repository gates
   check-theme                every shipped theme clears the DESIGN_SYSTEM §2.2 contrast matrix
   check-notices              sidecar, Rust, and frontend attribution; THIRD_PARTY.md is current
   check-notices --update     rewrite THIRD_PARTY.md from sidecars.toml and the two lockfiles
+  release-check              versions, sidecar pins, release workflow, and signing status
+  release-check --allow-unsigned  the same, for a deliberately unsigned release candidate
   gen-ipc                    the committed TS bindings match a fresh export
   gen-ipc --check            the same, stated explicitly
   gen-ipc --update           rewrite the TS bindings from the Rust command surface
@@ -141,6 +152,7 @@ cargo xtask — repository gates
 
   --root <dir>               run against another tree, used by the fixture tests
   --update                   where a gate supports it, rewrite instead of check
+  --allow-unsigned           release-check only: accept an unconfigured signing environment
 
 Every gate exits non-zero on a violation and prints the path, the line where it
 applies, and what to do about it."

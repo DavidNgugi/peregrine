@@ -642,7 +642,7 @@ Known gaps, stated honestly:
 
 ## 18. Packaging, distribution, updates
 
-**What exists today.** The matrix builds four artefacts — DMG for both macOS architectures, NSIS, and a deb plus an AppImage — and the macOS and Windows bundles carry mpv and ffprobe as resources. Signing, notarisation, the signed manifest, the updater, rpm/Flatpak, and publishing a GitHub release are still owed; the workflow fails at the manifest stage until the minisign key is configured.
+**What exists today.** The matrix builds four artefacts — DMG for both macOS architectures, NSIS, and a deb plus an AppImage — and the macOS and Windows bundles carry mpv and ffprobe as resources. An explicitly unsigned release candidate now builds, uploads the bundles, writes `SHA256SUMS`, and publishes a prerelease; `cargo xtask release-check --allow-unsigned` is the local gate for that policy. Signing, notarisation, the signed manifest, the updater, rpm/Flatpak, and a verified clean-machine launch are still owed; the minisign path runs only when `RELEASE_SIGNING_CONFIGURED` is set.
 
 ```mermaid
 graph LR

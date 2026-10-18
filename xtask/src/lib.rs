@@ -18,6 +18,7 @@ pub mod genipc;
 pub mod migrations;
 pub mod notices;
 pub mod offset;
+pub mod release;
 pub mod report;
 pub mod theme;
 pub mod todos;
