@@ -75,5 +75,5 @@ pub use retention::{
 };
 pub use schedule::{DownloadScheduleRow, NewSchedule};
 pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
-pub use watch::{EpisodeProgressRow, WatchProgressRow, WatchlistRow};
+pub use watch::{EpisodeProgressRow, WatchDayRow, WatchProgressRow, WatchlistRow};
 pub use writer::NewEvent;

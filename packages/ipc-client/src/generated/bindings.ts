@@ -641,6 +641,14 @@ export const commands = {
 	/**  The account's viewing history, newest first. */
 	viewingHistory: (limit: number | null) => typedError<WatchHistoryDto[], AppError_Serialize>(__TAURI_INVOKE("viewing_history", { limit })),
 	/**
+	 *  Watched time per local day, optionally bounded by the row's last write.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running or the read fails.
+	 */
+	watchMetrics: (from: number | null, to: number | null) => typedError<WatchDayDto[], AppError_Serialize>(__TAURI_INVOKE("watch_metrics", { from, to })),
+	/**
 	 *  Removes the account's progress for one title, or every title when none is named.
 	 * 
 	 *  # Errors
@@ -2139,6 +2147,14 @@ export type UnmatchedRef = {
 	asTitle: MatchAsDto,
 	/**  The chosen title's id, when `asTitle` is `chosen` and the answer names one. */
 	titleId: number | null,
+};
+
+/**  One day's watched time, for the history graph. */
+export type WatchDayDto = {
+	/**  The local calendar day, `YYYY-MM-DD`. */
+	day: string,
+	/**  Watched milliseconds last written that day. */
+	totalMs: number | null,
 };
 
 /**  One row of the account's viewing history. */

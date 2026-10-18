@@ -1778,6 +1778,16 @@ impl Database {
         crate::watch::list_progress(&self.readers, scope, request).await
     }
 
+    /// Watched time per local day, optionally bounded by the row's last write.
+    pub async fn watch_by_day(
+        &self,
+        scope: AccountScope,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+    ) -> Result<Vec<crate::watch::WatchDayRow>, StorageError> {
+        crate::watch::watch_by_day(&self.readers, scope, from_ms, to_ms).await
+    }
+
     /// One title's per-episode watch state, for the season list.
     pub async fn list_progress_for_title(
         &self,

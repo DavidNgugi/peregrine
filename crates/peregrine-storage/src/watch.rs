@@ -58,6 +58,38 @@ pub struct EpisodeProgressRow {
     pub percent: f64,
 }
 
+/// One day's total watched milliseconds, for the history graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchDayRow {
+    /// The local calendar day, as `YYYY-MM-DD`.
+    pub day: String,
+    /// Summed position across the rows last written that day.
+    pub total_ms: i64,
+}
+
+/// Watched time per local day, optionally bounded by the row's last write.
+pub(crate) async fn watch_by_day(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+) -> Result<Vec<WatchDayRow>, StorageError> {
+    let rows = sqlx::query_as::<_, (String, i64)>(
+        "SELECT date(p.updated_at / 1000, 'unixepoch', 'localtime') AS day,                 COALESCE(SUM(p.position_ms), 0) AS total_ms            FROM watch_progress p            JOIN title t ON t.id = p.title_id           WHERE p.account_id = ?1             AND (?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL))             AND (?3 IS NULL OR p.updated_at >= ?3)             AND (?4 IS NULL OR p.updated_at <= ?4)           GROUP BY day ORDER BY day ASC",
+    )
+    .bind(scope.account().get())
+    .bind(hidden_by_scope(scope))
+    .bind(from_ms)
+    .bind(to_ms)
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(rows
+        .into_iter()
+        .map(|(day, total_ms)| WatchDayRow { day, total_ms })
+        .collect())
+}
+
 /// One row of `watchlist_entry`.
 ///
 /// There is no separate row id to carry: the table's identity is `(account_id, title_id)`, and

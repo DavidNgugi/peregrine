@@ -35,6 +35,7 @@ import type {
   ReleaseOfferDto,
   NotificationDto,
   ContinueWatchingDto,
+  WatchDayDto,
   WatchHistoryDto,
   ScheduledDownloadDto,
   WatchlistEntryDto,
@@ -304,6 +305,10 @@ export async function continueWatching(): Promise<ContinueWatchingDto[]> {
 /** The account's viewing history, newest first. */
 export async function viewingHistory(limit = 200): Promise<WatchHistoryDto[]> {
   return unwrap(commands.viewingHistory(limit));
+}
+
+export async function watchMetrics(from?: number, to?: number): Promise<WatchDayDto[]> {
+  return unwrap(commands.watchMetrics(from ?? null, to ?? null));
 }
 
 /** Removes progress for one title, or all of it when no title is named. */

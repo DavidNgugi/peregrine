@@ -182,6 +182,41 @@ pub async fn viewing_history(
     Ok(guard_response("watch::viewing_history", history))
 }
 
+/// One day's watched time, for the history graph.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchDayDto {
+    /// The local calendar day, `YYYY-MM-DD`.
+    pub day: String,
+    /// Watched milliseconds last written that day.
+    pub total_ms: f64,
+}
+
+/// Watched time per local day, optionally bounded by the row's last write.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is not running or the read fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn watch_metrics(
+    state: State<'_, RuntimeState>,
+    from: Option<f64>,
+    to: Option<f64>,
+) -> Result<Vec<WatchDayDto>, AppError> {
+    let rows = state
+        .runtime()?
+        .watch_metrics(from.map(|ms| ms as i64), to.map(|ms| ms as i64))
+        .await?;
+    let days = rows
+        .into_iter()
+        .map(|row| WatchDayDto {
+            day: row.day,
+            total_ms: row.total_ms as f64,
+        })
+        .collect();
+    Ok(guard_response("watch::watch_metrics", days))
+}
 /// Removes the account's progress for one title, or every title when none is named.
 ///
 /// # Errors

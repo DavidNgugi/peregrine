@@ -6,6 +6,7 @@ import { routePath, type Route } from "../../../app/routes.js";
 import { imageUrl } from "../../../lib/media.js";
 import { clearWatchHistory } from "@peregrine/ipc-client";
 import { useWatchHistory, type WatchHistoryView } from "../hooks/useWatchHistory.js";
+import { WatchMetricsPanel } from "./WatchMetricsPanel.js";
 
 export const HISTORY_PAGE = 25;
 
@@ -173,6 +174,7 @@ export function HistoryScreen({
 
   return (
     <Screen subtitle={t("history.subtitle")} title={t("history.title")}>
+      <WatchMetricsPanel />
       <HistoryList
         history={history}
         onAskClear={(titleId, name) => {

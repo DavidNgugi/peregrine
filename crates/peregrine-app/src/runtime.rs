@@ -3472,6 +3472,22 @@ impl Runtime {
         public_ip_from_json(&body).ok_or(RuntimeError::PublicIpUnavailable)
     }
 
+    /// Watched time per local day, optionally bounded by the row's last write.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn watch_metrics(
+        &self,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+    ) -> Result<Vec<peregrine_storage::WatchDayRow>, RuntimeError> {
+        Ok(self
+            .database
+            .watch_by_day(installation_scope(), from_ms, to_ms)
+            .await?)
+    }
+
     /// Removes the account's watch progress for one title, or all of it when no title is named.
     ///
     /// # Errors

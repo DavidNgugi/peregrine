@@ -719,6 +719,22 @@ export const en = {
       clearFailed: "The history could not be cleared. Try again.",
       progressEpisode: "{{percent}}% of this episode",
       progressTitle: "{{percent}}% of this title",
+      metrics: {
+        title: "Watch time",
+        from: "From date",
+        to: "To date",
+        chart: "Daily watch time",
+        failed: "Watch time could not be read.",
+        underMinute: "Under a minute",
+        minutes: "{{count}} min",
+        hours: "{{hours}}h {{minutes}}m",
+        preset: {
+          "7": "7 days",
+          "30": "30 days",
+          "90": "90 days",
+          all: "All time",
+        },
+      },
     },
     settings: {
       history: {
