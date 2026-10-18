@@ -26,18 +26,17 @@ function contentArea(markup: string): string {
 }
 
 describe("App", () => {
-  it("composes the shell, the current screen, and the player bar", () => {
+  it("composes the shell and the current screen", () => {
     const markup = renderToStaticMarkup(<App platform="macos" route={HOME} />);
 
-    // The three regions, each anchored on something only it draws: the navigation column's own
-    // landmark, the current screen's heading and toolbar, and the player bar's idle line. A
-    // screen's rails read answers on an effect, which a static render never runs, so what is
-    // composed here is the screen's first frame — and that frame deliberately claims nothing about
-    // a catalogue nobody has read, rather than drawing "Nothing here yet" over one.
+    // The two regions, each anchored on something only it draws: the navigation column's own
+    // landmark and the current screen's heading and toolbar. A screen's rails read answers on an
+    // effect, which a static render never runs, so what is composed here is the screen's first
+    // frame — and that frame deliberately claims nothing about a catalogue nobody has read,
+    // rather than drawing "Nothing here yet" over one.
     expect(markup).toContain(`aria-label="${i18n.t("shell.nav.label")}"`);
     expect(contentArea(markup)).toContain("Discover");
     expect(contentArea(markup)).toContain(i18n.t("discover.search.placeholder"));
-    expect(markup).toContain(i18n.t("shell.nowPlaying.idle"));
   });
 
   it("offers a reachable theme control with an accessible name", () => {
@@ -55,10 +54,10 @@ describe("App", () => {
     );
   });
 
-  it("puts the chrome, the navigation, and the player bar outside the screen's own area", () => {
+  it("puts the chrome and the navigation outside the screen's own area", () => {
     // The shell's persistence is structural: PG-E7-01's acceptance is that navigation
-    // never unmounts the shell, and nothing a screen renders can take the chrome or the
-    // player with it while they are siblings of `main` rather than inside it.
+    // never unmounts the shell, and nothing a screen renders can take the chrome with it while
+    // they are siblings of `main` rather than inside it.
     const markup = renderToStaticMarkup(<App platform="macos" route={HOME} />);
     const content = contentArea(markup);
 
@@ -67,7 +66,6 @@ describe("App", () => {
     expect(content).toContain("<h1");
     expect(content).toContain(i18n.t("discover.search.placeholder"));
     expect(content).not.toContain("data-tauri-drag-region");
-    expect(content).not.toContain(i18n.t("shell.nowPlaying.idle"));
     expect(content).not.toContain(`aria-label="${i18n.t("shell.nav.label")}"`);
   });
 

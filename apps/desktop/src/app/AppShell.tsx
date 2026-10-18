@@ -1,4 +1,3 @@
-import { NowPlayingBar } from "@peregrine/player-ui";
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
 import { ProfileAvatar, ProfileSwitcher, useProfiles } from "../features/profiles/index.js";
 import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
@@ -560,7 +559,6 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
           </DownloadProgressProvider>
         </main>
       </div>
-      <NowPlayingBar idleLabel={t("shell.nowPlaying.idle")} state={{ kind: "idle" }} />
       <ProfileSwitcher
         activeId={book.activeId}
         backdrops={profileBackdrops}

@@ -43,9 +43,6 @@ export const en = {
         switchToLight: "Switch to the light theme",
         switchToDark: "Switch to the dark theme",
       },
-      nowPlaying: {
-        idle: "Nothing playing",
-      },
       notifications: {
         label: "Notifications",
         labelWithCount: "Notifications ({{count}})",
