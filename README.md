@@ -6,7 +6,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 
 ![The Discover screen, showing a featured title, its details, and a trending rail](assets/screenshots/discover.webp)
 
-> **Status: early beta.** Discovery, acquisition, library scanning, episode-level playback, watch state, and scheduled downloads work end to end on macOS. The release workflow builds macOS, Windows, and Linux bundles, but they are unsigned, unnotarised, and unpublished; Windows and Linux have not been run. Subtitles, casting, and accounts still do not exist. Treat this as a working prototype.
+> **Status: v1.0 release candidate, unsigned.** Discovery, acquisition, library scanning, episode-level playback, watch state, the watchlist, and scheduled downloads work end to end on macOS. The release workflow builds macOS, Windows, and Linux bundles, but they are unsigned, unnotarised, and unpublished; Windows and Linux have not been run. Subtitles, casting to a device, and accounts still do not exist. Treat it as a release candidate, not a supported release.
 
 ## What works today
 
@@ -16,6 +16,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 - **Play while it downloads** — a download is playable once its file list is known, served from the torrent engine through a loopback HTTP server.
 - **Your library** — point it at folders you already have. Filenames are parsed and matched to titles, with manual matching for the ones it cannot place. Scanned titles get their own **My library** rail on Discover, and the Library screen searches and filters them. A scanned title still carrying no provider id is matched automatically in the background: the app searches the configured provider by name and kind on its next pass, then fills in the poster and metadata. Nothing is moved or renamed without asking.
 - **Cast** — each refreshed title carries its top-billed cast from TMDB, portraits included, drawn as a rail on the title page. Clicking a person opens their page: the titles in your library that credit them, plus the rest of their credits from TMDB.
+- **Watchlist** — save a title from its page. A bookmark marks it on every rail and grid, and Discover's **My list** rail collects the saved titles.
 - **Playback** — pick an episode and play that episode, not the title's first file. mpv for containers the webview cannot demux, resume, and continue watching that reopens the exact episode.
 - **Watch state** — a bar along each episode's still fills as you watch and completes when you finish; the first unfinished episode is marked **Next up**, and Settings carries the full viewing history.
 - **Scheduled downloads** — an unreleased episode or title offers Schedule instead of Download; the app fetches it on its release date and the Scheduled list in Downloads cancels it.
@@ -25,7 +26,7 @@ Peregrine does the job of a Prowlarr, Radarr, Sonarr, qBittorrent, and Jellyfin 
 
 ## Roadmap
 
-Packaging and signed releases come first, then subtitles, casting, watchlists with air dates, local accounts with parental gating (a parent curates a child's library by rating and by hand, and the child cannot download), MCP access for agents, and a Jellyfin-compatible API so other clients can play from Peregrine.
+Packaging and signed releases come first, then subtitles, casting to a device, air-date monitoring with watchlist auto-acquire, local accounts with parental gating (a parent curates a child's library by rating and by hand, and the child cannot download), MCP access for agents, and a Jellyfin-compatible API so other clients can play from Peregrine.
 
 After that, a headless server with a browser client, installable with Docker or on NAS platforms such as UmbrelOS, Unraid, and TrueNAS. Once the core is stable, TV and mobile playback clients: Android TV, Tizen, iOS, and Android, in the way Jellyfin and Plex offer theirs. The full plan, with phases and exit criteria, is in [docs/PLAN.md](docs/PLAN.md).
 
@@ -48,7 +49,7 @@ Self-hosted media is usually five services: an indexer manager, a film manager, 
 
 The wins worth stating: a native app rather than a web console; one configuration surface rather than five; an engine and a player that can coordinate, which is what makes play-while-downloading possible; and an inspection before any byte is written.
 
-The honest limits: Peregrine is early, verified only on macOS, and its bundles are neither signed nor notarised, while the stacks above have years of maturity. The first-run setup wizard exists, but there are no real accounts yet: profiles are local names and pictures, not scoped libraries. The bundled mpv and ffprobe remove the separate install on macOS and Windows; the Linux bundle still has no player.
+The honest limits: Peregrine is an unsigned release candidate, verified only on macOS, and its bundles are neither signed nor notarised, while the stacks above have years of maturity. The first-run setup wizard exists, but there are no real accounts yet: profiles are local names and pictures, not scoped libraries. The bundled mpv and ffprobe remove the separate install on macOS and Windows; the Linux bundle still has no player.
 
 ## Build from source
 
@@ -56,7 +57,7 @@ Prerequisites: Rust 1.95 or newer, Node 22 or newer, and pnpm. The build fetches
 
 Release builds are compiled with a shared TMDB token supplied as `PEREGRINE_TMDB_TOKEN` at build time, so a fresh install can search without a key. The token is never in the repository. A key saved in Settings takes precedence, and a local build without the variable simply asks for one.
 
-The release workflow produces a DMG, a deb, an AppImage, and an NSIS installer, but no GitHub release is published until the signing key is configured, so there is still nothing to download.
+The release workflow produces four bundles — DMGs for both macOS architectures, an NSIS installer, and a deb plus an AppImage — and an unsigned v1.0 release candidate is published with a `SHA256SUMS` file. Signed releases wait for the signing secrets; the maintainer procedure is in [docs/RELEASE.md](docs/RELEASE.md).
 
 ```bash
 pnpm install
@@ -84,6 +85,7 @@ A Tauri v2 shell, a Rust core, and a React front end. The core owns all state an
 | [FLOWS.md](docs/FLOWS.md) | End-to-end sequence diagrams and state machines |
 | [PLAN.md](docs/PLAN.md) | Phases, exit criteria, effort model, risk register |
 | [TASKS.md](docs/TASKS.md) | The backlog: what each task still owes, and its acceptance criteria |
+| [RELEASE.md](docs/RELEASE.md) | Cutting and verifying a release, the unsigned RC policy, and the signing secrets |
 | [SECURITY.md](SECURITY.md) | Threat model, controls, accepted risks, reporting policy |
 | [AGENTS.md](AGENTS.md) | The engineering contract, for human and AI contributors alike |
 
