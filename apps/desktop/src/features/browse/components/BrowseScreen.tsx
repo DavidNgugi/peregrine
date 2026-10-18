@@ -81,7 +81,7 @@ const TILE_ROW_HEIGHT = TILE_POSTER_HEIGHT + 12;
  * otherwise refuse to shrink.
  */
 const SELECT_CLASS =
-  "h-9 min-w-0 rounded-full border border-border-subtle bg-surface-0/70 px-3 text-body text-text-primary disabled:opacity-40 md:flex-1";
+  "h-9 min-w-0 rounded-full border border-border-subtle bg-surface-0/70 px-3 text-body text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-40 md:flex-1";
 
 /** What the drawing needs, which is what the hooks answered plus the route's kind. */
 export interface BrowseViewProps {
@@ -322,6 +322,21 @@ export function BrowseView({
         // and the cached poster: `search_tiles` writes it through the list path. The text is the
         // grid's reset key, so a new query starts from its first tile.
         <>
+          {/* **The answer is announced, not only drawn.** While the query is live the grid under
+              the field changes without focus moving: this region says a read is in the air, then how
+              many titles arrived, then that none did. A failure is left to the alert below, which is
+              already announced when it appears. The region is rendered for the whole live search, so
+              the text it changes to is what a reader hears. */}
+          <p aria-live="polite" className="sr-only" role="status">
+            {search.searching || (!search.searched && !search.failed)
+              ? t("discover.search.searching")
+              : search.failed
+                ? ""
+                : search.results.length > 0
+                  ? t("browse.search.count", { count: search.results.length })
+                  : t("discover.none.title")}
+          </p>
+
           {search.failed ? (
             <ErrorState
               body={t("discover.searchFailed.body")}
@@ -330,9 +345,7 @@ export function BrowseView({
           ) : null}
 
           {search.searching || (!search.searched && !search.failed) ? (
-            <p className="text-body text-text-secondary" role="status">
-              {t("discover.search.searching")}
-            </p>
+            <p className="text-body text-text-secondary">{t("discover.search.searching")}</p>
           ) : null}
 
           {search.results.length > 0 ? (

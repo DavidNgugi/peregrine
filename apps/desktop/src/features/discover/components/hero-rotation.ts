@@ -85,6 +85,18 @@ export function rotationRuns(count: number): boolean {
 }
 
 /**
+ * Whether the interval should be armed: a rotation, and no reduced-motion preference.
+ *
+ * The rotation is decoration rather than a state change, so a reader who has asked the system for
+ * less motion keeps the slide they are on — the strip below still moves the hero by hand. The
+ * decision lives here rather than in the component's effect because a Node test cannot drive a
+ * timer, and this is the one question the effect asks for itself.
+ */
+export function autoRotates(count: number, reducedMotion: boolean): boolean {
+  return rotationRuns(count) && !reducedMotion;
+}
+
+/**
  * The slide on screen, clamped to the rotation that exists right now.
  *
  * A stored index and a shorter list is a real state — a refresh that replaced the first rail, an

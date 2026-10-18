@@ -1,7 +1,14 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { fileToAvatar } from "./avatar-file.js";
+import { keepFocusInside } from "./focus-trap.js";
 import { ProfileImage } from "./ProfileImage.js";
 import {
   AVATAR_STYLE_KEYS,
@@ -60,9 +67,11 @@ export function ProfileEditor({
   const [error, setError] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    const previous = document.activeElement;
     const nextAvatar = profile?.avatar ?? { kind: "dicebear", style: "initials", seed: "You" };
     setName(profile?.name ?? "");
     setAvatar(nextAvatar);
@@ -70,6 +79,13 @@ export function ProfileEditor({
     setSeeds(seedsFor(profile?.name ?? ""));
     setError(false);
     nameInput.current?.focus();
+    // The pencil that opened the editor is where a keyboard user returns when it closes. A control
+    // that has itself unmounted with the selector is skipped rather than focused into nothing.
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) {
+        previous.focus();
+      }
+    };
   }, [open, profile]);
 
   useEffect(() => {
@@ -118,6 +134,15 @@ export function ProfileEditor({
       aria-label={mode === "create" ? t("profile.newTitle") : t("profile.editTitle")}
       aria-modal="true"
       className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-black/80 p-6"
+      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
+        keepFocusInside(event, dialog.current);
+        // This dialog sits inside the selector's own dialog; Tab is answered here so the outer
+        // trap cannot wrap to the avatars this surface has covered.
+        if (event.key === "Tab") {
+          event.stopPropagation();
+        }
+      }}
+      ref={dialog}
       role="dialog"
     >
       <div className="w-full max-w-3xl rounded-xl border border-white/10 bg-[#141414] p-6 text-white shadow-2xl">

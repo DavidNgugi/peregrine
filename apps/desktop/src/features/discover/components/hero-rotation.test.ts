@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { HomeRailDto, RailItemDto } from "@peregrine/ipc-client";
 import {
   advance,
+  autoRotates,
   currentSlide,
   FIRST_SLIDE,
   heroSlides,
@@ -73,6 +74,17 @@ describe("the rotation's arithmetic", () => {
     expect(rotationRuns(0)).toBe(false);
     expect(rotationRuns(1)).toBe(false);
     expect(rotationRuns(2)).toBe(true);
+  });
+
+  it("stops the automatic rotation when the system asks for less motion", () => {
+    // The interval is decoration: a reader who prefers reduced motion keeps the slide they are on,
+    // while the strip's own click still moves the hero. One item is never a rotation either way.
+    expect(autoRotates(0, false)).toBe(false);
+    expect(autoRotates(1, false)).toBe(false);
+    expect(autoRotates(2, false)).toBe(true);
+    expect(autoRotates(5, false)).toBe(true);
+    expect(autoRotates(2, true)).toBe(false);
+    expect(autoRotates(5, true)).toBe(false);
   });
 
   it("steps forward one slide", () => {

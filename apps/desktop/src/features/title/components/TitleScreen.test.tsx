@@ -434,6 +434,11 @@ describe("TitleScreen", () => {
       ["Season 2", "true"],
       ["Specials", "false"],
     ]);
+    // Every chip carries the kit's focus ring rather than the webview's default: the chip is a raw
+    // button, so the visible focus state is this screen's to own.
+    expect(html).toMatch(
+      /<button aria-pressed="(true|false)" class="[^"]*focus-visible:outline-2/u,
+    );
   });
 
   it("draws the reserved box for an episode with no still, and never a broken image", () => {

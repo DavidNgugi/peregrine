@@ -94,9 +94,12 @@ export function TitleFeedList({
 
   if (feed.items.length === 0) {
     // Nothing to draw and nothing wrong: a title no provider can be asked about has no feed, and the
-    // page above is still the answer to the question the reader asked.
+    // page above is still the answer to the question the reader asked. A failure is still a status,
+    // even with no tiles above it to keep.
     return feed.failed === null ? null : (
-      <EmptyState body={t("title.feed.failed.body")} title={t("title.feed.failed.title")} />
+      <div role="status">
+        <EmptyState body={t("title.feed.failed.body")} title={t("title.feed.failed.title")} />
+      </div>
     );
   }
 
@@ -111,7 +114,11 @@ export function TitleFeedList({
   });
 
   return (
-    <section aria-labelledby="title-feed-heading" className="flex flex-col gap-3">
+    <section
+      aria-busy={feed.loading}
+      aria-labelledby="title-feed-heading"
+      className="flex flex-col gap-3"
+    >
       <div className="flex flex-col gap-1">
         <h2 className="text-title-2 text-text-primary" id="title-feed-heading">
           {t("title.feed.title")}
@@ -149,15 +156,25 @@ export function TitleFeedList({
         ))}
       </ul>
 
-      {feed.exhausted ? (
-        // The end, said rather than left to inference: a list that simply stops is indistinguishable
-        // from one that is still loading.
-        <p className="text-caption text-text-tertiary" role="status">
-          {feed.failed === null ? t("title.feed.end") : t("title.feed.failed.body")}
-        </p>
-      ) : (
+      {/* **One status region, mounted for the life of the feed.** It is the same element in every
+          state — a page on its way, a page that failed, every source drained — because a live region
+          that arrives with its own text is announced by some readers and not others. A failure is
+          reported even when the feed is not exhausted: the sentinel stays behind it and the next
+          look retries, but staying silent left the reader with a list that had quietly stopped. */}
+      <p className="text-caption text-text-tertiary" role="status">
+        {feed.failed !== null
+          ? t("title.feed.failed.body")
+          : feed.loading
+            ? t("title.feed.loading")
+            : feed.exhausted
+              ? // The end, said rather than left to inference: a list that simply stops is
+                // indistinguishable from one that is still loading.
+                t("title.feed.end")
+              : ""}
+      </p>
+      {feed.failed === null && !feed.loading && !feed.exhausted ? (
         <FeedSentinel onReached={feed.loadMore} />
-      )}
+      ) : null}
     </section>
   );
 }

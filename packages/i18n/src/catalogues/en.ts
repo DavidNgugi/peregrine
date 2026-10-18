@@ -237,6 +237,10 @@ export const en = {
         placeholder: "A film or a series",
         action: "Search",
         searching: "Searching the providers…",
+        // Announced by the search's live region when the answer lands. Both plural forms for the
+        // reason `card.votes` gives: a count of one is not a count of many.
+        count_one: "{{count}} result",
+        count_other: "{{count}} results",
         // **Which of the two answered.** The catalogue's index is instant and offline; a provider
         // answer has just been written into the catalogue. The two are otherwise indistinguishable,
         // and a reader is entitled to know whether a request was spent.
@@ -298,6 +302,9 @@ export const en = {
         placeholder: "Search titles",
         // The grid's accessible name while a query is live; the browse grid has its own above.
         results: "Search results",
+        // Announced by the live search's status region, for the reason `discover.search.count`.
+        count_one: "{{count}} result",
+        count_other: "{{count}} results",
       },
       empty: {
         title: "Nothing matches these filters",
@@ -521,6 +528,7 @@ export const en = {
       feed: {
         title: "More like this",
         description: "Recommended titles, then everything else in the genres they share.",
+        loading: "Loading more titles…",
         end: "That is everything your providers have for this title.",
         failed: {
           title: "More titles could not be loaded",
@@ -589,6 +597,10 @@ export const en = {
         description: "Choose the title “{{file}}” belongs to. Nothing is downloaded or moved.",
         search: "Search your catalogue",
         placeholder: "A film or series name",
+        searching: "Searching your catalogue…",
+        // Announced by the picker's live region; both plural forms for the reason `card.votes` gives.
+        results_one: "{{count}} title found",
+        results_other: "{{count}} titles found",
         empty: {
           title: "Nothing to choose from yet.",
           body: "Type a name to search the catalogue.",
@@ -640,6 +652,9 @@ export const en = {
         files: "Copies",
         size: "Size",
         missing: "Missing",
+        // The queue's and the rules' button columns are named too: an unnamed column is one a
+        // screen-reader table navigation cannot announce.
+        actions: "Actions",
       },
       // The list/grid choice. The label names the group rather than either drawing; the two buttons
       // carry their own words.

@@ -8,6 +8,7 @@ import { heroPlay } from "../../../lib/play-action.js";
 
 import {
   advance,
+  autoRotates,
   currentSlide,
   FIRST_SLIDE,
   HERO_INTERVAL_MS,
@@ -113,7 +114,11 @@ export function DiscoverHero({
   // on the *index* would do the same thing; keying it on nothing — the trap — would leave a timer
   // armed across renders that a click could then beat by a few milliseconds.
   useEffect(() => {
-    if (!rotationRuns(count)) {
+    // The interval is armed only for a rotation the reader has not asked to hold still; the strip
+    // below still moves the hero by hand. (Automatic rotation also falls under WCAG 2.2.2, which
+    // reduced motion does not waive; a build that wants it live for everyone needs a pause control,
+    // recorded as owed rather than guessed at here.)
+    if (!autoRotates(count, window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
       return;
     }
     const timer = window.setInterval(() => {

@@ -42,9 +42,10 @@ export function SeasonSwitcher({ seasons, current, onChoose }: SeasonSwitcherPro
           <button
             aria-pressed={pressed}
             className={
-              pressed
-                ? "rounded-full bg-surface-2 px-3 py-1 text-caption text-text-primary"
-                : "rounded-full px-3 py-1 text-caption text-text-secondary hover:bg-surface-2/60"
+              "rounded-full px-3 py-1 text-caption focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring " +
+              (pressed
+                ? "bg-surface-2 text-text-primary"
+                : "text-text-secondary hover:bg-surface-2/60")
             }
             key={season.seasonNumber}
             onClick={() => {

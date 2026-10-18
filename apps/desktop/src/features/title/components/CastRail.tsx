@@ -28,7 +28,7 @@ export function CastRail({
         {cast.map((member) => (
           <li className="w-24 shrink-0" key={`${member.name}-${member.character ?? ""}`}>
             <button
-              className="flex w-full flex-col items-center gap-1.5 text-center"
+              className="flex w-full flex-col items-center gap-1.5 rounded-md text-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               disabled={onPerson === undefined}
               onClick={() => {
                 onPerson?.(member.id);

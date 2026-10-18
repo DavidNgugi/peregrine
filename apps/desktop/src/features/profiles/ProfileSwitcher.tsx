@@ -1,7 +1,14 @@
 import { IconButton } from "@peregrine/ui";
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+} from "react";
 import { useTranslation } from "react-i18next";
 
+import { keepFocusInside } from "./focus-trap.js";
 import { ProfileEditor } from "./ProfileEditor.js";
 import { ProfileImage } from "./ProfileImage.js";
 import type { Avatar, Profile } from "./profile.js";
@@ -45,6 +52,7 @@ export function ProfileSwitcher({
   const [index, setIndex] = useState(0);
   const [editing, setEditing] = useState<Editing | null>(null);
   const avatarRefs = useRef(new Map<string, HTMLButtonElement>());
+  const dialog = useRef<HTMLDivElement | null>(null);
 
   const images = backdrops.length > 0 ? backdrops : posters.length > 0 ? [posters[0]!] : [];
 
@@ -54,11 +62,23 @@ export function ProfileSwitcher({
       setIndex(0);
       return;
     }
+    // Choosing a profile is the exit, so the control that opened this surface is where a keyboard
+    // user belongs again when it closes. Captured before the move below, and an element that has
+    // itself gone away is skipped rather than focused into nothing.
+    const previous = document.activeElement;
     avatarRefs.current.get(activeId)?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) {
+        previous.focus();
+      }
+    };
   }, [activeId, open]);
 
   useEffect(() => {
     if (!open || images.length < 2) return;
+    // The rotating backdrop is decoration, not a state change: a reader who has asked the system for
+    // less motion keeps the first picture, and every profile remains selectable beside it.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = setInterval(() => {
       setIndex((current) => (current + 1) % images.length);
     }, 7000);
@@ -89,6 +109,10 @@ export function ProfileSwitcher({
       aria-label={t("profile.who")}
       aria-modal="true"
       className="fixed inset-0 z-50 overflow-hidden bg-black text-white"
+      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
+        keepFocusInside(event, dialog.current);
+      }}
+      ref={dialog}
       role="dialog"
     >
       {images.length === 0 ? (
@@ -97,7 +121,7 @@ export function ProfileSwitcher({
         images.map((image, position) => (
           <img
             alt=""
-            className={`absolute inset-0 size-full object-cover transition-opacity duration-700 ${
+            className={`absolute inset-0 size-full object-cover transition-opacity duration-700 motion-reduce:transition-none ${
               position === index ? "opacity-100" : "opacity-0"
             }`}
             key={image}

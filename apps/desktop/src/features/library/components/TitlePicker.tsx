@@ -43,6 +43,20 @@ export function TitlePicker({ fileName, onChoose, onClose }: TitlePickerProps): 
       onClose={onClose}
       title={t("library.picker.title")}
     >
+      {/* **The answer is announced, not only drawn.** The search is a local read per keystroke, so
+          the list under this field changes without focus moving and without a page reload: without a
+          live region a screen-reader user would type a name and hear nothing. The region is in the
+          DOM from the first frame, which is what makes a change to it announceable. A failure is
+          said here too, because its block is an EmptyState rather than an alert. */}
+      <p aria-live="polite" className="sr-only" role="status">
+        {search.searching
+          ? t("library.picker.searching")
+          : search.failed
+            ? t("library.picker.failed.title")
+            : search.results.length > 0
+              ? t("library.picker.results", { count: search.results.length })
+              : ""}
+      </p>
       <TextInput
         autoFocus
         label={t("library.picker.search")}

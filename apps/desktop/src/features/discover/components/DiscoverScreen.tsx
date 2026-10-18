@@ -265,6 +265,20 @@ export function DiscoverToolbar({
         {trailing}
       </div>
       {feedback}
+      {/* **One live status for the search answer.** The panel below changes as the debounce settles,
+          and the field keeps focus throughout, so without this a screen-reader user would type and
+          hear nothing when the answer arrived. A failure is an alert of its own, so it is not
+          repeated here. The region is mounted with the toolbar, which is what makes a change to it
+          announceable rather than a new region arriving with its text. */}
+      <p aria-live="polite" className="sr-only" role="status">
+        {search.searching
+          ? t("discover.search.searching")
+          : search.searched && !search.failed
+            ? search.results.length > 0
+              ? t("discover.search.count", { count: search.results.length })
+              : t("discover.none.title")
+            : ""}
+      </p>
     </div>
   );
 }
@@ -367,9 +381,7 @@ export function DiscoverView({
         {/* Announced rather than drawn as a bar: there is no completion to show for a request whose
           length nobody knows, and a determinate bar would be a number invented to fill a shape. */}
         {search.searching ? (
-          <p className="text-body text-text-secondary" role="status">
-            {t("discover.search.searching")}
-          </p>
+          <p className="text-body text-text-secondary">{t("discover.search.searching")}</p>
         ) : null}
 
         {!search.searching && search.failed ? (
@@ -393,7 +405,7 @@ export function DiscoverView({
                   : "discover.search.source.provider",
               )}
             </p>
-            <ul aria-busy={search.searching} className="flex flex-col gap-1">
+            <ul className="flex flex-col gap-1">
               {search.results.map((row) => (
                 <li key={row.id}>
                   {/* A link, because it is one: it says where it goes, and a keyboard user opens it with

@@ -27,10 +27,10 @@ function cast(overrides: Partial<CastMemberDto> = {}): CastMemberDto {
   };
 }
 
-function markup(members: readonly CastMemberDto[]): string {
+function markup(members: readonly CastMemberDto[], onPerson?: (id: number) => void): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <CastRail cast={members} />
+      <CastRail cast={members} {...(onPerson === undefined ? {} : { onPerson })} />
     </I18nextProvider>,
   );
 }
@@ -52,5 +52,13 @@ describe("CastRail", () => {
     const html = markup([cast({ profile: "/cache/keanu.jpg" })]);
     expect(html).toContain("asset://localhost/");
     expect(html).toContain("keanu");
+  });
+
+  it("makes a credited person a keyboard-reachable control with a visible focus ring", () => {
+    const html = markup([cast()], () => undefined);
+
+    expect(html).toContain("<button");
+    expect(html).toContain("focus-visible:outline-2");
+    expect(html).not.toContain('disabled=""');
   });
 });

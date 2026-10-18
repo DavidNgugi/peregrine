@@ -38,6 +38,15 @@ describe("TitlePicker", () => {
     expect(html).not.toContain("did not run");
   });
 
+  it("carries a live region for the search's answer", () => {
+    // The list changes under the field as the local index answers, so without a region in the DOM
+    // from the first frame a screen-reader user would type a name and hear nothing.
+    const html = markup();
+
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('role="status"');
+  });
+
   it("is a dialog, so the page behind it is not reachable", () => {
     // The confirmation rule from AGENTS R22 and the reason a dialog exists: this is one decision, and
     // the rest of the screen waits for it.

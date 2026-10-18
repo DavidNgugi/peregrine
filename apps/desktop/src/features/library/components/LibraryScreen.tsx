@@ -302,7 +302,9 @@ function queueColumnsOf(
     },
     {
       id: "match",
-      header: "",
+      // Named rather than blank: an unnamed column is one a screen-reader table navigation cannot
+      // announce, and the buttons in it all act on the parked file.
+      header: t("library.column.actions"),
       cell: (row) => {
         const named = suggestionOf(row);
         return (
@@ -368,7 +370,7 @@ function ruleColumnsOf(
     },
     {
       id: "forget",
-      header: "",
+      header: t("library.column.actions"),
       cell: (row) => (
         <Button
           disabled={busy}
@@ -447,17 +449,25 @@ export function LibraryScreen({
           <div className="flex flex-wrap items-center justify-between gap-3">
             {scan.running ? (
               <Progress label={t("library.scan.running")} value={scan.permille} />
-            ) : (
-              <span className="text-caption text-text-tertiary">
-                {scan.phase === "succeeded"
+            ) : null}
+            {/* The status region is mounted for the whole scan rather than appearing with its
+                sentence: a region that arrives with its text is announced by some readers and not
+                others, and this is the only signal for a reader who cannot see the bar. Hidden while
+                the bar is on screen because the bar's own label says the same thing. */}
+            <span
+              className={scan.running ? "sr-only" : "text-caption text-text-tertiary"}
+              role="status"
+            >
+              {scan.running
+                ? t("library.scan.running")
+                : scan.phase === "succeeded"
                   ? t("library.scan.finished")
                   : scan.phase === "canceled"
                     ? t("library.scan.canceled")
                     : scan.phase === "failed"
                       ? t("library.scan.failed")
                       : t("library.scan.idle")}
-              </span>
-            )}
+            </span>
             <div className="flex items-center gap-3">
               {/* Poster progress, said in words because a capture takes seconds and a screen that showed
                   nothing would look stuck. It disappears when the work does. */}

@@ -146,6 +146,9 @@ describe("BrowseView", () => {
     expect(html).toContain("/title/movie/9");
     expect(html).toContain("Search results");
     expect(html).not.toContain("Browse results");
+    // The grid under the field changes without focus moving, so the live region says how many
+    // titles arrived.
+    expect(html).toMatch(/role="status"[^>]*>1 result</u);
     // The provider filters belong to the grid; a live search disables them rather than letting a
     // change spend a request on a page nobody can see.
     expect(html).toContain('disabled=""');
@@ -163,13 +166,14 @@ describe("BrowseView", () => {
       query: "spider",
       searching: true,
     });
-    expect(running).toContain("Searching the providers…");
+    expect(running).toMatch(/role="status"[^>]*>Searching the providers…</u);
 
     const nothing = markup({}, [], "movie", undefined, undefined, {
       query: "zzz",
       searched: true,
     });
     expect(nothing).toContain("Nothing matched");
+    expect(nothing).toMatch(/role="status"[^>]*>Nothing matched</u);
   });
 
   it("reports a failed search rather than calling it empty", () => {
@@ -206,6 +210,13 @@ describe("BrowseView", () => {
     expect(html).toContain("Oldest");
     expect(html).toContain("Any rating");
     expect(html).toContain("8+ stars");
+    // The three filters are raw selects rather than kit controls, so their visible focus state is
+    // this screen's to own alongside the search pill's focus-within ring.
+    const selects = [...html.matchAll(/<select[^>]*>/gu)].map((match) => match[0]);
+    expect(selects).toHaveLength(3);
+    for (const select of selects) {
+      expect(select).toContain("focus-visible:outline-2");
+    }
   });
 
   it("marks the kind the route named as the one pressed", () => {

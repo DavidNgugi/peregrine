@@ -480,9 +480,7 @@ describe("the search's live status", () => {
   it("says a read is in the air, then how many titles arrived", () => {
     // The panel under the field appears without focus moving, so the count is what tells a
     // screen-reader user that the debounce has settled and an answer is on screen.
-    expect(searched({ searching: true })).toMatch(
-      /role="status"[^>]*>Searching the providers…</u,
-    );
+    expect(searched({ searching: true })).toMatch(/role="status"[^>]*>Searching the providers…</u);
     expect(searched({ results: [hit], searched: true, source: "catalogue" })).toMatch(
       /role="status"[^>]*>1 result</u,
     );

@@ -315,6 +315,9 @@ describe("LibraryScreen", () => {
 
     expect(running).toContain("Scanning");
     expect(running).toContain('role="progressbar"');
+    // The status region stays mounted for the whole scan; while the bar is on screen it carries the
+    // same sentence in an sr-only node, so the start is announced as well as the end.
+    expect(running).toMatch(/role="status"[^>]*>Scanning your folders…</u);
     expect(running).toContain(`disabled=""`);
   });
 
@@ -324,8 +327,8 @@ describe("LibraryScreen", () => {
     const succeeded = markup(library(), scanControl({ phase: "succeeded" }));
     const failed = markup(library(), scanControl({ phase: "failed" }));
 
-    expect(succeeded).toContain("Scan finished.");
-    expect(failed).toContain("The last scan did not finish.");
+    expect(succeeded).toMatch(/role="status"[^>]*>Scan finished\./u);
+    expect(failed).toMatch(/role="status"[^>]*>The last scan did not finish\./u);
     expect(succeeded).not.toContain("Scanning");
   });
 
@@ -338,6 +341,9 @@ describe("LibraryScreen", () => {
     expect(html).toContain("The Matrix (2049)");
     expect(html).toContain("could be a year or part of the title");
     expect(html).toContain("Match");
+    // The button column is named: an empty header leaves screen-reader table navigation with a
+    // column it cannot announce.
+    expect(html).toContain("Actions");
   });
 
   it("says which existing title a parked name looks like, and files it there", () => {
@@ -418,6 +424,7 @@ describe("LibraryScreen", () => {
     expect(html).toContain("the matrix");
     expect(html).toContain("The Matrix");
     expect(html).toContain("Forget");
+    expect(html).toContain("Actions");
   });
 
   it("says nothing about rules when there are none or the read failed", () => {
