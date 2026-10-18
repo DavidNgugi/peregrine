@@ -499,6 +499,7 @@ export const en = {
         runtime: "{{minutes}} min",
         download: "Download",
         downloading: "Downloading… {{percent}}%",
+        downloadingWaiting: "Downloading…",
         play: "Play",
         playLabel: "Play episode {{number}} ({{name}})",
         nextUp: "Next up",

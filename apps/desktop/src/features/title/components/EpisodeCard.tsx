@@ -224,7 +224,9 @@ export function EpisodeCard({
                 variant={downloading ? "primary" : "secondary"}
               >
                 {downloading
-                  ? t("title.episode.downloading", { percent: downloadPercent ?? 0 })
+                  ? downloadPercent === undefined
+                    ? t("title.episode.downloadingWaiting")
+                    : t("title.episode.downloading", { percent: downloadPercent })
                   : t("title.episode.download")}
               </Button>
             )}

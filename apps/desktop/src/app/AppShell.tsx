@@ -513,6 +513,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 key={`${route.titleKind}:${String(route.id)}`}
                 acquire={acquire}
                 backLabel={t("shell.back")}
+                downloadRows={downloads.downloads}
                 downloads={marks}
                 onBack={canBack ? goBack : undefined}
                 onNavigate={navigate}

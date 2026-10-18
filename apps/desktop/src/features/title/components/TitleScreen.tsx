@@ -22,8 +22,8 @@
 
 import { Button, EmptyState, ErrorState, Screen, Section, Table } from "@peregrine/ui";
 import { normalizeIpcError, playExternally, scheduleDownload } from "@peregrine/ipc-client";
-import type { IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
-import { useState, type ReactElement } from "react";
+import type { DownloadJobDto, IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
+import { useEffect, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { CastRail } from "./CastRail.js";
 import { TitleHero } from "./TitleHero.js";
@@ -38,7 +38,7 @@ import type { TitleSeasons } from "../hooks/useSeasons.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
 import { TitleFeedList } from "./TitleFeedList.js";
 import type { Route, TitleKind } from "../../../app/routes.js";
-import type { DownloadMarks } from "../../../lib/download-status.js";
+import { downloadStatusOf, type DownloadMarks } from "../../../lib/download-status.js";
 
 interface TitleScreenProps {
   /** Which of the two the route says this is, which is what the page can say immediately. */
@@ -71,6 +71,8 @@ interface TitleScreenProps {
   readonly acquire?: AcquireControl;
   /** A download status per title, forwarded to the feed's tiles. */
   readonly downloads?: DownloadMarks | undefined;
+  /** The queue rows, so each episode can read its own transfer rather than one page-wide job. */
+  readonly downloadRows?: readonly DownloadJobDto[] | undefined;
   /** Titles on the account's watchlist, forwarded to the feed's tiles. */
   readonly watchlistIds?: ReadonlySet<number> | undefined;
   /** Whether this title is on the watchlist. */
@@ -110,6 +112,7 @@ export function TitleScreen({
   acquire,
   onNavigate,
   downloads,
+  downloadRows,
   watchlistIds,
   watchlisted = false,
   onWatchlist,
@@ -122,6 +125,50 @@ export function TitleScreen({
   // say: a Play that opens nothing and explains nothing is the inert control PG-E1-07 forbids.
   const [playFailure, setPlayFailure] = useState<IpcError | null>(null);
   const [scheduled, setScheduled] = useState<ReadonlySet<string>>(() => new Set());
+  // **A click is not the queue yet.** The acquire job searches before it creates a download row, and
+  // one page-wide acquire state would drop the previous episode's label the moment a second one was
+  // clicked. The requested set bridges that gap; the queue row takes over as soon as it exists.
+  const [requested, setRequested] = useState<ReadonlySet<string>>(() => new Set());
+  const episodeKey = (season: number, episode: number): string =>
+    `${String(season)}:${String(episode)}`;
+  useEffect(() => {
+    const queued = new Set(
+      (downloadRows ?? [])
+        .filter((job) => job.titleId === title?.id && downloadStatusOf(job.state) === "active")
+        .map((job) =>
+          job.seasonNumber === null || job.episodeNumber === null
+            ? ""
+            : episodeKey(job.seasonNumber, job.episodeNumber),
+        ),
+    );
+    setRequested((previous) => {
+      const kept = [...previous].filter((key) => !queued.has(key));
+      return kept.length === previous.size ? previous : new Set(kept);
+    });
+  }, [downloadRows, title?.id]);
+  useEffect(() => {
+    if (acquire?.episode == null || acquire.outcome === null || acquire.outcome === "queued") {
+      return;
+    }
+    const key = episodeKey(acquire.episode.season, acquire.episode.episode);
+    setRequested((previous) => {
+      if (!previous.has(key)) {
+        return previous;
+      }
+      const next = new Set(previous);
+      next.delete(key);
+      return next;
+    });
+  }, [acquire?.episode, acquire?.outcome]);
+  // A refused start never creates a row; the bridge must not become a button that lies forever.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRequested((previous) => (previous.size === 0 ? previous : new Set()));
+    }, 120_000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
   const schedule = (
     key: string,
     season: number | null,
@@ -343,6 +390,14 @@ export function TitleScreen({
             >
               {seasons.episodes.map((episode) => {
                 const nextUp = seasons.episodes.find((row) => !row.watched);
+                const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
+                const job = (downloadRows ?? []).find(
+                  (row) =>
+                    row.titleId === title.id &&
+                    row.seasonNumber === episode.seasonNumber &&
+                    row.episodeNumber === episode.episodeNumber &&
+                    downloadStatusOf(row.state) === "active",
+                );
                 return (
                   // The season and the number together, because an episode's number is only unique
                   // within its season — and a title can hold the same number in two of them.
@@ -351,15 +406,10 @@ export function TitleScreen({
                     key={`${String(episode.seasonNumber)}-${String(episode.episodeNumber)}`}
                   >
                     <EpisodeCard
-                      downloadPercent={
-                        acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
-                      }
-                      downloading={
-                        acquire?.titleId === title.id &&
-                        acquire.episode?.season === episode.seasonNumber &&
-                        acquire.episode?.episode === episode.episodeNumber &&
-                        ((acquire.starting ?? false) || (acquire.running ?? false))
-                      }
+                      {...(job === undefined
+                        ? {}
+                        : { downloadPercent: Math.round(job.progressPermille / 10) })}
+                      downloading={job !== undefined || requested.has(key)}
                       episode={episode}
                       onSchedule={
                         episode.airDate === null
@@ -397,6 +447,11 @@ export function TitleScreen({
                         acquire === undefined
                           ? undefined
                           : (chosen) => {
+                              setRequested((previous) =>
+                                new Set(previous).add(
+                                  episodeKey(chosen.seasonNumber, chosen.episodeNumber),
+                                ),
+                              );
                               void acquire.start(title.id, {
                                 season: chosen.seasonNumber,
                                 episode: chosen.episodeNumber,
