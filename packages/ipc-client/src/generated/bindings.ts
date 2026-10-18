@@ -267,7 +267,7 @@ export const commands = {
 	 *  [`AppError`] when the title is not here, holds no copy on disk, holds a copy outside every
 	 *  configured folder, or when mpv is not installed.
 	 */
-	playExternally: (title: TitleRef) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("play_externally", { title })),
+	playExternally: (title: TitleRef, season: number | null, episode: number | null) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("play_externally", { title, season, episode })),
 	/**
 	 *  Stops the playback session `session` names, answering whether that one was open.
 	 * 

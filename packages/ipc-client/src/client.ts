@@ -502,11 +502,17 @@ export async function startPlayback(
 /**
  * Opens one title's file in mpv, for a container the page's media element cannot demux.
  *
- * The bytes never cross IPC: mpv opens the file itself, so this command carries only the title id.
- * A refusal is mpv missing, or one of the same file refusals `startPlayback` reports.
+ * The bytes never cross IPC: mpv opens the file itself, so this command carries only the ids. The
+ * season and episode travel together or not at all; an episode play must hand mpv that episode's
+ * file rather than the first file the title owns. A refusal is mpv missing, or one of the same file
+ * refusals `startPlayback` reports.
  */
-export async function playExternally(titleId: number): Promise<void> {
-  await unwrap(commands.playExternally({ id: titleId }));
+export async function playExternally(
+  titleId: number,
+  season?: number,
+  episode?: number,
+): Promise<void> {
+  await unwrap(commands.playExternally({ id: titleId }, season ?? null, episode ?? null));
 }
 
 /**

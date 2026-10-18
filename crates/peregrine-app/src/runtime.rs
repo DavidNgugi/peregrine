@@ -3305,7 +3305,11 @@ impl Runtime {
     ///
     /// The same refusals as [`Runtime::start_playback`], plus [`RuntimeError::Player`] when mpv is
     /// not installed or the operating system would not start it.
-    pub async fn start_external_playback(&self, title_id: i64) -> Result<(), RuntimeError> {
+    pub async fn start_external_playback(
+        &self,
+        title_id: i64,
+        episode: Option<crate::jobs::acquire::EpisodePick>,
+    ) -> Result<(), RuntimeError> {
         let opening = *self
             .session_id
             .lock()
@@ -3314,11 +3318,21 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
-        let (_file, safe) = self.playable(title_id, None).await?;
+        // Resolve the episode before the file: an external play opened from an episode card must
+        // hand mpv that episode's file, not the first file the title happens to hold.
+        let episode_id = match episode {
+            Some(pick) => {
+                self.database
+                    .episode_id_for(title_id, pick.season, pick.episode)
+                    .await?
+            }
+            None => None,
+        };
+        let (_file, safe) = self.playable(title_id, episode_id).await?;
         // The app's own watch progress is the resume rule; mpv's watch_later is disabled.
         let resume_ms = self
             .database
-            .watch_progress(installation_scope(), title_id, None)
+            .watch_progress(installation_scope(), title_id, episode_id)
             .await?
             .map(|progress| progress.position_ms());
 
@@ -3335,7 +3349,7 @@ impl Runtime {
                 let progress = WatchProgress::record(
                     installation_scope().account(),
                     title_id,
-                    None,
+                    episode_id,
                     position,
                     ProgressSource::Local,
                     clock.now(),

@@ -303,6 +303,42 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // again once the job settles. Without it the card that was just downloaded kept saying
   // "Not acquired" until the reader left the page and came back.
   const [acquiredRevision, setAcquiredRevision] = useState(0);
+  // **The completion, not the request.** The acquire job settles when the download is queued; the
+  // library rows only land when the transfer finishes. Watching the queue's completed rows is what
+  // makes the episode that just finished stop saying "Not acquired" without leaving the page.
+  const doneStates = new Set(["completed", "seeding"]);
+  const completedForTitle =
+    route.kind === "title"
+      ? downloads.downloads.filter((job) => job.titleId === route.id && doneStates.has(job.state))
+          .length
+      : 0;
+  const completedTotal = downloads.downloads.filter((job) => doneStates.has(job.state)).length;
+  const seenCompletedTotal = useRef(completedTotal);
+  useEffect(() => {
+    if (completedTotal > seenCompletedTotal.current) {
+      void library.refresh();
+    }
+    seenCompletedTotal.current = completedTotal;
+  }, [completedTotal, library]);
+  const seenCompleted = useRef<{ title: number | null; count: number }>({
+    title: null,
+    count: 0,
+  });
+  useEffect(() => {
+    if (route.kind !== "title") {
+      seenCompleted.current = { title: null, count: 0 };
+      return;
+    }
+    if (seenCompleted.current.title !== route.id) {
+      seenCompleted.current = { title: route.id, count: completedForTitle };
+      return;
+    }
+    if (completedForTitle > seenCompleted.current.count) {
+      setAcquiredRevision((current) => current + 1);
+      void library.refresh();
+    }
+    seenCompleted.current.count = completedForTitle;
+  }, [completedForTitle, route, library]);
   const acquiredTitle =
     acquire.outcome === "queued" && !acquire.running && !acquire.starting ? acquire.titleId : null;
   useEffect(() => {

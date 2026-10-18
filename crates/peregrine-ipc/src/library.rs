@@ -960,8 +960,14 @@ pub async fn start_playback(
 pub async fn play_externally(
     state: State<'_, RuntimeState>,
     title: TitleRef,
+    season: Option<u32>,
+    episode: Option<u32>,
 ) -> Result<(), AppError> {
-    state.runtime()?.start_external_playback(title.id).await?;
+    let episode = crate::downloads::episode_pick(season, episode)?;
+    state
+        .runtime()?
+        .start_external_playback(title.id, episode)
+        .await?;
     let () = guard_response("library::play_externally", ());
     Ok(())
 }

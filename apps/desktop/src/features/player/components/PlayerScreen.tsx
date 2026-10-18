@@ -330,7 +330,7 @@ export function PlayerScreen({ id, season, episode, onClose }: PlayerScreenProps
     // sentence about mpv is a dead end the reader has to back out of; returning to where the play
     // came from is the whole of what this page can do after a successful launch.
     let cancelled = false;
-    void playExternally(session.titleId)
+    void playExternally(session.titleId, season ?? undefined, episode ?? undefined)
       .then(() => {
         if (!cancelled) {
           onClose();
