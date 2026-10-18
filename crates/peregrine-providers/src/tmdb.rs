@@ -810,7 +810,7 @@ impl MetadataProvider for Tmdb {
                     name,
                     character,
                     order: member.order,
-                    profile_path: member.profile_path,
+                    profile_path: member.profile_path.filter(|path| !path.trim().is_empty()),
                 });
             }
             Ok(TitleCredits { cast })
@@ -3156,5 +3156,45 @@ mod tests {
                 "a name is trimmed before it is offered"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn credits_are_mapped_with_their_characters_and_blank_names_are_skipped() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/movie/603/credits"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(json(
+                r#"{"cast": [
+                    {"id": 6384, "name": "  Keanu Reeves ", "character": " Neo ", "order": 0,
+                     "profile_path": "/keanu.jpg"},
+                    {"id": 9, "name": "   ", "character": "Nobody", "order": 1},
+                    {"id": 2, "name": "Carrie-Anne Moss", "character": "   ", "order": 2,
+                     "profile_path": ""}
+                ]}"#,
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let id = peregrine_domain::ExternalId::new(Provider::Tmdb, "603").expect("a provider id");
+        let credits = adapter(&server)
+            .credits(&id, TitleKind::Movie)
+            .await
+            .expect("the credits answer");
+
+        assert_eq!(credits.cast.len(), 2, "a person with no name is not cast");
+        assert_eq!(credits.cast[0].name, "Keanu Reeves", "a name is trimmed");
+        assert_eq!(credits.cast[0].character.as_deref(), Some("Neo"));
+        assert_eq!(credits.cast[0].order, Some(0));
+        assert_eq!(credits.cast[0].profile_path.as_deref(), Some("/keanu.jpg"));
+        assert_eq!(
+            credits.cast[1].character, None,
+            "a whitespace character is no character"
+        );
+        assert_eq!(
+            credits.cast[1].profile_path, None,
+            "an empty path is no portrait"
+        );
     }
 }
