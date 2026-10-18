@@ -2136,6 +2136,10 @@ export type WatchHistoryDto = {
 	titleId: number,
 	/**  The title's display name, when the library can answer it. */
 	title: string | null,
+	/**  Where the cached poster is, when the cache holds one (R11 keeps it a path). */
+	poster: string | null,
+	/**  Which of the two the title is, so a row can open the title route it belongs to. */
+	titleKind: DownloadTitleKind | null,
 	/**  The episode's season, when the row names an episode. */
 	seasonNumber: number | null,
 	/**  The episode's number within that season. */

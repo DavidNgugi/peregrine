@@ -150,6 +150,10 @@ pub struct WatchHistoryDto {
     pub title_id: i64,
     /// The title's display name, when the library can answer it.
     pub title: Option<String>,
+    /// Where the cached poster is, when the cache holds one (R11 keeps it a path).
+    pub poster: Option<String>,
+    /// Which of the two the title is, so a row can open the title route it belongs to.
+    pub title_kind: Option<DownloadTitleKind>,
     /// The episode's season, when the row names an episode.
     #[specta(type = Option<Number>)]
     pub season_number: Option<u32>,
@@ -186,7 +190,7 @@ async fn history_of(
     let mut history = Vec::with_capacity(rows.len());
     for row in rows {
         let progress = row.progress;
-        let (title, _, _) = title_art(runtime, progress.title_id()).await;
+        let (title, poster, title_kind) = title_art(runtime, progress.title_id()).await;
         let episode = match progress.episode_id() {
             Some(id) => runtime.episode_numbers(id).await.unwrap_or(None),
             None => None,
@@ -194,6 +198,8 @@ async fn history_of(
         history.push(WatchHistoryDto {
             title_id: progress.title_id(),
             title,
+            poster,
+            title_kind,
             season_number: episode.map(|(season, _)| season),
             episode_number: episode.map(|(_, number)| number),
             watched: progress.watched(),

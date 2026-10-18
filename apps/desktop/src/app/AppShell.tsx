@@ -499,7 +499,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 onNavigate={navigate}
               />
             ) : null}
-            {route.kind === "history" ? <HistoryScreen /> : null}
+            {route.kind === "history" ? <HistoryScreen onNavigate={navigate} /> : null}
             {route.kind === "diagnostics" ? (
               <JobsScreen backLabel={t("shell.back")} onBack={canBack ? goBack : undefined} />
             ) : null}

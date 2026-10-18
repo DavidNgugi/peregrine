@@ -11,6 +11,8 @@ function rows(count: number): WatchHistoryDto[] {
   return Array.from({ length: count }, (_, index) => ({
     titleId: index + 1,
     title: `Title ${String(index + 1)}`,
+    poster: null,
+    titleKind: "show",
     seasonNumber: null,
     episodeNumber: null,
     watched: false,
@@ -22,7 +24,10 @@ function rows(count: number): WatchHistoryDto[] {
 function markup(count: number): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <HistoryList history={{ rows: rows(count), loading: false, failed: null }} />
+      <HistoryList
+        history={{ rows: rows(count), loading: false, failed: null }}
+        onNavigate={() => undefined}
+      />
     </I18nextProvider>,
   );
 }
