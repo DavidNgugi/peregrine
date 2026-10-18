@@ -1045,6 +1045,14 @@ impl Database {
     /// The deletion path (`AGENTS` R22) calls this once per file it removed, so the library stops
     /// claiming a copy that no longer exists. The item is kept: it is the history that makes the
     /// title `Availability::Removed` rather than a title that was never acquired.
+    /// Removes downloaded items whose files are all gone, which a manual deletion leaves behind.
+    pub async fn remove_empty_items(&self) -> Result<bool, StorageError> {
+        match self.writer.send(WriteRequest::RemoveEmptyItems).await? {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("remove_empty_items", &other)),
+        }
+    }
+
     pub async fn delete_media_file_by_path(&self, path: &str) -> Result<bool, StorageError> {
         match self
             .writer

@@ -156,6 +156,8 @@ pub(crate) enum WriteRequest {
     DeleteMediaFileByPath {
         path: String,
     },
+    /// Remove items in a downloaded state whose files are all gone.
+    RemoveEmptyItems,
     /// Insert one row into `unmatched_file`.
     InsertUnmatchedFile {
         file: Box<peregrine_domain::UnmatchedFile>,
@@ -524,6 +526,10 @@ async fn apply_library_write(
         WriteRequest::InsertMediaFile(file) => crate::library::insert_file(connection, &file)
             .await
             .map(|id| WriteResponse::RowInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::RemoveEmptyItems => crate::library::remove_empty_items(connection)
+            .await
+            .map(|removed| WriteResponse::RowChanged { changed: removed })
             .map_err(StorageError::from_sqlx),
         WriteRequest::DeleteMediaFileByPath { path } => {
             crate::library::delete_file_by_path(connection, &path)

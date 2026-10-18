@@ -964,6 +964,14 @@ impl Runtime {
             Ok(_) => {}
             Err(error) => warn!(%error, "the built-in quality profile could not be seeded"),
         }
+        // A file removed in Finder leaves an item claiming the library holds it; the scan cannot
+        // see what is not there, so startup is where that state is repaired. A failure is not
+        // fatal: the library lists a phantom tile, which is recoverable, rather than no library.
+        match database.remove_empty_items().await {
+            Ok(true) => info!("removed downloaded items whose files are gone"),
+            Ok(false) => {}
+            Err(error) => warn!(%error, "empty media items could not be removed"),
+        }
         let ids: Arc<dyn IdGenerator + Send + Sync> = Arc::new(UlidGenerator);
         // The third adapter the domain may not reach for itself: a token has to come from a real random
         // source, and `cargo xtask check-determinism` permits one in `peregrine-platform` and nowhere

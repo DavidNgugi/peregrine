@@ -426,12 +426,48 @@ pub(crate) async fn delete_file_by_path(
     connection: &mut sqlx::SqliteConnection,
     path: &str,
 ) -> Result<bool, sqlx::Error> {
+    // Read before the delete: once the row is gone nothing names the item it belonged to.
+    let item: Option<i64> =
+        sqlx::query_scalar("SELECT media_item_id FROM media_file WHERE path = ?1")
+            .bind(path)
+            .fetch_optional(&mut *connection)
+            .await?;
     let result = sqlx::query("DELETE FROM media_file WHERE path = ?1")
         .bind(path)
         .execute(&mut *connection)
         .await?;
+    // **An item with no files is not a title the library holds.** Deleting the last copy is how a
+    // download leaves the library; keeping the empty item leaves a tile that claims a film is here
+    // and a page that claims it is downloaded. Watch progress is keyed by title and episode, not by
+    // the item, so removing it loses no history.
+    if let Some(item) = item {
+        sqlx::query(
+            "DELETE FROM media_item WHERE id = ?1 \
+             AND NOT EXISTS (SELECT 1 FROM media_file WHERE media_item_id = ?1)",
+        )
+        .bind(item)
+        .execute(&mut *connection)
+        .await?;
+    }
     Ok(result.rows_affected() > 0)
 }
+/// Removes items in a downloaded state that have no file left behind.
+///
+/// This is the manual-deletion repair: a person who removes a file in Finder leaves the database
+/// saying the library holds it. Scan handles a missing file it can still see; this handles the case
+/// where there is nothing left to scan.
+pub(crate) async fn remove_empty_items(
+    connection: &mut sqlx::SqliteConnection,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "DELETE FROM media_item WHERE state IN ('available','partial') \
+         AND NOT EXISTS (SELECT 1 FROM media_file WHERE media_item_id = media_item.id)",
+    )
+    .execute(&mut *connection)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Reads one root.
 pub(crate) async fn root(
     pool: &sqlx::SqlitePool,
@@ -2514,6 +2550,73 @@ mod tests {
 
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].title.name, "Alien");
+    }
+
+    #[tokio::test]
+    async fn startup_cleanup_removes_downloaded_items_with_no_files() {
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+        title(&path, 2, "Arrival", 0, Some("R")).await;
+        let available = database.insert_media_item(item(1, None)).await.unwrap();
+        let mut wanted = item(2, None);
+        wanted.state = MediaItemState::Wanted;
+        let wanted = database.insert_media_item(wanted).await.unwrap();
+
+        assert!(database.remove_empty_items().await.unwrap());
+        assert!(
+            database
+                .media_item(any_account(), available)
+                .await
+                .unwrap()
+                .is_none(),
+            "an available item with no file is repaired"
+        );
+        assert!(
+            database
+                .media_item(any_account(), wanted)
+                .await
+                .unwrap()
+                .is_some(),
+            "a wanted item is an intention, not a phantom download"
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_the_last_file_removes_the_empty_item() {
+        // The deletion path, not the scan: removing the last copy is how a download leaves the
+        // library, and an item left behind claims a film is here with zero files behind it.
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let database = database(&directory).await;
+        account(&path, 1, "Adult").await;
+        title(&path, 1, "Alien", 0, Some("R")).await;
+        let (item_id, _) = item_with_file(&database, 1, "/media/Alien (1979).mkv").await;
+
+        assert!(
+            database
+                .delete_media_file_by_path("/media/Alien (1979).mkv")
+                .await
+                .unwrap()
+        );
+        assert!(
+            database
+                .media_item(any_account(), item_id)
+                .await
+                .unwrap()
+                .is_none(),
+            "the empty item is gone"
+        );
+        assert!(
+            database
+                .list_library_titles(any_account(), PageRequest::first(10))
+                .await
+                .unwrap()
+                .is_empty(),
+            "and the library no longer lists the title"
+        );
     }
 
     #[tokio::test]
