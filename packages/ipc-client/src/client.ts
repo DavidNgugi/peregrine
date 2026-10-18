@@ -306,6 +306,11 @@ export async function viewingHistory(limit = 200): Promise<WatchHistoryDto[]> {
   return unwrap(commands.viewingHistory(limit));
 }
 
+/** Removes progress for one title, or all of it when no title is named. */
+export async function clearWatchHistory(titleId?: number): Promise<number> {
+  return unwrap(commands.clearWatchHistory(titleId === undefined ? null : { id: titleId }));
+}
+
 /** The account's watchlist, newest first. */
 export async function watchlist(): Promise<WatchlistEntryDto[]> {
   return unwrap(commands.watchlist());

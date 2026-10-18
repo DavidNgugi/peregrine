@@ -199,6 +199,11 @@ pub(crate) enum WriteRequest {
         account_id: peregrine_domain::AccountId,
         title_id: i64,
     },
+    /// Remove watch progress for one title, or every title when the id is absent.
+    ClearWatchProgress {
+        account_id: peregrine_domain::AccountId,
+        title_id: Option<i64>,
+    },
     /// Refresh one file's stamp and root.
     RefreshFileStamp {
         id: i64,
@@ -384,6 +389,8 @@ pub(crate) enum WriteResponse {
     RowIgnored,
     /// Whether a row was there to change or remove.
     RowChanged { changed: bool },
+    /// How many rows a bulk removal took out.
+    RowsChanged { changed: u64 },
     /// The rowid an upsert wrote, and whether it moved anything: a re-run that stored the values
     /// already there reports `changed: false` rather than a second row.
     RowUpserted { id: i64, changed: bool },
@@ -653,6 +660,13 @@ async fn apply_library_write(
         } => crate::watch::remove_watchlist(connection, account_id, title_id)
             .await
             .map(|changed| WriteResponse::RowChanged { changed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::ClearWatchProgress {
+            account_id,
+            title_id,
+        } => crate::watch::clear_progress(connection, account_id, title_id)
+            .await
+            .map(|changed| WriteResponse::RowsChanged { changed })
             .map_err(StorageError::from_sqlx),
         // Reachable only if `apply` stops dispatching one of them here, which is a
         // compile-time property of the two matches rather than a runtime state.

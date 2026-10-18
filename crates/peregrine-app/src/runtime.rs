@@ -3472,7 +3472,20 @@ impl Runtime {
         public_ip_from_json(&body).ok_or(RuntimeError::PublicIpUnavailable)
     }
 
-    /// The account's viewing history, newest first, for the settings list.
+    /// Removes the account's watch progress for one title, or all of it when no title is named.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the delete fails.
+    pub async fn clear_history(&self, title_id: Option<i64>) -> Result<u32, RuntimeError> {
+        let removed = self
+            .database
+            .clear_watch_progress(installation_scope().account(), title_id)
+            .await?;
+        Ok(u32::try_from(removed).unwrap_or(u32::MAX))
+    }
+
+    /// The account's viewing history, newest first, for the history screen.
     ///
     /// # Errors
     ///

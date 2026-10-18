@@ -148,6 +148,26 @@ pub(crate) async fn remove_watchlist(
     Ok(result.rows_affected() > 0)
 }
 
+/// Removes one account's progress, for one title or for everything, and reports how many rows went.
+///
+/// The title case removes every episode of that title, which is what "clear this title from my
+/// history" means to a reader looking at one row: the row is the title's latest episode, not a
+/// separate history entry per episode.
+pub(crate) async fn clear_progress(
+    connection: &mut sqlx::SqliteConnection,
+    account_id: AccountId,
+    title_id: Option<i64>,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "DELETE FROM watch_progress WHERE account_id = ?1 AND (?2 IS NULL OR title_id = ?2)",
+    )
+    .bind(account_id.get())
+    .bind(title_id)
+    .execute(&mut *connection)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Reads one account's progress for one title or episode, when the scope may see the title.
 pub(crate) async fn progress_for(
     pool: &sqlx::SqlitePool,

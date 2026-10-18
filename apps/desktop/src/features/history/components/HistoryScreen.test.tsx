@@ -25,7 +25,13 @@ function markup(count: number): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <HistoryList
-        history={{ rows: rows(count), loading: false, failed: null }}
+        history={{
+          rows: rows(count),
+          loading: false,
+          failed: null,
+          refresh: () => Promise.resolve(),
+        }}
+        onAskClear={() => undefined}
         onNavigate={() => undefined}
       />
     </I18nextProvider>,

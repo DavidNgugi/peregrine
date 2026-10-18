@@ -640,6 +640,17 @@ export const commands = {
 	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
 	/**  The account's viewing history, newest first. */
 	viewingHistory: (limit: number | null) => typedError<WatchHistoryDto[], AppError_Serialize>(__TAURI_INVOKE("viewing_history", { limit })),
+	/**
+	 *  Removes the account's progress for one title, or every title when none is named.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running or the delete fails.
+	 */
+	clearWatchHistory: (title: {
+	/**  The title's id, as a listing returned it. */
+	id: number,
+} | null) => typedError<number, AppError_Serialize>(__TAURI_INVOKE("clear_watch_history", { title })),
 	/**  The account's watchlist, newest first. */
 	watchlist: () => typedError<WatchlistEntryDto[], AppError_Serialize>(__TAURI_INVOKE("watchlist")),
 	/**  Adds one title to the watchlist. */

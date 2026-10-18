@@ -707,6 +707,18 @@ export const en = {
     history: {
       title: "Watch history",
       subtitle: "What this device has watched, newest first.",
+      count: "{{count}} entries",
+      all: "everything",
+      clearAll: "Clear history",
+      remove: "Remove",
+      clearTitle: "Clear this history?",
+      clearBody:
+        "Remove the watch history for {{name}}? Continue Watching and its progress will be gone.",
+      confirm: "Clear",
+      cancel: "Cancel",
+      clearFailed: "The history could not be cleared. Try again.",
+      progressEpisode: "{{percent}}% of this episode",
+      progressTitle: "{{percent}}% of this title",
     },
     settings: {
       history: {

@@ -1871,6 +1871,28 @@ impl Database {
         crate::schedule::due(&self.readers, scope, today).await
     }
 
+    /// Removes watch progress for one title, or for every title when the id is absent.
+    ///
+    /// Returns how many rows went, so a reader who cleared a title with no history is not told
+    /// something was removed.
+    pub async fn clear_watch_progress(
+        &self,
+        account_id: peregrine_domain::AccountId,
+        title_id: Option<i64>,
+    ) -> Result<u64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ClearWatchProgress {
+                account_id,
+                title_id,
+            })
+            .await?
+        {
+            WriteResponse::RowsChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("clear_watch_progress", &other)),
+        }
+    }
+
     /// Removes one watchlist entry, reporting whether it was there.
     pub async fn remove_from_watchlist(
         &self,

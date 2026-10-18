@@ -182,6 +182,21 @@ pub async fn viewing_history(
     Ok(guard_response("watch::viewing_history", history))
 }
 
+/// Removes the account's progress for one title, or every title when none is named.
+///
+/// # Errors
+///
+/// [`AppError`] when the runtime is not running or the delete fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_watch_history(
+    state: State<'_, RuntimeState>,
+    title: Option<crate::library::TitleRef>,
+) -> Result<u32, AppError> {
+    let removed = state.runtime()?.clear_history(title.map(|t| t.id)).await?;
+    Ok(guard_response("watch::clear_watch_history", removed))
+}
+
 /// Resolves each progress row's title, episode, and state into the history list.
 async fn history_of(
     runtime: &peregrine_app::runtime::Runtime,

@@ -137,6 +137,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             watch::continue_watching,
             watch::record_progress,
             watch::viewing_history,
+            watch::clear_watch_history,
             watch::watchlist,
             watch::add_to_watchlist,
             watch::remove_from_watchlist,

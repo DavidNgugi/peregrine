@@ -1123,6 +1123,7 @@ fn watch_cases() -> Vec<ContractCase> {
         fails_internal("add_to_watchlist", add_to_watchlist_dead),
         fails_internal("remove_from_watchlist", remove_from_watchlist_dead),
         fails_internal("viewing_history", viewing_history_dead),
+        fails_internal("clear_watch_history", clear_watch_history_dead),
         fails_internal("watchlist", watchlist_dead),
     ]
 }
@@ -1143,6 +1144,14 @@ fn remove_from_watchlist_dead(harness: &Harness) -> Invocation<'_> {
         )
         .await
         .map(drop)
+    })
+}
+
+fn clear_watch_history_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::clear_watch_history(harness.dead_state(), None)
+            .await
+            .map(drop)
     })
 }
 

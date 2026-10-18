@@ -132,6 +132,7 @@ export {
   publicIp,
   recordProgress,
   viewingHistory,
+  clearWatchHistory,
   watchlist,
   addToWatchlist,
   removeFromWatchlist,
