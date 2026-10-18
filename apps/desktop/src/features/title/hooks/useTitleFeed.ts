@@ -71,15 +71,24 @@ export function useTitleFeed(
     readonly items: readonly RailItemDto[];
     readonly genres: readonly GenreDto[];
   },
+  currentTitleId: number | null,
 ): TitleFeed {
   // A fresh object every render, so the identity cannot be a dependency: what identifies the seed is
-  // which title it starts with and which genres it named.
-  const signature = `${String(seed.items[0]?.titleId ?? 0)}|${seed.genres
+  // which title it starts with and which genres it named. The opened title is part of that identity:
+  // two pages can share a recommendation head and still be different feeds.
+  const signature = `${String(currentTitleId ?? 0)}|${String(seed.items[0]?.titleId ?? 0)}|${seed.genres
     .map((genre) => genre.id)
     .join(",")}`;
 
+  // **A genre page can contain the title whose page is open** — a browse read knows nothing about
+  // which page asked for it — and a recommendation already filtered by the core can still have the
+  // opened title in a later page. One filter over every entry point is what keeps the feed from
+  // recommending the page it is on.
+  const withoutCurrent = (items: readonly RailItemDto[]): readonly RailItemDto[] =>
+    currentTitleId === null ? items : items.filter((item) => item.titleId !== currentTitleId);
+
   const [state, setState] = useState<FeedState>({
-    items: seed.items,
+    items: withoutCurrent(seed.items),
     cursor: { remaining: seed.genres, page: 1 },
     loading: false,
     failed: null,
@@ -92,7 +101,7 @@ export function useTitleFeed(
     generation.current += 1;
     inFlight.current = false;
     setState({
-      items: seed.items,
+      items: withoutCurrent(seed.items),
       cursor: { remaining: seed.genres, page: 1 },
       loading: false,
       failed: null,
@@ -124,7 +133,7 @@ export function useTitleFeed(
             ? previous.cursor.remaining.slice(1)
             : previous.cursor.remaining;
           return {
-            items: mergePage(previous.items, answer.items, false),
+            items: withoutCurrent(mergePage(previous.items, answer.items, false)),
             cursor: { remaining, page: drained ? 1 : previous.cursor.page + 1 },
             loading: false,
             failed: null,
@@ -143,7 +152,7 @@ export function useTitleFeed(
         }
       }
     })();
-  }, [kind, state.cursor, state.loading]);
+  }, [kind, state.cursor, state.loading, currentTitleId]);
 
   return {
     ...state,

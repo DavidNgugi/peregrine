@@ -278,7 +278,11 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // stays a projection: the recommendations are its head, and the genres they share are the queue of
   // pages behind them. One list and one scroll area, where the first shape was a rail with a shelf per
   // genre under it.
-  const feed = useTitleFeed(route.kind === "title" ? route.titleKind : "movie", similar);
+  const feed = useTitleFeed(
+    route.kind === "title" ? route.titleKind : "movie",
+    similar,
+    route.kind === "title" ? route.id : null,
+  );
   // The seasons and the season on screen, asked for by the same route. A film is answered without a
   // request, which is the same short circuit the title read makes.
   //
