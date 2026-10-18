@@ -1041,10 +1041,6 @@ impl Database {
     }
 
     /// Deletes one `media_file` row by its path, reporting whether the row was there.
-    ///
-    /// The deletion path (`AGENTS` R22) calls this once per file it removed, so the library stops
-    /// claiming a copy that no longer exists. The item is kept: it is the history that makes the
-    /// title `Availability::Removed` rather than a title that was never acquired.
     /// Removes downloaded items whose files are all gone, which a manual deletion leaves behind.
     pub async fn remove_empty_items(&self) -> Result<bool, StorageError> {
         match self.writer.send(WriteRequest::RemoveEmptyItems).await? {
@@ -1053,6 +1049,9 @@ impl Database {
         }
     }
 
+    /// The deletion path (`AGENTS` R22) calls this once per file it removed, so the library stops
+    /// claiming a copy that no longer exists. An item whose last file goes with it stops claiming a
+    /// download; watch progress hangs off the title and the episode, so nothing historical is lost.
     pub async fn delete_media_file_by_path(&self, path: &str) -> Result<bool, StorageError> {
         match self
             .writer
