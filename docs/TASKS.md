@@ -582,6 +582,8 @@ graph LR
   - Acceptance: Engine peer and tracker IO stops entirely if the bound interface goes away, no silent fallback to the default route, and a VPN reconnect is picked up without an app restart (qBittorrent passes the unresolved interface through but never re-resolves it, so a dropped tunnel just grinds); asserted by killing and restoring the interface in a test
 - [x] **PG-E10-20** `S` · deps — · Say plainly, in Settings and the README, that the VPN tunnel and its kill switch are the reader's to run **Done:** Settings → Network (`NetworkSection.tsx`) states that Peregrine creates no tunnel, how to verify the exit address, that there is no kill switch of its own, and that interface/SOCKS5 binding is still PG-E10-11; the README's "Using a VPN" section says the same in one paragraph. Tested by `SettingsScreen.test.tsx`.
   - Acceptance: No control implies Peregrine manages a tunnel; the exit-address check and the missing kill switch are both named
+- [x] **PG-E10-21** `S` · deps — · One-click exit-address check in Settings → Network, so a reader can confirm a tunnel is carrying traffic **Done:** `Runtime::public_ip` makes one request to ipify's documented JSON endpoint, validates the answer as an IP address, bounds the body to 4 KiB, and returns it without logging it; `network::public_ip` is the thin command and `usePublicIp` draws the button, result, and refusal. Offline parser tests cover IPv4, IPv6, a non-address, an empty address, HTML, and a different key. This is the manual check only; the multi-endpoint leak tool that compares tunnelled and untunnelled addresses stays PG-E10-12.
+  - Acceptance: No request leaves the machine until the reader presses the button; the result names the address and the failure says the check could not be made
 - [ ] **PG-E10-12** `M` · deps PG-E10-11 · Leak check tool: compare the tunnel-exit IP with the machine's non-tunnelled public IP via several echo endpoints
   - Acceptance: Reports the observed addresses and states plainly which protocols were verified; SOCKS5 UDP-associate coverage is explicitly reported as unverified until SPIKE-3 confirms it
 - [ ] **PG-E10-13** `M` · deps PG-E10-02 · Port reachability check and UPnP/NAT-PMP decision, off by default
@@ -1517,7 +1519,7 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | --- | --- | --- | --- |
 | 0 Foundations | E0–E4 | 93 | 178 |
 | 1 Discovery | E5–E9 | 85 | 203 |
-| 2 Acquisition and library | E10–E15 | 99 | 239 |
+| 2 Acquisition and library | E10–E15 | 100 | 240 |
 | 3 Playback and subtitles | E16–E18 | 59 | 145 |
 | 4 Platform and distribution | E19–E27 | 133 | 327 |
 | 5 1.0 hardening and community | E28–E29 | 24 | 58 |
@@ -1525,14 +1527,14 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
 | 9 Roadmap: homelab deployment | E36 written; E37 pending | 17 written | 56 |
-| **Full backlog (phases 0–5)** | | **493** | **1 148** |
+| **Full backlog (phases 0–5)** | | **494** | **1 149** |
 
 Two numbers matter, and they are different by design.
 
 | Scope | Content | Tasks | Ideal days | Why |
 | --- | --- | --- | --- | --- |
 | **Core 1.0** | Working discovery, acquisition with the safety gate, library, playback with subtitles and resume, notifications with consent, plus signed installers and updates | 225 | 577 (+30% contingency ≈ **750**) | This is a genuinely usable, shippable app |
-| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 493 | **1 148** | This is what "no known defects, every platform, every edge case" costs |
+| **Full quality bar** | Phases 0–5: casting codec matrix, full i18n, accessibility audit, soak and chaos programmes, fuzzing programmes, per-OS package breadth, portable mode, multi-account, Trakt, collections | 494 | **1 149** | This is what "no known defects, every platform, every edge case" costs |
 
 Phase 6 is committed roadmap and is **excluded** from the 1.0 figures: 22 tasks and 66 ideal days on top, tracked separately so the 1.0 numbers stay meaningful. Phase 7 (media server) is excluded as well: v1.3 is broken down as E32 (12 tasks, 39 ideal days), and v1.4–v1.5 add roughly 51 more that are scoped but not yet broken down. Phase 8 (accounts and parental gating) adds 14 tasks and 43 ideal days. Phase 9 (homelab deployment) adds E36 as 17 tasks and 56 ideal days, with E37 (a browser console served by the daemon) scoped but unwritten because the first real homelab install decides its shape.
 

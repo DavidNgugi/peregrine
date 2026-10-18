@@ -129,6 +129,7 @@ export {
   startProwlarr,
   stopProwlarr,
   continueWatching,
+  publicIp,
   recordProgress,
   viewingHistory,
   watchlist,

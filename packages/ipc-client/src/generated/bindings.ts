@@ -52,6 +52,14 @@ export const commands = {
 	 */
 	logTail: (lines: number | null) => typedError<string[], AppError_Serialize>(__TAURI_INVOKE("log_tail", { lines })),
 	/**
+	 *  The address the internet sees, or a refusal that says the check could not be made.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] when the runtime is not running or the echo request fails.
+	 */
+	publicIp: () => typedError<string, AppError_Serialize>(__TAURI_INVOKE("public_ip")),
+	/**
 	 *  Every shortcut this application has, as the Settings list renders it.
 	 * 
 	 *  # Errors

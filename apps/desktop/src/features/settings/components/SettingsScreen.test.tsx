@@ -166,6 +166,8 @@ describe("SettingsScreen", () => {
     expect(html).toContain("Network and VPN");
     expect(html).toContain("does not create a VPN tunnel");
     expect(html).toContain("no kill switch of its own");
+    expect(html).toContain("checks the address the internet sees");
+    expect(html).toContain("Check again");
   });
 
   it("says the list is unknown when the read failed, and never that it is empty", () => {

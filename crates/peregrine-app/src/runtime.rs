@@ -3433,6 +3433,45 @@ impl Runtime {
             .await?)
     }
 
+    /// The address the internet sees, read only when the reader asks for it.
+    ///
+    /// **One request, and only from a click.** This is the check a person runs after starting a
+    /// tunnel; it is not a heartbeat, it is not cached, and the answer is never logged (AGENTS R23).
+    /// The echo service is ipify's documented JSON endpoint, which is the only third party this
+    /// command contacts and only for this answer.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::PublicIpUnavailable`] when the request fails, answers non-success, or does
+    /// not carry a valid address.
+    pub async fn public_ip(&self) -> Result<String, RuntimeError> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .user_agent(concat!("Peregrine/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|_| RuntimeError::PublicIpUnavailable)?;
+        let response = client
+            .get(PUBLIC_IP_ECHO)
+            .send()
+            .await
+            .map_err(|_| RuntimeError::PublicIpUnavailable)?;
+        if !response.status().is_success()
+            || response
+                .content_length()
+                .is_some_and(|length| length > 4096)
+        {
+            return Err(RuntimeError::PublicIpUnavailable);
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|_| RuntimeError::PublicIpUnavailable)?;
+        if body.len() > 4096 {
+            return Err(RuntimeError::PublicIpUnavailable);
+        }
+        public_ip_from_json(&body).ok_or(RuntimeError::PublicIpUnavailable)
+    }
+
     /// The account's viewing history, newest first, for the settings list.
     ///
     /// # Errors
@@ -4305,12 +4344,31 @@ const fn subtitle_content_type(format: SubtitleFormat) -> &'static str {
 /// served — which is the direction that cannot leak (SECURITY.md's path-safety row).
 const MAX_MEDIA_ROOTS: u32 = 200;
 
+/// ipify's documented JSON echo endpoint. One request, only from the reader's click.
+const PUBLIC_IP_ECHO: &str = "https://api.ipify.org?format=json";
+
+/// The address in an ipify answer, validated as an address rather than trusted as text.
+fn public_ip_from_json(body: &str) -> Option<String> {
+    let answer: serde_json::Value = serde_json::from_str(body).ok()?;
+    answer
+        .get("ip")?
+        .as_str()?
+        .trim()
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .map(|ip| ip.to_string())
+}
+
 /// Why the runtime could not start, or could not do what it was asked.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
     /// The torrent session did not start, so acquisition and streaming are unavailable.
     #[error("the torrent engine is not running")]
     TorrentEngineUnavailable,
+
+    /// The public-address probe could not reach or understand its echo service.
+    #[error("the public address could not be read; check the connection and try again")]
+    PublicIpUnavailable,
 
     /// The data directory could not be created.
     #[error("cannot create the data directory {}: {source}", path.display())]
@@ -4433,6 +4491,26 @@ mod tests {
     use peregrine_testkit::MemorySecretStore;
     use std::fmt::Write as _;
     use tempfile::TempDir;
+
+    #[test]
+    fn a_public_ip_answer_is_read_as_an_address() {
+        assert_eq!(
+            public_ip_from_json(r#"{"ip":"203.0.113.9"}"#).as_deref(),
+            Some("203.0.113.9")
+        );
+        assert_eq!(
+            public_ip_from_json(r#"{"ip":"2001:db8::1"}"#).as_deref(),
+            Some("2001:db8::1")
+        );
+    }
+
+    #[test]
+    fn a_public_ip_answer_that_is_not_an_address_is_refused() {
+        assert_eq!(public_ip_from_json(r#"{"ip":"not an address"}"#), None);
+        assert_eq!(public_ip_from_json(r#"{"ip":""}"#), None);
+        assert_eq!(public_ip_from_json("<html>no</html>"), None);
+        assert_eq!(public_ip_from_json(r#"{"address":"203.0.113.9"}"#), None);
+    }
 
     /// Starts a runtime against a temporary directory, with a recording sink.
     ///

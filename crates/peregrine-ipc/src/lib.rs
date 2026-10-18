@@ -24,6 +24,7 @@ pub mod guard;
 pub mod indexers;
 pub mod jobs;
 pub mod library;
+pub mod network;
 pub mod notifications;
 pub mod providers;
 pub mod prowlarr;
@@ -63,6 +64,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             system::health,
             system::provider_attribution,
             system::log_tail,
+            network::public_ip,
             shortcuts::list_shortcuts,
             autostart::autostart_enabled::<tauri::Wry>,
             autostart::set_autostart::<tauri::Wry>,

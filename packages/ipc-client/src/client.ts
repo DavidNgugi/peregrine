@@ -507,6 +507,10 @@ export async function startPlayback(
  * file rather than the first file the title owns. A refusal is mpv missing, or one of the same file
  * refusals `startPlayback` reports.
  */
+export async function publicIp(): Promise<string> {
+  return unwrap(commands.publicIp());
+}
+
 export async function playExternally(
   titleId: number,
   season?: number,

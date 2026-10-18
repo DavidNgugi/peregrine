@@ -150,6 +150,15 @@ fn log_tail_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `public_ip` asks the runtime for its HTTP client, so it fails when there is none.
+fn public_ip_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::network::public_ip(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
 /// `start_hello` refuses a step count outside the documented range before it accepts any work.
 fn start_hello_with_no_steps(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { jobs::start_hello(harness.served_state(), 0).await.map(drop) })
@@ -1273,6 +1282,14 @@ fn shell_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: log_tail_without_a_runtime,
+        },
+        ContractCase {
+            command: "public_ip",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: public_ip_without_a_runtime,
         },
     ]
 }

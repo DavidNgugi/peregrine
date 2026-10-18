@@ -734,7 +734,11 @@ export const en = {
         description: "How Peregrine uses your connection, and what it does not manage.",
         body: "Peregrine does not create a VPN tunnel. Start WireGuard, your VPN provider's app, or a router-level tunnel before downloading; Peregrine's torrent and provider traffic follows the system route.",
         verify:
-          "To check that the tunnel is carrying traffic, open ifconfig.me in a browser. If it shows your ISP's address, the VPN is not in use.",
+          "This section checks the address the internet sees when you open it. If it shows your ISP's address, the VPN is not in use.",
+        check: "Check again",
+        checking: "Checking…",
+        result: "Sites see {{ip}}. Compare it with your VPN provider's exit address.",
+        failed: "The address could not be read. Check the connection and try again.",
         killSwitch:
           "Turn on your VPN's kill switch or lock-down mode. Peregrine has no kill switch of its own, and a dropped tunnel can expose your address.",
         binding:

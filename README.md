@@ -79,7 +79,7 @@ A Tauri v2 shell, a Rust core, and a React front end. The core owns all state an
 
 ## Using a VPN
 
-Peregrine does not create or manage a VPN tunnel: run WireGuard, your VPN provider's app, or a router-level tunnel, and turn on its kill switch. Torrent and provider traffic follows the operating system's route, so a dropped tunnel can expose your address. Settings → Network explains this and how to verify the exit address; binding torrent traffic to an interface or SOCKS5 proxy is still open (`PG-E10-11`).
+Peregrine does not create or manage a VPN tunnel: run WireGuard, your VPN provider's app, or a router-level tunnel, and turn on its kill switch. Torrent and provider traffic follows the operating system's route, so a dropped tunnel can expose your address. Settings → Network checks the address the internet sees when you open it; binding torrent traffic to an interface or SOCKS5 proxy is still open (`PG-E10-11`).
 
 ## Documentation
 
@@ -96,7 +96,7 @@ Peregrine does not create or manage a VPN tunnel: run WireGuard, your VPN provid
 
 ## Privacy
 
-No telemetry, no accounts, no remote code. The app contacts the metadata and indexer services you configure, the BitTorrent swarm for torrents you add, and nothing else. Provider keys live in the OS keyring and are redacted from logs and diagnostics. See [SECURITY.md](SECURITY.md).
+No telemetry, no accounts, no remote code. The app contacts the metadata and indexer services you configure, the BitTorrent swarm for torrents you add, and nothing else — except when you open **Settings → Network**, which makes one request to `api.ipify.org` to show your exit address and does not log the answer. Provider keys live in the OS keyring and are redacted from logs and diagnostics. See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

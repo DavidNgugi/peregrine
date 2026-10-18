@@ -329,6 +329,11 @@ impl From<RuntimeError> for AppError {
             RuntimeError::TorrentEngineUnavailable => AppError::new(ErrorCode::Unsupported)
                 .with_detail("Downloads are unavailable because the torrent engine did not start.")
                 .with_cause("the torrent session was not composed at startup"),
+            RuntimeError::PublicIpUnavailable => AppError::new(ErrorCode::Internal)
+                .with_detail(
+                    "The public address could not be read. Check the connection and try again.",
+                )
+                .with_cause("the public-address echo request failed"),
         }
     }
 }
