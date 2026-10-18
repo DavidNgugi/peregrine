@@ -476,6 +476,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
+          # Each artifact's root is its own path under `dist` (`release/`, `bundle-*`, `sbom/`);
+          # merging them is what puts the manifest at `dist/release/` where the globs look.
+          merge-multiple: true
           path: dist
       - uses: softprops/action-gh-release@v3
         # A dry run stops one step short of publishing; everything that could make
