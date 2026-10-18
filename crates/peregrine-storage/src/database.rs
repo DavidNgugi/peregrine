@@ -558,6 +558,15 @@ impl Database {
         crate::catalogue::identity(&self.readers, scope, id).await
     }
 
+    /// The newest titles still in the stub state, for the automatic matcher.
+    pub async fn stub_titles(
+        &self,
+        scope: AccountScope,
+        limit: u32,
+    ) -> Result<Vec<TitleIdentity>, StorageError> {
+        crate::catalogue::stub_titles(&self.readers, scope, limit).await
+    }
+
     /// The newest page of titles `scope` may see.
     pub async fn list_titles(
         &self,

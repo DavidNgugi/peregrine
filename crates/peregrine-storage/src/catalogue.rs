@@ -677,6 +677,28 @@ pub(crate) async fn identity_unrestricted(
     row.map(TryInto::try_into).transpose()
 }
 
+/// The newest titles that are still stubs, which the matcher works through.
+///
+/// A dedicated read rather than a filter over a page: a library large enough for the matcher to
+/// matter is also large enough for its stubs to fall off the first page of all titles.
+pub(crate) async fn stub_titles(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    limit: u32,
+) -> Result<Vec<TitleIdentity>, StorageError> {
+    let rows = sqlx::query_as::<_, IdentityRow>(
+        "SELECT id, kind, subtype, name, sort_name, metadata_state, adult FROM title \
+         WHERE metadata_state = 'stub' AND (?1 = 0 OR (adult = 0 AND content_rating IS NOT NULL)) \
+         ORDER BY id DESC LIMIT ?2",
+    )
+    .bind(hidden_by_scope(scope))
+    .bind(i64::from(limit))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Reads one page of titles the scope may see, newest first.
 ///
 /// The scope is the first branch of the `WHERE` clause and the cursor the second, so a

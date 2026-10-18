@@ -749,6 +749,12 @@ pub struct Runtime {
     _logging: Observability,
     /// Which providers hold a credential, refreshed off the command path (see `providers`).
     providers: Arc<crate::providers::ProviderRegistry>,
+    /// Stubs the matcher has already queued this session.
+    ///
+    /// A title the provider cannot name stays a stub, and without this the automatic pass would
+    /// search for it on every tick. A restart tries once more, which is when a new key or a fixed
+    /// provider should get its chance.
+    attempted_matches: Mutex<std::collections::HashSet<i64>>,
     /// Where provider credentials are kept, off the command path for the same reason.
     secrets: Arc<dyn SecretStore>,
     /// Where fetched artwork lives, content-addressed (see `peregrine_sync::ImageCache`).
@@ -1087,6 +1093,7 @@ impl Runtime {
             live: Mutex::new(HashMap::new()),
             _logging: logging,
             providers,
+            attempted_matches: Mutex::new(std::collections::HashSet::new()),
             secrets,
             artwork,
             rails,
@@ -3283,6 +3290,45 @@ impl Runtime {
             .database
             .list_watch_progress(installation_scope(), PageRequest::first(limit))
             .await?)
+    }
+
+    /// Queues a metadata refresh for the newest scanned titles that are still stubs.
+    ///
+    /// The matcher runs without a person asking: a scan writes titles it cannot fill, and a library
+    /// that stayed grey until each title was opened would be a library nobody browses. The bound is
+    /// deliberate — twenty a pass, and the provider's own rate limits do the rest.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails. A title the scheduler refuses is skipped rather
+    /// than failing the pass, so one bad row cannot stop the rest.
+    pub async fn match_stub_titles(&self) -> Result<usize, RuntimeError> {
+        if self.providers.adapters().is_empty() {
+            return Ok(0);
+        }
+        let stubs = self.database.stub_titles(installation_scope(), 20).await?;
+        // One attempt per stub per session: a title TMDB cannot name stays a stub, and retrying it
+        // every minute would be a search nobody asked for.
+        let pending: Vec<_> = {
+            let mut attempted = self
+                .attempted_matches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            stubs
+                .into_iter()
+                .filter(|stub| attempted.insert(stub.id))
+                .collect()
+        };
+        let mut queued = 0;
+        for stub in pending {
+            match self.start_provider_refresh(stub.id, stub.kind).await {
+                Ok(_) => queued += 1,
+                Err(error) => {
+                    tracing::debug!(%error, title = stub.id, "a stub title was not queued");
+                }
+            }
+        }
+        Ok(queued)
     }
 
     /// Adds a title to the account's watchlist, or refreshes the row that is already there.
