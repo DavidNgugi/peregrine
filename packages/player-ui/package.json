@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/player-ui",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "description": "The player surface's HTML layer: now-playing presentation and timecode formatting.",
   "license": "MIT OR Apache-2.0",

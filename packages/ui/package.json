@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/ui",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "description": "Reusable visual primitives. Components consume semantic theme tokens and nothing else.",
   "license": "MIT OR Apache-2.0",
