@@ -5,6 +5,7 @@ import type {
   LibraryTitleDto,
   RailItemDto,
   TitleMatchDto,
+  WatchlistEntryDto,
 } from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
@@ -131,6 +132,52 @@ describe("My library", () => {
     expect(html.indexOf("Newer Arrival")).toBeLessThan(html.indexOf("Older Arrival"));
     // The tile carries the same line a provider rail's tile does, rather than a bare item count.
     expect(html).toContain("Film · 1 item");
+  });
+
+  it("gives a library tile its title, kind and count, and the watchlist bookmark", () => {
+    // **The regression this covers.** The library rail once drew a bare item count: no kind, no
+    // overview, and no mark for a title on the account's list, while the provider rails beside it
+    // carried all three. A static render cannot hover a tile, so the title and meta are asserted
+    // where a screen reader reads them — the tile's accessible name — and the bookmark's word is
+    // asserted there too, because that is what keeps the mark from being colour alone.
+    const watched: LibraryTitleDto = {
+      id: 2,
+      name: "Newer Arrival",
+      kind: "shows",
+      stub: false,
+      items: 2,
+      files: 3,
+      bytes: 1,
+      missingFiles: 0,
+      addedAt: 2,
+      overview: null,
+      rating: null,
+      poster: null,
+      needsPoster: false,
+    };
+    const unwatched: LibraryTitleDto = { ...watched, id: 3, name: "Other Arrival", addedAt: 1 };
+    const saved: WatchlistEntryDto[] = [
+      { titleId: 2, title: "Newer Arrival", poster: null, kind: "show", addedAt: 0 },
+    ];
+
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <DiscoverView
+          libraryTitles={[watched, unwatched]}
+          onNavigate={() => undefined}
+          rails={railsView()}
+          search={{ ...NO_SEARCH }}
+          watchlist={saved}
+        />
+      </I18nextProvider>,
+    );
+
+    // One name carries all three facts, which is also how a screen reader meets the tile: the
+    // title, the watchlist word, then the same kind/count line a provider rail's tile carries.
+    expect(html).toContain("Newer Arrival, On My list, Series · 2 items");
+    // And the tile that is not on the list says so by omission: no mark, no word, same meta.
+    expect(html).toContain("Other Arrival, Series · 2 items");
+    expect(html).not.toContain("Other Arrival, On My list");
   });
 });
 
@@ -424,5 +471,23 @@ describe("where a search answer came from", () => {
 
     expect(html).not.toContain("In your catalogue");
     expect(html).not.toContain("From your providers");
+  });
+});
+
+describe("the search's live status", () => {
+  const hit: TitleMatchDto = { id: 1, name: "The Matrix", kind: "movies" };
+
+  it("says a read is in the air, then how many titles arrived", () => {
+    // The panel under the field appears without focus moving, so the count is what tells a
+    // screen-reader user that the debounce has settled and an answer is on screen.
+    expect(searched({ searching: true })).toMatch(
+      /role="status"[^>]*>Searching the providers…</u,
+    );
+    expect(searched({ results: [hit], searched: true, source: "catalogue" })).toMatch(
+      /role="status"[^>]*>1 result</u,
+    );
+    expect(searched({ results: [], searched: true, source: "none" })).toMatch(
+      /role="status"[^>]*>Nothing matched</u,
+    );
   });
 });

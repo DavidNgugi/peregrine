@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { TitleKind } from "../../../app/routes.js";
 import { logUiError } from "../../../lib/error-log.js";
 import { mayLoad, mergePage, stillHasMore } from "../../../lib/paged-list.js";
+import { withoutTitle } from "./feed-filter.js";
 
 /** One queue of genres the feed has still to draw from. */
 interface Cursor {
@@ -80,15 +81,8 @@ export function useTitleFeed(
     .map((genre) => genre.id)
     .join(",")}`;
 
-  // **A genre page can contain the title whose page is open** — a browse read knows nothing about
-  // which page asked for it — and a recommendation already filtered by the core can still have the
-  // opened title in a later page. One filter over every entry point is what keeps the feed from
-  // recommending the page it is on.
-  const withoutCurrent = (items: readonly RailItemDto[]): readonly RailItemDto[] =>
-    currentTitleId === null ? items : items.filter((item) => item.titleId !== currentTitleId);
-
   const [state, setState] = useState<FeedState>({
-    items: withoutCurrent(seed.items),
+    items: withoutTitle(seed.items, currentTitleId),
     cursor: { remaining: seed.genres, page: 1 },
     loading: false,
     failed: null,
@@ -101,7 +95,7 @@ export function useTitleFeed(
     generation.current += 1;
     inFlight.current = false;
     setState({
-      items: withoutCurrent(seed.items),
+      items: withoutTitle(seed.items, currentTitleId),
       cursor: { remaining: seed.genres, page: 1 },
       loading: false,
       failed: null,
@@ -133,7 +127,7 @@ export function useTitleFeed(
             ? previous.cursor.remaining.slice(1)
             : previous.cursor.remaining;
           return {
-            items: withoutCurrent(mergePage(previous.items, answer.items, false)),
+            items: withoutTitle(mergePage(previous.items, answer.items, false), currentTitleId),
             cursor: { remaining, page: drained ? 1 : previous.cursor.page + 1 },
             loading: false,
             failed: null,
