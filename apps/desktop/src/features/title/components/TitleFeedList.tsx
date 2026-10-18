@@ -74,6 +74,8 @@ export interface TitleFeedListProps {
   readonly onNavigate: (route: Route) => void;
   /** A download status per title, so a tile wears the mark of a transfer in flight. */
   readonly downloads?: DownloadMarks | undefined;
+  /** Titles on the account's watchlist, so their tiles carry the bookmark. */
+  readonly watchlisted?: ReadonlySet<number> | undefined;
 }
 
 /** Nothing downloading, for a caller that draws the feed without a queue. */
@@ -84,6 +86,7 @@ export function TitleFeedList({
   feed,
   onNavigate,
   downloads,
+  watchlisted,
 }: TitleFeedListProps): ReactElement | null {
   const { t } = useTranslation();
   const marks = downloads ?? NO_DOWNLOADS;
@@ -139,6 +142,8 @@ export function TitleFeedList({
               ratingLabel={item.rating === null ? null : t("card.rating", { score: item.rating })}
               size="lg"
               title={item.name}
+              watchlistLabel={t("card.watchlisted")}
+              watchlisted={watchlisted?.has(item.titleId) ?? false}
             />
           </li>
         ))}

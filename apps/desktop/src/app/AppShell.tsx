@@ -512,6 +512,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 onBack={canBack ? goBack : undefined}
                 onNavigate={navigate}
                 seasons={seasons}
+                watchlistIds={watchlistedIds}
               />
             ) : null}
           </DownloadProgressProvider>

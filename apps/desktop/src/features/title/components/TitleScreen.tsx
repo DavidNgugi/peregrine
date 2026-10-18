@@ -71,6 +71,8 @@ interface TitleScreenProps {
   readonly acquire?: AcquireControl;
   /** A download status per title, forwarded to the feed's tiles. */
   readonly downloads?: DownloadMarks | undefined;
+  /** Titles on the account's watchlist, forwarded to the feed's tiles. */
+  readonly watchlistIds?: ReadonlySet<number> | undefined;
   /** Whether this title is on the watchlist. */
   readonly watchlisted?: boolean | undefined;
   /** Adds or removes this title from the watchlist. */
@@ -108,6 +110,7 @@ export function TitleScreen({
   acquire,
   onNavigate,
   downloads,
+  watchlistIds,
   watchlisted = false,
   onWatchlist,
   onBack,
@@ -417,7 +420,12 @@ export function TitleScreen({
         </Section>
       )}
 
-      <TitleFeedList downloads={downloads} feed={feed} onNavigate={onNavigate} />
+      <TitleFeedList
+        downloads={downloads}
+        feed={feed}
+        onNavigate={onNavigate}
+        watchlisted={watchlistIds}
+      />
     </Screen>
   );
 }

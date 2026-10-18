@@ -549,6 +549,8 @@ export function DiscoverView({
                   size="lg"
                   tabIndex={tabIndex}
                   title={row.title ?? t("discover.rail.unknown")}
+                  watchlistLabel={t("card.watchlisted")}
+                  watchlisted
                 />
               )}
               title={t("discover.rail.watchlist")}
@@ -586,6 +588,8 @@ export function DiscoverView({
                     size="lg"
                     tabIndex={tabIndex}
                     title={row.title ?? t("discover.rail.unknown")}
+                    watchlistLabel={t("card.watchlisted")}
+                    watchlisted={watchlisted.has(row.titleId)}
                   />
                 );
               }}
