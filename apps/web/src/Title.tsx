@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Episode, type PlaybackTicket, type Tile, type Title } from "./api.js";
 import { RailRow } from "./Home.js";
+import { useIsMobile } from "./useIsMobile.js";
 
 /** One title's page: a hero, the episodes of a series, and More Like This. */
 export function TitleScreen({
@@ -22,6 +23,8 @@ export function TitleScreen({
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [episodesOpen, setEpisodesOpen] = useState(true);
+  const mobile = useIsMobile();
   const focused = useRef(false);
 
   // Focus the Play control once the page has a title to draw. A season switch re-reads the
@@ -204,58 +207,73 @@ export function TitleScreen({
 
         {episodes.length === 0 ? null : (
           <section className="episodes">
-            <h2>Episodes</h2>
-            {episodes.map((episode) => (
-              <button
-                className="episode"
-                data-focus="true"
-                disabled={!episode.playable}
-                key={episode.seasonNumber + ":" + episode.episodeNumber}
-                onClick={() => void playEpisode(episode, episode.watched)}
-                type="button"
-              >
-                <span className="episode-still">
-                  {episode.still === null ? null : (
-                    <img alt="" decoding="async" loading="lazy" src={episode.still} />
-                  )}
-                  {episode.percent <= 0 ? null : (
-                    <span className="card-progress">
-                      <i style={{ width: Math.min(100, episode.percent) + "%" }} />
+            <div className="section-head">
+              <h2>Episodes</h2>
+              {mobile && episodes.length > 0 ? (
+                <button
+                  aria-expanded={episodesOpen}
+                  className="collapse"
+                  data-focus="true"
+                  onClick={() => setEpisodesOpen((held) => !held)}
+                  type="button"
+                >
+                  {episodesOpen ? "Hide" : "Show"}
+                </button>
+              ) : null}
+            </div>
+            {mobile && !episodesOpen
+              ? null
+              : episodes.map((episode) => (
+                  <button
+                    className="episode"
+                    data-focus="true"
+                    disabled={!episode.playable}
+                    key={episode.seasonNumber + ":" + episode.episodeNumber}
+                    onClick={() => void playEpisode(episode, episode.watched)}
+                    type="button"
+                  >
+                    <span className="episode-still">
+                      {episode.still === null ? null : (
+                        <img alt="" decoding="async" loading="lazy" src={episode.still} />
+                      )}
+                      {episode.percent <= 0 ? null : (
+                        <span className="card-progress">
+                          <i style={{ width: Math.min(100, episode.percent) + "%" }} />
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-                <span className="episode-copy">
-                  <span className="episode-number">
-                    {"S" + String(episode.seasonNumber) + " E" + String(episode.episodeNumber)}
-                  </span>
-                  <span className="episode-name">
-                    {episode.name ?? "Episode " + String(episode.episodeNumber)}
-                  </span>
-                  <span className="episode-meta">
-                    {[
-                      episode.runtimeMinutes === null
-                        ? null
-                        : String(episode.runtimeMinutes) + " min",
-                      episode.airDate,
-                    ]
-                      .filter((part): part is string => part !== null)
-                      .join("  ·  ")}
-                  </span>
-                  {episode.overview === null ? null : (
-                    <span className="episode-overview">{episode.overview}</span>
-                  )}
-                </span>
-                <span className="episode-action">
-                  {!episode.playable
-                    ? "Not downloaded"
-                    : episode.watched
-                      ? "Play again"
-                      : episode.percent > 0
-                        ? "Resume"
-                        : "Play"}
-                </span>
-              </button>
-            ))}
+                    <span className="episode-copy">
+                      <span className="episode-number">
+                        {"S" + String(episode.seasonNumber) + " E" + String(episode.episodeNumber)}
+                      </span>
+                      <span className="episode-name">
+                        {episode.name ?? "Episode " + String(episode.episodeNumber)}
+                      </span>
+                      <span className="episode-meta">
+                        {[
+                          episode.runtimeMinutes === null
+                            ? null
+                            : String(episode.runtimeMinutes) + " min",
+                          episode.airDate,
+                        ]
+                          .filter((part): part is string => part !== null)
+                          .join("  ·  ")}
+                      </span>
+                      {episode.overview === null ? null : (
+                        <span className="episode-overview">{episode.overview}</span>
+                      )}
+                    </span>
+                    <span className="episode-action">
+                      {!episode.playable
+                        ? "Not downloaded"
+                        : episode.watched
+                          ? "Play again"
+                          : episode.percent > 0
+                            ? "Resume"
+                            : "Play"}
+                    </span>
+                  </button>
+                ))}
           </section>
         )}
 

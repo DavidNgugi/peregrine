@@ -86,6 +86,7 @@ video:focus-visible {
 
 .tile {
   position: relative;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -112,6 +113,7 @@ video:focus-visible {
 }
 
 .tile-title {
+  min-height: 2.5em;
   font-size: 17px;
   line-height: 1.25;
   color: var(--text-secondary);
@@ -514,14 +516,44 @@ button {
 }
 
 .rail {
-  margin-top: 30px;
+  margin-top: 22px;
 }
 
 .rail h2 {
-  margin: 0 0 12px;
-  padding: 0 48px;
+  margin: 0;
+  padding: 0;
   font-size: 22px;
   letter-spacing: -0.01em;
+}
+
+.rail-head {
+  padding: 0 48px;
+}
+
+.section-head h2 {
+  margin: 0;
+  padding: 0;
+}
+
+.section-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.collapse {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 620;
+  cursor: pointer;
 }
 
 .rail-track {
@@ -540,6 +572,8 @@ button {
 
 .card {
   flex: 0 0 164px;
+  width: 164px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -562,6 +596,8 @@ button {
 }
 
 .card-art img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -846,12 +882,25 @@ button {
     padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
 
+  .title-body {
+    gap: 18px;
+  }
+
+  .collapse {
+    min-height: 40px;
+    padding: 8px 14px;
+  }
+
+  .season {
+    min-height: 40px;
+  }
+
   .screen:not(.player):not(.title-screen):not(.center) {
     padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
 
   .hero {
-    min-height: 56vh;
+    min-height: 48vh;
   }
 
   .hero-copy,
@@ -871,21 +920,29 @@ button {
   }
 
   .rail {
-    margin-top: 22px;
+    margin-top: 14px;
   }
 
   .rail h2 {
-    padding: 0 18px;
     font-size: 18px;
   }
 
+  .rail-head {
+    padding: 0 18px;
+  }
+
   .rail-track {
-    gap: 10px;
-    padding: 2px 18px 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 14px 12px;
+    padding: 0 18px 2px;
+    overflow: visible;
+    scroll-snap-type: none;
   }
 
   .card {
-    flex-basis: 122px;
+    width: 100%;
+    flex: none;
   }
 
   .card-name {
@@ -893,13 +950,26 @@ button {
   }
 
   .title-hero {
-    min-height: 52vh;
+    min-height: 46vh;
   }
 
-  .seasons,
+  .seasons {
+    flex-wrap: wrap;
+    padding: 0 18px;
+    overflow: visible;
+  }
+
   .episodes,
   .episodes-empty {
     padding: 0 18px;
+  }
+
+  .episodes .section-head {
+    margin-bottom: 8px;
+  }
+
+  .episodes h2 {
+    font-size: 20px;
   }
 
   .episode {

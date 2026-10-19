@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import type { HomeData, Rail, Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
+import { useIsMobile } from "./useIsMobile.js";
 
 /** One poster card in a rail or grid. */
 export function TileCard({
@@ -49,14 +50,33 @@ export function RailRow({
   readonly rail: Rail;
   readonly onOpen: (tile: Tile) => void;
 }) {
+  const mobile = useIsMobile();
+  const [open, setOpen] = useState(true);
+  const collapsible = mobile && rail.items.length > 2;
+
   return (
     <section className="rail">
-      <h2>{rail.title}</h2>
-      <div className="rail-track">
-        {rail.items.map((tile) => (
-          <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
-        ))}
+      <div className="section-head rail-head">
+        <h2>{rail.title}</h2>
+        {collapsible ? (
+          <button
+            aria-expanded={open}
+            className="collapse"
+            data-focus="true"
+            onClick={() => setOpen((held) => !held)}
+            type="button"
+          >
+            {open ? "Hide" : "Show"}
+          </button>
+        ) : null}
       </div>
+      {mobile && !open ? null : (
+        <div className="rail-track">
+          {rail.items.map((tile) => (
+            <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
