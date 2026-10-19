@@ -82,6 +82,15 @@ export function App() {
     void loadHome();
   }, [loadHome]);
 
+  const goHome = useCallback((): void => {
+    setScreen({ name: "home" });
+    void loadHome();
+  }, [loadHome]);
+
+  const goLibrary = useCallback((): void => {
+    void loadLibrary();
+  }, [loadLibrary]);
+
   useSpatialFocus(screen.name !== "loading");
 
   useEffect(() => {
@@ -92,13 +101,12 @@ export function App() {
         setScreen({ name: "title", id: screen.titleId });
       } else if (screen.name === "title") {
         event.preventDefault();
-        setScreen({ name: "home" });
-        void loadHome();
+        goHome();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, loadHome]);
+  }, [screen, goHome]);
 
   const openTile = useCallback((tile: Tile): void => {
     setScreen({ name: "title", id: tile.id, preview: tile });
@@ -159,32 +167,23 @@ export function App() {
 
   if (screen.name === "title") {
     return (
-      <TitleScreen
-        id={screen.id}
-        key={screen.id}
-        onBack={() => {
-          setScreen({ name: "home" });
-          void loadHome();
-        }}
-        onOpen={openTile}
-        onPlay={(ticket, name) => startPlayback(ticket, name, screen.id)}
-        preview={screen.preview}
-      />
+      <>
+        <TitleScreen
+          id={screen.id}
+          key={screen.id}
+          onBack={goHome}
+          onOpen={openTile}
+          onPlay={(ticket, name) => startPlayback(ticket, name, screen.id)}
+          preview={screen.preview}
+        />
+        <TabBar active={null} onHome={goHome} onLibrary={goLibrary} />
+      </>
     );
   }
 
   return (
     <>
-      <TopBar
-        active={screen.name}
-        onHome={() => {
-          setScreen({ name: "home" });
-          void loadHome();
-        }}
-        onLibrary={() => {
-          void loadLibrary();
-        }}
-      />
+      <TopBar active={screen.name} onHome={goHome} onLibrary={goLibrary} />
       {error === null ? null : <p className="error">{error}</p>}
       {screen.name === "home" ? (
         <HomeScreen
@@ -198,16 +197,7 @@ export function App() {
       ) : (
         <LibraryScreen error={libraryError} onOpen={openId} rows={rows} />
       )}
-      <TabBar
-        active={screen.name}
-        onHome={() => {
-          setScreen({ name: "home" });
-          void loadHome();
-        }}
-        onLibrary={() => {
-          void loadLibrary();
-        }}
-      />
+      <TabBar active={screen.name} onHome={goHome} onLibrary={goLibrary} />
     </>
   );
 }
@@ -251,7 +241,7 @@ function TabBar({
   onHome,
   onLibrary,
 }: {
-  readonly active: "home" | "library";
+  readonly active: "home" | "library" | null;
   readonly onHome: () => void;
   readonly onLibrary: () => void;
 }) {
@@ -263,7 +253,8 @@ function TabBar({
         onClick={onHome}
         type="button"
       >
-        Home
+        <HomeIcon />
+        <span>Home</span>
       </button>
       <button
         className={active === "library" ? "tab current" : "tab"}
@@ -271,9 +262,45 @@ function TabBar({
         onClick={onLibrary}
         type="button"
       >
-        Library
+        <LibraryIcon />
+        <span>Library</span>
       </button>
     </nav>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
+      <path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" />
+    </svg>
+  );
+}
+
+function LibraryIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
+      <rect height="7" rx="1" width="7" x="3" y="3" />
+      <rect height="7" rx="1" width="7" x="14" y="3" />
+      <rect height="7" rx="1" width="7" x="3" y="14" />
+      <rect height="7" rx="1" width="7" x="14" y="14" />
+    </svg>
   );
 }
 

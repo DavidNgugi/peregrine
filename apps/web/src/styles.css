@@ -826,10 +826,24 @@ button {
   }
 
   .tab {
+    display: flex;
     flex: 1;
+    flex-direction: column;
+    gap: 3px;
+    align-items: center;
+    justify-content: center;
     min-height: 56px;
     border-radius: 0;
-    font-size: 15px;
+    font-size: 12px;
+  }
+
+  .tab svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .title-screen {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
 
   .screen:not(.player):not(.title-screen):not(.center) {
