@@ -33,6 +33,7 @@ mod offers;
 mod page;
 mod pairing;
 mod pragmas;
+mod preferences;
 mod quality;
 mod retention;
 mod schedule;

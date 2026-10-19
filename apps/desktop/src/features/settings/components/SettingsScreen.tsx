@@ -26,6 +26,7 @@ import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
 import { NetworkSection } from "./NetworkSection.js";
+import { PlaybackSection } from "./PlaybackSection.js";
 import { WebAccessSection } from "./WebAccessSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
 import { UsenetSection } from "./UsenetSection.js";
@@ -168,6 +169,8 @@ export function SettingsScreen({
         </SettingsRow>
         {quality.failed ? <ErrorState title={t("settings.quality.failed")} /> : null}
       </SettingsSection>
+
+      <PlaybackSection />
 
       <LibrariesSection libraries={libraries} />
 

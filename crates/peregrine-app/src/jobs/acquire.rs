@@ -8,6 +8,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
+use peregrine_domain::language;
 use peregrine_domain::rank::{Candidate, ReleaseRanker, alternative_candidates, ranked_candidates};
 use peregrine_domain::{
     AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, NzbHash, Protocol, ReleaseName,
@@ -120,6 +121,8 @@ pub struct AcquireJob {
     journal_id: i64,
     target: Target,
     min_seeders: u32,
+    /// The audio language the account prefers, which orders the ranked candidates.
+    preferred_audio_language: String,
     /// The one notification this job raises, so the job does not name the service's four ports.
     offers: Arc<dyn NotifyOffers>,
 }
@@ -139,6 +142,7 @@ impl AcquireJob {
         journal_id: i64,
         target: Target,
         min_seeders: u32,
+        preferred_audio_language: String,
         offers: Arc<dyn NotifyOffers>,
     ) -> Self {
         Self {
@@ -152,6 +156,7 @@ impl AcquireJob {
             journal_id,
             target,
             min_seeders,
+            preferred_audio_language,
             offers,
         }
     }
@@ -309,7 +314,16 @@ impl AcquireJob {
             kept.push(release);
         }
 
-        let ranked = ranked_candidates(&candidates, &profile);
+        let mut ranked = ranked_candidates(&candidates, &profile);
+        // Stable: a release that names the preferred language moves ahead of one that names
+        // another, and two releases in the same language band keep the quality ranker's order.
+        // Nothing is dropped — a release in the wrong language is still a candidate.
+        ranked.sort_by_key(|index| {
+            language::rank(
+                kept[*index].raw_title.as_str(),
+                &self.preferred_audio_language,
+            )
+        });
         if ranked.is_empty() {
             // The preferred quality found nothing, but the releases that do exist are worth
             // offering: "nothing at 1080p, but 2160p x3 and 720p x1 exist" is a choice, where "no

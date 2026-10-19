@@ -114,6 +114,13 @@ pub(crate) enum WriteRequest {
         /// The new display name, already trimmed and bounded by the caller.
         name: String,
     },
+    /// Write the singleton playback language preference.
+    SetPlaybackPreference {
+        /// The validated preference.
+        preference: Box<peregrine_domain::PlaybackPreference>,
+        /// Unix milliseconds the desktop wrote it.
+        at: Timestamp,
+    },
     /// Revoke a paired device, which refuses its next request.
     RevokePairedDevice {
         /// The device row.
@@ -722,6 +729,11 @@ async fn apply_library_write(
             .await
             .map(|()| WriteResponse::Applied)
             .map_err(StorageError::from_sqlx),
+        WriteRequest::SetPlaybackPreference { preference, at } => {
+            crate::preferences::write(connection, &preference, at)
+                .await
+                .map(|()| WriteResponse::Applied)
+        }
         WriteRequest::RemoveWatchlist {
             account_id,
             title_id,

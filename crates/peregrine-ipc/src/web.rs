@@ -459,6 +459,9 @@ mod tests {
     }
 
     #[test]
+    // The value is a hostname, not a path: its `local` suffix is the mDNS domain, and the lint
+    // that wants a path extension here would be comparing a different thing.
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     fn an_advertised_name_is_a_bare_mdns_label_when_the_platform_has_one() {
         if let Some(name) = super::local_hostname() {
             assert!(name.ends_with(".local"));

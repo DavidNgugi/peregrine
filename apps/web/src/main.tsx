@@ -1,5 +1,8 @@
 import "@peregrine/theme/tokens.css";
 import "./styles.css";
+import "./home.css";
+import "./title.css";
+import "./player.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

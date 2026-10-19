@@ -814,6 +814,7 @@ fn cases() -> Vec<ContractCase> {
     all.extend(usenet_cases());
     all.extend(notification_cases());
     all.extend(watch_cases());
+    all.extend(playback_cases());
     all.extend(prowlarr_cases());
     all.extend(web_cases());
     all
@@ -1408,6 +1409,37 @@ fn dismiss_notification_dead(harness: &Harness) -> Invocation<'_> {
         crate::notifications::dismiss_notification(
             harness.dead_state(),
             crate::notifications::NotificationRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+/// The playback namespace. Both commands read or write the preference row through the runtime.
+fn playback_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("playback_preferences", playback_preferences_dead),
+        fails_internal("set_playback_preferences", set_playback_preferences_dead),
+    ]
+}
+
+fn playback_preferences_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::playback::playback_preferences(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_playback_preferences_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::playback::set_playback_preferences(
+            harness.dead_state(),
+            crate::playback::PlaybackPreferencesDto {
+                audio_language: "en".to_owned(),
+                subtitle_language: "en".to_owned(),
+                subtitles: crate::playback::SubtitleModeDto::Auto,
+            },
         )
         .await
         .map(drop)

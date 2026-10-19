@@ -20,7 +20,9 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use peregrine_domain::SubtitleFormat;
 use peregrine_domain::catalogue::TitleKind;
+use peregrine_domain::subtitle::format::SubtitleDocument;
 use peregrine_providers::BrowseSort;
 use peregrine_storage::PairedDevice;
 use serde::{Deserialize, Serialize};
@@ -32,7 +34,8 @@ use tracing::warn;
 
 use super::{
     AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MeDto, MediaGrant, PairOffer,
-    PairStatus, PlaybackTicket, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
+    PairStatus, PlaybackTicket, PreferencesDto, SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto,
+    WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -45,11 +48,14 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/pair/{pair_id}", get(pair_status))
         .route("/api/home", get(home))
         .route("/api/library", get(library))
-        .route("/api/watchlist", get(watchlist))
+        .route("/api/watchlist", get(watchlist).post(watchlist_set))
+        .route("/api/watched", post(watched_set))
         .route("/api/downloads", get(downloads))
         .route("/api/me", get(me))
         .route("/api/host", get(host))
+        .route("/api/preferences", get(preferences))
         .route("/api/acquire", post(acquire))
+        .route("/api/acquire/season", post(acquire_season))
         .route("/api/search", get(search))
         .route("/api/browse", get(browse))
         .route("/api/genres", get(genres))
@@ -57,6 +63,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/playback/stop", post(stop_playback))
         .route("/api/playback/{id}", post(playback))
         .route("/api/progress", post(progress))
+        .route("/api/subtitle/{track_id}", get(subtitle))
         .route("/img/{key}", get(image))
         .route("/media/{token}", get(media))
         .route("/hls/{token}/{file}", get(hls))
@@ -264,6 +271,11 @@ impl From<WebError> for ApiError {
                 "not_found",
                 "the title is not in the library",
             ),
+            WebError::UnknownEpisode => Self::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "the episode is not in the library",
+            ),
             WebError::NotPermitted => Self::new(
                 StatusCode::FORBIDDEN,
                 "not_permitted",
@@ -309,6 +321,85 @@ impl From<WebError> for ApiError {
             }
         }
     }
+}
+
+async fn preferences(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+) -> Result<Json<PreferencesDto>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.preferences().await?))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WatchlistBody {
+    title_id: i64,
+    saved: bool,
+}
+
+async fn watchlist_set(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<WatchlistBody>,
+) -> Result<StatusCode, ApiError> {
+    require_read(&device)?;
+    service
+        .set_watchlist(&device, body.title_id, body.saved)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WatchedBody {
+    title_id: i64,
+    scope: Option<String>,
+    season: Option<u32>,
+    episode: Option<u32>,
+    watched: bool,
+}
+
+async fn watched_set(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<WatchedBody>,
+) -> Result<StatusCode, ApiError> {
+    require_read(&device)?;
+    service
+        .set_watched(
+            &device,
+            body.title_id,
+            body.scope.as_deref().unwrap_or_default(),
+            body.season,
+            body.episode,
+            body.watched,
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SeasonAcquireBody {
+    title_id: i64,
+    season: Option<u32>,
+}
+
+async fn acquire_season(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<SeasonAcquireBody>,
+) -> Result<Json<SeasonAcquireDto>, ApiError> {
+    require_read(&device)?;
+    let season = body
+        .season
+        .ok_or_else(|| ApiError::from(WebError::InvalidRequest))?;
+    Ok(Json(
+        service
+            .acquire_season(&device, body.title_id, season)
+            .await?,
+    ))
 }
 
 /// The device a request authenticated as.
@@ -688,6 +779,53 @@ async fn progress(
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtitleQuery {
+    title_id: i64,
+    episode_id: Option<i64>,
+    offset_ms: Option<i64>,
+}
+
+/// One sidecar subtitle as `WebVTT`, retimed onto the session's own timeline.
+///
+/// The client names a track and the title or episode it belongs to, never a path. A bitmap
+/// format, an unreadable sidecar, a parse failure, and a track that belongs to another file all
+/// answer the same 404: the player falls back to no subtitle rather than to a broken VTT file.
+async fn subtitle(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    UrlPath(track_id): UrlPath<i64>,
+    Query(query): Query<SubtitleQuery>,
+) -> Result<Response, ApiError> {
+    require_read(&device)?;
+    let Some((path, format)) = service
+        .subtitle_track(query.title_id, query.episode_id, track_id)
+        .await
+    else {
+        return Err(ApiError::not_found());
+    };
+    let bytes = tokio::fs::read(path.as_path())
+        .await
+        .map_err(|_| ApiError::not_found())?;
+    let text = String::from_utf8_lossy(&bytes);
+    let document = SubtitleDocument::parse(format, &text).map_err(|_| ApiError::not_found())?;
+    let offset_ms = query.offset_ms.unwrap_or(0).max(0);
+    let rendered = document
+        .retimed_for_offset(offset_ms)
+        .render(SubtitleFormat::Vtt)
+        .map_err(|_| ApiError::not_found())?;
+    let mut response = Response::new(Body::from(rendered));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/vtt; charset=utf-8"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 
 async fn image(

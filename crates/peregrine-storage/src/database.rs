@@ -10,7 +10,8 @@ use tracing::{info, warn};
 use peregrine_domain::catalogue::WatchAvailability;
 use peregrine_domain::{
     AccountScope, DownloadEvent, DownloadState, LibraryRoot, MediaFile, MediaItem,
-    PayloadDescription, ScanMode, SubtitleTrack, UnmatchedFile, WatchProgress, WatchlistEntry,
+    PayloadDescription, PlaybackPreference, ScanMode, SubtitleTrack, UnmatchedFile, WatchProgress,
+    WatchlistEntry,
 };
 
 use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
@@ -2265,6 +2266,33 @@ impl Database {
         request: PageRequest,
     ) -> Result<Vec<crate::watch::WatchlistRow>, StorageError> {
         crate::watch::list_watchlist(&self.readers, scope, request).await
+    }
+
+    /// The account's playback language preference.
+    ///
+    /// The migration inserts the default row, so this answers without a fallback on every
+    /// database this build created; a row that somehow is absent still answers the default.
+    pub async fn playback_preference(&self) -> Result<PlaybackPreference, StorageError> {
+        crate::preferences::read(&self.readers).await
+    }
+
+    /// Writes the one playback preference row.
+    pub async fn set_playback_preference(
+        &self,
+        preference: &PlaybackPreference,
+        at: jiff::Timestamp,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetPlaybackPreference {
+                preference: Box::new(preference.clone()),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("set_playback_preference", &other)),
+        }
     }
 
     /// How many rows `event_log` holds, read through the pool.

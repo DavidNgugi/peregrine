@@ -1,13 +1,22 @@
 /* The ten-foot layout: large type, generous spacing, a focus ring a person can see from a sofa. */
 
 html,
-body,
-#root {
+body {
   height: 100%;
   margin: 0;
   background: var(--surface-0);
   color: var(--text-primary);
   font-family: var(--font-ui);
+}
+
+/* Focus and scrollIntoView must land below the sticky bar, not under it. */
+html {
+  scroll-padding-top: 100px;
+}
+
+/* A fixed height would end the sticky top bar after one viewport; the root has to grow with the page. */
+#root {
+  min-height: 100dvh;
 }
 
 body {
@@ -47,10 +56,17 @@ video:focus-visible {
 }
 
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 24px;
   padding: 28px 48px;
+  background: var(--surface-0);
+  background: color-mix(in oklab, var(--surface-0) 86%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
 }
 
 .brand {
@@ -327,6 +343,10 @@ button {
 @media (max-width: 720px) {
   body {
     font-size: 17px;
+  }
+
+  html {
+    scroll-padding-top: calc(76px + env(safe-area-inset-top, 0px));
   }
 
   .topbar {
@@ -701,6 +721,22 @@ button {
 .tab.current {
   background: var(--surface-2);
   color: var(--text-primary);
+}
+
+.topbar-back {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.topbar-back svg {
+  width: 22px;
+  height: 22px;
 }
 
 .tabbar {

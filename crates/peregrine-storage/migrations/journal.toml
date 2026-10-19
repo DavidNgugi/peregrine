@@ -114,3 +114,7 @@ sha256 = "463ac4642598a79362a160192bb8778fc8d805057b3015346348f63103c87ba8"
 [[migration]]
 file = "0028_offer_protocol.sql"
 sha256 = "a9c76c9bd36b9fa052f3f33d696547e9d861cc962b90be3e4ed71900b8486f67"
+
+[[migration]]
+file = "0029_playback_preference.sql"
+sha256 = "a2fe0dfda0fb20c08fadd4411a04d8cbe5204eb43d67963a8d7a1d1fcbbf78d1"

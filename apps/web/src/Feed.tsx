@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { api, type Genre, type Tile } from "./api.js";
 import { TileCard } from "./Home.js";
@@ -9,6 +9,9 @@ import { TileCard } from "./Home.js";
  * The recommendations are the head; after them the shared genres are paged one provider page at a
  * time, exactly as the desktop title page does. A sentinel below the grid asks for the next page as
  * it nears the viewport, and a second check after each page covers a sentinel that never left it.
+ *
+ * The section collapses on every viewport. While it is collapsed the sentinel is not mounted and
+ * both paging effects stop, so a hidden feed cannot keep asking for pages nobody can see.
  */
 export function TitleFeed({
   titleId,
@@ -29,9 +32,11 @@ export function TitleFeed({
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [exhausted, setExhausted] = useState(genres.length === 0);
+  const [open, setOpen] = useState(true);
   const inFlight = useRef(false);
   const sentinel = useRef<HTMLDivElement | null>(null);
   const generation = useRef(0);
+  const gridId = useId();
   const signature =
     String(titleId) +
     "|" +
@@ -93,7 +98,7 @@ export function TitleFeed({
   }, [kind, page, remaining, loading, titleId]);
 
   useEffect(() => {
-    if (loading || exhausted || remaining.length === 0) return;
+    if (!open || loading || exhausted || remaining.length === 0) return;
     const element = sentinel.current;
     if (element === null) return;
     const observer = new IntersectionObserver(
@@ -104,37 +109,52 @@ export function TitleFeed({
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [loadMore, loading, exhausted, remaining.length]);
+  }, [open, loadMore, loading, exhausted, remaining.length]);
 
   // A page that lands while the sentinel is still on screen does not change its intersection,
   // so the observer above would never fire again for it. Check the position after every page.
   useEffect(() => {
-    if (loading || exhausted || remaining.length === 0) return;
+    if (!open || loading || exhausted || remaining.length === 0) return;
     const element = sentinel.current;
     if (element === null) return;
     if (element.getBoundingClientRect().top < window.innerHeight + 600) loadMore();
-  }, [items.length, loading, exhausted, remaining.length, loadMore]);
+  }, [open, items.length, loading, exhausted, remaining.length, loadMore]);
 
   return (
     <section className="title-feed">
       <div className="section-head">
         <h2>More like this</h2>
+        <button
+          aria-controls={gridId}
+          aria-expanded={open}
+          aria-label={open ? "Hide More like this" : "Show More like this"}
+          className="collapse"
+          data-focus="true"
+          onClick={() => setOpen((held) => !held)}
+          type="button"
+        >
+          {open ? "Hide" : "Show"}
+        </button>
       </div>
-      <div className="feed-grid">
-        {items.map((tile) => (
-          <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
-        ))}
-      </div>
-      <div aria-hidden="true" className="feed-sentinel" ref={sentinel} />
-      {loading ? <p className="dim feed-status">Loading more...</p> : null}
-      {failed === null ? null : (
-        <div className="feed-status">
-          <p className="error">{failed}</p>
-          <button className="secondary" data-focus="true" onClick={loadMore} type="button">
-            Try again
-          </button>
-        </div>
-      )}
+      {open ? (
+        <>
+          <div className="feed-grid" id={gridId}>
+            {items.map((tile) => (
+              <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
+            ))}
+          </div>
+          <div aria-hidden="true" className="feed-sentinel" ref={sentinel} />
+          {loading ? <p className="dim feed-status">Loading more...</p> : null}
+          {failed === null ? null : (
+            <div className="feed-status">
+              <p className="error">{failed}</p>
+              <button className="secondary" data-focus="true" onClick={loadMore} type="button">
+                Try again
+              </button>
+            </div>
+          )}
+        </>
+      ) : null}
     </section>
   );
 }

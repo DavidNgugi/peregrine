@@ -34,5 +34,6 @@ One file per decision that constrains the architecture. Each records the context
 | [0028](./0028-tv-web-client.md) | TV web client: a paired LAN surface, read-only by default | Accepted; first slice of E37, refined into the desktop app ahead of the E36 daemon |
 | [0029](./0029-device-scoped-acquisition.md) | Device-scoped acquisition from the LAN client | Accepted; adds the opt-in `acquire` scope, the approval checkbox, and the audit rows |
 | [0030](./0030-usenet-acquisition.md) | Usenet acquisition: a native engine, a quarantined archive, and an import boundary | Accepted, post-1.0 (E38) |
+| [0031](./0031-browser-client-parity.md) | Browser client parity: viewer writes, subtitles, and language defaults | Accepted; refines 0028 §3 and §6 and 0029 |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.

@@ -172,7 +172,7 @@ mod tests {
     ];
 
     /// The tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 50] = [
+    const DOCUMENTED_TABLES: [&str; 51] = [
         "account",
         "cast_session",
         "company",
@@ -200,6 +200,7 @@ mod tests {
         "notification",
         "paired_device",
         "person",
+        "playback_preference",
         "provider_cache",
         "quality_profile",
         "release_decision",
@@ -2431,6 +2432,8 @@ mod tests {
         SELECT 'paired_device' AS table_name, COUNT(*) AS n FROM paired_device
         UNION ALL
         SELECT 'person' AS table_name, COUNT(*) AS n FROM person
+        UNION ALL
+        SELECT 'playback_preference' AS table_name, COUNT(*) AS n FROM playback_preference
         UNION ALL
         SELECT 'quality_profile' AS table_name, COUNT(*) AS n FROM quality_profile
         UNION ALL

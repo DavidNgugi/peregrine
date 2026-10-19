@@ -26,6 +26,7 @@ pub mod jobs;
 pub mod library;
 pub mod network;
 pub mod notifications;
+pub mod playback;
 pub mod providers;
 pub mod prowlarr;
 pub mod runtime;
@@ -168,6 +169,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             watch::watchlist,
             watch::add_to_watchlist,
             watch::remove_from_watchlist,
+            playback::playback_preferences,
+            playback::set_playback_preferences,
             prowlarr::prowlarr_status,
             prowlarr::install_prowlarr,
             prowlarr::start_prowlarr,

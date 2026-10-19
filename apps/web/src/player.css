@@ -1,0 +1,99 @@
+/* The player: subtitle and audio menus, next-up notice, and the controls that grew. */
+
+/* The controls gain two menus, so they are allowed to wrap at any width rather than only on a
+   phone; the seek bar still takes what is left of the row. */
+.player-controls {
+  flex-wrap: wrap;
+}
+
+.player-menu {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 16px;
+}
+
+.player-menu-label {
+  white-space: nowrap;
+}
+
+/* Readable from a sofa, but deliberately smaller than the title and the clock. */
+.player-select {
+  min-width: 0;
+  max-width: 240px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.player-select:focus-visible {
+  outline: 4px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.player-audio-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.player-audio {
+  color: var(--text-tertiary);
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.player-next {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 28px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-0);
+  color: var(--text-secondary);
+  font-size: 18px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .player-menu,
+  .player-audio-group {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .player-select {
+    flex: 1 1 auto;
+    max-width: none;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  .player-next {
+    padding: 8px 14px;
+    font-size: 15px;
+  }
+}
+
+/* In the short-landscape layout the controls are an overlay, so the status line joins it rather
+   than sitting underneath it. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .player-next {
+    position: absolute;
+    right: 0;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    left: 0;
+    z-index: 2;
+    padding: 8px 16px;
+    border: 0;
+    background: linear-gradient(to top, oklch(0 0 0 / 0.8), transparent);
+  }
+}

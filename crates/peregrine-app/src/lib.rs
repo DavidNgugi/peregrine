@@ -76,8 +76,9 @@ pub use peregrine_secrets::DevFileStore;
 // this block already exports, so a caller that must build or destructure the row a command answers
 // with would otherwise have a type it cannot name.
 pub use peregrine_domain::{
-    DeletionPlan, EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, PreferredQuality,
-    Provider, ScanMode, SeasonNumber, TitleOffer, TrashError, WatchProgress,
+    DeletionPlan, EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, PlaybackPreference,
+    PreferredQuality, Provider, ScanMode, SeasonNumber, SubtitleMode, TitleOffer, TrashError,
+    WatchProgress,
 };
 // The notification centre's rows and severity, for the reason above: the commands that list the
 // centre name them, and `peregrine-ipc` may not take a `peregrine-domain` edge (AGENTS R6).

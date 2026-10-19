@@ -7,6 +7,14 @@
  * the target offset, not a call to `currentTime`: a transcode cannot seek backwards, and a seek
  * beyond what the encoder has produced would stall. The debounce turns a held arrow key into one
  * restart.
+ *
+ * **The sidecars are served by the listener, never built here.** Every subtitle URL in the ticket
+ * already answers WebVTT and, for an HLS session, already carries the transcode's offset. The
+ * element's own `textTracks` are the only source of truth for what is loaded, because a direct
+ * file and an hls.js attachment populate them at different times.
+ *
+ * **Ending is the only autoplay trigger.** The next episode is minted from the `ended` event and
+ * only while this screen is still mounted; a pause, a seek, or the back control never starts one.
  */
 
 import type Hls from "hls.js";
@@ -14,12 +22,57 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 
 import { api, type PlaybackTicket } from "./api.js";
 import { ChevronLeftIcon } from "./icons.js";
+import {
+  audioOptionIndex,
+  initialSubtitleIndex,
+  nextEpisodeRequest,
+  subtitleLabel,
+} from "./player-tracks.js";
 
 export interface PlayerProps {
   readonly titleId: number;
   readonly titleName: string;
   readonly initial: PlaybackTicket;
   readonly onClose: () => void;
+}
+
+/** One rendition in the audio menu. */
+interface AudioOption {
+  readonly id: string;
+  readonly label: string;
+  readonly language: string | null;
+}
+
+/** Where the audio list came from, and therefore how a choice is applied. */
+interface AudioMenu {
+  readonly source: "hls" | "native";
+  readonly options: readonly AudioOption[];
+}
+
+/** Safari's audio track records are not in lib.dom. */
+interface NativeAudioTrack {
+  readonly id: string;
+  readonly label: string;
+  readonly language: string;
+  enabled: boolean;
+}
+
+interface NativeAudioTrackList {
+  readonly length: number;
+  readonly [index: number]: NativeAudioTrack;
+}
+
+function nativeAudioTracks(element: HTMLVideoElement | null): NativeAudioTrackList | null {
+  if (element === null) return null;
+  const media = element as HTMLVideoElement & {
+    readonly audioTracks?: NativeAudioTrackList;
+  };
+  return media.audioTracks ?? null;
+}
+
+/** The track order a subtitle selection is meaningful in; ids are stable within one session. */
+function subtitleIds(tracks: PlaybackTicket["subtitles"]): string {
+  return tracks.map((track) => String(track.id)).join(",");
 }
 
 export function Player({ titleId, titleName, initial, onClose }: PlayerProps): ReactElement {
@@ -38,6 +91,42 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     readonly percent: number;
     readonly charging: boolean;
   } | null>(null);
+
+  const [selectedSubtitle, setSelectedSubtitle] = useState<number | null>(() =>
+    initialSubtitleIndex(initial.subtitles),
+  );
+  const subtitleKey = useRef(subtitleIds(initial.subtitles));
+  const [audioMenu, setAudioMenu] = useState<AudioMenu | null>(null);
+  const [selectedAudio, setSelectedAudio] = useState<number | null>(null);
+  const [startingNext, setStartingNext] = useState<{
+    readonly seasonNumber: number;
+    readonly episodeNumber: number;
+  } | null>(null);
+  const [finished, setFinished] = useState(false);
+
+  // A mint can outlive the screen that asked for it; these refs are how a late answer is dropped.
+  const mounted = useRef(true);
+  const advancing = useRef(false);
+  const endedReported = useRef(false);
+  const latestTicket = useRef(ticket);
+  latestTicket.current = ticket;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // The parent stops the ticket it opened; a ticket this screen minted (a seek restart or the
+  // next episode) is not the one the parent knows, so its session is stopped here on the way out.
+  useEffect(() => {
+    return () => {
+      if (latestTicket.current.url !== initial.url) {
+        void api.stopPlayback(latestTicket.current.url).catch(() => {});
+      }
+    };
+  }, [initial.url]);
 
   // The host's charge is what the stream dies with, so the warning belongs on the screen doing
   // the streaming rather than on the computer it is coming from.
@@ -76,6 +165,10 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     setAbsoluteMs(ticket.startPositionMs);
     pending.current = null;
     setPendingMs(null);
+    setAudioMenu(null);
+    setSelectedAudio(null);
+    setFinished(false);
+    endedReported.current = false;
     if (ticket.kind === "hls") {
       void import("hls.js")
         .then(({ default: HlsPlayer }) => {
@@ -98,14 +191,36 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
               setMessage("The transcode stopped. Choose a position to try again.");
             });
             instance.on(HlsPlayer.Events.FRAG_BUFFERED, () => setMessage(null));
-            instance.attachMedia(element);
-            instance.loadSource(ticket.url);
+            const readAudio = (): void => {
+              if (cancelled) return;
+              const tracks = instance.audioTracks;
+              if (tracks.length <= 1) {
+                setAudioMenu(null);
+                setSelectedAudio(null);
+                return;
+              }
+              const options: AudioOption[] = tracks.map((track) => ({
+                id: "hls-" + String(track.id),
+                label: track.name.trim() || track.lang || "Audio " + String(track.id),
+                language: track.lang ?? null,
+              }));
+              setAudioMenu({ source: "hls", options });
+              setSelectedAudio((current) =>
+                current !== null && current < options.length
+                  ? current
+                  : audioOptionIndex(options, ticket.audioLanguage),
+              );
+            };
             instance.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
               setMessage(null);
+              readAudio();
               void element.play().catch(() => {
                 setPlaying(false);
               });
             });
+            instance.on(HlsPlayer.Events.AUDIO_TRACKS_UPDATED, readAudio);
+            instance.attachMedia(element);
+            instance.loadSource(ticket.url);
           } else if (element.canPlayType("application/vnd.apple.mpegurl") !== "") {
             element.src = ticket.url;
             void element.play().catch(() => {
@@ -140,6 +255,74 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     };
   }, [ticket]);
 
+  // A seek restart keeps the same subtitle set, so a choice made before the seek survives it; a
+  // new episode's set is different and starts from the core's default.
+  useEffect(() => {
+    const key = subtitleIds(ticket.subtitles);
+    if (key === subtitleKey.current) return;
+    subtitleKey.current = key;
+    setSelectedSubtitle(initialSubtitleIndex(ticket.subtitles));
+  }, [ticket]);
+
+  // **The mode is set on the element's own track objects.** A track appears in `textTracks` only
+  // once the element has loaded it, and direct load, hls.js attachment, and a new session all
+  // reach that point at different times; `addtrack` and `loadedmetadata` are what make the
+  // choice outlive those transitions.
+  useEffect(() => {
+    const element = video.current;
+    if (element === null) return;
+    const apply = (): void => {
+      for (let index = 0; index < element.textTracks.length; index += 1) {
+        const entry = element.textTracks[index];
+        if (entry === undefined) continue;
+        entry.mode = index === selectedSubtitle ? "showing" : "disabled";
+      }
+    };
+    apply();
+    element.addEventListener("loadedmetadata", apply);
+    const tracks = element.textTracks;
+    tracks.addEventListener("addtrack", apply);
+    return () => {
+      element.removeEventListener("loadedmetadata", apply);
+      tracks.removeEventListener("addtrack", apply);
+    };
+  }, [selectedSubtitle, ticket]);
+
+  // Safari exposes audio renditions on the element; hls.js exposes them on the instance. This
+  // reads the native list when metadata arrives and offers nothing for a single rendition.
+  useEffect(() => {
+    const element = video.current;
+    if (element === null) return;
+    const read = (): void => {
+      // hls.js owns its own rendition list; the element's list is not the same answer.
+      if (hls.current !== null) return;
+      const list = nativeAudioTracks(element);
+      if (list === null || list.length <= 1) {
+        setAudioMenu(null);
+        setSelectedAudio(null);
+        return;
+      }
+      const options: AudioOption[] = [];
+      for (let index = 0; index < list.length; index += 1) {
+        const track = list[index];
+        if (track === undefined) continue;
+        options.push({
+          id: "native-" + track.id,
+          label: track.label || track.language || "Audio " + String(index),
+          language: track.language === "" ? null : track.language,
+        });
+      }
+      setAudioMenu({ source: "native", options });
+      setSelectedAudio((current) =>
+        current !== null && current < options.length
+          ? current
+          : audioOptionIndex(options, ticket.audioLanguage),
+      );
+    };
+    element.addEventListener("loadedmetadata", read);
+    return () => element.removeEventListener("loadedmetadata", read);
+  }, [ticket]);
+
   // One writer for every path: the same endpoint and the same store the desktop uses.
   const report = useCallback(
     (keepalive = false): void => {
@@ -168,14 +351,54 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         setTotalMs(ticket.startPositionMs + element.duration * 1000);
       }
     };
-    const onPlay = (): void => setPlaying(true);
+    const onPlay = (): void => {
+      setPlaying(true);
+      setFinished(false);
+      // Replaying after a "Finished" is a new ending, and it owes its own progress report.
+      endedReported.current = false;
+    };
     const onPause = (): void => {
       setPlaying(false);
       reportRef.current();
     };
     const onEnded = (): void => {
+      if (endedReported.current) return;
+      endedReported.current = true;
       setPlaying(false);
       reportRef.current(true);
+      const next = nextEpisodeRequest(ticket.nextEpisode);
+      if (next === null) {
+        setFinished(true);
+        return;
+      }
+      if (!mounted.current || advancing.current) return;
+      advancing.current = true;
+      setStartingNext({
+        seasonNumber: next.seasonNumber,
+        episodeNumber: next.episodeNumber,
+      });
+      api
+        .playback(titleId, next.positionMs, next.seasonNumber, next.episodeNumber)
+        .then((minted) => {
+          if (!mounted.current) {
+            // The screen that would have played this is gone; do not leave its transcode running.
+            void api.stopPlayback(minted.url).catch(() => {});
+            return;
+          }
+          setStartingNext(null);
+          setFinished(false);
+          setTicket(minted);
+        })
+        .catch((caught: unknown) => {
+          if (!mounted.current) return;
+          setStartingNext(null);
+          setMessage(
+            caught instanceof Error ? caught.message : "The next episode could not be started.",
+          );
+        })
+        .finally(() => {
+          advancing.current = false;
+        });
     };
     element.addEventListener("timeupdate", onTime);
     element.addEventListener("loadedmetadata", onMetadata);
@@ -191,7 +414,7 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       element.removeEventListener("pause", onPause);
       element.removeEventListener("ended", onEnded);
     };
-  }, [ticket]);
+  }, [ticket, titleId]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -239,7 +462,7 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         );
       }
     },
-    [titleId],
+    [titleId, ticket.episodeId],
   );
 
   const seekTo = useCallback(
@@ -263,6 +486,26 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     } else {
       element.pause();
     }
+  };
+
+  const selectAudio = (index: number): void => {
+    const menu = audioMenu;
+    if (menu === null) return;
+    if (menu.source === "hls") {
+      const instance = hls.current;
+      if (instance !== null && index < instance.audioTracks.length) {
+        instance.audioTrack = index;
+      }
+    } else {
+      const list = nativeAudioTracks(video.current);
+      if (list !== null) {
+        for (let current = 0; current < list.length; current += 1) {
+          const track = list[current];
+          if (track !== undefined) track.enabled = current === index;
+        }
+      }
+    }
+    setSelectedAudio(index);
   };
 
   const close = (): void => {
@@ -298,7 +541,18 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       >
         <ChevronLeftIcon />
       </button>
-      <video autoPlay playsInline ref={video} />
+      <video autoPlay playsInline ref={video}>
+        {ticket.subtitles.map((track) => (
+          <track
+            default={track.default}
+            key={track.id}
+            kind="subtitles"
+            label={subtitleLabel(track)}
+            src={track.url}
+            srcLang={track.language}
+          />
+        ))}
+      </video>
       {battery !== null && battery.percent < 10 && !battery.charging ? (
         <p className="player-warning" role="alert">
           The computer running Peregrine is at {battery.percent}% battery. Playback stops when it
@@ -306,6 +560,17 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         </p>
       ) : null}
       {message === null ? null : <p className="player-message">{message}</p>}
+      {startingNext === null && !finished ? null : (
+        <p className="player-next" role="status">
+          {startingNext === null
+            ? "Finished"
+            : "Starting S" +
+              String(startingNext.seasonNumber) +
+              " E" +
+              String(startingNext.episodeNumber) +
+              "..."}
+        </p>
+      )}
       <div className="player-controls">
         <button className="control" data-focus="true" onClick={toggle} type="button">
           {playing ? "Pause" : "Play"}
@@ -329,6 +594,50 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         <button className="control" data-focus="true" onClick={fullscreen} type="button">
           Fullscreen
         </button>
+        {ticket.subtitles.length === 0 ? null : (
+          <label className="player-menu">
+            <span className="player-menu-label">Subtitles</span>
+            <select
+              aria-label="Subtitles"
+              className="player-select"
+              data-focus="true"
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setSelectedSubtitle(value === "" ? null : Number(value));
+              }}
+              value={selectedSubtitle === null ? "" : String(selectedSubtitle)}
+            >
+              <option value="">Off</option>
+              {ticket.subtitles.map((track, index) => (
+                <option key={track.id} value={String(index)}>
+                  {subtitleLabel(track)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {ticket.audioLanguage === null && audioMenu === null ? null : (
+          <span className="player-audio-group">
+            <span className="player-audio">
+              {ticket.audioLanguage === null ? "Audio" : "Audio: " + ticket.audioLanguage}
+            </span>
+            {audioMenu === null ? null : (
+              <select
+                aria-label="Audio track"
+                className="player-select"
+                data-focus="true"
+                onChange={(event) => selectAudio(Number(event.currentTarget.value))}
+                value={selectedAudio === null ? "" : String(selectedAudio)}
+              >
+                {audioMenu.options.map((option, index) => (
+                  <option key={option.id} value={String(index)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </span>
+        )}
         <span className="time">
           {format(shown)} / {totalMs === null ? "--:--" : format(totalMs)}
         </span>

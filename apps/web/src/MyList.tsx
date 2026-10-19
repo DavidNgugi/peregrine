@@ -4,11 +4,18 @@ import { api, type Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
 
-/** The account's watchlist, read-only on this surface; adding stays in the desktop app. */
+/**
+ * The account's watchlist: a title is added or removed from its own page, and this screen offers
+ * the remove action beside each card. The control is a sibling of the card rather than a child,
+ * because the card itself is one button and a button inside a button is neither valid markup nor
+ * one tab stop.
+ */
 export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void }) {
   const [items, setItems] = useState<Tile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   useAutoFocus(items[0]?.id);
 
   useEffect(() => {
@@ -32,6 +39,21 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
     };
   }, []);
 
+  const remove = async (tile: Tile): Promise<void> => {
+    setRemoving(tile.id);
+    setActionError(null);
+    try {
+      await api.watchlistSet(tile.id, false);
+      setItems((held) => held.filter((item) => item.id !== tile.id));
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : "That title could not be removed from My List.",
+      );
+    } finally {
+      setRemoving(null);
+    }
+  };
+
   return (
     <main className="screen my-list-screen">
       <header className="browse-head">
@@ -42,6 +64,11 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
       </header>
 
       {error === null ? null : <p className="error">{error}</p>}
+      {actionError === null ? null : (
+        <p className="error" role="alert">
+          {actionError}
+        </p>
+      )}
       {loading ? <p className="dim browse-loading">Reading...</p> : null}
       {!loading && items.length === 0 ? (
         <p className="dim browse-empty">
@@ -50,7 +77,19 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
       ) : (
         <div className="browse-grid">
           {items.map((tile, index) => (
-            <TileCard autofocus={index === 0} key={tile.id} onOpen={onOpen} tile={tile} />
+            <div className="card-cell" key={tile.id}>
+              <TileCard autofocus={index === 0} onOpen={onOpen} tile={tile} watchlisted={true} />
+              <button
+                aria-label={"Remove " + tile.name + " from My List"}
+                className="card-remove"
+                data-focus="true"
+                disabled={removing === tile.id}
+                onClick={() => void remove(tile)}
+                type="button"
+              >
+                {removing === tile.id ? "Removing..." : "Remove"}
+              </button>
+            </div>
           ))}
         </div>
       )}

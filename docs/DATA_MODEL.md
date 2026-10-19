@@ -96,6 +96,16 @@ CREATE TABLE settings (
   updated_at INTEGER NOT NULL
 );
 
+-- The playback language defaults, a singleton because there is one installation-wide answer.
+-- The desktop Settings screen writes it; the web client and the acquire job read it (ADR 0031).
+CREATE TABLE playback_preference (
+  id                INTEGER PRIMARY KEY CHECK (id = 1),
+  audio_language    TEXT NOT NULL,       -- BCP-47-ish tag, 'en' by default
+  subtitle_language TEXT NOT NULL,       -- BCP-47-ish tag, 'en' by default
+  subtitles         TEXT NOT NULL CHECK (subtitles IN ('auto','forced','off')),
+  updated_at        INTEGER NOT NULL
+);
+
 -- A pointer to a keyring entry. The secret value itself never enters the database.
 CREATE TABLE secret_ref (
   key             TEXT PRIMARY KEY,
@@ -1187,7 +1197,7 @@ CREATE TABLE share_device (
 
 ### 2.12.1 Paired LAN devices (ADR 0028)
 
-The desktop-served TV client pairs into `paired_device`, not the future media server's `share_device`: one row per browser or television, a hashed credential, and `read,stream` by default. An approval with the desktop's **Allow downloads** box adds the separate `acquire` scope ([ADR 0029](./adr/0029-device-scoped-acquisition.md)). `revoked_at` is a timestamp rather than a delete so the audit can answer which device was cut off and when; `last_address` is shown beside last-seen and is never an authorization input.
+The desktop-served TV client pairs into `paired_device`, not the future media server's `share_device`: one row per browser or television, a hashed credential, and `read,stream` by default. An approval with the desktop's **Allow downloads** box adds the separate `acquire` scope ([ADR 0029](./adr/0029-device-scoped-acquisition.md)). A `read` token also writes the account's viewer state — progress, the watchlist, and watched marks — under the existing `watch_progress` and `watchlist_entry` rows; it cannot delete, change settings, or read a path ([ADR 0031](./adr/0031-browser-client-parity.md)). `revoked_at` is a timestamp rather than a delete so the audit can answer which device was cut off and when; `last_address` is shown beside last-seen and is never an authorization input.
 
 An acquisition request leaves a `web_audit` row naming the device, the action, the title, the episode when known, and the journal job once the queue accepts it. The device row outlives revocation, so the audit keeps answering after the credential is cut off.
 

@@ -39,6 +39,37 @@ export interface Progress {
   readonly watched: boolean;
 }
 
+/** One sidecar subtitle track the player can show, served as WebVTT by the listener. */
+export interface SubtitleTrack {
+  readonly id: number;
+  readonly language: string;
+  readonly label: string | null;
+  readonly format: string;
+  readonly forced: boolean;
+  readonly sdh: boolean;
+  /** The track this device's preferences choose, so the player starts on it. */
+  readonly default: boolean;
+  readonly url: string;
+}
+
+/** The episode that follows the one a playback ticket opened, when there is a playable one. */
+export interface NextEpisode {
+  readonly seasonNumber: number;
+  readonly episodeNumber: number;
+  readonly episodeId: number;
+  readonly name: string | null;
+}
+
+/** What the account prefers for audio and subtitles; the desktop Settings screen writes it. */
+export interface PlaybackPreferences {
+  readonly audioLanguage: string;
+  readonly subtitleLanguage: string;
+  readonly subtitles: "auto" | "off" | "forced";
+}
+
+/** The raw download lifecycle state, as the core stored it, or null when no job exists. */
+export type DownloadState = string | null;
+
 export interface Tile {
   readonly id: number;
   readonly name: string;
@@ -132,6 +163,10 @@ export interface Episode {
   readonly positionMs: number;
   readonly watched: boolean;
   readonly playable: boolean;
+  /** The download job's lifecycle state for this episode, or null when nobody asked. */
+  readonly downloadState: DownloadState;
+  /** The job's completion, 0 to 100, when one is running. */
+  readonly downloadPercent: number | null;
 }
 
 export interface Title {
@@ -148,6 +183,14 @@ export interface Title {
   readonly playable: boolean;
   readonly progress: Progress | null;
   readonly inLibrary: boolean;
+  /** Whether the account's watchlist holds this title. */
+  readonly watchlisted: boolean;
+  /** Whether a whole-title progress row is marked watched. */
+  readonly watched: boolean;
+  /** The title-level download job's lifecycle state, or null when there is none. */
+  readonly downloadState: DownloadState;
+  /** The title-level job's completion, 0 to 100. */
+  readonly downloadPercent: number | null;
   readonly seasons: Season[];
   readonly episodes: Episode[];
   readonly similar: Tile[];
@@ -178,6 +221,16 @@ export interface PlaybackTicket {
   readonly startPositionMs: number;
   readonly durationMs: number | null;
   readonly episodeId: number | null;
+  /** movie or show, so the player knows whether a next episode can exist. */
+  readonly titleKind: "movie" | "show";
+  /** The title's display name, for the next-up line. */
+  readonly titleName: string;
+  /** The sidecar subtitle tracks this session can serve, default already chosen. */
+  readonly subtitles: SubtitleTrack[];
+  /** The playable episode after this one, for autoplay; null for a film or the last episode. */
+  readonly nextEpisode: NextEpisode | null;
+  /** The audio language the host selected for a transcode, when it selected one. */
+  readonly audioLanguage: string | null;
 }
 
 async function request<T>(
@@ -210,7 +263,23 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-/** The three reads and the two writes this client needs. */
+/** One watched-state change the title page asks for. */
+export interface WatchedChange {
+  readonly titleId: number;
+  readonly scope: "title" | "episode" | "season";
+  readonly season?: number;
+  readonly episode?: number;
+  readonly watched: boolean;
+}
+
+/** What a season download queued, and what it could not. */
+export interface SeasonAcquireResult {
+  readonly queued: number;
+  readonly alreadyPlayable: number;
+  readonly failed: number;
+}
+
+/** The reads and writes this client needs. */
 export const api = {
   home: (): Promise<HomeData> => request<HomeData>("/api/home"),
   browse: (
@@ -242,6 +311,13 @@ export const api = {
       season: season ?? null,
       episode: episode ?? null,
     }),
+  acquireSeason: (titleId: number, season: number): Promise<SeasonAcquireResult> =>
+    request<SeasonAcquireResult>("/api/acquire/season", "POST", { titleId, season }),
+  watchlistSet: (titleId: number, saved: boolean): Promise<void> =>
+    request<void>("/api/watchlist", "POST", { titleId, saved }),
+  watchedSet: (change: WatchedChange): Promise<void> =>
+    request<void>("/api/watched", "POST", change),
+  preferences: (): Promise<PlaybackPreferences> => request<PlaybackPreferences>("/api/preferences"),
   stopPlayback: (url: string): Promise<void> =>
     request<void>("/api/playback/stop", "POST", { url }, true),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),

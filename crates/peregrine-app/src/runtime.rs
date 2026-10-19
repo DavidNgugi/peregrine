@@ -26,8 +26,8 @@ use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
     AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback,
-    PlaybackPosition, PreferredQuality, ProgressSource, SafePath, ScanMode, SubtitleFormat,
-    SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
+    PlaybackPosition, PlaybackPreference, PreferredQuality, ProgressSource, SafePath, ScanMode,
+    SubtitleFormat, SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
 };
 use peregrine_platform::{SystemClock, SystemTrash, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
@@ -2133,6 +2133,13 @@ impl Runtime {
         min_seeders: u32,
     ) -> Result<StartedJob, RuntimeError> {
         let title_id = target.title_id;
+        // The account's preference is read once per submit, so the job orders the candidates it
+        // finds by the language the person asked the host to prefer.
+        let preferred_audio_language = self
+            .playback_preference()
+            .await?
+            .audio_language()
+            .to_owned();
         let now = self.clock.now().as_millisecond();
         let key = crate::jobs::acquire::dedupe_key(title_id, target.episode);
         let journal_id = self
@@ -2164,6 +2171,7 @@ impl Runtime {
             journal_id,
             target,
             min_seeders,
+            preferred_audio_language,
             Arc::clone(&self.notifications),
         );
         match self.scheduler.submit(spec, job).await {
@@ -2222,6 +2230,30 @@ impl Runtime {
         id: i64,
     ) -> Result<Option<peregrine_storage::DownloadJobRow>, RuntimeError> {
         Ok(self.database.download_job(installation_scope(), id).await?)
+    }
+
+    /// The account's playback language preference.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the row cannot be read.
+    pub async fn playback_preference(&self) -> Result<PlaybackPreference, RuntimeError> {
+        Ok(self.database.playback_preference().await?)
+    }
+
+    /// Stores the account's playback language preference.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the row cannot be written.
+    pub async fn set_playback_preference(
+        &self,
+        preference: &PlaybackPreference,
+    ) -> Result<(), RuntimeError> {
+        self.database
+            .set_playback_preference(preference, self.clock.now())
+            .await?;
+        Ok(())
     }
 
     /// Proves, stores, or clears one provider's credential, and answers the job doing it.
@@ -3006,6 +3038,120 @@ impl Runtime {
             duration_ms: progress.duration_ms(),
             percent: progress.percent(),
             watched: progress.watched(),
+        }))
+    }
+
+    /// The sidecar subtitle tracks a playback session may offer for one title or episode.
+    ///
+    /// Metadata only: the path a sidecar lives at never leaves the core (AGENTS R11), and the
+    /// route that serves it resolves the same track through [`Runtime::web_subtitle_path`]. A
+    /// title with no playable file has no tracks to offer, which is an empty list rather than a
+    /// failure: the player draws no subtitle menu for it.
+    pub async fn web_subtitles(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Vec<crate::web::WebSubtitleTrack> {
+        let Ok((file, _)) = self.playable(title_id, episode_id).await else {
+            return Vec::new();
+        };
+        let Ok(tracks) = self.playable_subtitles(file.id).await else {
+            return Vec::new();
+        };
+        tracks
+            .into_iter()
+            .map(|(track, _)| crate::web::WebSubtitleTrack {
+                id: track.id,
+                language: track.language.as_str().to_owned(),
+                label: track.label,
+                format: track.format.as_str().to_owned(),
+                forced: track.is_forced,
+                sdh: track.is_sdh,
+                is_default: track.is_default,
+            })
+            .collect()
+    }
+
+    /// The guarded sidecar and its container for one track of one title or episode.
+    ///
+    /// The title and episode are resolved to the file the core would play, and the track is looked
+    /// up among that file's own sidecars. A track id from another file therefore resolves to
+    /// `None` rather than to a path, which is what keeps a client from naming a file at all.
+    pub async fn web_subtitle_path(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        track_id: i64,
+    ) -> Option<(SafePath, SubtitleFormat)> {
+        let (file, _) = self.playable(title_id, episode_id).await.ok()?;
+        let tracks = self.playable_subtitles(file.id).await.ok()?;
+        tracks
+            .into_iter()
+            .find(|(track, _)| track.id == track_id)
+            .map(|(track, path)| (path, track.format))
+    }
+
+    /// The playable episode that follows one on the same title.
+    ///
+    /// "Next" is the next row in the same season with a file on disk, else the first such row of
+    /// a later season. A film, the last episode, and a later season nobody has acquired all answer
+    /// `None`, which the player draws as no autoplay.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when a read fails.
+    pub async fn web_next_episode(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Option<crate::web::NextEpisodeDto>, RuntimeError> {
+        let Some(episode_id) = episode_id else {
+            return Ok(None);
+        };
+        let Some(identity) = self.title_identity(title_id).await? else {
+            return Ok(None);
+        };
+        if identity.kind != peregrine_domain::catalogue::TitleKind::Show {
+            return Ok(None);
+        }
+        let Some((season, number)) = self.episode_numbers(episode_id).await? else {
+            return Ok(None);
+        };
+        let same_season = self
+            .database
+            .list_title_episodes(installation_scope(), title_id, Some(season), 500)
+            .await?;
+        let row = if let Some(row) = same_season
+            .into_iter()
+            .find(|row| row.episode_number.get() > number && row.files > 0)
+        {
+            row
+        } else {
+            let later = self
+                .database
+                .list_title_episodes(installation_scope(), title_id, None, 1000)
+                .await?;
+            let Some(row) = later
+                .into_iter()
+                .find(|row| row.season_number.get() > season && row.files > 0)
+            else {
+                return Ok(None);
+            };
+            row
+        };
+        let season_number = row.season_number.get();
+        let episode_number = row.episode_number.get();
+        let Some(episode_id) = self
+            .episode_id(title_id, season_number, episode_number)
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(crate::web::NextEpisodeDto {
+            season_number,
+            episode_number,
+            episode_id,
+            name: row.name,
         }))
     }
 
@@ -3995,6 +4141,19 @@ impl Runtime {
             .database
             .remove_from_watchlist(installation_scope().account(), title_id)
             .await?)
+    }
+
+    /// Whether the account's watchlist holds one title.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn is_watchlisted(&self, title_id: i64) -> Result<bool, RuntimeError> {
+        Ok(self
+            .database
+            .watchlist_entry(installation_scope(), title_id)
+            .await?
+            .is_some())
     }
 
     /// The account's watchlist, newest first.

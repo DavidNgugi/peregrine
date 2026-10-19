@@ -20,6 +20,7 @@ pub mod download;
 pub mod event;
 pub mod id;
 pub mod inspect;
+pub mod language;
 pub mod library;
 pub mod matching;
 pub mod name;
@@ -28,6 +29,7 @@ pub mod ordering;
 pub mod path;
 pub mod playback;
 pub mod ports;
+pub mod preferences;
 pub mod quality;
 pub mod rank;
 pub mod redaction;
@@ -101,6 +103,7 @@ pub use ordering::{
 pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
 pub use playback::{LocalPlayback, PlayerBackend, PlayerError, PositionSink};
 pub use ports::{Clock, IdGenerator, SessionToken, SessionTokenError, TokenSource};
+pub use preferences::{PlaybackPreference, PlaybackPreferenceError, SubtitleMode};
 pub use quality::{
     DEFAULT_HD_CEILING_BYTES, GroupRules, PreferredQuality, QualityProfile, QualityProfileError,
     QualityRank, QualityRules, SizeCaps,

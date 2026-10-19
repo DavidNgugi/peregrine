@@ -801,6 +801,10 @@ export const commands = {
 	addToWatchlist: (title: TitleRef) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("add_to_watchlist", { title })),
 	/**  Removes one title from the watchlist. */
 	removeFromWatchlist: (title: TitleRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("remove_from_watchlist", { title })),
+	/**  The languages a player chooses audio and subtitle tracks by. */
+	playbackPreferences: () => typedError<PlaybackPreferencesDto, AppError_Serialize>(__TAURI_INVOKE("playback_preferences")),
+	/**  Replaces the playback language preference and answers the stored value. */
+	setPlaybackPreferences: (preferences: PlaybackPreferencesDto) => typedError<PlaybackPreferencesDto, AppError_Serialize>(__TAURI_INVOKE("set_playback_preferences", { preferences })),
 	/**  Reads the managed indexer manager's state. */
 	prowlarrStatus: () => typedError<ProwlarrStatusDto, AppError_Serialize>(__TAURI_INVOKE("prowlarr_status")),
 	/**  Downloads and verifies the pinned Prowlarr pack, and answers the job doing it. */
@@ -1717,6 +1721,16 @@ export type PersonRef = {
 	id: number,
 };
 
+/**  The account's playback language preference. */
+export type PlaybackPreferencesDto = {
+	/**  The preferred audio language, as a BCP-47-ish tag. */
+	audioLanguage: string,
+	/**  The preferred subtitle language, as a BCP-47-ish tag. */
+	subtitleLanguage: string,
+	/**  How the player picks a subtitle track. */
+	subtitles: SubtitleModeDto,
+};
+
 /**
  *  One open playback session: what is playing, and where the bytes come from.
  * 
@@ -2146,6 +2160,15 @@ export type ShortcutBinding = {
 	/**  Whether Shift is held. */
 	shift: boolean,
 };
+
+/**  How the player picks a subtitle track, as the settings screen selects it. */
+export type SubtitleModeDto = 
+/**  Match the preferred language, else the row's own default. */
+"auto" | 
+/**  Start with no subtitle track. */
+"off" | 
+/**  Show only the forced narrative track. */
+"forced";
 
 /**
  *  One sidecar subtitle track a playback session can show, and where its bytes are.

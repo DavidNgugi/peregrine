@@ -21,13 +21,17 @@
 //! token. Revoking the device drops its sessions.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use peregrine_domain::catalogue::TitleKind;
-use peregrine_domain::{Clock, LocalPlayback, SessionToken, TokenSource};
+use peregrine_domain::{
+    Clock, DownloadState, LocalPlayback, PlaybackPreference, SafePath, SessionToken,
+    SubtitleFormat, SubtitleMode, TokenSource,
+};
 use peregrine_platform::{Inhibitor, PowerSave};
 use peregrine_providers::{BrowseRequest, BrowseSort};
 use peregrine_storage::{Database, NewPairedDevice, PairedDevice, StorageError};
@@ -188,6 +192,9 @@ pub enum WebError {
     /// The title is not in the library, or this scope may not see it.
     #[error("the title is not in the library")]
     UnknownTitle,
+    /// The episode is not in the library, or this scope may not see it.
+    #[error("the episode is not in the library")]
+    UnknownEpisode,
     /// The device was not approved to start downloads.
     #[error("this device may not start downloads")]
     NotPermitted,
@@ -289,7 +296,155 @@ pub struct PlaybackTicket {
     pub duration_ms: Option<i64>,
     /// The episode the session plays, for a series' progress rows.
     pub episode_id: Option<i64>,
+    /// `movie` or `show`, so the player knows whether a next episode can exist.
+    pub title_kind: &'static str,
+    /// The title's display name, for the next-up line.
+    pub title_name: String,
+    /// The sidecar subtitle tracks this session can serve, default already chosen.
+    pub subtitles: Vec<SubtitleTrackDto>,
+    /// The playable episode after this one, for autoplay.
+    pub next_episode: Option<NextEpisodeDto>,
+    /// The audio language the host selected for a transcode, when it selected one.
+    pub audio_language: Option<String>,
 }
+
+/// One sidecar subtitle track, as the player draws and fetches it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleTrackDto {
+    /// The track row id.
+    pub id: i64,
+    /// The language tag the row carries.
+    pub language: String,
+    /// The label to show instead of the language, when the row gave one.
+    pub label: Option<String>,
+    /// The sidecar's container.
+    pub format: String,
+    /// Whether the track only covers forced narrative.
+    pub forced: bool,
+    /// Whether the track carries descriptions for the hard of hearing.
+    pub sdh: bool,
+    /// The track this device's preferences choose, so the player starts on it.
+    pub r#default: bool,
+    /// The `WebVTT` URL the player fetches this track from.
+    pub url: String,
+}
+
+/// The episode that follows the one a playback ticket opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextEpisodeDto {
+    /// The season the next episode sits in.
+    pub season_number: u32,
+    /// Its number within that season.
+    pub episode_number: u32,
+    /// The episode row id a new ticket names.
+    pub episode_id: i64,
+    /// Its name, when a provider filled one in.
+    pub name: Option<String>,
+}
+
+/// The account's playback language preference, as the web client reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferencesDto {
+    /// The preferred audio language.
+    pub audio_language: String,
+    /// The preferred subtitle language.
+    pub subtitle_language: String,
+    /// `auto`, `off`, or `forced`.
+    pub subtitles: String,
+}
+
+/// What a season acquisition queued, and what it could not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonAcquireDto {
+    /// Episodes the queue accepted.
+    pub queued: u32,
+    /// Episodes whose file was already on disk.
+    pub already_playable: u32,
+    /// Episodes the queue refused.
+    pub failed: u32,
+}
+
+/// A subtitle track's metadata without its path, which never leaves the core (AGENTS R11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebSubtitleTrack {
+    /// The track row id.
+    pub id: i64,
+    /// The language tag the row carries.
+    pub language: String,
+    /// The label to show instead of the language, when the row gave one.
+    pub label: Option<String>,
+    /// The sidecar's container.
+    pub format: String,
+    /// Whether the track only covers forced narrative.
+    pub forced: bool,
+    /// Whether the track carries descriptions for the hard of hearing.
+    pub sdh: bool,
+    /// Whether the row itself is preferred when no language matches.
+    pub is_default: bool,
+}
+
+/// What one title's download jobs say, keyed the way its page draws them.
+#[derive(Debug, Default)]
+struct TitleDownloads {
+    title: Option<JobDownload>,
+    episodes: HashMap<(u32, u32), JobDownload>,
+}
+
+/// One job's lifecycle state and completion.
+#[derive(Debug, Clone)]
+struct JobDownload {
+    state: String,
+    percent: f64,
+}
+
+impl TitleDownloads {
+    /// The state a title page shows when no single job covers the whole title.
+    ///
+    /// A series the user downloaded episode by episode has no title-level job, so its page
+    /// aggregates the listed season's jobs: the first one still doing something wins, and a
+    /// season whose every listed episode completed reads `completed`. A failed or removed job
+    /// is neither active nor done, so it contributes nothing to the summary.
+    fn summary(&self, is_show: bool, episodes: &[EpisodeDto]) -> (Option<String>, Option<f64>) {
+        if let Some(title) = &self.title {
+            return (Some(title.state.clone()), Some(title.percent));
+        }
+        if !is_show || episodes.is_empty() {
+            return (None, None);
+        }
+        let jobs: Vec<&JobDownload> = episodes
+            .iter()
+            .filter_map(|episode| {
+                self.episodes
+                    .get(&(episode.season_number, episode.episode_number))
+            })
+            .collect();
+        if let Some(active) = jobs
+            .iter()
+            .find(|job| DownloadState::parse(&job.state).is_some_and(|state| !state.is_terminal()))
+        {
+            return (Some(active.state.clone()), Some(active.percent));
+        }
+        let all_done = episodes.iter().all(|episode| {
+            self.episodes
+                .get(&(episode.season_number, episode.episode_number))
+                .is_some_and(|job| job.state == DownloadState::Completed.as_str())
+        });
+        if all_done {
+            return (
+                Some(DownloadState::Completed.as_str().to_owned()),
+                Some(100.0),
+            );
+        }
+        (None, None)
+    }
+}
+
+/// Where a subtitle track is served from and how it was encoded.
+type SubtitleSource = (SafePath, SubtitleFormat);
 
 /// A media request the server will answer, resolved from its playback token.
 #[derive(Debug, Clone)]
@@ -354,6 +509,12 @@ struct HlsSession {
     child: tokio::process::Child,
     device_id: i64,
     expires_at_ms: i64,
+}
+
+/// What a started transcode hands the ticket it was minted for.
+struct StartedHls {
+    url: String,
+    audio_language: Option<String>,
 }
 
 /// A live HLS session, as the route that serves it needs it.
@@ -1346,6 +1507,245 @@ impl WebService {
             coalesced: started.coalesced,
         })
     }
+
+    /// The account's playback language preference.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the row cannot be read.
+    pub async fn preferences(&self) -> Result<PreferencesDto, WebError> {
+        let preference = self.runtime.playback_preference().await?;
+        Ok(PreferencesDto {
+            audio_language: preference.audio_language().to_owned(),
+            subtitle_language: preference.subtitle_language().to_owned(),
+            subtitles: preference.subtitles().as_str().to_owned(),
+        })
+    }
+
+    /// Adds or removes one title on the account's watchlist.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::UnknownTitle`] when the title is not visible here, or [`WebError::Runtime`]
+    /// when the write fails.
+    pub async fn set_watchlist(
+        &self,
+        device: &PairedDevice,
+        title_id: i64,
+        saved: bool,
+    ) -> Result<(), WebError> {
+        if self.runtime.title_identity(title_id).await?.is_none() {
+            return Err(WebError::UnknownTitle);
+        }
+        if saved {
+            self.runtime.add_to_watchlist(title_id).await?;
+        } else {
+            self.runtime.remove_from_watchlist(title_id).await?;
+        }
+        info!(
+            device = device.id,
+            title = title_id,
+            saved,
+            "a paired device changed the watchlist"
+        );
+        Ok(())
+    }
+
+    /// Marks one title, episode, or season watched or unwatched.
+    ///
+    /// The scope is an exact word rather than a prefix, and an episode needs both of its numbers
+    /// because a season alone is a different write. A title or episode the caller named that the
+    /// library does not hold is a 404 rather than a storage error surfacing as a 500.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::InvalidRequest`] for a missing or unknown scope or number,
+    /// [`WebError::UnknownTitle`] or [`WebError::UnknownEpisode`] when the row is absent, and
+    /// [`WebError::Runtime`] when the write fails.
+    pub async fn set_watched(
+        &self,
+        device: &PairedDevice,
+        title_id: i64,
+        scope: &str,
+        season: Option<u32>,
+        episode: Option<u32>,
+        watched: bool,
+    ) -> Result<(), WebError> {
+        if self.runtime.title_identity(title_id).await?.is_none() {
+            return Err(WebError::UnknownTitle);
+        }
+        match scope {
+            "title" => self.runtime.set_title_watched(title_id, watched).await?,
+            "episode" => {
+                let (Some(season), Some(episode)) = (season, episode) else {
+                    return Err(WebError::InvalidRequest);
+                };
+                if season == 0 || episode == 0 {
+                    return Err(WebError::InvalidRequest);
+                }
+                if self
+                    .runtime
+                    .episode_id(title_id, season, episode)
+                    .await?
+                    .is_none()
+                {
+                    return Err(WebError::UnknownEpisode);
+                }
+                match self
+                    .runtime
+                    .set_episode_watched(title_id, season, episode, watched)
+                    .await
+                {
+                    Ok(()) => {}
+                    // The episode was resolved a statement ago; a row that vanished since is
+                    // still the caller's 404, not an internal failure.
+                    Err(crate::RuntimeError::InvalidRequest { .. }) => {
+                        return Err(WebError::UnknownEpisode);
+                    }
+                    Err(error) => return Err(WebError::Runtime(error)),
+                }
+            }
+            "season" => {
+                let Some(season) = season.filter(|season| *season > 0) else {
+                    return Err(WebError::InvalidRequest);
+                };
+                self.runtime
+                    .set_season_watched(title_id, season, watched)
+                    .await?;
+            }
+            _ => return Err(WebError::InvalidRequest),
+        }
+        info!(
+            device = device.id,
+            title = title_id,
+            scope,
+            watched,
+            "a paired device changed a watched mark"
+        );
+        Ok(())
+    }
+
+    /// Queues every episode of one season that has no file on disk.
+    ///
+    /// One episode's failure is counted rather than returned: a season is fifteen downloads, and
+    /// a release the indexer cannot find for episode four must not cost the other fourteen. The
+    /// audit row is written before the queue is touched, so a failed submission still names the
+    /// device and the episode; when a row cannot be written the episode is not queued at all,
+    /// because an unattributed acquisition is the thing ADR 0029 forbids.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::NotPermitted`] when the device lacks the acquire scope,
+    /// [`WebError::InvalidRequest`] for a zero season, [`WebError::UnknownTitle`] for an id no
+    /// catalogue row holds, and [`WebError::Runtime`] when the season read fails.
+    #[allow(clippy::too_many_lines)] // One loop over the season; splitting it hides the audit order.
+    pub async fn acquire_season(
+        &self,
+        device: &PairedDevice,
+        title_id: i64,
+        season: u32,
+    ) -> Result<SeasonAcquireDto, WebError> {
+        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) {
+            return Err(WebError::NotPermitted);
+        }
+        if season == 0 {
+            return Err(WebError::InvalidRequest);
+        }
+        if self.runtime.title_identity(title_id).await?.is_none() {
+            return Err(WebError::UnknownTitle);
+        }
+        let episodes = self
+            .runtime
+            .title_episodes(title_id, Some(season), 500)
+            .await?;
+        let mut result = SeasonAcquireDto {
+            queued: 0,
+            already_playable: 0,
+            failed: 0,
+        };
+        for episode in episodes {
+            if episode.row.files > 0 {
+                result.already_playable += 1;
+                continue;
+            }
+            let episode_number = episode.row.episode_number.get();
+            let episode_id = self
+                .runtime
+                .episode_id(title_id, episode.row.season_number.get(), episode_number)
+                .await?;
+            let audit_id = match self
+                .database
+                .record_web_audit(peregrine_storage::NewWebAudit {
+                    device_id: device.id,
+                    action: peregrine_storage::WebAuditAction::Acquire,
+                    title_id,
+                    episode_id,
+                    job_id: None,
+                    at: self.now(),
+                })
+                .await
+            {
+                Ok(id) => id,
+                Err(error) => {
+                    warn!(
+                        %error,
+                        title = title_id,
+                        season,
+                        episode = episode_number,
+                        "a season acquisition could not be audited"
+                    );
+                    result.failed += 1;
+                    continue;
+                }
+            };
+            let pick = crate::jobs::acquire::EpisodePick {
+                season: episode.row.season_number.get(),
+                episode: episode_number,
+            };
+            match self
+                .runtime
+                .start_acquire(
+                    crate::runtime::installation_scope(),
+                    title_id,
+                    Some(pick),
+                    1,
+                )
+                .await
+            {
+                Ok(started) => {
+                    result.queued += 1;
+                    if let Err(error) = self
+                        .database
+                        .set_web_audit_job(audit_id, started.journal_id)
+                        .await
+                    {
+                        warn!(%error, "an acquisition audit could not name its job");
+                    }
+                }
+                Err(error) => {
+                    result.failed += 1;
+                    warn!(
+                        %error,
+                        title = title_id,
+                        season,
+                        episode = episode_number,
+                        "a season acquisition could not be queued"
+                    );
+                }
+            }
+        }
+        info!(
+            device = device.id,
+            title = title_id,
+            season,
+            queued = result.queued,
+            already_playable = result.already_playable,
+            failed = result.failed,
+            "a paired device queued a season"
+        );
+        Ok(result)
+    }
+
     /// The account's My List as tiles, newest first.
     ///
     /// # Errors
@@ -1483,7 +1883,10 @@ impl WebService {
             return Ok(None);
         };
         let is_show = identity.kind == TitleKind::Show;
-        let (seasons, episodes) = self.title_seasons_page(id, is_show, season).await?;
+        let downloads = self.title_downloads(id).await?;
+        let (seasons, episodes) = self
+            .title_seasons_page(id, is_show, season, &downloads)
+            .await?;
         // A provider fill that never cached its poster (or a series the catalogue only listed)
         // is a page with no main image. The same refresh fills both, and the client already polls
         // while `refreshing` is true.
@@ -1522,6 +1925,7 @@ impl WebService {
                 ),
                 None => (None, None, None, None, None, 0, 0, false, None),
             };
+        let (download_state, download_percent) = downloads.summary(is_show, &episodes);
         Ok(Some(TitleDto {
             id,
             name: identity.name,
@@ -1536,6 +1940,10 @@ impl WebService {
             playable,
             progress,
             in_library: detail.is_some(),
+            watchlisted: self.runtime.is_watchlisted(id).await?,
+            watched: self.runtime.title_watched(id).await?,
+            download_state,
+            download_percent,
             seasons,
             episodes,
             similar,
@@ -1549,6 +1957,7 @@ impl WebService {
         id: i64,
         is_show: bool,
         season: Option<u32>,
+        downloads: &TitleDownloads,
     ) -> Result<(Vec<SeasonDto>, Vec<EpisodeDto>), WebError> {
         if !is_show {
             return Ok((Vec::new(), Vec::new()));
@@ -1575,8 +1984,38 @@ impl WebService {
         let episodes = episode_dtos(
             self.runtime.title_episodes(id, chosen, 500).await?,
             &progress,
+            downloads,
         );
         Ok((seasons, episodes))
+    }
+
+    /// One read of the title's download jobs, keyed by the numbers a page draws.
+    ///
+    /// The queue is read once rather than per episode: the title-level job is the newest that
+    /// names no episode, and an episode's job is the newest that names it. `episode_numbers`
+    /// turns the job's episode id into the season and number the page already has.
+    async fn title_downloads(&self, title_id: i64) -> Result<TitleDownloads, WebError> {
+        let jobs = self.runtime.download_jobs().await?;
+        let mut downloads = TitleDownloads::default();
+        for job in jobs.iter().filter(|job| job.title_id == title_id) {
+            let download = JobDownload {
+                state: job.state.as_str().to_owned(),
+                percent: job.progress_permille as f64 / 10.0,
+            };
+            match job.episode_id {
+                None => {
+                    if downloads.title.is_none() {
+                        downloads.title = Some(download);
+                    }
+                }
+                Some(episode_id) => {
+                    if let Some(numbers) = self.runtime.episode_numbers(episode_id).await? {
+                        downloads.episodes.entry(numbers).or_insert(download);
+                    }
+                }
+            }
+        }
+        Ok(downloads)
     }
 
     async fn title_similar_page(
@@ -1627,6 +2066,7 @@ impl WebService {
     ///
     /// [`WebError::NoFile`], [`WebError::TranscodeRequired`], [`WebError::Unsupported`], or a
     /// runtime failure.
+    #[allow(clippy::too_many_lines)] // One mint: resolve, choose delivery, then build the ticket.
     pub async fn mint_playback(
         &self,
         device: &PairedDevice,
@@ -1666,38 +2106,83 @@ impl WebService {
         let start = target.duration_ms.map_or(position_ms.max(0), |duration| {
             position_ms.clamp(0, duration)
         });
+        let identity = self
+            .runtime
+            .title_identity(title_id)
+            .await?
+            .ok_or(WebError::UnknownTitle)?;
+        let preference = self.runtime.playback_preference().await?;
+        let next_episode = self
+            .runtime
+            .web_next_episode(title_id, target.episode_id)
+            .await?;
         // A container the webview demuxes is served as bytes; everything else is transcoded. The
         // choice is the domain's `LocalPlayback` rule, not this module's codec table.
         // The container is the first question; the streams inside it are the second. An MP4
         // carrying HEVC or AC3 demuxes and still fails, so a probe that names another codec goes
         // to the transcoder just as an MKV does.
-        if target.playback != LocalPlayback::Webview || !transcode::browser_safe(&target.path).await
+        let (kind, url, mime, audio_language, subtitle_offset) = if target.playback
+            != LocalPlayback::Webview
+            || !transcode::browser_safe(&target.path).await
         {
-            return self.start_hls(device, &target, start).await;
-        }
-        let mime = mime_for(&target.path);
-        let token = self.tokens.next_token();
-        let now_ms = self.now();
-        self.sessions
-            .lock()
-            .expect("the session lock is not poisoned")
-            .insert(
-                token.as_str().to_owned(),
-                Grant {
-                    device_id: device.id,
-                    path: target.path,
-                    size_bytes: target.size_bytes,
-                    mime,
-                    expires_at_ms: now_ms + PLAYBACK_TTL_MS,
-                },
-            );
+            let started = self
+                .start_hls(device, &target, start, preference.audio_language())
+                .await?;
+            (
+                "hls",
+                started.url,
+                "application/vnd.apple.mpegurl".to_owned(),
+                started.audio_language,
+                start,
+            )
+        } else {
+            let mime = mime_for(&target.path);
+            let token = self.tokens.next_token();
+            let now_ms = self.now();
+            self.sessions
+                .lock()
+                .expect("the session lock is not poisoned")
+                .insert(
+                    token.as_str().to_owned(),
+                    Grant {
+                        device_id: device.id,
+                        path: target.path,
+                        size_bytes: target.size_bytes,
+                        mime,
+                        expires_at_ms: now_ms + PLAYBACK_TTL_MS,
+                    },
+                );
+            (
+                "direct",
+                format!("/media/{}", token.as_str()),
+                mime.to_owned(),
+                None,
+                0,
+            )
+        };
+        // The sidecar timeline is the film's own. A transcode's playlist starts at zero, so the
+        // URL carries the start offset and the route retimes the cues onto that timeline.
+        let subtitles = subtitle_dtos(
+            self.runtime
+                .web_subtitles(title_id, target.episode_id)
+                .await,
+            &preference,
+            title_id,
+            target.episode_id,
+            subtitle_offset,
+        );
         Ok(PlaybackTicket {
-            kind: "direct",
-            url: format!("/media/{}", token.as_str()),
-            mime: mime.to_owned(),
+            kind,
+            url,
+            mime,
             start_position_ms: start,
             duration_ms: target.duration_ms,
             episode_id: target.episode_id,
+            title_kind: identity.kind.as_str(),
+            title_name: identity.name,
+            subtitles,
+            next_episode,
+            audio_language,
         })
     }
 
@@ -1798,20 +2283,25 @@ impl WebService {
     }
 
     /// Starts a transcode at `start_ms` and answers the HLS playlist URL.
+    ///
+    /// The preferred audio language is the host's one selection: the transcoder maps the first
+    /// stream whose tag matches it and reports the tag back so the ticket can say which language
+    /// this session carries. A host that finds no match maps the first stream and reports none.
     async fn start_hls(
         &self,
         device: &PairedDevice,
         target: &WebPlaybackTarget,
         start_ms: i64,
-    ) -> Result<PlaybackTicket, WebError> {
+        audio_language: &str,
+    ) -> Result<StartedHls, WebError> {
         let transcoder = self.transcoder().await?;
         // One session per device: a resume or a seek replaces the previous transcode rather than
         // leaving two encoders fighting for the same GPU.
         self.evict_hls_device(device.id).await;
         let token = self.tokens.next_token();
         let directory = self.transcode_root.join(token.as_str());
-        let mut child = transcoder
-            .start(&directory, &target.path, start_ms)
+        let mut started = transcoder
+            .start(&directory, &target.path, start_ms, Some(audio_language))
             .await
             .map_err(|error| {
                 warn!(%error, "the transcode could not be started");
@@ -1821,7 +2311,7 @@ impl WebService {
             let mut sessions = self.hls.lock().await;
             if sessions.len() >= HLS_SESSION_LIMIT {
                 drop(sessions);
-                let _ = child.kill().await;
+                let _ = started.child.kill().await;
                 let _ = tokio::fs::remove_dir_all(&directory).await;
                 return Err(WebError::TranscodeBusy);
             }
@@ -1829,19 +2319,15 @@ impl WebService {
                 token.as_str().to_owned(),
                 HlsSession {
                     dir: directory,
-                    child,
+                    child: started.child,
                     device_id: device.id,
                     expires_at_ms: self.now() + PLAYBACK_TTL_MS,
                 },
             );
         }
-        Ok(PlaybackTicket {
-            kind: "hls",
+        Ok(StartedHls {
             url: format!("/hls/{}/index.m3u8", token.as_str()),
-            mime: "application/vnd.apple.mpegurl".to_owned(),
-            start_position_ms: start_ms,
-            duration_ms: target.duration_ms,
-            episode_id: target.episode_id,
+            audio_language: started.audio_language,
         })
     }
 
@@ -1942,6 +2428,23 @@ impl WebService {
             .is_some_and(|device| device.revoked_at.is_none()))
     }
 
+    /// The sidecar a subtitle URL names, resolved through the title's own playable file.
+    ///
+    /// The client names a title, an episode, and a track id; the path comes from the core's own
+    /// guard. `None` covers every refusal — an unknown title, no playable file, a track that
+    /// belongs to another file, a sidecar outside every root — because the route's answer to all
+    /// of them is one 404.
+    pub async fn subtitle_track(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        track_id: i64,
+    ) -> Option<SubtitleSource> {
+        self.runtime
+            .web_subtitle_path(title_id, episode_id, track_id)
+            .await
+    }
+
     /// The cache root, which is the only directory image requests may read.
     #[must_use]
     pub fn artwork_root(&self) -> &Path {
@@ -1972,6 +2475,10 @@ pub struct LibraryRowDto {
 }
 
 /// A title as its page draws it.
+// Five independent flags, each a column or a derived answer a screen draws: playable, in the
+// library, on the watchlist, watched, and refreshing. Collapsing them into one state would
+// misrepresent a title that is several at once.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TitleDto {
@@ -2001,6 +2508,14 @@ pub struct TitleDto {
     pub progress: Option<WebProgress>,
     /// Whether the library holds a copy; false for a title opened from a discovery rail.
     pub in_library: bool,
+    /// Whether the account's watchlist holds this title.
+    pub watchlisted: bool,
+    /// Whether a whole-title progress row is marked watched.
+    pub watched: bool,
+    /// The title-level download job's lifecycle state, or null when there is none.
+    pub download_state: Option<String>,
+    /// The title-level job's completion, 0 to 100.
+    pub download_percent: Option<f64>,
     /// The seasons a series offers, empty for a film.
     pub seasons: Vec<SeasonDto>,
     /// The episodes of the requested season, empty for a film.
@@ -2191,6 +2706,10 @@ pub struct EpisodeDto {
     pub watched: bool,
     /// Whether a file is on disk for it.
     pub playable: bool,
+    /// The download job's lifecycle state for this episode, or null when nobody asked.
+    pub download_state: Option<String>,
+    /// The job's completion, 0 to 100, when one is running.
+    pub download_percent: Option<f64>,
 }
 
 /// Where a title was left, as the client's Resume control reads it.
@@ -2252,6 +2771,7 @@ fn hero_candidates(rails: &[RailDto], hero: Option<&TileDto>) -> Vec<TileDto> {
 fn episode_dtos(
     episodes: Vec<crate::TitleEpisodeDetail>,
     progress: &[peregrine_storage::EpisodeProgressRow],
+    downloads: &TitleDownloads,
 ) -> Vec<EpisodeDto> {
     episodes
         .into_iter()
@@ -2261,6 +2781,9 @@ fn episode_dtos(
                 held.season_number == row.season_number.get()
                     && held.episode_number == row.episode_number.get()
             });
+            let download = downloads
+                .episodes
+                .get(&(row.season_number.get(), row.episode_number.get()));
             EpisodeDto {
                 season_number: row.season_number.get(),
                 episode_number: row.episode_number.get(),
@@ -2275,9 +2798,84 @@ fn episode_dtos(
                 position_ms: found.map_or(0, |held| held.position_ms),
                 watched: found.is_some_and(|held| held.watched),
                 playable: row.files > 0,
+                download_state: download.map(|job| job.state.clone()),
+                download_percent: download.map(|job| job.percent),
             }
         })
         .collect()
+}
+
+/// The player's subtitle tracks, with exactly one `default` chosen by the account's preference.
+fn subtitle_dtos(
+    tracks: Vec<WebSubtitleTrack>,
+    preference: &PlaybackPreference,
+    title_id: i64,
+    episode_id: Option<i64>,
+    offset_ms: i64,
+) -> Vec<SubtitleTrackDto> {
+    let selected = chosen_subtitle(&tracks, preference);
+    tracks
+        .into_iter()
+        .map(|track| SubtitleTrackDto {
+            id: track.id,
+            language: track.language,
+            label: track.label,
+            format: track.format,
+            forced: track.forced,
+            sdh: track.sdh,
+            r#default: selected == Some(track.id),
+            url: subtitle_url(track.id, title_id, episode_id, offset_ms),
+        })
+        .collect()
+}
+
+/// The row id the preference chooses, or `None` when no track should start on.
+fn chosen_subtitle(tracks: &[WebSubtitleTrack], preference: &PlaybackPreference) -> Option<i64> {
+    match preference.subtitles() {
+        SubtitleMode::Off => None,
+        SubtitleMode::Forced => {
+            let forced: Vec<&WebSubtitleTrack> =
+                tracks.iter().filter(|track| track.forced).collect();
+            forced
+                .iter()
+                .copied()
+                .find(|track| tag_matches(&track.language, preference.subtitle_language()))
+                .or_else(|| forced.first().copied())
+                .map(|track| track.id)
+        }
+        SubtitleMode::Auto => tracks
+            .iter()
+            .find(|track| tag_matches(&track.language, preference.subtitle_language()))
+            .or_else(|| tracks.iter().find(|track| track.is_default))
+            // A lone sidecar tagged "und" is the common shape of a downloaded subtitle: the
+            // library has no language to match, and starting with it off would hide the only
+            // track the file has. More than one track keeps the preference honest.
+            .or_else(|| {
+                let only = tracks.first()?;
+                (tracks.len() == 1 && only.language.eq_ignore_ascii_case("und")).then_some(only)
+            })
+            .map(|track| track.id),
+    }
+}
+
+/// Whether a track's tag names the wanted language: a case-insensitive prefix either way.
+///
+/// The either-way comparison is what makes `en` match a provider's `eng` and a row's `en-US`,
+/// without requiring the preference and the row to agree on how much of the tag they wrote.
+fn tag_matches(tag: &str, wanted: &str) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    let wanted = wanted.trim().to_ascii_lowercase();
+    !tag.is_empty() && !wanted.is_empty() && (tag.starts_with(&wanted) || wanted.starts_with(&tag))
+}
+
+/// The URL a track is fetched from, with the offset that puts its cues on the session's timeline.
+fn subtitle_url(track_id: i64, title_id: i64, episode_id: Option<i64>, offset_ms: i64) -> String {
+    let mut url = format!("/api/subtitle/{track_id}?titleId={title_id}");
+    if let Some(episode_id) = episode_id {
+        let _ = write!(url, "&episodeId={episode_id}");
+    }
+    let _ = write!(url, "&offsetMs={offset_ms}");
+    url
 }
 
 fn tile_from_entry(entry: &crate::LibraryTitleEntry) -> TileDto {
@@ -2416,7 +3014,12 @@ mod tests {
     use peregrine_testkit::MemorySecretStore;
     use tempfile::TempDir;
 
-    use super::{WebConfig, WebError, code_for, hash_token, mime_for, scope_allows};
+    use peregrine_domain::{PlaybackPreference, SubtitleMode};
+
+    use super::{
+        EpisodeDto, JobDownload, TitleDownloads, WebConfig, WebError, WebSubtitleTrack,
+        chosen_subtitle, code_for, hash_token, mime_for, scope_allows, subtitle_dtos, subtitle_url,
+    };
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
     use crate::{Observability, Runtime, RuntimeConfig};
@@ -2653,5 +3256,177 @@ mod tests {
             Err(WebError::InvalidName)
         ));
         assert!(super::device_name(&"a".repeat(64)).is_ok());
+    }
+
+    fn track(id: i64, language: &str, forced: bool, is_default: bool) -> WebSubtitleTrack {
+        WebSubtitleTrack {
+            id,
+            language: language.to_owned(),
+            label: None,
+            format: "srt".to_owned(),
+            forced,
+            sdh: false,
+            is_default,
+        }
+    }
+
+    #[test]
+    fn the_subtitle_default_follows_the_account_preference() {
+        let tracks = vec![
+            track(1, "eng", false, false),
+            track(2, "fra", true, false),
+            track(3, "deu", false, true),
+        ];
+        let auto = PlaybackPreference::new("en", "fr", SubtitleMode::Auto).expect("a preference");
+        assert_eq!(
+            chosen_subtitle(&tracks, &auto),
+            Some(2),
+            "a language match beats the row's own default"
+        );
+
+        let english =
+            PlaybackPreference::new("en", "en", SubtitleMode::Auto).expect("a preference");
+        assert_eq!(chosen_subtitle(&tracks, &english), Some(1));
+
+        let unmatched =
+            PlaybackPreference::new("en", "es", SubtitleMode::Auto).expect("a preference");
+        assert_eq!(
+            chosen_subtitle(&tracks, &unmatched),
+            Some(3),
+            "with no language match the row's default is chosen"
+        );
+
+        let off = PlaybackPreference::new("en", "fr", SubtitleMode::Off).expect("a preference");
+        assert_eq!(chosen_subtitle(&tracks, &off), None);
+
+        let forced =
+            PlaybackPreference::new("en", "fr", SubtitleMode::Forced).expect("a preference");
+        assert_eq!(chosen_subtitle(&tracks, &forced), Some(2));
+
+        let forced_other =
+            PlaybackPreference::new("en", "de", SubtitleMode::Forced).expect("a preference");
+        assert_eq!(
+            chosen_subtitle(&tracks, &forced_other),
+            Some(2),
+            "a forced preference with no matching forced track takes the first forced one"
+        );
+
+        let english_only = vec![track(1, "eng", false, false)];
+        let none = PlaybackPreference::new("en", "es", SubtitleMode::Auto).expect("a preference");
+        assert_eq!(chosen_subtitle(&english_only, &none), None);
+
+        let undetermined = vec![track(1, "und", false, false)];
+        assert_eq!(
+            chosen_subtitle(&undetermined, &none),
+            Some(1),
+            "a lone undetermined sidecar is still the only subtitles the file has"
+        );
+    }
+
+    #[test]
+    fn exactly_one_served_track_is_marked_default_and_the_url_carries_the_offset() {
+        let tracks = vec![track(1, "eng", false, false), track(2, "fra", false, true)];
+        let preference =
+            PlaybackPreference::new("en", "fr", SubtitleMode::Auto).expect("a preference");
+        let served = subtitle_dtos(tracks, &preference, 7, Some(9), 4_000);
+        assert_eq!(served.iter().filter(|track| track.r#default).count(), 1);
+        assert!(served[1].r#default);
+        assert_eq!(
+            served[0].url,
+            "/api/subtitle/1?titleId=7&episodeId=9&offsetMs=4000"
+        );
+        let json = serde_json::to_value(&served).expect("serializes");
+        assert_eq!(json[0]["default"], serde_json::json!(false));
+        assert_eq!(json[1]["default"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn a_title_url_omits_an_episode_it_does_not_have() {
+        assert_eq!(
+            subtitle_url(3, 4, None, 0),
+            "/api/subtitle/3?titleId=4&offsetMs=0"
+        );
+    }
+
+    fn episode(season_number: u32, episode_number: u32) -> EpisodeDto {
+        EpisodeDto {
+            season_number,
+            episode_number,
+            name: None,
+            overview: None,
+            still: None,
+            runtime_minutes: None,
+            rating: None,
+            air_date: None,
+            files: 0,
+            percent: 0.0,
+            position_ms: 0,
+            watched: false,
+            playable: false,
+            download_state: None,
+            download_percent: None,
+        }
+    }
+
+    #[test]
+    fn a_series_download_state_aggregates_the_listed_episodes() {
+        let mut downloads = TitleDownloads::default();
+        let episodes = vec![episode(1, 1), episode(1, 2)];
+        assert_eq!(downloads.summary(true, &episodes), (None, None));
+
+        downloads.episodes.insert(
+            (1, 1),
+            JobDownload {
+                state: "completed".to_owned(),
+                percent: 100.0,
+            },
+        );
+        downloads.episodes.insert(
+            (1, 2),
+            JobDownload {
+                state: "downloading".to_owned(),
+                percent: 42.0,
+            },
+        );
+        assert_eq!(
+            downloads.summary(true, &episodes),
+            (Some("downloading".to_owned()), Some(42.0)),
+            "the first active episode wins"
+        );
+
+        downloads.episodes.insert(
+            (1, 2),
+            JobDownload {
+                state: "completed".to_owned(),
+                percent: 100.0,
+            },
+        );
+        assert_eq!(
+            downloads.summary(true, &episodes),
+            (Some("completed".to_owned()), Some(100.0))
+        );
+
+        assert_eq!(
+            downloads.summary(false, &episodes),
+            (None, None),
+            "a film does not aggregate episodes"
+        );
+
+        let incomplete = vec![episode(1, 1), episode(1, 3)];
+        assert_eq!(
+            downloads.summary(true, &incomplete),
+            (None, None),
+            "an episode with no job is not done"
+        );
+
+        downloads.title = Some(JobDownload {
+            state: "paused".to_owned(),
+            percent: 12.5,
+        });
+        assert_eq!(
+            downloads.summary(true, &episodes),
+            (Some("paused".to_owned()), Some(12.5)),
+            "a title-level job is the page's answer"
+        );
     }
 }

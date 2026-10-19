@@ -933,16 +933,31 @@ sequenceDiagram
     TV->>Web: GET /api/home
     Web->>Core: home_page: hero, Continue Watching, library, provider rails
     Core-->>TV: one answer for the whole home screen
+    TV->>Web: GET /api/title/{id}
+    Web-->>TV: title, seasons, episodes, watchlist/watched, download state
+    opt The viewer saves or marks something
+        TV->>Web: POST /api/watchlist {titleId, saved}
+        TV->>Web: POST /api/watched {titleId, scope, season?, episode?, watched}
+        Web->>Core: add/remove watchlist, set title/season/episode watched
+        Note over Desktop,TV: one watch_progress or watchlist_entry row
+    end
     TV->>Web: POST /api/playback/{id} {position, season?, episode?}
     alt The container and its streams are browser-safe
-        Web-->>TV: direct ticket; Range /media/{token}
+        Web-->>TV: direct ticket; Range /media/{token}; subtitle URLs; next episode
     else Anything else
-        Web->>Core: ffmpeg HLS session starting at the offset
-        Web-->>TV: playlist and fMP4 segments under /hls/{token}
+        Web->>Core: ffmpeg HLS session at the offset, the preferred audio stream
+        Web-->>TV: playlist, segments, and offset-retimed WebVTT sidecars
     end
+    TV->>Web: GET /api/subtitle/{trackId}?offsetMs=...
+    Web->>Core: parse the sidecar, retime its cues, render WebVTT
+    Web-->>TV: text/vtt
     TV->>Web: POST /api/progress every ten seconds, on hide, and on leave
     Web->>Core: record_progress → the same watch_progress row
     Note over Desktop,TV: Continue Watching and Resume read one row in both directions
+    opt The current episode ends and the ticket names a next one
+        TV->>Web: POST /api/playback/{id} {season: next, episode: next, position: 0}
+        Web-->>TV: the next ticket; the player replaces the source on the same route
+    end
     opt The device has acquire and the title has no file
         TV->>Web: POST /api/acquire {titleId, season?, episode?}
         Web->>DB: web_audit(device, acquire, title, episode)
@@ -950,13 +965,20 @@ sequenceDiagram
         Web-->>TV: jobId and journalId
         TV->>Web: GET /api/downloads until the row is playable
     end
+    opt The device has acquire and the viewer asks for a whole season
+        TV->>Web: POST /api/acquire/season {titleId, season}
+        Web->>DB: one web_audit row per missing episode
+        Web->>Core: start_acquire per episode
+        Web-->>TV: queued, already on disk, failed counts
+        TV->>Web: GET /api/title/{id} every two seconds until the buttons settle
+    end
 ```
 
-A denial, an expiry, or a consumed request is terminal: the client starts a new request and gets a new prompt. The token is shown once and stored only as its hash; a revoke refuses the device's next request, including a segment of a film already playing, and kills its HLS session. Leaving the player posts the ticket URL to `/api/playback/stop`, which kills the child and removes its directory; a start also clears directories a previous process left behind. Reads require the `read` scope and playback requires `stream`, so a stream-only credential cannot walk the catalogue. `POST /api/acquire` additionally requires `acquire`, which no approval grants unless the desktop's **Allow downloads** box was ticked; the server checks the scope itself, and the audit row is written before the queue.
+A denial, an expiry, or a consumed request is terminal: the client starts a new request and gets a new prompt. The token is shown once and stored only as its hash; a revoke refuses the device's next request, including a segment of a film already playing, and kills its HLS session. Leaving the player posts the ticket URL to `/api/playback/stop`, which kills the child and removes its directory; a start also clears directories a previous process left behind. Reads require the `read` scope and playback requires `stream`, so a stream-only credential cannot walk the catalogue. A `read` device may also write the account's viewer state — the watchlist and watched marks — because those change only what this account has saved or seen, in the same two tables the desktop writes; it still cannot delete, change settings, or read a path (ADR 0031). `POST /api/acquire` and `POST /api/acquire/season` additionally require `acquire`, which no approval grants unless the desktop's **Allow downloads** box was ticked; the server checks the scope itself, and the audit row is written before the queue. A playback ticket carries the sidecar subtitle tracks and the next playable episode; the subtitle route serves WebVTT converted from the stored sidecar and retimed for an HLS start offset, and the player autoplays the next episode on `ended` without changing the route.
 
-Invariants: the surface is off until a person starts it and binds one explicit address, never the unspecified one; when that address stops belonging to the machine the listener moves to the address the default route names, on the same port, and a move that cannot bind leaves the old socket serving; the advertised origin is the bound address, with the configured hostname accepted beside it, so a device that resolves the name keeps its pairing cookie across an address change; the pairing code is single use and valid for five minutes; no plaintext token or code is stored or logged; a read is scoped to `AccountScope`; no response contains an absolute path; progress goes through `Runtime::record_progress`, so a manual watch mark outranks a report; a device that is streaming holds a system-sleep assertion, the surface holds one while the person's keep-awake switch is on, and the player warns when the host is below ten percent on battery; a device's label is a display name the person can change and never an identity; and one device holds one HLS session while the host holds at most four.
+Invariants: the surface is off until a person starts it and binds one explicit address, never the unspecified one; when that address stops belonging to the machine the listener moves to the address the default route names, on the same port, and a move that cannot bind leaves the old socket serving; the advertised origin is the bound address, with the configured hostname accepted beside it, so a device that resolves the name keeps its pairing cookie across an address change; the pairing code is single use and valid for five minutes; no plaintext token or code is stored or logged; a read is scoped to `AccountScope`; no response contains an absolute path; progress goes through `Runtime::record_progress`, so a manual watch mark outranks a report; a device that is streaming holds a system-sleep assertion, the surface holds one while the person's keep-awake switch is on, and the player warns when the host is below ten percent on battery; a device's label is a display name the person can change and never an identity; a title's read carries the same watchlist and watched state the desktop writes; a subtitle is resolved only through the title's own playable file and served as `text/vtt` with `no-store`; the preferred subtitle track is the account's, not the client's; the next episode is the core's answer and a late mint after the screen is gone is dropped; and one device holds one HLS session while the host holds at most four.
 
-Tests: pairing expiry, denial, replay, and the per-address limit; an unauthenticated read and a foreign `Host` or `Origin`; a configured hostname accepted beside the bound address; a read with no `read` scope; a rebind that cannot bind leaving the old socket answering; a rename refused when it is blank, too long, control-bearing, or aimed at a revoked row; a revoke between two segments; a direct Range request; a real MKV through the HLS routes (playlist, init, and segment); progress written on the TV and read on the desktop and the reverse; a report naming an episode the title has no file for; a read-only device refused an acquisition; an `acquire` device refused half an episode; and the audit row a permitted request leaves.
+Tests: pairing expiry, denial, replay, and the per-address limit; an unauthenticated read and a foreign `Host` or `Origin`; a configured hostname accepted beside the bound address; a read with no `read` scope; a rebind that cannot bind leaving the old socket answering; a rename refused when it is blank, too long, control-bearing, or aimed at a revoked row; a revoke between two segments; a direct Range request; a real MKV through the HLS routes (playlist, init, and segment); progress written on the TV and read on the desktop and the reverse; a report naming an episode the title has no file for; a read-only device refused an acquisition; an `acquire` device refused half an episode; a season request that queues one job per missing episode and skips the one already on disk; a watchlist and watched write read back through the title; an SRT sidecar served as WebVTT with a cue dropped before an offset and one spanning it kept; a track from another file refused; and the audit row a permitted request leaves.
 
 ---
 

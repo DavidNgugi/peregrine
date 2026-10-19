@@ -1,24 +1,168 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState, type TransitionEvent } from "react";
 
 import type { HomeData, Rail, Tile } from "./api.js";
-import { useIsMobile } from "./useIsMobile.js";
+import {
+  DWELL_MS,
+  IDLE_PREVIEW,
+  MIN_VISIBLE_RATIO,
+  nextPreview,
+  panelVisible,
+  previewScale,
+  type PreviewEvent,
+  type PreviewState,
+} from "./hover-preview.js";
+import { BookmarkIcon } from "./icons.js";
 
-/** One poster card in a rail or grid. */
+/** The one input the ladder answers to: a mouse or trackpad, not a remote or a finger. */
+const FINE_POINTER = "(hover: hover) and (pointer: fine)";
+
+function finePointer(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(FINE_POINTER).matches;
+}
+
+/** The line a tile and its panel share: what kind of title this is, and how it is rated. */
+function tileMeta(tile: Tile): string {
+  return [
+    tile.kind === "show" ? "Series" : "Film",
+    typeof tile.year === "number" ? String(tile.year) : null,
+    tile.rating === null ? null : tile.rating.toFixed(1),
+  ]
+    .filter((part): part is string => part !== null)
+    .join("  ·  ");
+}
+
+/** The synopsis as the panel draws it: provider prose, whitespace-collapsed, or nothing. */
+function panelOverview(tile: Tile): string | null {
+  if (tile.overview === null) return null;
+  const text = tile.overview.trim().replace(/\s+/gu, " ");
+  return text === "" ? null : text;
+}
+
+/**
+ * One poster card in a rail or grid.
+ *
+ * The tile is one button, and the hover preview is a layer inside it: the state machine decides
+ * when the layer is drawn and how far the tile has grown, while this component only forwards the
+ * pointer, timer, observer, and transition events. The panel is `aria-hidden` because every word
+ * in it is either already in the tile's accessible name or prose a person chose to reveal.
+ *
+ * The scale is applied only on a fine pointer. A remote, a keyboard, and a touch screen get the
+ * panel on focus without moving the tile, which is the keyboard parity §5 requires.
+ */
 export function TileCard({
   tile,
   onOpen,
   autofocus = false,
+  watchlisted = false,
 }: {
   readonly tile: Tile;
   readonly onOpen: (tile: Tile) => void;
   readonly autofocus?: boolean;
+  readonly watchlisted?: boolean;
 }) {
+  const [preview, setPreview] = useState<PreviewState>(IDLE_PREVIEW);
+  const [focused, setFocused] = useState(false);
+  // The input type is a property of the device, and a listener per tile on a grid of thousands is
+  // the cost the reference card avoids. Navigating remounts the grid if the input ever changes.
+  const [hoverable] = useState(finePointer);
+  const [node, setNode] = useState<HTMLElement | null>(null);
+
+  const dispatch = useCallback((event: PreviewEvent) => {
+    setPreview((current) => nextPreview(current, event));
+  }, []);
+
+  const active = preview.phase !== "idle";
+
+  // §5's dwell: armed by being in the dwelling phase and disarmed by leaving it, so every cancel
+  // clears the timer without a second place to remember.
+  useEffect(() => {
+    if (!hoverable || preview.phase !== "dwelling") return;
+    const timer = window.setTimeout(() => {
+      dispatch({ type: "dwellElapsed" });
+    }, DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [hoverable, preview.phase, dispatch]);
+
+  // Reduced motion removes the transform transition, and the phone grid removes the transform
+  // itself; neither ever fires the transitionend the ladder settles on. Settle straight away so an
+  // exit cannot leave the lift and will-change behind.
+  useEffect(() => {
+    if (!preview.animating) return;
+    const instant =
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      !window.matchMedia("(min-width: 721px)").matches;
+    if (!instant) return;
+    dispatch({ type: "settled" });
+  }, [preview.animating, dispatch]);
+
+  // The two global cancels, attached only while an interaction is in flight: one listener per tile
+  // on a grid of hundreds would be hundreds for something one pointer can do at a time. The scroll
+  // listener is passive and capturing so a scroll inside a scroll container is heard too.
+  useEffect(() => {
+    if (!active) return;
+    const onScroll = (): void => dispatch({ type: "scroll" });
+    const onVisibility = (): void =>
+      dispatch({ type: "visibilityChange", hidden: document.hidden });
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [active, dispatch]);
+
+  // §5's visibility floor. A tile that scrolls out from under a still pointer never receives a
+  // leave; the observer's first callback also answers a tile that was already below the floor.
+  useEffect(() => {
+    if (!active || node === null || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          dispatch({ type: "intersection", ratio: entry.intersectionRatio });
+        }
+      },
+      { threshold: [MIN_VISIBLE_RATIO] },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [active, node, dispatch]);
+
+  const showsPanel = panelVisible(preview, focused);
+  const scale = hoverable ? previewScale(preview) : 1;
+  const settling = preview.phase === "idle" && preview.animating;
+  const meta = tileMeta(tile);
+  const overview = panelOverview(tile);
+
+  const onTransitionEnd = (event: TransitionEvent<HTMLButtonElement>): void => {
+    // The name's opacity and the panel's own animation end here too; neither is the tile settling.
+    if (event.propertyName !== "transform" || event.pseudoElement !== "") return;
+    dispatch({ type: "settled" });
+  };
+
   return (
     <button
       className="card"
       data-autofocus={autofocus ? "true" : undefined}
       data-focus="true"
+      data-panel={showsPanel ? "true" : undefined}
+      data-preview={settling ? "settling" : preview.phase}
       onClick={() => onOpen(tile)}
+      onBlur={() => setFocused(false)}
+      onFocus={() => setFocused(true)}
+      onPointerEnter={
+        hoverable
+          ? (event) => {
+              setNode(event.currentTarget);
+              dispatch({ type: "pointerEnter" });
+            }
+          : undefined
+      }
+      onPointerLeave={hoverable ? () => dispatch({ type: "pointerLeave" }) : undefined}
+      onTransitionEnd={onTransitionEnd}
+      style={{
+        ...(scale === 1 ? {} : { transform: "scale(" + String(scale) + ")" }),
+        ...(preview.animating ? { willChange: "transform" } : {}),
+      }}
       type="button"
     >
       <span className="card-art">
@@ -35,13 +179,25 @@ export function TileCard({
         {tile.rating === null ? null : (
           <span className="card-rating">{tile.rating.toFixed(1)}</span>
         )}
+        {watchlisted ? (
+          <span aria-hidden="true" className="card-bookmark">
+            <BookmarkIcon />
+          </span>
+        ) : null}
+        {showsPanel ? (
+          <span aria-hidden="true" className="card-preview">
+            <span className="card-preview-name">{tile.name}</span>
+            <span className="card-preview-meta">{meta}</span>
+            {overview === null ? null : <span className="card-preview-overview">{overview}</span>}
+          </span>
+        ) : null}
       </span>
       <span className="card-name">{tile.name}</span>
     </button>
   );
 }
 
-/** One horizontal rail of tiles. */
+/** One rail of tiles, a vertical grid that can be collapsed on every viewport. */
 export function RailRow({
   rail,
   onOpen,
@@ -49,9 +205,9 @@ export function RailRow({
   readonly rail: Rail;
   readonly onOpen: (tile: Tile) => void;
 }) {
-  const mobile = useIsMobile();
   const [open, setOpen] = useState(true);
-  const collapsible = mobile && rail.items.length > 2;
+  const panelId = useId();
+  const collapsible = rail.items.length > 0;
 
   return (
     <section className="rail">
@@ -59,7 +215,9 @@ export function RailRow({
         <h2>{rail.title}</h2>
         {collapsible ? (
           <button
+            aria-controls={panelId}
             aria-expanded={open}
+            aria-label={(open ? "Hide " : "Show ") + rail.title}
             className="collapse"
             data-focus="true"
             onClick={() => setOpen((held) => !held)}
@@ -69,13 +227,13 @@ export function RailRow({
           </button>
         ) : null}
       </div>
-      {mobile && !open ? null : (
-        <div className="rail-track">
+      {open ? (
+        <div className="rail-track" id={panelId}>
           {rail.items.map((tile) => (
             <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
           ))}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -90,13 +248,7 @@ function Hero({
   readonly onOpen: (tile: Tile) => void;
   readonly onPlay: (tile: Tile) => void;
 }) {
-  const meta = [
-    tile.kind === "show" ? "Series" : "Film",
-    typeof tile.year === "number" ? String(tile.year) : null,
-    tile.rating === null ? null : tile.rating.toFixed(1),
-  ]
-    .filter((part): part is string => part !== null)
-    .join("  ·  ");
+  const meta = tileMeta(tile);
   const art = tile.backdrop ?? tile.poster;
 
   return (
@@ -142,7 +294,7 @@ function Hero({
   );
 }
 
-/** The home screen: a hero and horizontal rails, scrolled by touch or the D-pad. */
+/** The home screen: a hero and vertical rails, each of which collapses on any viewport. */
 export function HomeScreen({
   data,
   loading,

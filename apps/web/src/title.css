@@ -1,0 +1,144 @@
+/* The title page: hero actions, seasons, episodes, and downloads; loaded after home.css. */
+
+.title-actions {
+  margin-top: 2px;
+}
+
+.watchlist,
+.watch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 13px 26px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.watchlist svg {
+  width: 20px;
+  height: 20px;
+}
+
+.watchlist[aria-pressed="true"],
+.watch-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.watchlist:disabled,
+.watch-toggle:disabled,
+.season-watch:disabled,
+.season-download:disabled,
+.episode-watch:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.title-message {
+  padding: 0;
+  font-size: 15px;
+}
+
+.seasons-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Season chips wrap; a horizontal strip is the one list shape this client no longer uses. */
+.seasons {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.seasons-head {
+  flex-wrap: wrap;
+  padding: 0 48px;
+}
+
+.episodes .section-head {
+  flex-wrap: wrap;
+}
+
+.seasons-head h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.section-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.season-watch,
+.season-download,
+.episode-watch {
+  flex: 0 0 auto;
+  padding: 6px 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.season-watch[aria-pressed="true"],
+.episode-watch[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.season-download {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.season-download:disabled {
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+.episode-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+@media (max-width: 720px) {
+  .watchlist,
+  .watch-toggle {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .seasons-head {
+    padding: 0 18px;
+  }
+
+  .seasons-head h2 {
+    font-size: 20px;
+  }
+
+  .section-head-actions {
+    gap: 6px;
+  }
+
+  .season-watch,
+  .season-download,
+  .episode-watch {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+}

@@ -57,6 +57,24 @@ pub struct Transcoder {
     encoder: &'static str,
 }
 
+/// A started transcode and the audio stream it mapped.
+#[derive(Debug)]
+pub struct StartedTranscode {
+    /// The ffmpeg child, owned by the session that started it.
+    pub child: Child,
+    /// The language tag of the stream the host selected, or `None` when it mapped the first.
+    pub audio_language: Option<String>,
+}
+
+/// Which audio stream a transcode maps, and the tag that named it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AudioStreamChoice {
+    /// The audio stream's ordinal within the file's audio streams, which is what `0:a:n` takes.
+    pub ordinal: usize,
+    /// The tag of the stream that matched, or `None` for the first-stream fallback.
+    pub language: Option<String>,
+}
+
 impl Transcoder {
     /// Finds an ffmpeg and the best encoder it offers.
     ///
@@ -97,6 +115,9 @@ impl Transcoder {
 
     /// Starts one HLS transcode and waits for its playlist.
     ///
+    /// The audio stream is the one the probe's tag names for `audio_language`; a host that
+    /// cannot probe, or finds no match, maps the first audio stream and reports no language.
+    ///
     /// # Errors
     ///
     /// [`TranscodeError::Io`] when the directory or process cannot be made,
@@ -107,7 +128,18 @@ impl Transcoder {
         directory: &Path,
         source: &Path,
         start_ms: i64,
-    ) -> Result<Child, TranscodeError> {
+        audio_language: Option<&str>,
+    ) -> Result<StartedTranscode, TranscodeError> {
+        let choice = match audio_language
+            .map(str::trim)
+            .filter(|preferred| !preferred.is_empty())
+        {
+            Some(preferred) => {
+                let probe = probe_audio(source).await.unwrap_or_default();
+                choose_audio_stream(&probe, Some(preferred))
+            }
+            None => AudioStreamChoice::default(),
+        };
         tokio::fs::create_dir_all(directory).await?;
         let playlist = directory.join("index.m3u8");
         let log_path = directory.join("ffmpeg.log");
@@ -127,7 +159,10 @@ impl Transcoder {
         command
             .arg("-i")
             .arg(source)
-            .args(["-map", "0:v:0", "-map", "0:a:0?"]);
+            .arg("-map")
+            .arg("0:v:0")
+            .arg("-map")
+            .arg(format!("0:a:{}?", choice.ordinal));
         command.args(video_arguments(self.encoder));
         command.args([
             "-force_key_frames",
@@ -167,7 +202,10 @@ impl Transcoder {
                 && let Ok(metadata) = tokio::fs::metadata(&playlist).await
                 && metadata.len() > 0
             {
-                return Ok(child);
+                return Ok(StartedTranscode {
+                    child,
+                    audio_language: choice.language,
+                });
             }
             if let Some(status) = child.try_wait()? {
                 let reason = tail(&log_path, source).await;
@@ -281,6 +319,80 @@ async fn probe_stream(ffprobe: &Path, path: &Path, stream: &str) -> Option<Strin
     (!codec.is_empty()).then_some(codec)
 }
 
+/// The audio streams' indices and language tags, as ffprobe's JSON, or `None` when it failed.
+async fn probe_audio(path: &Path) -> Option<String> {
+    let output = Command::new(locate_probe())
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index:stream_tags=language",
+            "-of",
+            "json",
+        ])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Chooses the audio stream to map from ffprobe's own JSON.
+///
+/// The ordinal is the stream's position among the file's audio streams, not the absolute
+/// `stream.index` ffprobe reports: a video is usually index 0, so the first audio stream is
+/// index 1 and `0:a:1` would select the second. `-select_streams a` makes the array positions
+/// audio-relative, which is exactly what `0:a:n` takes.
+///
+/// A preference that matches nothing, a probe this build cannot read, and a preferred tag that is
+/// blank all fall back to the first audio stream with no language claimed.
+#[must_use]
+pub fn choose_audio_stream(probe_json: &str, preferred: Option<&str>) -> AudioStreamChoice {
+    let fallback = AudioStreamChoice::default();
+    let Some(preferred) = preferred.map(str::trim).filter(|value| !value.is_empty()) else {
+        return fallback;
+    };
+    let Ok(probe) = serde_json::from_str::<serde_json::Value>(probe_json) else {
+        return fallback;
+    };
+    let Some(streams) = probe.get("streams").and_then(serde_json::Value::as_array) else {
+        return fallback;
+    };
+    for (ordinal, stream) in streams.iter().enumerate() {
+        let Some(tag) = stream
+            .get("tags")
+            .and_then(|tags| tags.get("language"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if language_matches(tag, preferred) {
+            return AudioStreamChoice {
+                ordinal,
+                language: Some(tag.to_owned()),
+            };
+        }
+    }
+    fallback
+}
+
+/// Whether a stream's tag names the preferred language: a case-insensitive prefix either way.
+fn language_matches(tag: &str, preferred: &str) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    let preferred = preferred.trim().to_ascii_lowercase();
+    !tag.is_empty()
+        && !preferred.is_empty()
+        && (tag.starts_with(&preferred) || preferred.starts_with(&tag))
+}
+
 fn locate_probe() -> PathBuf {
     if let Ok(explicit) = std::env::var("PEREGRINE_FFPROBE") {
         let path = PathBuf::from(explicit);
@@ -353,7 +465,9 @@ pub fn valid_hls_file(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Transcoder, valid_hls_file, video_arguments};
+    use super::{
+        AudioStreamChoice, Transcoder, choose_audio_stream, valid_hls_file, video_arguments,
+    };
 
     #[test]
     fn only_the_three_shapes_of_a_session_file_are_served() {
@@ -386,6 +500,51 @@ mod tests {
             let arguments = video_arguments(encoder);
             assert!(!arguments.contains(&"libx264"), "{encoder} must stay LGPL");
         }
+    }
+
+    #[test]
+    fn an_audio_stream_is_chosen_by_its_audio_ordinal_not_its_absolute_index() {
+        let probe = r#"{"streams":[{"index":1,"tags":{"language":"fre"}},{"index":2,"tags":{"language":"eng"}}]}"#;
+        assert_eq!(
+            choose_audio_stream(probe, Some("en")),
+            AudioStreamChoice {
+                ordinal: 1,
+                language: Some("eng".to_owned()),
+            },
+            "the second audio stream is 0:a:1; its absolute index 2 is not the ordinal"
+        );
+        let first = r#"{"streams":[{"index":5,"tags":{"language":"eng"}}]}"#;
+        assert_eq!(choose_audio_stream(first, Some("en")).ordinal, 0);
+    }
+
+    #[test]
+    fn no_match_malformed_and_mono_fall_back_to_the_first_stream() {
+        let fallback = AudioStreamChoice::default();
+        let german = r#"{"streams":[{"index":1,"tags":{"language":"ger"}}]}"#;
+        assert_eq!(choose_audio_stream(german, Some("en")), fallback);
+        assert_eq!(choose_audio_stream("not json", Some("en")), fallback);
+        assert_eq!(
+            choose_audio_stream(r#"{"streams":[]}"#, Some("en")),
+            fallback
+        );
+        let untagged = r#"{"streams":[{"index":1}]}"#;
+        assert_eq!(choose_audio_stream(untagged, Some("en")), fallback);
+        assert_eq!(choose_audio_stream(german, None), fallback);
+        assert_eq!(choose_audio_stream(german, Some("  ")), fallback);
+    }
+
+    #[test]
+    fn a_language_tag_matches_case_insensitively_by_prefix() {
+        let probe = r#"{"streams":[{"index":2,"tags":{"language":"ENG"}}]}"#;
+        assert_eq!(
+            choose_audio_stream(probe, Some("en")),
+            AudioStreamChoice {
+                ordinal: 0,
+                language: Some("ENG".to_owned()),
+            }
+        );
+        let regional = r#"{"streams":[{"index":1,"tags":{"language":"en"}}]}"#;
+        assert_eq!(choose_audio_stream(regional, Some("en-US")).ordinal, 0);
     }
 
     #[tokio::test]
@@ -422,8 +581,8 @@ mod tests {
 
         let transcoder = Transcoder::detect().await.expect("an encoder");
         let output = directory.path().join("hls");
-        let mut child = transcoder
-            .start(&output, &source, 0)
+        let mut started = transcoder
+            .start(&output, &source, 0, Some("en"))
             .await
             .expect("the transcode starts");
         let playlist = tokio::fs::read_to_string(output.join("index.m3u8"))
@@ -431,7 +590,7 @@ mod tests {
             .expect("a playlist");
         assert!(playlist.contains("#EXTM3U"));
         assert!(playlist.contains("init.mp4"));
-        let _ = child.kill().await;
+        let _ = started.child.kill().await;
     }
 
     #[tokio::test]

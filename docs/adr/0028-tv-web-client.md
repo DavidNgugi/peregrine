@@ -1,6 +1,6 @@
 # ADR 0028 — TV web client: a paired LAN surface, read-only by default
 
-- **Status:** Accepted. The first slice of E37 (the browser console) served by the desktop app, ahead of the E36 daemon that [ADR 0020](./0020-homelab-deployment.md) §3 assumed would host it. The acquisition sentence in §3 is superseded by [ADR 0029](./0029-device-scoped-acquisition.md); every other boundary here stands.
+- **Status:** Accepted. The first slice of E37 (the browser console) served by the desktop app, ahead of the E36 daemon that [ADR 0020](./0020-homelab-deployment.md) §3 assumed would host it. The acquisition sentence in §3 is superseded by [ADR 0029](./0029-device-scoped-acquisition.md); §3's read-only sentence and §6's subtitle omission are refined by [ADR 0031](./0031-browser-client-parity.md); every other boundary here stands.
 - **Date:** 2026-10-19
 - **Evidence:** the command surface and the event bus in this tree; the loopback media server in `crates/peregrine-stream`; [ADR 0018](./0018-media-server.md) §4 for the server posture, [ADR 0020](./0020-homelab-deployment.md) §3 for the console's scope, and [R33](../AGENTS.md) for the LAN rules
 - **Related:** [0002](./0002-rust-core-owns-state.md), [0018](./0018-media-server.md), [0019](./0019-local-accounts-and-parental-gating.md), [0020](./0020-homelab-deployment.md), [0023](./0023-in-app-video-surface.md), [0029](./0029-device-scoped-acquisition.md)

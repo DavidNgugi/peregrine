@@ -227,6 +227,42 @@ impl SubtitleDocument {
             SubtitleFormat::Pgs | SubtitleFormat::Vobsub => Err(FormatError::NotText { format }),
         }
     }
+
+    /// Moves the document onto a timeline that starts `offset_ms` into the source.
+    ///
+    /// A transcode's HLS playlist begins at zero while the sidecar was authored against the
+    /// film's own timeline, so a cue that ended before the start is gone and one that straddles
+    /// it begins at zero. A zero or negative offset is the sidecar's own timeline, and the
+    /// document is returned unchanged: a caller must not have to special-case "no seek".
+    #[must_use]
+    pub fn retimed_for_offset(&self, offset_ms: i64) -> Self {
+        if offset_ms <= 0 {
+            return self.clone();
+        }
+        let offset = Millis::from_millis(offset_ms);
+        let cues = self
+            .cues
+            .iter()
+            .filter_map(|cue| {
+                if cue.timing.end() <= offset {
+                    return None;
+                }
+                let start = if cue.timing.start() <= offset {
+                    Millis::ZERO
+                } else {
+                    cue.timing.start().advanced_by(offset)
+                };
+                let mut retimed = cue.clone();
+                retimed.timing = SubtitleTiming::new(start, cue.timing.end().advanced_by(offset));
+                Some(retimed)
+            })
+            .collect();
+        Self {
+            preamble: self.preamble.clone(),
+            cues,
+            suffix: self.suffix.clone(),
+        }
+    }
 }
 
 /// Why a subtitle format could not be read or written.
@@ -1649,6 +1685,40 @@ Dialogue: 1,0:00:04.00,0:00:06.25,Default,,0000,0000,0000,fx,{\\an8}{\\pos(960,8
             document.render(SubtitleFormat::Vtt).expect("renders"),
             "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOnly one.\n\n"
         );
+    }
+
+    #[test]
+    fn a_zero_offset_changes_nothing() {
+        let document = SubtitleDocument::new(vec![
+            SubtitleCue::line(timing(1_000, 2_000), "Before."),
+            SubtitleCue::line(timing(3_000, 4_000), "After."),
+        ]);
+        assert_eq!(document.retimed_for_offset(0), document);
+    }
+
+    #[test]
+    fn a_cue_spanning_the_offset_begins_at_zero() {
+        let document = SubtitleDocument::new(vec![SubtitleCue::line(
+            timing(5_000, 9_000),
+            "Straddles the seek.",
+        )]);
+        let retimed = document.retimed_for_offset(7_000);
+        assert_eq!(retimed.cues.len(), 1);
+        assert_eq!(retimed.cues[0].timing, timing(0, 2_000));
+        assert_eq!(retimed.cues[0].text, vec!["Straddles the seek.".to_owned()]);
+    }
+
+    #[test]
+    fn a_cue_wholly_before_the_offset_is_dropped() {
+        let document = SubtitleDocument::new(vec![
+            SubtitleCue::line(timing(1_000, 2_000), "Gone."),
+            SubtitleCue::line(timing(3_000, 4_000), "Also gone."),
+            SubtitleCue::line(timing(4_000, 6_000), "Kept."),
+        ]);
+        let retimed = document.retimed_for_offset(4_000);
+        assert_eq!(retimed.cues.len(), 1, "a cue ending at the offset is over");
+        assert_eq!(retimed.cues[0].timing, timing(0, 2_000));
+        assert_eq!(retimed.cues[0].text, vec!["Kept.".to_owned()]);
     }
 
     proptest! {

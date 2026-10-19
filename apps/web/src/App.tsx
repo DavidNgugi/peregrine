@@ -23,6 +23,7 @@ import { useAutoFocus, useSpatialFocus } from "./focus.js";
 import { HomeScreen } from "./Home.js";
 import {
   BookmarkIcon,
+  ChevronLeftIcon,
   CompassIcon,
   DownloadIcon,
   HomeIcon,
@@ -261,6 +262,14 @@ export function App() {
 
   useSpatialFocus(screen.name !== "loading");
 
+  // A title page is read from its top however it was entered. A season switch is internal state
+  // and keeps its place, so this keys on the title's id rather than on the screen.
+  const titleId = screen.name === "title" ? screen.id : null;
+  useEffect(() => {
+    if (titleId === null) return;
+    window.scrollTo(0, 0);
+  }, [titleId]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" && event.key !== "Backspace") return;
@@ -358,134 +367,71 @@ export function App() {
     );
   }
 
-  if (screen.name === "title") {
-    return (
-      <>
-        <TitleScreen
-          canAcquire={canAcquire}
-          id={screen.id}
-          key={screen.id}
-          onBack={goBack}
-          onOpen={(tile) => openTile(tile)}
-          onPlay={(ticket, name) => startPlayback(ticket, name, screen.id)}
-          preview={screen.preview}
-        />
-        <TabBar
-          active={null}
-          onBrowse={() => goBrowse()}
-          onHome={goHome}
-          onDownloads={goDownloads}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-        />
-      </>
-    );
-  }
+  // Every screen but the player shares one bar; the title page is a tab-less destination.
+  const current = screen;
+  const activeTab: Tab | null = current.name === "title" ? null : current.name;
 
-  if (screen.name === "browse") {
-    return (
-      <>
-        <TopBar
-          active="browse"
-          onBrowse={() => goBrowse()}
-          onHome={goHome}
-          onDownloads={goDownloads}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-          onSearch={() => goBrowse(true)}
-        />
-        <BrowseScreen onOpen={(tile) => openTile(tile)} />
-        <TabBar
-          active="browse"
-          onBrowse={() => goBrowse()}
-          onHome={goHome}
-          onDownloads={goDownloads}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-        />
-      </>
-    );
-  }
-
-  if (screen.name === "myList") {
-    return (
-      <>
-        <TopBar
-          active="myList"
-          onBrowse={() => goBrowse()}
-          onHome={goHome}
-          onDownloads={goDownloads}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-          onSearch={() => goBrowse(true)}
-        />
-        <MyListScreen onOpen={(tile) => openTile(tile)} />
-        <TabBar
-          active="myList"
-          onBrowse={() => goBrowse()}
-          onHome={goHome}
-          onDownloads={goDownloads}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-        />
-      </>
-    );
-  }
-
-  if (screen.name === "downloads") {
-    return (
-      <>
-        <TopBar
-          active="downloads"
-          onBrowse={() => goBrowse()}
-          onDownloads={goDownloads}
-          onHome={goHome}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-          onSearch={() => goBrowse(true)}
-        />
-        <DownloadsScreen onOpen={(tile) => openTile(tile)} />
-        <TabBar
-          active="downloads"
-          onBrowse={() => goBrowse()}
-          onDownloads={goDownloads}
-          onHome={goHome}
-          onLibrary={goLibrary}
-          onMyList={goMyList}
-        />
-      </>
-    );
-  }
+  const content = (() => {
+    switch (current.name) {
+      case "title":
+        return (
+          <TitleScreen
+            canAcquire={canAcquire}
+            id={current.id}
+            key={current.id}
+            onOpen={(tile) => openTile(tile)}
+            onPlay={(ticket, name) => startPlayback(ticket, name, current.id)}
+            preview={current.preview}
+          />
+        );
+      case "browse":
+        return <BrowseScreen onOpen={(tile) => openTile(tile)} />;
+      case "myList":
+        return <MyListScreen onOpen={(tile) => openTile(tile)} />;
+      case "downloads":
+        return <DownloadsScreen onOpen={(tile) => openTile(tile)} />;
+      case "home":
+        return (
+          <>
+            {error === null ? null : <p className="error">{error}</p>}
+            <HomeScreen
+              data={home}
+              error={homeError}
+              loading={homeLoading}
+              onOpen={(tile) => openTile(tile)}
+              onPlay={(tile) => void playTile(tile)}
+              onRetry={() => void loadHome()}
+            />
+          </>
+        );
+      case "library":
+        return (
+          <>
+            {error === null ? null : <p className="error">{error}</p>}
+            <LibraryScreen error={libraryError} onOpen={openId} rows={rows} />
+          </>
+        );
+    }
+  })();
 
   return (
     <>
       <TopBar
-        active={screen.name}
+        active={activeTab}
+        onBack={current.name === "home" ? null : goBack}
         onBrowse={() => goBrowse()}
-        onHome={goHome}
         onDownloads={goDownloads}
+        onHome={goHome}
         onLibrary={goLibrary}
         onMyList={goMyList}
         onSearch={() => goBrowse(true)}
       />
-      {error === null ? null : <p className="error">{error}</p>}
-      {screen.name === "home" ? (
-        <HomeScreen
-          data={home}
-          error={homeError}
-          loading={homeLoading}
-          onOpen={(tile) => openTile(tile)}
-          onPlay={(tile) => void playTile(tile)}
-          onRetry={() => void loadHome()}
-        />
-      ) : (
-        <LibraryScreen error={libraryError} onOpen={openId} rows={rows} />
-      )}
+      {content}
       <TabBar
-        active={screen.name}
+        active={activeTab}
         onBrowse={() => goBrowse()}
-        onHome={goHome}
         onDownloads={goDownloads}
+        onHome={goHome}
         onLibrary={goLibrary}
         onMyList={goMyList}
       />
@@ -497,6 +443,7 @@ type Tab = "home" | "browse" | "myList" | "downloads" | "library";
 
 function TopBar({
   active,
+  onBack,
   onHome,
   onBrowse,
   onMyList,
@@ -504,7 +451,8 @@ function TopBar({
   onLibrary,
   onSearch,
 }: {
-  readonly active: Tab;
+  readonly active: Tab | null;
+  readonly onBack: (() => void) | null;
   readonly onHome: () => void;
   readonly onBrowse: () => void;
   readonly onMyList: () => void;
@@ -514,6 +462,17 @@ function TopBar({
 }) {
   return (
     <header className="topbar">
+      {onBack === null ? null : (
+        <button
+          aria-label="Back"
+          className="nav topbar-back"
+          data-focus="true"
+          onClick={onBack}
+          type="button"
+        >
+          <ChevronLeftIcon />
+        </button>
+      )}
       <span className="brand">Peregrine</span>
       <nav className="topbar-nav">
         {(
