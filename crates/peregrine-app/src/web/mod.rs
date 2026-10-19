@@ -20,7 +20,7 @@
 //! to the device and one file for two hours; the media URL carries that session, not the device
 //! token. Revoking the device drops its sessions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -375,6 +375,7 @@ pub struct WebService {
     seen: Mutex<HashMap<i64, i64>>,
     hosts: Mutex<Vec<String>>,
     running: tokio::sync::Mutex<Option<Running>>,
+    refresh_started: Mutex<HashSet<i64>>,
 }
 
 impl WebService {
@@ -404,6 +405,7 @@ impl WebService {
             seen: Mutex::new(HashMap::new()),
             hosts: Mutex::new(Vec::new()),
             running: tokio::sync::Mutex::new(None),
+            refresh_started: Mutex::new(HashSet::new()),
         }
     }
 
@@ -1164,53 +1166,119 @@ impl WebService {
         id: i64,
         season: Option<u32>,
     ) -> Result<Option<TitleDto>, WebError> {
-        let Some(detail) = self.runtime.library_title(id).await? else {
-            // A rail can name a catalogue title the library does not hold. Opening it should say
-            // what it is and that no copy is here, not answer 404; the client fills the artwork
-            // from the rail tile it navigated from.
-            let Some(identity) = self.runtime.title_identity(id).await? else {
-                return Ok(None);
+        let detail = self.runtime.library_title(id).await?;
+        // A rail can name a catalogue title the library does not hold. It still has a page: the
+        // identity supplies the name and kind, and a provider refresh fills in details and
+        // episodes for a series.
+        let Some(identity) = self.runtime.title_identity(id).await? else {
+            return Ok(None);
+        };
+        let is_show = identity.kind == TitleKind::Show;
+        let (seasons, episodes) = self.title_seasons_page(id, is_show, season).await?;
+        let refreshing = is_show && seasons.is_empty() && !identity.metadata_state.has_details();
+        if refreshing {
+            let start_now = self
+                .refresh_started
+                .lock()
+                .expect("the refresh lock is not poisoned")
+                .insert(id);
+            if start_now
+                && let Err(error) = self
+                    .runtime
+                    .start_provider_refresh(id, TitleKind::Show)
+                    .await
+            {
+                warn!(%error, "a title refresh could not be started");
+                self.refresh_started
+                    .lock()
+                    .expect("the refresh lock is not poisoned")
+                    .remove(&id);
+            }
+        }
+        let (similar, similar_genres) = self.title_similar_page(id, detail.is_some()).await?;
+        let (poster, backdrop, overview, rating, released, items, files, playable, progress) =
+            match &detail {
+                Some(detail) => (
+                    image_url(detail.entry.poster.as_deref()),
+                    image_url(detail.backdrop.as_deref()),
+                    detail.overview.clone(),
+                    detail.rating,
+                    detail.released.map(|date| date.to_string()),
+                    detail.entry.row.items,
+                    detail.entry.row.files,
+                    detail.playback.support.is_some(),
+                    self.runtime.web_progress(id).await?,
+                ),
+                None => (None, None, None, None, None, 0, 0, false, None),
             };
-            return Ok(Some(missing_title(id, identity)));
-        };
-        let is_show = detail.entry.row.title.kind.as_str() == "show";
-        let seasons = if is_show {
-            self.runtime
-                .title_seasons(id, 50)
-                .await?
-                .into_iter()
-                .map(|season| SeasonDto {
-                    number: season.row.season_number.get(),
-                    name: season.row.name,
-                    episode_count: season.row.episode_count,
-                    poster: image_url(season.poster.as_deref()),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        Ok(Some(TitleDto {
+            id,
+            name: identity.name,
+            kind: identity.kind.as_str().to_owned(),
+            poster,
+            backdrop,
+            overview,
+            rating,
+            released,
+            items,
+            files,
+            playable,
+            progress,
+            in_library: detail.is_some(),
+            seasons,
+            episodes,
+            similar,
+            similar_genres,
+            refreshing,
+        }))
+    }
+
+    async fn title_seasons_page(
+        &self,
+        id: i64,
+        is_show: bool,
+        season: Option<u32>,
+    ) -> Result<(Vec<SeasonDto>, Vec<EpisodeDto>), WebError> {
+        if !is_show {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let seasons: Vec<SeasonDto> = self
+            .runtime
+            .title_seasons(id, 50)
+            .await?
+            .into_iter()
+            .map(|season| SeasonDto {
+                number: season.row.season_number.get(),
+                name: season.row.name,
+                episode_count: season.row.episode_count,
+                poster: image_url(season.poster.as_deref()),
+            })
+            .collect();
         let chosen = season.or_else(|| {
             seasons
                 .iter()
                 .find(|held| held.episode_count.unwrap_or(0) > 0 || held.number > 0)
                 .map(|held| held.number)
         });
-        let progress = if is_show {
-            self.runtime.title_watch_progress(id).await?
-        } else {
-            Vec::new()
-        };
-        let episodes = if is_show {
-            episode_dtos(
-                self.runtime.title_episodes(id, chosen, 500).await?,
-                &progress,
-            )
-        } else {
-            Vec::new()
-        };
+        let progress = self.runtime.title_watch_progress(id).await?;
+        let episodes = episode_dtos(
+            self.runtime.title_episodes(id, chosen, 500).await?,
+            &progress,
+        );
+        Ok((seasons, episodes))
+    }
+
+    async fn title_similar_page(
+        &self,
+        id: i64,
+        in_library: bool,
+    ) -> Result<(Vec<TileDto>, Vec<GenreDto>), WebError> {
+        if !in_library {
+            return Ok((Vec::new(), Vec::new()));
+        }
         // A title page is useful without the network: the provider's similar list is a bonus, so
         // a slow or unreachable provider gets three seconds and then an empty rail, not a spinner.
-        let (similar, similar_genres): (Vec<TileDto>, Vec<GenreDto>) =
+        let (similar, genres): (Vec<TileDto>, Vec<GenreDto>) =
             match tokio::time::timeout(std::time::Duration::from_secs(3), self.runtime.similar(id))
                 .await
             {
@@ -1227,44 +1295,21 @@ impl WebService {
                 ),
                 _ => (Vec::new(), Vec::new()),
             };
+        if !similar.is_empty() {
+            return Ok((similar, genres));
+        }
         // A provider with nothing to say should not leave the page without a rail. The library's
         // other titles are a truthful "more like this" and cost one local read.
-        let similar = if similar.is_empty() {
-            self.runtime
-                .library_titles(None, 20)
-                .await?
-                .into_iter()
-                .filter(|entry| entry.row.title.id != id)
-                .map(|entry| tile_from_entry(&entry))
-                .collect()
-        } else {
-            similar
-        };
-        let entry = detail.entry;
-        // Any file with a copy can be played: a container the browser demuxes goes direct, and
-        // everything else is transcoded to HLS.
-        let playable = detail.playback.support.is_some();
-        Ok(Some(TitleDto {
-            id: entry.row.title.id,
-            name: entry.row.title.name.clone(),
-            kind: entry.row.title.kind.as_str().to_owned(),
-            poster: image_url(entry.poster.as_deref()),
-            backdrop: image_url(detail.backdrop.as_deref()),
-            overview: detail.overview.clone(),
-            rating: detail.rating,
-            released: detail.released.map(|date| date.to_string()),
-            items: entry.row.items,
-            files: entry.row.files,
-            playable,
-            progress: self.runtime.web_progress(id).await?,
-            in_library: true,
-            seasons,
-            episodes,
-            similar,
-            similar_genres,
-        }))
+        let similar = self
+            .runtime
+            .library_titles(None, 20)
+            .await?
+            .into_iter()
+            .filter(|entry| entry.row.title.id != id)
+            .map(|entry| tile_from_entry(&entry))
+            .collect();
+        Ok((similar, genres))
     }
-
     /// Mints a playback session for one device and one title.
     ///
     /// # Errors
@@ -1645,6 +1690,8 @@ pub struct TitleDto {
     pub similar: Vec<TileDto>,
     /// The genres those recommendations share, which the feed pages through after them.
     pub similar_genres: Vec<GenreDto>,
+    /// A provider refresh is filling this title's details and episodes in the background.
+    pub refreshing: bool,
 }
 
 /// One tile a rail or a grid draws.
@@ -1857,28 +1904,6 @@ fn hero_candidates(rails: &[RailDto], hero: Option<&TileDto>) -> Vec<TileDto> {
         heroes.push(first.clone());
     }
     heroes
-}
-
-fn missing_title(id: i64, identity: crate::TitleIdentity) -> TitleDto {
-    TitleDto {
-        id,
-        name: identity.name,
-        kind: identity.kind.as_str().to_owned(),
-        poster: None,
-        backdrop: None,
-        overview: None,
-        rating: None,
-        released: None,
-        items: 0,
-        files: 0,
-        playable: false,
-        progress: None,
-        in_library: false,
-        seasons: Vec::new(),
-        episodes: Vec::new(),
-        similar: Vec::new(),
-        similar_genres: Vec::new(),
-    }
 }
 
 fn episode_dtos(

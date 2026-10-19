@@ -135,6 +135,7 @@ export interface Title {
   readonly episodes: Episode[];
   readonly similar: Tile[];
   readonly similarGenres: Genre[];
+  readonly refreshing: boolean;
 }
 
 /** A pairing request as the TV creates it. */

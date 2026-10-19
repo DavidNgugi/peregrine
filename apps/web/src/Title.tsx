@@ -41,6 +41,20 @@ export function TitleScreen({
     }
   }, [title]);
 
+  // A provider refresh fills a catalogue series' seasons and episodes after the page has drawn.
+  useEffect(() => {
+    if (title?.refreshing !== true) return;
+    const timer = window.setInterval(() => {
+      void api
+        .title(id, season)
+        .then((found) => setTitle(found))
+        .catch(() => {
+          // A dropped poll is not a failed refresh; the next tick asks again.
+        });
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [title?.refreshing, id, season]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -81,6 +95,7 @@ export function TitleScreen({
     );
     return started ?? episodes.find((episode) => episode.playable);
   }, [episodes]);
+  const canPlay = movie ? title?.playable === true : nextEpisode !== undefined;
 
   const playMovie = async (positionMs: number): Promise<void> => {
     setBusy(true);
@@ -150,7 +165,7 @@ export function TitleScreen({
           {overview === null ? null : <p className="hero-overview">{overview}</p>}
           {title === null ? (
             <p className="dim">Reading...</p>
-          ) : inLibrary ? (
+          ) : canPlay ? (
             <div className="actions">
               <button
                 className="play"
@@ -186,7 +201,9 @@ export function TitleScreen({
             </div>
           ) : (
             <p className="note">
-              This title is not in your library. Add it from the desktop app to play it here.
+              {inLibrary
+                ? "No downloaded file is on disk yet. Downloads start on the desktop app."
+                : "This title is not in your library. Add it from the desktop app to play it here."}
             </p>
           )}
           {message === null ? null : <p className="error">{message}</p>}
@@ -286,13 +303,25 @@ export function TitleScreen({
           </section>
         )}
 
+        {title?.refreshing === true && episodes.length === 0 ? (
+          <p className="dim episodes-empty">Fetching episodes from the provider...</p>
+        ) : null}
+
+        {title !== null &&
+        kind === "show" &&
+        title.refreshing !== true &&
+        episodes.length === 0 &&
+        seasons.length === 0 ? (
+          <p className="dim episodes-empty">No episodes are listed for this series yet.</p>
+        ) : null}
+
         {episodes.length === 0 && seasons.length > 0 ? (
           <p className="dim episodes-empty">No episodes for this season yet.</p>
         ) : null}
 
-        {title !== null && (title.similar.length > 0 || title.similarGenres.length > 0) ? (
+        {title !== null && (title.similar.length > 0 || (title.similarGenres ?? []).length > 0) ? (
           <TitleFeed
-            genres={title.similarGenres}
+            genres={title.similarGenres ?? []}
             kind={kind === "show" ? "show" : "movie"}
             onOpen={onOpen}
             seed={title.similar}

@@ -26,7 +26,7 @@ use peregrine_storage::PairedDevice;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio_util::io::ReaderStream;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::warn;
 
@@ -64,8 +64,37 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
 
     let router = match app_dir {
         Some(directory) => {
-            let index = ServeFile::new(directory.join("index.html"));
-            api.fallback_service(ServeDir::new(directory).not_found_service(index))
+            // A client-side route such as /title/16 must answer `index.html` with 200 on a
+            // refresh. A missing asset must still be a 404, not HTML dressed as JavaScript.
+            let index = std::sync::Arc::new(directory.join("index.html"));
+            let fallback = get({
+                let index = std::sync::Arc::clone(&index);
+                move |request: Request| {
+                    let index = std::sync::Arc::clone(&index);
+                    async move {
+                        let path = request.uri().path();
+                        let missing_asset = path.starts_with("/assets/")
+                            || path.starts_with("/api/")
+                            || path
+                                .rsplit('/')
+                                .next()
+                                .is_some_and(|name| name.contains('.'));
+                        if missing_asset {
+                            return StatusCode::NOT_FOUND.into_response();
+                        }
+                        let Ok(bytes) = tokio::fs::read(index.as_path()).await else {
+                            return StatusCode::NOT_FOUND.into_response();
+                        };
+                        let mut response = Response::new(Body::from(bytes));
+                        response.headers_mut().insert(
+                            header::CONTENT_TYPE,
+                            HeaderValue::from_static("text/html; charset=utf-8"),
+                        );
+                        response
+                    }
+                }
+            });
+            api.fallback_service(ServeDir::new(directory).fallback(fallback))
         }
         None => api.fallback(no_client),
     };

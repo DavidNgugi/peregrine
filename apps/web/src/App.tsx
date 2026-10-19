@@ -30,6 +30,7 @@ import {
 } from "./icons.js";
 import { MyListScreen } from "./MyList.js";
 import { Player } from "./Player.js";
+import { parseRoute, routePath, type Route } from "./routing.js";
 import { TitleScreen } from "./Title.js";
 
 type Screen =
@@ -54,11 +55,10 @@ export function App() {
   const [homeLoading, setHomeLoading] = useState(true);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [rows, setRows] = useState<readonly LibraryRow[]>([]);
-  const [returnTo, setReturnTo] = useState<"home" | "browse" | "myList" | "downloads" | "library">(
-    "home",
-  );
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
 
   const loadHome = useCallback(async (): Promise<void> => {
     setHomeLoading(true);
@@ -66,14 +66,12 @@ export function App() {
       const data = await api.home();
       setHome(data);
       setHomeError(null);
-      setScreen({ name: "home" });
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         setScreen({ name: "pair" });
         return;
       }
       setHomeError(text(caught));
-      setScreen({ name: "home" });
     } finally {
       setHomeLoading(false);
     }
@@ -95,53 +93,166 @@ export function App() {
     }
   }, []);
 
+  const push = useCallback((route: Route): void => {
+    const path = routePath(route);
+    if (window.location.pathname + window.location.search !== path) {
+      window.history.pushState({ fromApp: true }, "", path);
+    }
+  }, []);
+
+  const showRoute = useCallback(
+    (route: Route, preview?: Tile): void => {
+      switch (route.kind) {
+        case "home":
+          // An unknown path is the home screen; give it the address that says so.
+          if (window.location.pathname !== "/") {
+            window.history.replaceState(null, "", "/");
+          }
+          setScreen({ name: "home" });
+          if (home === null) void loadHome();
+          break;
+        case "browse":
+          setScreen({ name: "browse" });
+          break;
+        case "myList":
+          setScreen({ name: "myList" });
+          break;
+        case "downloads":
+          setScreen({ name: "downloads" });
+          break;
+        case "library":
+          setScreen({ name: "library" });
+          void loadLibrary();
+          break;
+        case "title":
+          setScreen(
+            preview === undefined
+              ? { name: "title", id: route.id }
+              : { name: "title", id: route.id, preview },
+          );
+          break;
+        case "watch": {
+          const title: Route = { kind: "title", id: route.id };
+          window.history.replaceState({ fromApp: false }, "", routePath(title));
+          setScreen({ name: "title", id: route.id });
+          break;
+        }
+      }
+    },
+    [home, loadHome, loadLibrary],
+  );
+
+  // A refresh on any path but the home screen still needs an authenticated read; the library is
+  // the smallest one, and it is what `/library` would draw anyway.
   useEffect(() => {
-    void loadHome();
-  }, [loadHome]);
+    let cancelled = false;
+    const route = parseRoute(window.location.pathname);
+    const boot = async (): Promise<void> => {
+      setHomeLoading(true);
+      try {
+        if (route.kind === "home") {
+          const data = await api.home();
+          if (cancelled) return;
+          setHome(data);
+          setHomeError(null);
+          if (window.location.pathname !== "/") {
+            window.history.replaceState(null, "", "/");
+          }
+          setScreen({ name: "home" });
+        } else {
+          await api.library();
+          if (cancelled) return;
+          showRoute(route);
+        }
+      } catch (caught) {
+        if (cancelled) return;
+        if (caught instanceof ApiError && caught.status === 401) {
+          setScreen({ name: "pair" });
+        } else if (route.kind === "home") {
+          setHomeError(text(caught));
+          setScreen({ name: "home" });
+        } else {
+          setLibraryError(text(caught));
+          showRoute(route);
+        }
+      } finally {
+        if (!cancelled) setHomeLoading(false);
+      }
+    };
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+    // The first route is read once; later routes arrive through popstate or an explicit push.
+  }, []);
 
   const goHome = useCallback((): void => {
+    push({ kind: "home" });
     setScreen({ name: "home" });
     void loadHome();
-  }, [loadHome]);
+  }, [loadHome, push]);
 
   const goLibrary = useCallback((): void => {
+    push({ kind: "library" });
+    setScreen({ name: "library" });
     void loadLibrary();
-  }, [loadLibrary]);
+  }, [loadLibrary, push]);
 
-  const goBrowse = useCallback((focusSearch = false): void => {
-    setScreen({ name: "browse" });
-    if (focusSearch) {
-      window.setTimeout(() => document.getElementById("browse-search")?.focus(), 60);
-    }
-  }, []);
+  const goBrowse = useCallback(
+    (focusSearch = false): void => {
+      push({ kind: "browse" });
+      setScreen({ name: "browse" });
+      if (focusSearch) {
+        window.setTimeout(() => document.getElementById("browse-search")?.focus(), 60);
+      }
+    },
+    [push],
+  );
 
   const goMyList = useCallback((): void => {
+    push({ kind: "myList" });
     setScreen({ name: "myList" });
-  }, []);
+  }, [push]);
 
   const goDownloads = useCallback((): void => {
+    push({ kind: "downloads" });
     setScreen({ name: "downloads" });
-  }, []);
+  }, [push]);
 
   const goBack = useCallback((): void => {
-    switch (returnTo) {
-      case "browse":
-        setScreen({ name: "browse" });
-        break;
-      case "myList":
-        setScreen({ name: "myList" });
-        break;
-      case "downloads":
-        setScreen({ name: "downloads" });
-        break;
-      case "library":
-        void loadLibrary();
-        break;
-      case "home":
-        goHome();
-        break;
+    if ((window.history.state as { fromApp?: boolean } | null)?.fromApp === true) {
+      window.history.back();
+    } else {
+      // A directly-opened page has no earlier app entry; replace it with home so Back does not
+      // bounce between the same two screens.
+      window.history.replaceState(null, "", "/");
+      setScreen({ name: "home" });
+      void loadHome();
     }
-  }, [returnTo, goHome, loadLibrary]);
+  }, [loadHome]);
+
+  // Back, forward, and a phone's edge swipe all arrive as `popstate`; the URL is the route.
+  useEffect(() => {
+    const onPop = (): void => {
+      const previous = screenRef.current;
+      if (previous.name === "player") {
+        void api.stopPlayback(previous.ticket.url).catch(() => {});
+      }
+      showRoute(parseRoute(window.location.pathname));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [showRoute]);
+
+  const closePlayer = useCallback((id: number): void => {
+    if ((window.history.state as { fromApp?: boolean } | null)?.fromApp === true) {
+      window.history.back();
+    } else {
+      const title: Route = { kind: "title", id };
+      window.history.replaceState(null, "", routePath(title));
+      setScreen({ name: "title", id });
+    }
+  }, []);
 
   useSpatialFocus(screen.name !== "loading");
 
@@ -150,7 +261,8 @@ export function App() {
       if (event.key !== "Escape" && event.key !== "Backspace") return;
       if (screen.name === "player") {
         event.preventDefault();
-        setScreen({ name: "title", id: screen.titleId });
+        void api.stopPlayback(screen.ticket.url).catch(() => {});
+        closePlayer(screen.titleId);
       } else if (screen.name === "title") {
         event.preventDefault();
         goBack();
@@ -158,20 +270,23 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, goBack]);
+  }, [screen, goBack, closePlayer]);
 
   const openTile = useCallback(
-    (tile: Tile, from: "home" | "browse" | "myList" | "downloads" | "library" = "home"): void => {
-      setReturnTo(from);
+    (tile: Tile): void => {
+      push({ kind: "title", id: tile.id });
       setScreen({ name: "title", id: tile.id, preview: tile });
     },
-    [],
+    [push],
   );
 
-  const openId = useCallback((id: number): void => {
-    setReturnTo("library");
-    setScreen({ name: "title", id });
-  }, []);
+  const openId = useCallback(
+    (id: number): void => {
+      push({ kind: "title", id });
+      setScreen({ name: "title", id });
+    },
+    [push],
+  );
 
   const playTile = useCallback(
     async (tile: Tile): Promise<void> => {
@@ -184,19 +299,21 @@ export function App() {
         const position = tile.percent !== null && tile.percent > 95 ? 0 : tile.positionMs;
         const ticket = await api.playback(tile.id, position);
         setError(null);
+        push({ kind: "watch", id: tile.id });
         setScreen({ name: "player", ticket, titleId: tile.id, title: tile.name });
       } catch (caught) {
         setError(text(caught));
       }
     },
-    [openTile],
+    [openTile, push],
   );
 
   const startPlayback = useCallback(
     (ticket: PlaybackTicket, name: string, titleId: number): void => {
+      push({ kind: "watch", id: titleId });
       setScreen({ name: "player", ticket, titleId, title: name });
     },
-    [],
+    [push],
   );
 
   if (screen.name === "loading") {
@@ -208,14 +325,14 @@ export function App() {
   }
 
   if (screen.name === "pair") {
-    return <PairScreen onPaired={() => void loadHome()} />;
+    return <PairScreen onPaired={() => showRoute(parseRoute(window.location.pathname))} />;
   }
 
   if (screen.name === "player") {
     return (
       <Player
         initial={screen.ticket}
-        onClose={() => setScreen({ name: "title", id: screen.titleId })}
+        onClose={() => closePlayer(screen.titleId)}
         titleId={screen.titleId}
         titleName={screen.title}
       />
@@ -229,7 +346,7 @@ export function App() {
           id={screen.id}
           key={screen.id}
           onBack={goBack}
-          onOpen={(tile) => openTile(tile, returnTo)}
+          onOpen={(tile) => openTile(tile)}
           onPlay={(ticket, name) => startPlayback(ticket, name, screen.id)}
           preview={screen.preview}
         />
@@ -257,7 +374,7 @@ export function App() {
           onMyList={goMyList}
           onSearch={() => goBrowse(true)}
         />
-        <BrowseScreen onOpen={(tile) => openTile(tile, "browse")} />
+        <BrowseScreen onOpen={(tile) => openTile(tile)} />
         <TabBar
           active="browse"
           onBrowse={() => goBrowse()}
@@ -282,7 +399,7 @@ export function App() {
           onMyList={goMyList}
           onSearch={() => goBrowse(true)}
         />
-        <MyListScreen onOpen={(tile) => openTile(tile, "myList")} />
+        <MyListScreen onOpen={(tile) => openTile(tile)} />
         <TabBar
           active="myList"
           onBrowse={() => goBrowse()}
@@ -307,7 +424,7 @@ export function App() {
           onMyList={goMyList}
           onSearch={() => goBrowse(true)}
         />
-        <DownloadsScreen onOpen={(tile) => openTile(tile, "downloads")} />
+        <DownloadsScreen onOpen={(tile) => openTile(tile)} />
         <TabBar
           active="downloads"
           onBrowse={() => goBrowse()}
@@ -337,7 +454,7 @@ export function App() {
           data={home}
           error={homeError}
           loading={homeLoading}
-          onOpen={(tile) => openTile(tile, "home")}
+          onOpen={(tile) => openTile(tile)}
           onPlay={(tile) => void playTile(tile)}
           onRetry={() => void loadHome()}
         />
