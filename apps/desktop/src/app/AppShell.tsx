@@ -1,4 +1,5 @@
 import { IconButton, Sidebar, SidebarItem } from "@peregrine/ui";
+import { commands, unwrap } from "@peregrine/ipc-client";
 import { ProfileAvatar, ProfileSwitcher, useProfiles } from "../features/profiles/index.js";
 import { NotificationCentre } from "../features/notifications/components/NotificationCentre.js";
 import type { ReactElement } from "react";
@@ -85,6 +86,19 @@ interface AppShellProps {
 export function AppShell({ platform, route: initialRoute }: AppShellProps): ReactElement {
   const { t } = useTranslation();
   const { resolved, setPreference } = useTheme();
+  // The switch is the consent. Once it is on, every launch starts the LAN listener; pairing still
+  // needs the code ceremony, so autostart does not expose a library by itself.
+  useEffect(() => {
+    if (localStorage.getItem("peregrine.web.autoStart") !== "1") return;
+    void (async () => {
+      try {
+        const address = await unwrap(commands.webLanAddress());
+        if (address !== null) await unwrap(commands.webStart(address, 8642));
+      } catch {
+        // Settings shows the failure and offers Start; a launch must not fail over it.
+      }
+    })();
+  }, []);
   // Where the user is, which the sidebar, the shortcut dispatcher, and the screen switch all read
   // from one value. It starts where the window opened, and only this shell moves it — through the
   // history, so every screen except the first has somewhere to go back to (`./navigation.js`).
