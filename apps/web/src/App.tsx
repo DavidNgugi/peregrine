@@ -112,7 +112,9 @@ export function App() {
             window.history.replaceState(null, "", "/");
           }
           setScreen({ name: "home" });
-          if (home === null) void loadHome();
+          // Re-read on every return: the watchlist marks on the rails are part of the answer, and a
+          // title saved from its page must show its bookmark when Back lands here.
+          void loadHome();
           break;
         case "browse":
           setScreen({ name: "browse" });
@@ -142,7 +144,7 @@ export function App() {
         }
       }
     },
-    [home, loadHome, loadLibrary],
+    [loadHome, loadLibrary],
   );
 
   // A refresh on any path but the home screen still needs an authenticated read; the library is
