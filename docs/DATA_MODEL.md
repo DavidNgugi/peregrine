@@ -1145,6 +1145,24 @@ CREATE TABLE share_device (
 );
 ```
 
+### 2.12.1 Paired LAN devices (ADR 0028)
+
+The desktop-served TV client pairs into `paired_device`, not the future media server's `share_device`: one row per browser or television, a hashed credential, and the closed `read,stream` scope. `revoked_at` is a timestamp rather than a delete so the audit can answer which device was cut off and when; `last_address` is shown beside last-seen and is never an authorization input.
+
+```sql
+CREATE TABLE paired_device (
+  id           INTEGER PRIMARY KEY,
+  name         TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 64),
+  platform     TEXT,
+  token_hash   TEXT    NOT NULL UNIQUE CHECK (length(token_hash) = 64),
+  scopes       TEXT    NOT NULL CHECK (length(scopes) > 0),
+  created_at   INTEGER NOT NULL,
+  last_seen_at INTEGER,
+  last_address TEXT,
+  revoked_at   INTEGER
+);
+```
+
 ---
 
 ## 3. Invariants
@@ -1193,13 +1211,15 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I38 | The repository layer emits only declared events: `event_log.kind`, `subject_kind` and `subject_id` can hold no value that `peregrine-domain`'s event vocabulary does not name, and no API accepts a kind as a string. | The seal is a type, not a check: `NewEvent` holds `peregrine_domain::Event`, `Event::as_str` is an exhaustive match so an unnamed variant fails `cargo check`, and a `compile_fail` doctest in `peregrine-storage`'s `writer` module pins that the old string field cannot be constructed. `the_download_vocabulary_covers_the_machine` walks the download machine's own legal-cell matrix in both directions, and `an_appended_event_reads_back_as_the_declared_event` proves a written row parses back to the event that wrote it |
 | I40 | A user's match correction is stored as a pattern and consulted before a file is parked, so the title the parse read places later files that read the same way; a rule settles *which title* a name means and never where in it the file sits. | `UNIQUE (pattern)` on `match_rule`; `the_second_occurrence_of_a_corrected_name_is_placed_without_asking` in `peregrine-app`'s `library::index` module proves the read, `a_rule_never_settles_a_numbering_question` proves an episode-shaped refusal is decided first, and `one_pattern_has_one_rule` proves the upsert |
 | I39 | The search index is derived from `title` and its related tables and rebuilds from them: a rebuild after the index has been made wrong in either direction reproduces the same results for the same query, in the same order. | `a_rebuild_reproduces_identical_search_results` in `peregrine-storage`'s `fts` module, which records the results of several queries, breaks the index by adding a row with no title and removing a title's row, and asserts the rebuild restores them exactly |
+| I41 | A paired LAN device's token exists only as SHA-256, and a revoked device is refused on its next request. | `UNIQUE (token_hash)` and the 64-character check; the pairing repository hashes on issue and the web extractor reads the hash per request, so revocation is effective including mid-stream |
 
 ### What each invariant is enforced by today
 
 The "Enforced by" column above states the *mechanism* an invariant is meant to have, which is not the same question as whether that mechanism exists. Audited against the tree (PG-E4-20):
 
-- **Enforced, with a test that names it:** I1, I2, I3, I4, I6, I7, I9, I11, I12, I13, I28, I35, I36, I37, I38, I39, I40. PG-E3-10's library repository puts I2 on the two partial unique indices with `one_movie_item_per_title_and_one_episode_item_per_episode` and I3 on `UNIQUE (path)` with `one_file_cannot_be_claimed_twice`, and I11 on `a_missing_file_keeps_its_row_and_its_first_instant`.
+- **Enforced, with a test that names it:** I1, I2, I3, I4, I6, I7, I9, I11, I12, I13, I28, I35, I36, I37, I38, I39, I40, I41. PG-E3-10's library repository puts I2 on the two partial unique indices with `one_movie_item_per_title_and_one_episode_item_per_episode` and I3 on `UNIQUE (path)` with `one_file_cannot_be_claimed_twice`, and I11 on `a_missing_file_keeps_its_row_and_its_first_instant`.
 - **Enforced by tests that now name them:** I14 by `quiet_hours_never_hold_back_a_critical_event` and `a_critical_event_that_cannot_be_disabled_still_respects_focus`; I15 by `the_scanner_finds_each_forbidden_class`; I25, I26 and I27 by the scoped-read tests in `peregrine-storage`'s `catalogue` module — including the notification reads, by `a_restricted_scope_hides_notifications_about_hidden_subjects` and `a_restricted_scope_hides_notifications_about_an_episode_of_a_hidden_title` in its `notify` module — and by the scoped search tests in its `fts` module. The enforcement was already real; only the cross-reference was missing, and adding it is cheaper than asking a reader to trust the column.
+- **I41** by `a_paired_device_round_trips_without_storing_its_token` and `revoking_keeps_the_row_and_is_reported_once` in `peregrine-storage`'s `pairing` module, and by the refused-after-revoke case in `peregrine-app`'s LAN test.
 - **Stated for a table that exists, where the promised mechanism is genuinely absent:** only **I10** — deleting a title must cascade to rows and never to files, and nothing deletes a title at all, because deletion is PG-E15's. Two others that first looked like this group were checked and are narrower than they appear:
   - **I5** is enforced **upstream**, not by the column. No repository writes `download_file` today, and it does not need to: `TorrentInspector` refuses `../escape.mkv` and absolute entries with a typed reason before any row could be written, so a traversing path cannot reach the table through the only path that exists. What the column promises — validating again at insert and on read — is defence in depth that lands with the `download_file` writer, and it should not be described as missing.
   - **I8** is **vacuously true**: nothing writes `settings` in production yet, so no plaintext secret can coexist with a `secret_ref` in it. The test the column promises would assert over an empty table and prove nothing; it belongs with the settings registry (PG-E20-01), which is where the values that could carry a secret start to exist.

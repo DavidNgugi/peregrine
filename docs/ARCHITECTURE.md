@@ -100,6 +100,7 @@ graph TB
 | Core ↔ swarm | Hostile | Torrent inspection gate, extension allowlist, path traversal rejection, size and file-count caps, never execute or open with system handler, never symlink. |
 | Core ↔ local HTTP server | Local processes | Loopback bind, ephemeral port, per-session bearer token in path, no directory listing, no upload routes. |
 | Core ↔ LAN (casting) | LAN peers | Off by default, explicit opt-in, per-session token, single-file scoped routes, optional PIN, bind restricted to the selected interface. |
+| Core ↔ paired LAN devices | Paired LAN peers | Off by default; one explicit address, never the unspecified one; eight-digit one-use pairing approved on the desktop; SHA-256 token in an `HttpOnly`, `SameSite=Strict` cookie; `read,stream` scopes checked per route; `Host`/`Origin` validation; 4 KiB body cap; `no-store` API and CSP; revocation checked on every request; HLS sessions capped and killed on stop, revoke, or expiry ([adr/0028](./adr/0028-tv-web-client.md)). |
 | Core ↔ filesystem | User data | `PathGuard` canonicalization, roots allowlist, symlink escape rejection, unlink only for files recorded in the DB. |
 | Core ↔ OS keyring | Trusted | API keys and Trakt tokens only ever in the platform keyring; redacted in logs and diagnostics. |
 
@@ -107,7 +108,7 @@ graph TB
 
 ## 4. Container and runtime view
 
-Peregrine is one process tree, not a client/server system. There is no daemon, no background service, and no port that stays open unless casting or streaming is active.
+Peregrine is one process tree, not a client/server system. There is no daemon, no background service, and no port that stays open unless casting, streaming, or the optional LAN surface is enabled. That surface is the one deliberate exception: it is off by default, bound to one explicit address, and stops with the app ([adr/0028](./adr/0028-tv-web-client.md)).
 
 ```mermaid
 graph LR
@@ -247,7 +248,7 @@ graph TD
 | `peregrine-cast` | Discovery (`mdns-sd` for Chromecast, `rupnp` for DLNA), renderer capability model, Chromecast CASTV2 and DLNA AVTransport adapters, delivery-mode decisions, playback-state reconciliation. Reuses `playback`'s sidecar supervisor for remux and transcode. | `domain`, `stream`, `playback` | Off by default. Never scans the whole subnet beyond the standard discovery protocols. |
 | `peregrine-secrets` | Keyring read/write, in-memory `Secret` wrappers, log redaction filter. | `domain`, `keyring`, `secrecy` | Secret values are never `Debug`-printed, never serialized to the DB, never included in error strings. |
 | `peregrine-platform` | Path resolution per OS, the production `Clock` and `IdGenerator`, permission requests, tray, dock/taskbar badges, autostart, notifications, power-save inhibition during playback, and the `OsAuthenticator` adapters (LocalAuthentication, Windows Hello, polkit and fprintd). | `domain` | One `cfg`-gated module per OS behind a common interface. It is the only shipping crate allowed to read a wall clock or a random source; `xtask check-determinism` enforces that. Authentication adapters report which mechanism answered, and report unavailability rather than faking success. The pieces that need a Tauri `AppHandle` are the exception and live where that handle is: the tray (PG-E1-09), the login item (PG-E1-13), the native pickers (PG-E1-12), and native notification delivery with its startup click handler (PG-E1-14) are plugins the desktop shell registers, and this crate holds the OS work that needs no running application. |
-| `peregrine-app` | The runtime that composes the above — logging, the database, the scheduler, and the event bus — plus the services that use them: `LibraryService`, `DiscoveryService`, `AcquisitionService`, `PlaybackService`, `SubtitleService`, `SettingsService`, `CastService`, `NotificationService`, `AccountService`, `MaintenanceService`. | everything above | Services are the only place where multiple ports are combined, and `Runtime` is the only place they are assembled. |
+| `peregrine-app` | The runtime that composes the above — logging, the database, the scheduler, and the event bus — plus the services that use them: `LibraryService`, `DiscoveryService`, `AcquisitionService`, `PlaybackService`, `SubtitleService`, `SettingsService`, `CastService`, `NotificationService`, `AccountService`, `MaintenanceService`, and the LAN web surface (`web`: pairing, device grants, read routes, and HLS sessions). | everything above | Services are the only place where multiple ports are combined, and `Runtime` is the only place they are assembled. |
 | `peregrine-ipc` | Tauri commands, event emitters, DTO mapping, error mapping, `specta` type export, and the one place the runtime is served over Tauri. | `app` | Commands are ≤20 lines: parse, call one service, map result. No logic. |
 | `xtask` | Dependency-edge check, migration lint, IPC binding generation, release notes, bench harness, performance budget gate. | dev tooling | Runs in CI, never shipped. |
 
@@ -287,6 +288,8 @@ graph TB
     Query -->|"typed IPC"| Core["Rust core"]
     UIState --> Cmd
 ```
+
+`apps/web` is a second client of the same core, not a second UI of the desktop app: a Vite/React SPA served as static assets by the LAN surface, talking the HTTP API rather than Tauri IPC. It has no TanStack Router or Query, no Tauri-bound hooks, and its own spatial-focus module; it shares `packages/theme`'s tokens, and its copy is local until it is consolidated with the console's catalogue. Its screens are the hero-and-rails home, the library grid, the title page with seasons, episodes, and More Like This, and the player ([adr/0028](./adr/0028-tv-web-client.md)).
 
 ### State ownership
 

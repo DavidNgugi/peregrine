@@ -883,6 +883,49 @@ Tests: every indirect leak path (suggestions, similar titles, counts, continue-w
 
 ---
 
+## F17 — TV web pairing and playback
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant TV as TV or phone browser
+    participant Web as LAN surface
+    participant Core as Runtime
+    participant DB as paired_device
+    participant Desktop
+
+    TV->>Web: POST /api/pair {name, platform}
+    Web->>Core: request_pair: eight-digit code, five-minute TTL, per-address limit
+    Web-->>TV: pairId and code
+    Web-->>Desktop: web://pair-requested
+    Note over Desktop: Settings → Web access shows the code, address, and name
+    Desktop->>Web: approve(pairId) after comparing the code
+    Web->>DB: insert paired_device(sha256(token), read,stream)
+    TV->>Web: GET /api/pair/{pairId}
+    Web-->>TV: token exactly once; HttpOnly SameSite=Strict cookie
+    TV->>Web: GET /api/home
+    Web->>Core: home_page: hero, Continue Watching, library, provider rails
+    Core-->>TV: one answer for the whole home screen
+    TV->>Web: POST /api/playback/{id} {position, season?, episode?}
+    alt The container and its streams are browser-safe
+        Web-->>TV: direct ticket; Range /media/{token}
+    else Anything else
+        Web->>Core: ffmpeg HLS session starting at the offset
+        Web-->>TV: playlist and fMP4 segments under /hls/{token}
+    end
+    TV->>Web: POST /api/progress every ten seconds, on hide, and on leave
+    Web->>Core: record_progress → the same watch_progress row
+    Note over Desktop,TV: Continue Watching and Resume read one row in both directions
+```
+
+A denial, an expiry, or a consumed request is terminal: the client starts a new request and gets a new prompt. The token is shown once and stored only as its hash; a revoke refuses the device's next request, including a segment of a film already playing, and kills its HLS session. Reads require the `read` scope and playback requires `stream`, so a stream-only credential cannot walk the catalogue.
+
+Invariants: the surface is off until a person starts it and binds one explicit address, never the unspecified one; the pairing code is single use and valid for five minutes; no plaintext token or code is stored or logged; a read is scoped to `AccountScope`; no response contains an absolute path; progress goes through `Runtime::record_progress`, so a manual watch mark outranks a report; and one device holds one HLS session while the host holds at most four.
+
+Tests: pairing expiry, denial, replay, and the per-address limit; an unauthenticated read and a foreign `Host` or `Origin`; a read with no `read` scope; a revoke between two segments; a direct Range request; a real MKV through the HLS routes (playlist, init, and segment); progress written on the TV and read on the desktop and the reverse; and a report naming an episode the title has no file for.
+
+---
+
 ## State machines
 
 ### SM1 — Download job
