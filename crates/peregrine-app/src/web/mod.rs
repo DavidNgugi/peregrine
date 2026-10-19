@@ -57,8 +57,12 @@ const PLAYBACK_TTL_MS: i64 = 6 * 60 * 60 * 1_000;
 const HLS_SESSION_LIMIT: usize = 4;
 /// How often a device's last-seen stamp is written at most, in milliseconds.
 const LAST_SEEN_INTERVAL_MS: i64 = 60 * 1_000;
-/// The scopes every paired device receives. There is no other scope in this slice.
+/// The scopes a device receives unless its approval also grants acquisition.
 pub const SCOPES: &str = "read,stream";
+/// The scope that lets a paired device ask the core to start a download. It is never a default.
+pub const ACQUIRE_SCOPE: &str = "acquire";
+/// The scopes an approval with the "Allow downloads" box ticked issues.
+pub const ACQUIRING_SCOPES: &str = "read,stream,acquire";
 /// The cookie a paired browser carries.
 pub const TOKEN_COOKIE: &str = "peregrine_token";
 
@@ -176,6 +180,12 @@ pub enum WebError {
     /// The title is not in the library, or this scope may not see it.
     #[error("the title is not in the library")]
     UnknownTitle,
+    /// The device was not approved to start downloads.
+    #[error("this device may not start downloads")]
+    NotPermitted,
+    /// The request named an episode incompletely or an impossible season.
+    #[error("the download request is not valid")]
+    InvalidRequest,
     /// A row the insert just wrote could not be read back.
     #[error("the paired device could not be read back")]
     DeviceMissing,
@@ -667,11 +677,18 @@ impl WebService {
 
     /// Approves one request by its secret id.
     ///
+    /// `allow_acquire` is the desktop's explicit **Allow downloads** decision; every other
+    /// approval issues the default `read,stream` only.
+    ///
     /// # Errors
     ///
     /// [`WebError::PairUnknown`], [`WebError::PairExpired`], [`WebError::PairNotPending`], or a
     /// storage failure.
-    pub async fn approve(&self, pair_id: &str) -> Result<PairedDevice, WebError> {
+    pub async fn approve(
+        &self,
+        pair_id: &str,
+        allow_acquire: bool,
+    ) -> Result<PairedDevice, WebError> {
         let now_ms = self.now();
         let (name, platform, address) = {
             let mut pairing = self
@@ -703,7 +720,11 @@ impl WebService {
                 name,
                 platform,
                 token_hash: hash_token(token.as_str()),
-                scopes: SCOPES.to_owned(),
+                scopes: if allow_acquire {
+                    ACQUIRING_SCOPES.to_owned()
+                } else {
+                    SCOPES.to_owned()
+                },
                 address,
                 at: now_ms,
             })
@@ -745,7 +766,11 @@ impl WebService {
     ///
     /// [`WebError::PairUnknown`] when no request shows the code, or the same errors as
     /// [`WebService::approve`].
-    pub async fn approve_code(&self, code: &str) -> Result<PairedDevice, WebError> {
+    pub async fn approve_code(
+        &self,
+        code: &str,
+        allow_acquire: bool,
+    ) -> Result<PairedDevice, WebError> {
         let now_ms = self.now();
         let pair_id = {
             let mut pairing = self
@@ -759,7 +784,7 @@ impl WebService {
                 .cloned()
                 .ok_or(WebError::PairUnknown)?
         };
-        self.approve(&pair_id).await
+        self.approve(&pair_id, allow_acquire).await
     }
 
     /// Refuses one request.
@@ -1036,6 +1061,87 @@ impl WebService {
             });
         }
         Ok(downloads)
+    }
+    /// The device behind a request, with the one capability the client gates its buttons on.
+    #[must_use]
+    pub fn me(&self, device: &PairedDevice) -> MeDto {
+        MeDto {
+            name: device.name.clone(),
+            scopes: device.scopes.clone(),
+            can_acquire: scope_allows(&device.scopes, ACQUIRE_SCOPE),
+        }
+    }
+
+    /// Starts the same automatic acquisition the desktop's Download button starts.
+    ///
+    /// The request is audited before the queue is touched, so a refusal or a failed submission
+    /// still says which device asked for which title.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::NotPermitted`] when the device lacks the scope, [`WebError::InvalidRequest`]
+    /// for half an episode or a zero marker, [`WebError::UnknownTitle`] when the id is unknown, or
+    /// the runtime's acquisition failures.
+    pub async fn acquire_title(
+        &self,
+        device: &PairedDevice,
+        title_id: i64,
+        season: Option<u32>,
+        episode: Option<u32>,
+    ) -> Result<AcquireDto, WebError> {
+        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) {
+            return Err(WebError::NotPermitted);
+        }
+        let pick = match (season, episode) {
+            (Some(season), Some(episode)) if season > 0 && episode > 0 => {
+                Some(crate::jobs::acquire::EpisodePick { season, episode })
+            }
+            (None, None) => None,
+            _ => return Err(WebError::InvalidRequest),
+        };
+        if self.runtime.title_identity(title_id).await?.is_none() {
+            return Err(WebError::UnknownTitle);
+        }
+        let episode_id = match pick {
+            Some(pick) => {
+                self.runtime
+                    .episode_id(title_id, pick.season, pick.episode)
+                    .await?
+            }
+            None => None,
+        };
+        let audit_id = self
+            .database
+            .record_web_audit(peregrine_storage::NewWebAudit {
+                device_id: device.id,
+                action: peregrine_storage::WebAuditAction::Acquire,
+                title_id,
+                episode_id,
+                job_id: None,
+                at: self.now(),
+            })
+            .await?;
+        let started = self
+            .runtime
+            .start_acquire(crate::runtime::installation_scope(), title_id, pick, 1)
+            .await?;
+        if let Err(error) = self
+            .database
+            .set_web_audit_job(audit_id, started.journal_id)
+            .await
+        {
+            warn!(%error, "the acquisition audit could not name its job");
+        }
+        info!(
+            device = device.id,
+            title = title_id,
+            "a paired device started an acquisition"
+        );
+        Ok(AcquireDto {
+            job_id: started.job.to_string(),
+            journal_id: started.journal_id,
+            coalesced: started.coalesced,
+        })
     }
     /// The account's My List as tiles, newest first.
     ///
@@ -1770,6 +1876,30 @@ pub struct GenreDto {
     pub name: String,
 }
 
+/// The device behind the current request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeDto {
+    /// The name the person approved.
+    pub name: String,
+    /// The scopes the row holds.
+    pub scopes: String,
+    /// Whether this device may start a download.
+    pub can_acquire: bool,
+}
+
+/// One acquisition a device asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquireDto {
+    /// The scheduler's id; nil when the request joined a job already running.
+    pub job_id: String,
+    /// The journal row, which outlives the scheduler handle.
+    pub journal_id: i64,
+    /// Whether the request joined a job already running.
+    pub coalesced: bool,
+}
+
 /// One download job as the progress screen draws it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2068,6 +2198,8 @@ mod tests {
         assert!(scope_allows("read,stream", "read"));
         assert!(scope_allows("read, stream", "stream"));
         assert!(!scope_allows("read,stream", "write"));
+        assert!(!scope_allows("read,stream", "acquire"));
+        assert!(scope_allows("read,stream,acquire", "acquire"));
         assert!(!scope_allows("reader", "read"));
     }
 

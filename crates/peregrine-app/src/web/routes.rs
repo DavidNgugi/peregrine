@@ -31,8 +31,8 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::warn;
 
 use super::{
-    BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MediaGrant, PairOffer, PairStatus,
-    PlaybackTicket, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
+    AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MeDto, MediaGrant, PairOffer,
+    PairStatus, PlaybackTicket, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -47,6 +47,8 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/library", get(library))
         .route("/api/watchlist", get(watchlist))
         .route("/api/downloads", get(downloads))
+        .route("/api/me", get(me))
+        .route("/api/acquire", post(acquire))
         .route("/api/search", get(search))
         .route("/api/browse", get(browse))
         .route("/api/genres", get(genres))
@@ -261,6 +263,16 @@ impl From<WebError> for ApiError {
                 "not_found",
                 "the title is not in the library",
             ),
+            WebError::NotPermitted => Self::new(
+                StatusCode::FORBIDDEN,
+                "not_permitted",
+                "this device was not approved to start downloads",
+            ),
+            WebError::InvalidRequest => Self::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "a season and an episode must be given together",
+            ),
             WebError::InvalidProgress => Self::new(
                 StatusCode::CONFLICT,
                 "invalid_progress",
@@ -460,6 +472,31 @@ async fn downloads(
 ) -> Result<Json<Vec<DownloadDto>>, ApiError> {
     require_read(&device)?;
     Ok(Json(service.downloads_page().await?))
+}
+
+async fn me(State(service): State<Arc<WebService>>, Device(device): Device) -> Json<MeDto> {
+    Json(service.me(&device))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcquireBody {
+    title_id: i64,
+    season: Option<u32>,
+    episode: Option<u32>,
+}
+
+async fn acquire(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<AcquireBody>,
+) -> Result<Json<AcquireDto>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(
+        service
+            .acquire_title(&device, body.title_id, body.season, body.episode)
+            .await?,
+    ))
 }
 
 async fn search(

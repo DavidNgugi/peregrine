@@ -516,7 +516,7 @@ export const commands = {
 	 *  [`ErrorCode::NotFound`] for an id no request holds, [`ErrorCode::Conflict`] when it expired or
 	 *  was already answered.
 	 */
-	webApprove: (pairId: string) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_approve", { pairId })),
+	webApprove: (pairId: string, allowAcquire: boolean | null) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_approve", { pairId, allowAcquire })),
 	/**
 	 *  Approves whichever request shows `code`.
 	 * 
@@ -524,7 +524,7 @@ export const commands = {
 	 * 
 	 *  [`ErrorCode::NotFound`] when no request shows it, and the same refusals as [`web_approve`].
 	 */
-	webApproveCode: (code: string) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_approve_code", { code })),
+	webApproveCode: (code: string, allowAcquire: boolean | null) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_approve_code", { code, allowAcquire })),
 	/**
 	 *  Refuses one pairing request.
 	 * 

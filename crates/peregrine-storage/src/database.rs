@@ -1978,6 +1978,41 @@ impl Database {
         crate::pairing::for_token(&self.readers, token_hash).await
     }
 
+    /// Records one acquisition a paired device asked for.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the write fails, including a device row that does not exist.
+    pub async fn record_web_audit(
+        &self,
+        audit: crate::web_audit::NewWebAudit,
+    ) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordWebAudit(Box::new(audit)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("record_web_audit", &other)),
+        }
+    }
+
+    /// Attaches the journal job an audited acquisition started.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the write fails.
+    pub async fn set_web_audit_job(&self, id: i64, job_id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetWebAuditJob { id, job_id })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("set_web_audit_job", &other)),
+        }
+    }
+
     /// One paired device by its row id, revoked or not.
     pub async fn paired_device(
         &self,

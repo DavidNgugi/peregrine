@@ -46,6 +46,7 @@ export function WebAccessSection(): ReactElement {
   const [address, setAddress] = useState<string | null>(null);
   const [pending, setPending] = useState<readonly PendingPairDto[]>([]);
   const [devices, setDevices] = useState<readonly PairedDeviceDto[]>([]);
+  const [allowAcquire, setAllowAcquire] = useState<Record<string, boolean>>({});
   const [auto, setAuto] = useState(
     () => typeof localStorage !== "undefined" && localStorage.getItem(WEB_AUTO_KEY) === "1",
   );
@@ -172,32 +173,50 @@ export function WebAccessSection(): ReactElement {
                     {pair.platform === null ? "" : " \u00b7 " + pair.platform}
                   </span>
                 </span>
-                <span className="flex gap-2">
-                  <Button
-                    onClick={() => {
-                      void unwrap(commands.webApprove(pair.pairId))
-                        .then(read)
-                        .catch(() => {
-                          setFailed(true);
-                        });
-                    }}
-                    size="sm"
+                <span className="flex flex-wrap items-center gap-3">
+                  <label
+                    className="flex items-center gap-2 text-caption text-text-secondary"
+                    title={t("settings.web.allowDownloadsHint")}
                   >
-                    {t("settings.web.approve")}
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      void unwrap(commands.webDeny(pair.pairId))
-                        .then(read)
-                        .catch(() => {
-                          setFailed(true);
-                        });
-                    }}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    {t("settings.web.deny")}
-                  </Button>
+                    <input
+                      checked={allowAcquire[pair.pairId] ?? false}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setAllowAcquire((held) => ({ ...held, [pair.pairId]: checked }));
+                      }}
+                      type="checkbox"
+                    />
+                    {t("settings.web.allowDownloads")}
+                  </label>
+                  <span className="flex gap-2">
+                    <Button
+                      onClick={() => {
+                        void unwrap(
+                          commands.webApprove(pair.pairId, allowAcquire[pair.pairId] ?? false),
+                        )
+                          .then(read)
+                          .catch(() => {
+                            setFailed(true);
+                          });
+                      }}
+                      size="sm"
+                    >
+                      {t("settings.web.approve")}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        void unwrap(commands.webDeny(pair.pairId))
+                          .then(read)
+                          .catch(() => {
+                            setFailed(true);
+                          });
+                      }}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      {t("settings.web.deny")}
+                    </Button>
+                  </span>
                 </span>
               </div>
             ))}
@@ -219,6 +238,11 @@ export function WebAccessSection(): ReactElement {
                     <span className="text-caption text-text-tertiary">
                       {device.platform ?? device.scopes}
                     </span>
+                    {device.scopes.split(",").includes("acquire") ? (
+                      <span className="text-caption text-state-ok">
+                        {t("settings.web.downloadsAllowed")}
+                      </span>
+                    ) : null}
                   </span>
                   <Button
                     onClick={() => {
@@ -237,6 +261,8 @@ export function WebAccessSection(): ReactElement {
               ))}
           </div>
         )}
+
+        <p className="text-caption text-text-tertiary">{t("settings.web.acquireNote")}</p>
 
         <p className="text-caption text-text-tertiary">{t("settings.web.caveat")}</p>
 

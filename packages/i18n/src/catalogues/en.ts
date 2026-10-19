@@ -828,6 +828,12 @@ export const en = {
         code: "The browser shows an 8-digit code. Approve the matching request below.",
         startForCode: "Start the listener to get a QR code and address.",
         approve: "Approve",
+        allowDownloads: "Allow downloads",
+        allowDownloadsHint:
+          "Lets this device start downloads. It can use your bandwidth and disk under the same quality and seed rules as the desktop.",
+        downloadsAllowed: "Downloads allowed",
+        acquireNote:
+          "A device that is already paired stays read-only. To allow downloads on it, revoke it and pair it again with Allow downloads ticked.",
         deny: "Deny",
         revoke: "Revoke",
         pending: "Waiting for approval",

@@ -98,6 +98,15 @@ pub(crate) enum WriteRequest {
         /// The address it presented, when the connection carried one.
         address: Option<String>,
     },
+    /// Record what a paired device asked the LAN surface to do.
+    RecordWebAudit(Box<crate::web_audit::NewWebAudit>),
+    /// Attach the journal job an audited request started.
+    SetWebAuditJob {
+        /// The audit row.
+        id: i64,
+        /// The journal row.
+        job_id: i64,
+    },
     /// Revoke a paired device, which refuses its next request.
     RevokePairedDevice {
         /// The device row.
@@ -1007,6 +1016,8 @@ async fn apply(
             .map(|rows| WriteResponse::RetentionPruned { rows })
             .map_err(StorageError::from_sqlx),
         other @ (WriteRequest::InsertPairedDevice(_)
+        | WriteRequest::RecordWebAudit(_)
+        | WriteRequest::SetWebAuditJob { .. }
         | WriteRequest::TouchPairedDevice { .. }
         | WriteRequest::RevokePairedDevice { .. }) => apply_pairing(connection, other).await,
         other => apply_download_write(connection, other).await,
@@ -1024,6 +1035,14 @@ async fn apply_pairing(
             .map(|id| WriteResponse::RowInserted { id }),
         WriteRequest::TouchPairedDevice { id, at, address } => {
             crate::pairing::touch(connection, id, at, address.as_deref())
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
+        WriteRequest::RecordWebAudit(audit) => crate::web_audit::insert(connection, &audit)
+            .await
+            .map(|id| WriteResponse::RowInserted { id }),
+        WriteRequest::SetWebAuditJob { id, job_id } => {
+            crate::web_audit::set_job(connection, id, job_id)
                 .await
                 .map(|changed| WriteResponse::RowChanged { changed })
         }

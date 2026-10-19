@@ -57,6 +57,7 @@ export function App() {
   const [rows, setRows] = useState<readonly LibraryRow[]>([]);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [canAcquire, setCanAcquire] = useState(false);
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
@@ -150,6 +151,9 @@ export function App() {
     const boot = async (): Promise<void> => {
       setHomeLoading(true);
       try {
+        const me = await api.me();
+        if (cancelled) return;
+        setCanAcquire(me.canAcquire);
         if (route.kind === "home") {
           const data = await api.home();
           if (cancelled) return;
@@ -325,7 +329,21 @@ export function App() {
   }
 
   if (screen.name === "pair") {
-    return <PairScreen onPaired={() => showRoute(parseRoute(window.location.pathname))} />;
+    return (
+      <PairScreen
+        onPaired={() => {
+          void (async () => {
+            try {
+              const me = await api.me();
+              setCanAcquire(me.canAcquire);
+            } catch {
+              setCanAcquire(false);
+            }
+            showRoute(parseRoute(window.location.pathname));
+          })();
+        }}
+      />
+    );
   }
 
   if (screen.name === "player") {
@@ -343,6 +361,7 @@ export function App() {
     return (
       <>
         <TitleScreen
+          canAcquire={canAcquire}
           id={screen.id}
           key={screen.id}
           onBack={goBack}

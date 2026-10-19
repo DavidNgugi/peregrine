@@ -41,6 +41,7 @@ mod test_support;
 mod usage;
 mod watch;
 mod watch_options;
+mod web_audit;
 mod writer;
 
 pub use offers::{ChosenOfferRow, NewOffer, OfferRow};
@@ -80,4 +81,5 @@ pub use retention::{
 pub use schedule::{DownloadScheduleRow, NewSchedule};
 pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
 pub use watch::{EpisodeProgressRow, WatchDayRow, WatchProgressRow, WatchlistRow};
+pub use web_audit::{NewWebAudit, WebAuditAction};
 pub use writer::NewEvent;

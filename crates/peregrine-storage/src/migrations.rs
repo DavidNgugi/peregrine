@@ -172,7 +172,7 @@ mod tests {
     ];
 
     /// The tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 47] = [
+    const DOCUMENTED_TABLES: [&str; 48] = [
         "account",
         "cast_session",
         "company",
@@ -220,6 +220,7 @@ mod tests {
         "watch_progress",
         "watch_sync",
         "watchlist_entry",
+        "web_audit",
     ];
 
     /// `(name, declared type, notnull, default, pk)`, exactly as `PRAGMA table_info` reports it.
@@ -1026,10 +1027,11 @@ mod tests {
         ("watch_progress", "title", "title_id", "id", "CASCADE"),
         ("watchlist_entry", "account", "account_id", "id", "CASCADE"),
         ("watchlist_entry", "title", "title_id", "id", "CASCADE"),
+        ("web_audit", "paired_device", "device_id", "id", "NO ACTION"),
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 45] = [
+    const DOCUMENTED_INDICES: [&str; 46] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "discover_rail_title_idx",
@@ -1075,6 +1077,7 @@ mod tests {
         "watch_progress_account_idx",
         "watch_progress_continue_idx",
         "watchlist_added_idx",
+        "web_audit_device_created",
     ];
 
     /// The part of each named index's `CREATE` statement that makes it correct: the
@@ -1103,6 +1106,7 @@ mod tests {
         ("title_sort_name_idx", "(sort_name)"),
         ("title_sync_idx", "(metadata_state, last_synced_at)"),
         ("watch_offer_title_idx", "(title_id, region)"),
+        ("web_audit_device_created", "(device_id, created_at)"),
         ("title_alias_alias_idx", "(alias)"),
         ("external_id_title_idx", "(title_id)"),
         ("external_id_episode_idx", "(episode_id)"),
@@ -2313,6 +2317,8 @@ mod tests {
          VALUES ('download.completed', 'Download complete', 0)",
         "INSERT INTO paired_device (name, token_hash, scopes, created_at) \
          VALUES ('Test TV', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'read,stream', 0)",
+        "INSERT INTO web_audit (device_id, action, title_id, created_at) \
+         VALUES (1, 'acquire', 1, 0)",
         "INSERT INTO cast_session (device_id, state, delivery, started_at) \
          VALUES (1, 'playing', 'direct', 0)",
         "INSERT INTO discover_rail (rail, position, title_id) VALUES ('popular_movies', 0, 1)",
@@ -2423,6 +2429,8 @@ mod tests {
         SELECT 'watch_sync' AS table_name, COUNT(*) AS n FROM watch_sync
         UNION ALL
         SELECT 'watchlist_entry' AS table_name, COUNT(*) AS n FROM watchlist_entry
+        UNION ALL
+        SELECT 'web_audit' AS table_name, COUNT(*) AS n FROM web_audit
     ";
 
     /// The two disposable tables, counted before they are dropped.

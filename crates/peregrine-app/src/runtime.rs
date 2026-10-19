@@ -7407,7 +7407,7 @@ mod tests {
         let offer = service
             .request_pair(IpAddr::V4(Ipv4Addr::LOCALHOST), "Test TV", None)
             .unwrap();
-        let device = service.approve(&offer.pair_id).await.unwrap();
+        let device = service.approve(&offer.pair_id, false).await.unwrap();
         let crate::web::PairStatus::Approved {
             token: Some(token), ..
         } = service.pair_status(&offer.pair_id)
@@ -7923,6 +7923,71 @@ mod tests {
     /// browser carries, the token hash the database stores, and the immediate refusal after a revoke
     /// -- are all between the pieces a unit test would mock.
     #[tokio::test]
+    async fn a_device_approved_for_downloads_gets_the_acquire_scope() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        use crate::web::WebConfig;
+
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let service = Arc::new(Arc::new(runtime).web_service());
+        let status = service
+            .start(WebConfig::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .unwrap();
+        let port = status.address.expect("a bound address").port();
+        let base = format!("http://127.0.0.1:{port}");
+        let offer = service
+            .request_pair(IpAddr::V4(Ipv4Addr::LOCALHOST), "Download TV", None)
+            .unwrap();
+        let device = service.approve(&offer.pair_id, true).await.unwrap();
+        assert_eq!(device.scopes, "read,stream,acquire");
+        let crate::web::PairStatus::Approved {
+            token: Some(token), ..
+        } = service.pair_status(&offer.pair_id)
+        else {
+            panic!("the approval yields a token");
+        };
+        let client = reqwest::Client::new();
+        let me: serde_json::Value = client
+            .get(format!("{base}/api/me"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(me["canAcquire"], true);
+
+        let half_an_episode = client
+            .post(format!("{base}/api/acquire"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "titleId": 1, "season": 1 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(half_an_episode.status(), 400);
+        let unknown = client
+            .post(format!("{base}/api/acquire"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "titleId": 999_999 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unknown.status(), 404);
+
+        assert!(service.revoke(device.id).await.unwrap());
+        let after = client
+            .get(format!("{base}/api/me"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(after.status(), 401);
+        service.stop().await;
+    }
+    #[tokio::test]
     #[allow(clippy::too_many_lines)] // One scenario read top to bottom: pairing, auth, refusal, revoke.
     async fn the_lan_surface_pairs_a_device_reads_the_library_and_refuses_it_after_a_revoke() {
         use std::net::{IpAddr, Ipv4Addr};
@@ -7973,7 +8038,7 @@ mod tests {
             .unwrap();
         assert_eq!(refused.status(), 401, "an unpaired read is refused");
 
-        let device = service.approve(&pair_id).await.unwrap();
+        let device = service.approve(&pair_id, false).await.unwrap();
         assert_eq!(device.scopes, "read,stream");
 
         let approved = client
@@ -8083,6 +8148,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(downloads.status(), 200);
+
+        // The default pairing cannot acquire; the same read says so, and the write refuses.
+        let me: serde_json::Value = client
+            .get(format!("{base}/api/me"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(me["canAcquire"], false);
+        let refused_acquire = client
+            .post(format!("{base}/api/acquire"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({ "titleId": direct_id }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused_acquire.status(), 403);
 
         // A title nobody has played has no Resume control; after one report it has the position
         // the desktop would also read from the same row.

@@ -77,6 +77,18 @@ export interface Genre {
   readonly name: string;
 }
 
+export interface Me {
+  readonly name: string;
+  readonly scopes: string;
+  readonly canAcquire: boolean;
+}
+
+export interface AcquireResult {
+  readonly jobId: string;
+  readonly journalId: number;
+  readonly coalesced: boolean;
+}
+
 export interface Download {
   readonly id: number;
   readonly titleId: number;
@@ -217,6 +229,13 @@ export const api = {
     request<Genre[]>("/api/genres?kind=" + kind),
   watchlist: (): Promise<Tile[]> => request<Tile[]>("/api/watchlist"),
   downloads: (): Promise<Download[]> => request<Download[]>("/api/downloads"),
+  me: (): Promise<Me> => request<Me>("/api/me"),
+  acquire: (titleId: number, season?: number, episode?: number): Promise<AcquireResult> =>
+    request<AcquireResult>("/api/acquire", "POST", {
+      titleId,
+      season: season ?? null,
+      episode: episode ?? null,
+    }),
   stopPlayback: (url: string): Promise<void> =>
     request<void>("/api/playback/stop", "POST", { url }, true),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),

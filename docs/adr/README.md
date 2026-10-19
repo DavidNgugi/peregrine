@@ -31,6 +31,7 @@ One file per decision that constrains the architecture. Each records the context
 | [0025](./0025-prebuilt-sidecars.md) | Prebuilt sidecars: GPL-3 mpv and LGPL-3 ffmpeg on Windows and Linux | Accepted; refines 0009 and supersedes 0014's ban on `--enable-version3` |
 | [0026](./0026-scheduled-downloads.md) | Scheduled downloads: one table, one in-app ticker | Accepted |
 | [0027](./0027-local-profiles.md) | Local profiles before accounts | Accepted, provisional until 0019 |
-| [0028](./0028-tv-web-client.md) | TV web client: a read-only LAN surface, paired by code | Accepted; first slice of E37, refined into the desktop app ahead of the E36 daemon |
+| [0028](./0028-tv-web-client.md) | TV web client: a paired LAN surface, read-only by default | Accepted; first slice of E37, refined into the desktop app ahead of the E36 daemon |
+| [0029](./0029-device-scoped-acquisition.md) | Device-scoped acquisition from the LAN client | Accepted; adds the opt-in `acquire` scope, the approval checkbox, and the audit rows |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.

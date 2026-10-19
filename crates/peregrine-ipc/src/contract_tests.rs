@@ -668,7 +668,7 @@ fn web_pairings_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 
 fn web_approve_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::web::web_approve(harness.dead_state(), "pair".to_owned())
+        crate::web::web_approve(harness.dead_state(), "pair".to_owned(), None)
             .await
             .map(drop)
     })
@@ -676,7 +676,7 @@ fn web_approve_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 
 fn web_approve_code_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::web::web_approve_code(harness.dead_state(), "12345678".to_owned())
+        crate::web::web_approve_code(harness.dead_state(), "12345678".to_owned(), None)
             .await
             .map(drop)
     })

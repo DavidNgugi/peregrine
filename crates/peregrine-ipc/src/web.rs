@@ -180,8 +180,13 @@ pub fn web_pairings(state: State<'_, RuntimeState>) -> Result<Vec<PendingPairDto
 pub async fn web_approve(
     state: State<'_, RuntimeState>,
     pair_id: String,
+    allow_acquire: Option<bool>,
 ) -> Result<PairedDeviceDto, AppError> {
-    let device = state.web()?.approve(&pair_id).await.map_err(web_error)?;
+    let device = state
+        .web()?
+        .approve(&pair_id, allow_acquire.unwrap_or(false))
+        .await
+        .map_err(web_error)?;
     Ok(device_dto(device))
 }
 
@@ -196,8 +201,13 @@ pub async fn web_approve(
 pub async fn web_approve_code(
     state: State<'_, RuntimeState>,
     code: String,
+    allow_acquire: Option<bool>,
 ) -> Result<PairedDeviceDto, AppError> {
-    let device = state.web()?.approve_code(&code).await.map_err(web_error)?;
+    let device = state
+        .web()?
+        .approve_code(&code, allow_acquire.unwrap_or(false))
+        .await
+        .map_err(web_error)?;
     Ok(device_dto(device))
 }
 

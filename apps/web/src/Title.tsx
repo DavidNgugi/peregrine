@@ -9,12 +9,14 @@ import { useIsMobile } from "./useIsMobile.js";
 export function TitleScreen({
   id,
   preview,
+  canAcquire,
   onBack,
   onPlay,
   onOpen,
 }: {
   readonly id: number;
   readonly preview: Tile | undefined;
+  readonly canAcquire: boolean;
   readonly onBack: () => void;
   readonly onPlay: (ticket: PlaybackTicket, name: string) => void;
   readonly onOpen: (tile: Tile) => void;
@@ -23,6 +25,7 @@ export function TitleScreen({
   const [season, setSeason] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(true);
   const mobile = useIsMobile();
@@ -67,6 +70,7 @@ export function TitleScreen({
       })
       .catch((caught: unknown) => {
         if (cancelled) return;
+        setMessageError(true);
         setMessage(caught instanceof Error ? caught.message : "That title could not be read.");
         setLoading(false);
       });
@@ -97,6 +101,42 @@ export function TitleScreen({
   }, [episodes]);
   const canPlay = movie ? title?.playable === true : nextEpisode !== undefined;
 
+  const download = async (): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.acquire(id);
+      setMessageError(false);
+      setMessage("Download queued. Follow it in Downloads.");
+    } catch (caught) {
+      setMessageError(true);
+      setMessage(caught instanceof Error ? caught.message : "That download could not be queued.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadEpisode = async (episode: Episode): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.acquire(id, episode.seasonNumber, episode.episodeNumber);
+      setMessageError(false);
+      setMessage(
+        "Download queued for S" +
+          String(episode.seasonNumber) +
+          " E" +
+          String(episode.episodeNumber) +
+          ". Follow it in Downloads.",
+      );
+    } catch (caught) {
+      setMessageError(true);
+      setMessage(caught instanceof Error ? caught.message : "That download could not be queued.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const playMovie = async (positionMs: number): Promise<void> => {
     setBusy(true);
     setMessage(null);
@@ -104,6 +144,7 @@ export function TitleScreen({
       const ticket = await api.playback(id, positionMs);
       onPlay(ticket, name);
     } catch (caught) {
+      setMessageError(true);
       setMessage(caught instanceof Error ? caught.message : "That film could not be started.");
     } finally {
       setBusy(false);
@@ -122,6 +163,7 @@ export function TitleScreen({
       );
       onPlay(ticket, name);
     } catch (caught) {
+      setMessageError(true);
       setMessage(caught instanceof Error ? caught.message : "That episode could not be started.");
     } finally {
       setBusy(false);
@@ -200,13 +242,31 @@ export function TitleScreen({
               ) : null}
             </div>
           ) : (
-            <p className="note">
-              {inLibrary
-                ? "No downloaded file is on disk yet. Downloads start on the desktop app."
-                : "This title is not in your library. Add it from the desktop app to play it here."}
+            <div className="download-cta">
+              <p className="note">
+                {inLibrary
+                  ? "No downloaded file is on disk yet."
+                  : "This title is not in your library yet."}
+              </p>
+              {canAcquire && (movie || episodes.length === 0) ? (
+                <button
+                  className="secondary"
+                  data-autofocus="true"
+                  data-focus="true"
+                  disabled={busy}
+                  onClick={() => void download()}
+                  type="button"
+                >
+                  {busy ? "Queuing..." : movie ? "Download film" : "Download series"}
+                </button>
+              ) : null}
+            </div>
+          )}
+          {message === null ? null : (
+            <p aria-live="polite" className={messageError ? "error" : "notice"}>
+              {message}
             </p>
           )}
-          {message === null ? null : <p className="error">{message}</p>}
         </div>
       </section>
 
@@ -248,55 +308,70 @@ export function TitleScreen({
             {mobile && !episodesOpen ? null : (
               <div className="episodes-grid">
                 {episodes.map((episode) => (
-                  <button
-                    className="episode"
-                    data-focus="true"
-                    disabled={!episode.playable}
-                    key={episode.seasonNumber + ":" + episode.episodeNumber}
-                    onClick={() => void playEpisode(episode, episode.watched)}
-                    type="button"
-                  >
-                    <span className="episode-still">
-                      {episode.still === null ? null : (
-                        <img alt="" decoding="async" loading="lazy" src={episode.still} />
-                      )}
-                      {episode.percent <= 0 ? null : (
-                        <span className="card-progress">
-                          <i style={{ width: Math.min(100, episode.percent) + "%" }} />
+                  <div className="episode" key={episode.seasonNumber + ":" + episode.episodeNumber}>
+                    <button
+                      className="episode-play"
+                      data-focus="true"
+                      disabled={!episode.playable}
+                      onClick={() => void playEpisode(episode, episode.watched)}
+                      type="button"
+                    >
+                      <span className="episode-still">
+                        {episode.still === null ? null : (
+                          <img alt="" decoding="async" loading="lazy" src={episode.still} />
+                        )}
+                        {episode.percent <= 0 ? null : (
+                          <span className="card-progress">
+                            <i style={{ width: Math.min(100, episode.percent) + "%" }} />
+                          </span>
+                        )}
+                      </span>
+                      <span className="episode-copy">
+                        <span className="episode-number">
+                          {"S" +
+                            String(episode.seasonNumber) +
+                            " E" +
+                            String(episode.episodeNumber)}
                         </span>
-                      )}
-                    </span>
-                    <span className="episode-copy">
-                      <span className="episode-number">
-                        {"S" + String(episode.seasonNumber) + " E" + String(episode.episodeNumber)}
+                        <span className="episode-name">
+                          {episode.name ?? "Episode " + String(episode.episodeNumber)}
+                        </span>
+                        <span className="episode-meta">
+                          {[
+                            episode.runtimeMinutes === null
+                              ? null
+                              : String(episode.runtimeMinutes) + " min",
+                            episode.airDate,
+                          ]
+                            .filter((part): part is string => part !== null)
+                            .join("  ·  ")}
+                        </span>
+                        {episode.overview === null ? null : (
+                          <span className="episode-overview">{episode.overview}</span>
+                        )}
                       </span>
-                      <span className="episode-name">
-                        {episode.name ?? "Episode " + String(episode.episodeNumber)}
+                      <span className="episode-action">
+                        {!episode.playable
+                          ? "Not downloaded"
+                          : episode.watched
+                            ? "Play again"
+                            : episode.percent > 0
+                              ? "Resume"
+                              : "Play"}
                       </span>
-                      <span className="episode-meta">
-                        {[
-                          episode.runtimeMinutes === null
-                            ? null
-                            : String(episode.runtimeMinutes) + " min",
-                          episode.airDate,
-                        ]
-                          .filter((part): part is string => part !== null)
-                          .join("  ·  ")}
-                      </span>
-                      {episode.overview === null ? null : (
-                        <span className="episode-overview">{episode.overview}</span>
-                      )}
-                    </span>
-                    <span className="episode-action">
-                      {!episode.playable
-                        ? "Not downloaded"
-                        : episode.watched
-                          ? "Play again"
-                          : episode.percent > 0
-                            ? "Resume"
-                            : "Play"}
-                    </span>
-                  </button>
+                    </button>
+                    {canAcquire && !episode.playable ? (
+                      <button
+                        className="episode-download"
+                        data-focus="true"
+                        disabled={busy}
+                        onClick={() => void downloadEpisode(episode)}
+                        type="button"
+                      >
+                        {busy ? "Queuing..." : "Download"}
+                      </button>
+                    ) : null}
+                  </div>
                 ))}
               </div>
             )}

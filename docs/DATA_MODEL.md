@@ -1147,7 +1147,9 @@ CREATE TABLE share_device (
 
 ### 2.12.1 Paired LAN devices (ADR 0028)
 
-The desktop-served TV client pairs into `paired_device`, not the future media server's `share_device`: one row per browser or television, a hashed credential, and the closed `read,stream` scope. `revoked_at` is a timestamp rather than a delete so the audit can answer which device was cut off and when; `last_address` is shown beside last-seen and is never an authorization input.
+The desktop-served TV client pairs into `paired_device`, not the future media server's `share_device`: one row per browser or television, a hashed credential, and `read,stream` by default. An approval with the desktop's **Allow downloads** box adds the separate `acquire` scope ([ADR 0029](./adr/0029-device-scoped-acquisition.md)). `revoked_at` is a timestamp rather than a delete so the audit can answer which device was cut off and when; `last_address` is shown beside last-seen and is never an authorization input.
+
+An acquisition request leaves a `web_audit` row naming the device, the action, the title, the episode when known, and the journal job once the queue accepts it. The device row outlives revocation, so the audit keeps answering after the credential is cut off.
 
 ```sql
 CREATE TABLE paired_device (
@@ -1155,12 +1157,24 @@ CREATE TABLE paired_device (
   name         TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 64),
   platform     TEXT,
   token_hash   TEXT    NOT NULL UNIQUE CHECK (length(token_hash) = 64),
-  scopes       TEXT    NOT NULL CHECK (length(scopes) > 0),
+  scopes       TEXT    NOT NULL CHECK (length(scopes) > 0),  -- read,stream[,acquire]
   created_at   INTEGER NOT NULL,
   last_seen_at INTEGER,
   last_address TEXT,
   revoked_at   INTEGER
 );
+
+CREATE TABLE web_audit (
+  id         INTEGER PRIMARY KEY,
+  device_id  INTEGER NOT NULL REFERENCES paired_device(id),
+  action     TEXT    NOT NULL CHECK (action IN ('acquire')),
+  title_id   INTEGER NOT NULL,
+  episode_id INTEGER,
+  job_id     INTEGER,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX web_audit_device_created ON web_audit(device_id, created_at);
 ```
 
 ---
@@ -1212,6 +1226,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I40 | A user's match correction is stored as a pattern and consulted before a file is parked, so the title the parse read places later files that read the same way; a rule settles *which title* a name means and never where in it the file sits. | `UNIQUE (pattern)` on `match_rule`; `the_second_occurrence_of_a_corrected_name_is_placed_without_asking` in `peregrine-app`'s `library::index` module proves the read, `a_rule_never_settles_a_numbering_question` proves an episode-shaped refusal is decided first, and `one_pattern_has_one_rule` proves the upsert |
 | I39 | The search index is derived from `title` and its related tables and rebuilds from them: a rebuild after the index has been made wrong in either direction reproduces the same results for the same query, in the same order. | `a_rebuild_reproduces_identical_search_results` in `peregrine-storage`'s `fts` module, which records the results of several queries, breaks the index by adding a row with no title and removing a title's row, and asserts the rebuild restores them exactly |
 | I41 | A paired LAN device's token exists only as SHA-256, and a revoked device is refused on its next request. | `UNIQUE (token_hash)` and the 64-character check; the pairing repository hashes on issue and the web extractor reads the hash per request, so revocation is effective including mid-stream |
+| I42 | Every acquisition a paired device asks for is attributable: a `web_audit` row names the device and title before the queue is touched, and the journal job is attached when the queue accepts it. | The foreign key to `paired_device`; `an_acquisition_is_audited_against_its_device` in `peregrine-storage`'s `web_audit` module; the default-refusal and acquire-scope cases in `peregrine-app`'s LAN tests |
 
 ### What each invariant is enforced by today
 

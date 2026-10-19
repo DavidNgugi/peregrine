@@ -1,9 +1,9 @@
-# ADR 0028 — TV web client: a read-only LAN surface, paired by code
+# ADR 0028 — TV web client: a paired LAN surface, read-only by default
 
-- **Status:** Accepted. The first slice of E37 (the browser console) served by the desktop app, ahead of the E36 daemon that [ADR 0020](./0020-homelab-deployment.md) §3 assumed would host it.
+- **Status:** Accepted. The first slice of E37 (the browser console) served by the desktop app, ahead of the E36 daemon that [ADR 0020](./0020-homelab-deployment.md) §3 assumed would host it. The acquisition sentence in §3 is superseded by [ADR 0029](./0029-device-scoped-acquisition.md); every other boundary here stands.
 - **Date:** 2026-10-19
 - **Evidence:** the command surface and the event bus in this tree; the loopback media server in `crates/peregrine-stream`; [ADR 0018](./0018-media-server.md) §4 for the server posture, [ADR 0020](./0020-homelab-deployment.md) §3 for the console's scope, and [R33](../AGENTS.md) for the LAN rules
-- **Related:** [0002](./0002-rust-core-owns-state.md), [0018](./0018-media-server.md), [0019](./0019-local-accounts-and-parental-gating.md), [0020](./0020-homelab-deployment.md), [0023](./0023-in-app-video-surface.md)
+- **Related:** [0002](./0002-rust-core-owns-state.md), [0018](./0018-media-server.md), [0019](./0019-local-accounts-and-parental-gating.md), [0020](./0020-homelab-deployment.md), [0023](./0023-in-app-video-surface.md), [0029](./0029-device-scoped-acquisition.md)
 
 ## Context
 
@@ -22,12 +22,12 @@ The alternative shapes are worse:
 
 ## Decision
 
-### 1. A first-party web client, served by the desktop app, with a read-only API behind it
+### 1. A first-party web client, served by the desktop app, with a small API behind it
 
 The change adds two surfaces and one client:
 
 - A **LAN listener** in `peregrine-app` that is **off by default**, binds **one explicitly chosen address**, and stops when the app stops.
-- A **read-only HTTP API** — a deliberately smaller surface than the IPC command set, with its own DTOs and no generated parity with `peregrine-ipc`. Exposing the command set over the network would expose deletion, settings, acquisition, and the keyring for free, which is the one thing [R33](../AGENTS.md) forbids.
+- A **deliberately small HTTP API** — its own DTOs and no generated parity with `peregrine-ipc`. Exposing the command set over the network would expose deletion, settings, and the keyring for free, which is the one thing [R33](../AGENTS.md) forbids. Acquisition is one opt-in scope and one route ([ADR 0029](./0029-device-scoped-acquisition.md)), not the command set.
 - A **browser client** under `apps/web`, built as a ten-foot interface first: large type, few tiles per row, spatial focus for a D-pad, and a pointer path for the same screens. The same screens are touch-first on a phone — a two-to-three column grid, horizontal rails turned into vertical grids, collapsible rails and episode lists, a stacked title page, a persistent bottom tab bar for Home and Library, controls that wrap instead of overflowing, and video that letterboxes in portrait and fills the frame in landscape. The shape is the one a television audience already knows: a hero over horizontal rails of Continue Watching, the library, and the provider's lists; a title page with seasons and episode cards for a series, and an endless More Like This feed for anything the provider can name. Rails scroll horizontally by touch and by the D-pad, and a tile that is not held still opens a details page rather than pretending it can play. Every screen is an address (`/browse`, `/my-list`, `/title/16`), so a refresh restores the screen and the browser's Back and edge-swipe use real history; the player is the one transient route, and a refresh on it returns to the title rather than inventing a session. It shares `packages/theme`'s tokens. Its copy is local for this slice; moving it into the i18n catalogue is part of consolidating these screens with the console, and it does not share the Tauri-bound feature hooks.
 
 The same client and the same API are what the daemon (E36) will serve later. This record does not create a second console; it lands the client early, against the desktop core.
@@ -49,7 +49,7 @@ Controls on the ceremony:
 | Code guessing | Eight digits, five-minute TTL, one attempt to approve per pending request, max five pair requests per address per minute and a hard cap on pending requests |
 | Approving the wrong device | The prompt names the address and the display name; the person compares the code with the screen |
 | Replay of an approved code | A request is consumed on approval; `pairId` is never reusable |
-| Token theft from the wire | Plain HTTP on the LAN is the accepted transport ([ADR 0018](./0018-media-server.md) §4); the token is revocable, read-only, and named. TLS stays the reverse-proxy path |
+| Token theft from the wire | Plain HTTP on the LAN is the accepted transport ([ADR 0018](./0018-media-server.md) §4); the token is revocable and named, and is read/stream unless its approval explicitly added acquisition. TLS stays the reverse-proxy path |
 | Pairing loop after a denial | A denied request is terminal; the TV must start a new one, which produces a new prompt |
 
 ### 3. Device tokens are hashed, named, scoped, and revocable
@@ -57,7 +57,7 @@ Controls on the ceremony:
 - A token is 32 bytes of OS randomness, shown once as 64 lowercase hex characters.
 - The database stores **`sha256(token)` only**, never the token; a stolen database is not a set of credentials.
 - Each row is a device: a person-supplied name, a platform, the scope, timestamps, last address, and `revoked_at`.
-- The scope for this slice is `read,stream`. There is no write, delete, settings, acquisition, or keyring surface, so a stolen token can watch films and read the library — and nothing else. The read side includes the download queue's progress; starting a transfer remains in the desktop app.
+- The default scope is `read,stream`. There is no write, delete, settings, keyring, or filesystem surface. Acquisition is a separate `acquire` scope granted only by the desktop's **Allow downloads** checkbox at pairing ([ADR 0029](./0029-device-scoped-acquisition.md)); a read-only token can watch films and read the library — and nothing else. The read side includes the download queue's progress.
 - Revocation is immediate: every authenticated request hashes the presented token and reads the row, so a revoked device is refused on its next request, including one for a segment of a film.
 - Last-seen is written at most once a minute per device, so a playing TV does not turn reads into a write per range request.
 
@@ -103,14 +103,14 @@ The URL carries a **short-lived playback token**, not the device token: the devi
 Positive:
 
 - A television on the same network gets a poster grid and playback today, from the app the user already runs, with no second product to install.
-- The API surface is small enough to audit, and its read-only scope means the blast radius of a leaked token is entertainment, not data loss.
+- The API surface is small enough to audit. A leaked default token has a read/stream blast radius; a leaked `acquire` token can also spend bandwidth and disk, which is why that scope is opt-in, per-device, and audited ([ADR 0029](./0029-device-scoped-acquisition.md)).
 - The client, the API, and the pairing model are the ones the daemon will serve later, so E37 does not restart from zero.
 
 Negative and accepted:
 
 - **The desktop app is not a server.** The TV stops when the app quits or the machine sleeps; that is stated in the UI rather than discovered in the living room. The daemon (E36) remains the answer for always-on.
 - **A transcode costs the host.** One session per device and four at once is the bound; a seek restarts the encoder, so rapid scrubbing is a burst of short transcodes rather than a cheap seek, and a host without a hardware encoder pays for it in CPU.
-- **Plain HTTP is the LAN default.** A token is revocable and read-only, but it is visible to anything that can sniff the network. This is the same posture ADR 0018 §4 accepted, and TLS remains the reverse-proxy path.
+- **Plain HTTP is the LAN default.** A token is revocable and read/stream by default (or also `acquire` when explicitly granted), but it is visible to anything that can sniff the network. This is the same posture ADR 0018 §4 accepted, and TLS remains the reverse-proxy path.
 - **A second client is a second UI to maintain.** The mitigation is that it shares the theme, the i18n catalogue, and the API contract, and has no business rules of its own (R7).
 - **Two DTO families.** The web DTOs are not the IPC DTOs, deliberately: parity would be a security bug. The cost is a mapping layer that must be kept in step, tested by a contract test over the JSON.
 - **The TV browser is an unknown.** Its Chromium generation, HLS support, key codes, and storage behaviour are measured on the set before the layout is finalised; the client degrades to a pointer-friendly grid when the D-pad is absent.

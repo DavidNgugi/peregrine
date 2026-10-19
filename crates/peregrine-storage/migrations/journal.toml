@@ -94,3 +94,7 @@ sha256 = "7532539a50ba6480feaad88aae64bbf31edd26f37eb764eae15c19ce89a37c0e"
 [[migration]]
 file = "0023_paired_device.sql"
 sha256 = "794abe6876a93be156eeac645faf6eee9226b92c09e2180ebe00301b3f2f9e8f"
+
+[[migration]]
+file = "0024_web_audit.sql"
+sha256 = "38380f7dca6bcaea09a6313e5f02e103f0dffccd7a31d64f2f038857e72f5856"
