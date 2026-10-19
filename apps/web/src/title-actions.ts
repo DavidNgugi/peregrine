@@ -34,6 +34,17 @@ export function downloadAction(
   return { label: downloadLabel(state), disabled: true };
 }
 
+/**
+ * The lifecycle a control draws while a just-queued job is not yet in the title read.
+ *
+ * The server is the authority, but the first read after a queue can race the scheduler. A local
+ * "queued" is shown until the server names a state, so a successful click never falls back to
+ * "Download" and invites a duplicate.
+ */
+export function shownDownloadState(state: DownloadState, watching: boolean): DownloadState {
+  return state ?? (watching ? "queued" : null);
+}
+
 /** The label of a season's download control. */
 export function seasonDownloadLabel(season: number): string {
   return "Download season " + String(season);

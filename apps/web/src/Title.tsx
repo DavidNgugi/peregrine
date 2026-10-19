@@ -4,7 +4,12 @@ import { api, type Episode, type PlaybackTicket, type Tile, type Title } from ".
 import { downloadTone } from "./download-state.js";
 import { TitleFeed } from "./Feed.js";
 import { BookmarkIcon } from "./icons.js";
-import { downloadAction, seasonAcquireMessage, seasonDownloadLabel } from "./title-actions.js";
+import {
+  downloadAction,
+  seasonAcquireMessage,
+  seasonDownloadLabel,
+  shownDownloadState,
+} from "./title-actions.js";
 
 /** One title's page: a hero, the episodes of a series, and More Like This. */
 export function TitleScreen({
@@ -29,6 +34,10 @@ export function TitleScreen({
   const [pending, setPending] = useState<string | null>(null);
   const [marking, setMarking] = useState<string | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
+  // A queue action is not instantly visible in the title read: the scheduler inserts the job,
+  // then the page's next read may land before its state settles. Keep polling for a bounded
+  // window and keep the button in a queued state until the server confirms what happened.
+  const [watchingDownload, setWatchingDownload] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(true);
   const [seasonsOpen, setSeasonsOpen] = useState(true);
   const focused = useRef(false);
@@ -102,8 +111,8 @@ export function TitleScreen({
     title === null
       ? null
       : downloadAction(
-          title.downloadState,
-          title.downloadPercent,
+          shownDownloadState(title.downloadState, watchingDownload),
+          title.downloadPercent ?? (watchingDownload ? 0 : null),
           movie ? "Download" : "Download series",
         );
   const titleDownloadKey = movie ? "title" : "series";
@@ -118,6 +127,7 @@ export function TitleScreen({
   // it in. The read keeps the selected season, and it only replaces the title, never the scroll or
   // the focused control.
   const live =
+    watchingDownload ||
     title?.refreshing === true ||
     downloadTone(title?.downloadState) === "queued" ||
     downloadTone(title?.downloadState) === "active" ||
@@ -126,6 +136,14 @@ export function TitleScreen({
       return tone === "queued" || tone === "active";
     }) ??
       false);
+
+  // A queue that never becomes visible must not poll forever. Two minutes is longer than any
+  // acquisition's metadata search and short enough that a dead job stops costing requests.
+  useEffect(() => {
+    if (!watchingDownload) return;
+    const timer = window.setTimeout(() => setWatchingDownload(false), 120_000);
+    return () => window.clearTimeout(timer);
+  }, [watchingDownload]);
 
   useEffect(() => {
     if (!live) return;
@@ -268,6 +286,7 @@ export function TitleScreen({
     setMessage(null);
     try {
       await api.acquire(id);
+      setWatchingDownload(true);
       patch((held) => ({ ...held, downloadState: "queued", downloadPercent: 0 }));
       setMessageError(false);
       setMessage("Download queued. Follow it in Downloads.");
@@ -285,6 +304,7 @@ export function TitleScreen({
     setMessage(null);
     try {
       const result = await api.acquireSeason(id, seasonNumber);
+      setWatchingDownload(true);
       patch((held) => ({
         ...held,
         episodes: held.episodes.map((episode) => {
@@ -313,6 +333,7 @@ export function TitleScreen({
     setMessage(null);
     try {
       await api.acquire(id, episode.seasonNumber, episode.episodeNumber);
+      setWatchingDownload(true);
       patch((held) => ({
         ...held,
         episodes: held.episodes.map((heldEpisode) =>

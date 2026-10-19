@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { downloadAction, seasonAcquireMessage, seasonDownloadLabel } from "./title-actions.js";
+import {
+  downloadAction,
+  seasonAcquireMessage,
+  seasonDownloadLabel,
+  shownDownloadState,
+} from "./title-actions.js";
+
+describe("shownDownloadState", () => {
+  it("keeps a queued click visible until the title read catches up", () => {
+    expect(shownDownloadState(null, true)).toBe("queued");
+    expect(shownDownloadState(null, false)).toBeNull();
+  });
+
+  it("lets the server's state win once it names one", () => {
+    expect(shownDownloadState("downloading", true)).toBe("downloading");
+    expect(shownDownloadState("completed", true)).toBe("completed");
+    expect(shownDownloadState("failed", true)).toBe("failed");
+  });
+});
 
 describe("downloadAction", () => {
   it("offers the download when no job exists", () => {
