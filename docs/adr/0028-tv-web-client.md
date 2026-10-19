@@ -57,7 +57,7 @@ Controls on the ceremony:
 - A token is 32 bytes of OS randomness, shown once as 64 lowercase hex characters.
 - The database stores **`sha256(token)` only**, never the token; a stolen database is not a set of credentials.
 - Each row is a device: a person-supplied name, a platform, the scope, timestamps, last address, and `revoked_at`.
-- The scope for this slice is `read,stream`. There is no write, delete, settings, acquisition, or keyring surface, so a stolen token can watch films and read the library — and nothing else.
+- The scope for this slice is `read,stream`. There is no write, delete, settings, acquisition, or keyring surface, so a stolen token can watch films and read the library — and nothing else. The read side includes the download queue's progress; starting a transfer remains in the desktop app.
 - Revocation is immediate: every authenticated request hashes the presented token and reads the row, so a revoked device is refused on its next request, including one for a segment of a film.
 - Last-seen is written at most once a minute per device, so a playing TV does not turn reads into a write per range request.
 

@@ -31,8 +31,8 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::warn;
 
 use super::{
-    BrowseDto, GenreDto, LibraryRowDto, MediaGrant, PairOffer, PairStatus, PlaybackTicket,
-    TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
+    BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MediaGrant, PairOffer, PairStatus,
+    PlaybackTicket, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -46,6 +46,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/home", get(home))
         .route("/api/library", get(library))
         .route("/api/watchlist", get(watchlist))
+        .route("/api/downloads", get(downloads))
         .route("/api/search", get(search))
         .route("/api/browse", get(browse))
         .route("/api/genres", get(genres))
@@ -422,6 +423,14 @@ async fn watchlist(
 ) -> Result<Json<Vec<TileDto>>, ApiError> {
     require_read(&device)?;
     Ok(Json(service.watchlist_page().await?))
+}
+
+async fn downloads(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+) -> Result<Json<Vec<DownloadDto>>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.downloads_page().await?))
 }
 
 async fn search(

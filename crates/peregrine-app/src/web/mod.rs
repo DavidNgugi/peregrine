@@ -986,6 +986,55 @@ impl WebService {
         })
     }
 
+    /// The download queue with the progress a second screen polls.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the queue or a title read fails.
+    pub async fn downloads_page(&self) -> Result<Vec<DownloadDto>, WebError> {
+        let mut downloads = Vec::new();
+        for row in self.runtime.download_jobs().await? {
+            let (title, kind, poster) = match self.runtime.library_title(row.title_id).await? {
+                Some(detail) => {
+                    let entry = detail.entry;
+                    (
+                        Some(entry.row.title.name.clone()),
+                        Some(entry.row.title.kind.as_str().to_owned()),
+                        image_url(entry.poster.as_deref()),
+                    )
+                }
+                None => match self.runtime.title_identity(row.title_id).await? {
+                    Some(identity) => (
+                        Some(identity.name),
+                        Some(identity.kind.as_str().to_owned()),
+                        None,
+                    ),
+                    None => (None, None, None),
+                },
+            };
+            let episode = match row.episode_id {
+                Some(id) => self.runtime.episode_numbers(id).await?,
+                None => None,
+            };
+            downloads.push(DownloadDto {
+                id: row.id,
+                title_id: row.title_id,
+                title,
+                kind,
+                poster,
+                state: row.state.as_str().to_owned(),
+                progress_permille: row.progress_permille,
+                downloaded_bytes: row.downloaded_bytes,
+                total_bytes: row.reported_size_bytes,
+                rate_bps: row.download_rate_bps,
+                eta_seconds: row.eta_seconds,
+                season_number: episode.map(|(season, _)| season),
+                episode_number: episode.map(|(_, number)| number),
+                error: row.error_message,
+            });
+        }
+        Ok(downloads)
+    }
     /// The account's My List as tiles, newest first.
     ///
     /// # Errors
@@ -1672,6 +1721,40 @@ pub struct GenreDto {
     pub id: u32,
     /// The name the filter draws.
     pub name: String,
+}
+
+/// One download job as the progress screen draws it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadDto {
+    /// The row id.
+    pub id: i64,
+    /// The title being downloaded.
+    pub title_id: i64,
+    /// Its display name, when the catalogue can answer it.
+    pub title: Option<String>,
+    /// movie or show, when known.
+    pub kind: Option<String>,
+    /// The poster URL, or null.
+    pub poster: Option<String>,
+    /// The lifecycle state's stored spelling.
+    pub state: String,
+    /// Completion in permille, 1000 being the whole payload.
+    pub progress_permille: i64,
+    /// Payload bytes received so far.
+    pub downloaded_bytes: u64,
+    /// The size the indexer claimed, when it claimed one.
+    pub total_bytes: Option<u64>,
+    /// Last reported download rate, in bytes per second.
+    pub rate_bps: u64,
+    /// Seconds the transfer is expected to take, when there is an estimate.
+    pub eta_seconds: Option<u64>,
+    /// The episode's season, for an episode job.
+    pub season_number: Option<u32>,
+    /// The episode's number within the season.
+    pub episode_number: Option<u32>,
+    /// The engine's redacted failure message, when it failed.
+    pub error: Option<String>,
 }
 
 /// One season a switcher offers.

@@ -8076,6 +8076,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(genres.status(), 200);
+        let downloads = client
+            .get(format!("{base}/api/downloads"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(downloads.status(), 200);
 
         // A title nobody has played has no Resume control; after one report it has the position
         // the desktop would also read from the same row.

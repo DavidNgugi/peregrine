@@ -77,6 +77,23 @@ export interface Genre {
   readonly name: string;
 }
 
+export interface Download {
+  readonly id: number;
+  readonly titleId: number;
+  readonly title: string | null;
+  readonly kind: string | null;
+  readonly poster: string | null;
+  readonly state: string;
+  readonly progressPermille: number;
+  readonly downloadedBytes: number;
+  readonly totalBytes: number | null;
+  readonly rateBps: number;
+  readonly etaSeconds: number | null;
+  readonly seasonNumber: number | null;
+  readonly episodeNumber: number | null;
+  readonly error: string | null;
+}
+
 export interface Season {
   readonly number: number;
   readonly name: string | null;
@@ -198,6 +215,7 @@ export const api = {
   genres: (kind: "movie" | "show"): Promise<Genre[]> =>
     request<Genre[]>("/api/genres?kind=" + kind),
   watchlist: (): Promise<Tile[]> => request<Tile[]>("/api/watchlist"),
+  downloads: (): Promise<Download[]> => request<Download[]>("/api/downloads"),
   stopPlayback: (url: string): Promise<void> =>
     request<void>("/api/playback/stop", "POST", { url }, true),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),
