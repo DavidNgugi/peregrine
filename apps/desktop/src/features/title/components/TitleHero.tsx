@@ -27,7 +27,7 @@
 
 import { Button, Icon } from "@peregrine/ui";
 import type { LocalPlaybackDto, TitleOfferDto } from "@peregrine/ipc-client";
-import { useState, type ReactElement } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { imageUrl } from "../../../lib/media.js";
@@ -98,6 +98,14 @@ export interface TitleHeroProps {
   readonly onSchedule?: (() => void) | undefined;
   /** Whether this title is already scheduled. */
   readonly scheduled?: boolean | undefined;
+  /**
+   * What belongs under the actions, in this column rather than in a section of its own.
+   *
+   * The page's answer to "where else can I watch this" is a fact about the title and sits beside the
+   * actions that answer the same question. The hero owns the slot and the page owns its contents,
+   * which is what keeps this component from growing a prop per block below the buttons.
+   */
+  readonly children?: ReactNode | undefined;
 }
 
 /** The hero. */
@@ -124,6 +132,7 @@ export function TitleHero({
   onToggleWatched,
   watched = false,
   watchMarkBusy = false,
+  children,
 }: TitleHeroProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: another title's page has to give the next backdrop
@@ -276,6 +285,8 @@ export function TitleHero({
           {actions.acquire ? (
             <p className="text-caption text-text-tertiary">{t("title.hero.acquire")}</p>
           ) : null}
+
+          {children}
         </div>
       </div>
     </section>

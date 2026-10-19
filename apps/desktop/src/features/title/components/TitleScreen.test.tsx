@@ -187,12 +187,38 @@ describe("TitleScreen", () => {
     expect(html).toContain("Cast");
   });
 
-  it("shows the totals the library holds", () => {
-    const html = markup(detail({ title: title({ items: 3, files: 4, missingFiles: 1 }) }));
+  it("says how much space the title takes rather than drawing a table of counts", () => {
+    const html = markup(detail({ title: title({ items: 3, files: 4, missingFiles: 0 }) }));
 
     expect(html).toContain("Breaking Bad");
     expect(html).toContain("In your library");
-    expect(html).toContain("4");
+    expect(html).toContain("12 GB");
+    // The counts table is gone: a single row of items, copies, size, and a dash was a readout.
+    expect(html).not.toContain("Copies");
+  });
+
+  it("says how many of the title's files the library cannot find", () => {
+    const one = markup(detail({ title: title({ files: 4, missingFiles: 1 }) }));
+    const many = markup(detail({ title: title({ files: 4, missingFiles: 3 }) }));
+
+    expect(one).toContain("A file for this title is missing.");
+    expect(many).toContain("3 files for this title are missing.");
+  });
+
+  it("says nothing about missing files when every one of them is present", () => {
+    const html = markup(detail({ title: title({ missingFiles: 0 }) }));
+
+    expect(html).not.toContain("for this title is missing");
+    expect(html).not.toContain("for this title are missing");
+  });
+
+  it("leaves the fully missing title to the hero's own sentence", () => {
+    // 'absent' is the core's answer for a title with a row and no file it can see; the hero already
+    // says that in the control's reason, so the count would be the same fact twice.
+    const html = markup(detail({ title: title({ files: 3, missingFiles: 3 }), offer: "absent" }));
+
+    expect(html).toContain("The library recorded a file for this title");
+    expect(html).not.toContain("for this title are missing");
   });
 
   it("shows the cached poster over the asset protocol, and never through IPC", () => {

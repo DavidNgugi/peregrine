@@ -10,6 +10,7 @@ node_modules/
 
 # Frontend build output
 apps/desktop/dist/
+apps/web/dist/
 packages/*/dist/
 apps/desktop/src-tauri/gen/
 

@@ -171,7 +171,7 @@ tempfile = { version = "3.27.0" }
 # `net` because the loopback media server binds its own listener and its tests speak HTTP over a
 # real socket (ADR 0023): `axum`'s `tokio` feature would enable it transitively, and relying on a
 # feature another crate happens to turn on is the hazard PG-E0-20 records.
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "process"] }
 tokio-util = { version = "0.7.19" }
 toml = { version = "1.1.7" }
 # Moving a deleted file to the operating system's trash is a per-OS operation with a

@@ -474,6 +474,82 @@ export const commands = {
 	/**  Removes one rule, reporting whether it was there. */
 	forgetMatchRule: (rule: MatchRuleRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("forget_match_rule", { rule })),
 	/**
+	 *  Starts the listener on one address and port.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] for an address that is not one, or the unspecified address;
+	 *  [`ErrorCode::Conflict`] when it is already listening or the port is taken.
+	 */
+	webStart: (address: string, port: number) => typedError<WebStatusDto, AppError_Serialize>(__TAURI_INVOKE("web_start", { address, port })),
+	/**
+	 *  Stops the listener, if it is running.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the runtime never started.
+	 */
+	webStop: () => typedError<null, AppError_Serialize>(__TAURI_INVOKE("web_stop")),
+	/**
+	 *  What the listener is doing.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the runtime never started.
+	 */
+	webStatus: () => typedError<WebStatusDto, AppError_Serialize>(__TAURI_INVOKE("web_status")),
+	/**  The address this machine would be reached at on the local network, when it has one. */
+	webLanAddress: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("web_lan_address")),
+	/**
+	 *  The pairing requests waiting for a person.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the runtime never started.
+	 */
+	webPairings: () => typedError<PendingPairDto[], AppError_Serialize>(__TAURI_INVOKE("web_pairings")),
+	/**
+	 *  Approves one pairing request by its id.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::NotFound`] for an id no request holds, [`ErrorCode::Conflict`] when it expired or
+	 *  was already answered.
+	 */
+	webApprove: (pairId: string) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_approve", { pairId })),
+	/**
+	 *  Approves whichever request shows `code`.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::NotFound`] when no request shows it, and the same refusals as [`web_approve`].
+	 */
+	webApproveCode: (code: string) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_approve_code", { code })),
+	/**
+	 *  Refuses one pairing request.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::NotFound`] for an id no request holds.
+	 */
+	webDeny: (pairId: string) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("web_deny", { pairId })),
+	/**
+	 *  Every paired device, revoked ones included.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the read fails.
+	 */
+	webDevices: () => typedError<PairedDeviceDto[], AppError_Serialize>(__TAURI_INVOKE("web_devices")),
+	/**
+	 *  Revokes one device, refusing its next request and dropping its playback sessions.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the write fails.
+	 */
+	webRevoke: (device: DeviceRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("web_revoke", { device })),
+	/**
 	 *  What this installation has configured.
 	 * 
 	 *  The cached answer: neither this command nor a poll of it ever reads a keyring, which is
@@ -918,6 +994,12 @@ export type DeletionPlanDto = {
 	entries: DeletionEntryDto[],
 	/**  The sum of every entry size. */
 	totalBytes: number,
+};
+
+/**  A paired device's id, as the list returned it. */
+export type DeviceRef = {
+	/**  The row id. */
+	id: number,
 };
 
 /**  One download job, as the Downloads screen draws it. */
@@ -1533,6 +1615,44 @@ export type NotificationRef = {
 export type OfferRef = {
 	/**  The row a choice names. */
 	id: number,
+};
+
+/**  One device that may present a token. */
+export type PairedDeviceDto = {
+	/**  The row id a revoke takes. */
+	id: number,
+	/**  The name the person approved. */
+	name: string,
+	/**  Its platform, when it named one. */
+	platform: string | null,
+	/**  The scopes it was issued, as the row stores them. */
+	scopes: string,
+	/**  When it was paired, in Unix milliseconds. */
+	createdAt: number,
+	/**  The last authenticated request, in Unix milliseconds. */
+	lastSeenAt: number | null,
+	/**  The address it last presented. */
+	lastAddress: string | null,
+	/**  Whether the person revoked it. */
+	revoked: boolean,
+};
+
+/**  One pairing request the desktop prompt shows. */
+export type PendingPairDto = {
+	/**  The secret the TV polls with. */
+	pairId: string,
+	/**  The eight digits the person compares with the television. */
+	code: string,
+	/**  The name the client offered. */
+	name: string,
+	/**  Its platform, when it named one. */
+	platform: string | null,
+	/**  The address it came from. */
+	address: string | null,
+	/**  When it was created, in Unix milliseconds. */
+	createdAtMs: number,
+	/**  When it expires, in Unix milliseconds. */
+	expiresAtMs: number,
 };
 
 /**  One person and the library titles that credit them. */
@@ -2244,6 +2364,18 @@ export type WatchlistEntryDto = {
 	addedAt: number,
 };
 
+/**  What the listener is doing, as Settings draws it. */
+export type WebStatusDto = {
+	/**  Whether a socket is bound. */
+	running: boolean,
+	/**  The bound address, when it is running. */
+	address: string | null,
+	/**  The bound port, when it is running. */
+	port: number | null,
+	/**  How many pairing requests are waiting for a person. */
+	pending: number,
+};
+
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
     try {
@@ -2263,6 +2395,7 @@ export const eventTopics = {
 	downloadStats: { name: "download://stats", version: 1 },
 	notificationRaised: { name: "notification://raised", version: 1 },
 	titleRefreshed: { name: "title://refreshed", version: 1 },
+	webPairRequested: { name: "web://pair_requested", version: 1 },
 } as const;
 
 /** The wire name of an event topic. */

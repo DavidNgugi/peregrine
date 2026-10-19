@@ -10,10 +10,12 @@
  * through rather than hiding: the screen can then say what it has without implying it has more.
  */
 
-import { listLibraryTitles, normalizeIpcError } from "@peregrine/ipc-client";
+import { eventTopics, listLibraryTitles, normalizeIpcError } from "@peregrine/ipc-client";
 import type { LibraryTitleDto } from "@peregrine/ipc-client";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
+import { eventPayload, jobPhase } from "../../../lib/job-events.js";
 
 /** What the library holds, and what the screen needs to know about the read. */
 export interface LibraryTitles {
@@ -34,11 +36,28 @@ export interface LibraryTitles {
 }
 
 /**
+ * Whether a `job://state` envelope is a provider fill finishing successfully.
+ *
+ * Exported because the listener cannot be rendered in this repository's Node test environment:
+ * which events count as a completed fill is the part that can be wrong, and it is a pure question.
+ */
+export function providerFillFinished(envelope: unknown): boolean {
+  const payload = eventPayload(envelope);
+  return (
+    payload !== null &&
+    payload["kind"] === "provider.refresh_title" &&
+    jobPhase(payload["phase"]) === "succeeded"
+  );
+}
+
+/**
  * The titles the library holds.
  *
- * Read once on mount. A scan is what changes this list, and a scan is a job the shell already
- * watches — so the next step here is to re-read when one finishes rather than to poll, which is a
- * subscription the jobs bridge owns (`PG-E14-04`).
+ * Read on mount, and again whenever a provider fill finishes. A scan writes a stub from a filename,
+ * so the read that follows a scan has no poster, synopsis, or score for it — those are the fill's,
+ * and the fill is a job whose success is the core saying the row is complete. Watching that one
+ * signal rather than polling is what makes a matched title appear in the grid without a visit to its
+ * own screen, which is the only surface that re-reads for itself (`PG-E14-17`).
  */
 export function useLibraryTitles(): LibraryTitles {
   const [state, setState] = useState<Omit<LibraryTitles, "refresh">>({
@@ -59,6 +78,31 @@ export function useLibraryTitles(): LibraryTitles {
 
   useEffect(() => {
     void read();
+  }, [read]);
+
+  // The fill writes what the read above could not have seen, so its success is the one moment a
+  // re-read is both useful and final. A fill that failed changes nothing a tile draws, and one that
+  // matched nothing is a success the core reports — the read it costs is local and small.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | null = null;
+
+    void listen<unknown>(eventTopics.jobState.name, (event) => {
+      if (providerFillFinished(event.payload)) {
+        void read();
+      }
+    }).then((release) => {
+      if (cancelled) {
+        release();
+      } else {
+        unlisten = release;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [read]);
 
   return { ...state, refresh: read };

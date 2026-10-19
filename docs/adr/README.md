@@ -23,7 +23,7 @@ One file per decision that constrains the architecture. Each records the context
 | [0017](./0017-mcp-server.md) | MCP server: exposing the library to agent tools | Accepted, post-1.0 (Phase 6) |
 | [0018](./0018-media-server.md) | Media server: what is possible, in what order, and what we refuse | Accepted, post-1.0 (Phase 7) |
 | [0019](./0019-local-accounts-and-parental-gating.md) | Local accounts, avatars, and parental gating | Accepted, post-1.0 (Phase 8); the scope seam lands in 1.0 |
-| [0020](./0020-homelab-deployment.md) | Homelab deployment: the headless daemon in a container, and what we refuse to put in one | Accepted, post-1.0 (Phase 9); the browser console in §3 is scoped, not broken down |
+| [0020](./0020-homelab-deployment.md) | Homelab deployment: the headless daemon in a container, and what we refuse to put in one | Accepted, post-1.0 (Phase 9); §3's browser console is broken down as E37 and its first slice is 0028 |
 | [0021](./0021-mpl-2-0-transitive-dependencies.md) | MPL-2.0 transitively, and a licence exception scoped per crate | Accepted; refines 0009 §2 and DEPENDENCIES §6 |
 | [0022](./0022-component-packs-and-sidecar-verification.md) | Component packs and sidecar verification | Accepted; implements ARCHITECTURE §12 and the sidecar obligations in 0009, 0013, and 0014 |
 | [0023](./0023-in-app-video-surface.md) | The in-app video surface, and the loopback delivery it needs | Accepted; supersedes 0004's surface decision and 0013 §2 for local files in the initial slice |
@@ -31,5 +31,6 @@ One file per decision that constrains the architecture. Each records the context
 | [0025](./0025-prebuilt-sidecars.md) | Prebuilt sidecars: GPL-3 mpv and LGPL-3 ffmpeg on Windows and Linux | Accepted; refines 0009 and supersedes 0014's ban on `--enable-version3` |
 | [0026](./0026-scheduled-downloads.md) | Scheduled downloads: one table, one in-app ticker | Accepted |
 | [0027](./0027-local-profiles.md) | Local profiles before accounts | Accepted, provisional until 0019 |
+| [0028](./0028-tv-web-client.md) | TV web client: a read-only LAN surface, paired by code | Accepted; first slice of E37, refined into the desktop app ahead of the E36 daemon |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.

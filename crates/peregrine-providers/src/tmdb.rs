@@ -523,6 +523,10 @@ impl MetadataProvider for Tmdb {
             return Box::pin(async move { Err(unsupported) });
         }
         let limit = query.limit().get() as usize;
+        // The kind the query fixed, carried into the async block for the same reason the limit is:
+        // /search/movie and /search/tv are one kind each and their answers carry no media_type,
+        // which only the multi-search endpoint sends.
+        let fixed = query.kind();
         let url = match self.search_url(query) {
             Ok(url) => url.to_string(),
             Err(error) => return Box::pin(async move { Err(error) }),
@@ -546,7 +550,7 @@ impl MetadataProvider for Tmdb {
 
             let mut candidates = Vec::new();
             for result in answer.results.into_iter().take(limit) {
-                if let Some(candidate) = result.into_candidate() {
+                if let Some(candidate) = result.into_candidate_for(fixed) {
                     candidates.push(candidate);
                 }
             }
@@ -1550,20 +1554,17 @@ fn scored_rating(average: Option<f64>, votes: Option<u64>) -> Option<f64> {
 impl SearchResult {
     /// This result as a candidate, or `None` when it is not a title this build can use.
     ///
+    /// `fixed` is the kind the endpoint promised, when it serves one kind. `/search/multi` sends a
+    /// `media_type` per result and it is the only thing that can say whether a result is a film or a
+    /// series, so a search that named no kind passes `None` and reads it. Every other endpoint this
+    /// adapter reads is already one kind — `/movie/popular` cannot answer a series — and those
+    /// answers carry no `media_type` at all, so passing the kind the endpoint promises is what keeps
+    /// a rail or a kind-restricted search from answering an empty list because a field TMDB never
+    /// sends was missing.
+    ///
     /// A person result, an id TMDB did not send, a name that is empty after trimming, or a kind this
     /// build does not have are all skipped: a search that answered four titles and a person is a
     /// search that found four titles.
-    fn into_candidate(self) -> Option<SearchCandidate> {
-        self.into_candidate_for(None)
-    }
-
-    /// The same, when the endpoint that answered already fixed the kind.
-    ///
-    /// `/search/multi` sends a `media_type` per result and it is the only thing that can say
-    /// whether a result is a film or a series, so a search passes `None` and reads it. Every other
-    /// endpoint this adapter reads is already one kind — `/movie/popular` cannot answer a series —
-    /// and those answers carry no `media_type` at all, so passing the kind the endpoint promises is
-    /// what keeps a rail from answering an empty list because a field TMDB never sends was missing.
     ///
     /// The promised kind is a fact about the *endpoint*, and it is stated here rather than in the
     /// rail mapping because this is where a result becomes a candidate: a rail that asked
@@ -1816,6 +1817,47 @@ mod tests {
             .search(&restricted)
             .await
             .expect("the restricted endpoint answers");
+    }
+
+    #[tokio::test]
+    async fn a_kind_restricted_search_maps_an_answer_that_carries_no_media_type() {
+        // `/search/movie` and `/search/tv` are one kind each and their answers carry no
+        // `media_type`; a mapping that required it dropped every result and left every scanned
+        // title a stub, which is the defect PG-E14-21's automatic matching was written for.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search/movie"))
+            .respond_with(json(
+                r#"{"results": [
+                    {"id": 1214931, "title": "Nuremberg", "release_date": "2025-11-06",
+                     "poster_path": "/nuremberg.jpg"},
+                    {"id": 1045933, "title": "Nuremberg", "release_date": "1996-06-01"}
+                ]}"#,
+            ))
+            .mount(&server)
+            .await;
+
+        let mut restricted = query("nuremberg", 10);
+        restricted = SearchQuery::new(
+            restricted.text().clone(),
+            restricted.limit(),
+            Some(peregrine_domain::catalogue::TitleKind::Movie),
+        );
+
+        let found = adapter(&server)
+            .search(&restricted)
+            .await
+            .expect("a search answers");
+
+        assert_eq!(found.len(), 2, "every result is a candidate: {found:?}");
+        assert_eq!(found[0].name().as_str(), "Nuremberg");
+        assert_eq!(
+            found[0].kind(),
+            peregrine_domain::catalogue::TitleKind::Movie,
+            "the endpoint's kind is the result's kind"
+        );
+        assert_eq!(found[0].external_id().value(), "1214931");
+        assert_eq!(found[0].artwork_path(), Some("/nuremberg.jpg"));
     }
 
     #[tokio::test]

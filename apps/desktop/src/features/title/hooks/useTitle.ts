@@ -34,6 +34,7 @@ import type {
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
+import { eventPayload } from "../../../lib/job-events.js";
 import {
   afterRouteChange,
   followRefresh,
@@ -325,12 +326,10 @@ export function useTitle(id: number | null): TitleDetail {
     let unlisten: UnlistenFn | null = null;
 
     void listen<unknown>(eventTopics.titleRefreshed.name, (event) => {
-      const payload = event.payload;
-      if (typeof payload !== "object" || payload === null) {
-        return;
-      }
-      const record = payload as Record<string, unknown>;
-      if (record["titleId"] !== id) {
+      // The bus wraps every topic in a versioned envelope; a listener that read `event.payload`
+      // directly matched no title and re-read nothing.
+      const record = eventPayload(event.payload);
+      if (record === null || record["titleId"] !== id) {
         return;
       }
       setUpdates((count) => count + 1);

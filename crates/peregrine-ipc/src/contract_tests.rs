@@ -640,6 +640,130 @@ struct ContractCase {
 /// reads the registered names out of the builder's own export. A command with no case here
 /// fails that test by name; a case naming a command that is not registered fails it too, so
 /// the table cannot keep a dead entry either.
+/// The LAN surface's cases: every command answers `Internal` from a dead runtime, except the
+/// address probe, which is a route lookup rather than a read of the core.
+fn web_start_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_start(harness.dead_state(), "127.0.0.1".to_owned(), 8787)
+            .await
+            .map(drop)
+    })
+}
+
+fn web_stop_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::web::web_stop(harness.dead_state()).await.map(drop) })
+}
+
+fn web_status_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::web::web_status(harness.dead_state()).await.map(drop) })
+}
+
+fn web_lan_address_without_a_runtime(_harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::web::web_lan_address().map(drop) })
+}
+
+fn web_pairings_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::web::web_pairings(harness.dead_state()).map(drop) })
+}
+
+fn web_approve_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_approve(harness.dead_state(), "pair".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+fn web_approve_code_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_approve_code(harness.dead_state(), "12345678".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+fn web_deny_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::web::web_deny(harness.dead_state(), "pair".to_owned()).map(drop) })
+}
+
+fn web_devices_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_devices(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn web_revoke_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_revoke(harness.dead_state(), crate::web::DeviceRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+/// The `web` namespace's cases, one per registered command.
+fn web_cases() -> Vec<ContractCase> {
+    let fails = || Expected::Fails {
+        code: ErrorCode::Internal,
+        retryable: false,
+    };
+    vec![
+        ContractCase {
+            command: "web_start",
+            expected: fails(),
+            drive: web_start_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_stop",
+            expected: fails(),
+            drive: web_stop_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_status",
+            expected: fails(),
+            drive: web_status_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_lan_address",
+            expected: Expected::CannotFail {
+                reason: "the address is read from the routing table, not from the core",
+            },
+            drive: web_lan_address_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_pairings",
+            expected: fails(),
+            drive: web_pairings_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_approve",
+            expected: fails(),
+            drive: web_approve_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_approve_code",
+            expected: fails(),
+            drive: web_approve_code_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_deny",
+            expected: fails(),
+            drive: web_deny_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_devices",
+            expected: fails(),
+            drive: web_devices_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_revoke",
+            expected: fails(),
+            drive: web_revoke_without_a_runtime,
+        },
+    ]
+}
+
 fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
     all.extend(provider_cases());
@@ -649,6 +773,7 @@ fn cases() -> Vec<ContractCase> {
     all.extend(notification_cases());
     all.extend(watch_cases());
     all.extend(prowlarr_cases());
+    all.extend(web_cases());
     all
 }
 

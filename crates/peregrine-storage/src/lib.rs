@@ -31,6 +31,7 @@ mod migrations;
 mod notify;
 mod offers;
 mod page;
+mod pairing;
 mod pragmas;
 mod quality;
 mod retention;
@@ -71,6 +72,7 @@ pub use maintenance::{
 };
 pub use notify::NotificationRepository;
 pub use page::{Cursor, MAX_PAGE_ROWS, PageRequest};
+pub use pairing::{NewPairedDevice, PairedDevice};
 pub use retention::{
     RETENTION_POLICY, Requirement, RetentionFailure, RetentionOutcome, RetentionPlan,
     RetentionPolicyEntry, RetentionRule, TableRemoval, TimeWindow,

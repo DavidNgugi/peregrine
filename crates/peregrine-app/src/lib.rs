@@ -21,6 +21,7 @@ pub mod runtime;
 #[cfg(test)]
 mod testing;
 mod volume;
+pub mod web;
 
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
 pub use library::{
@@ -40,7 +41,8 @@ pub use prowlarr::{Installed, ProwlarrError, Supervisor, VERSION as PROWLARR_VER
 // layer, which may depend on this crate and not on storage — can name what it is handed
 // without a second dependency edge (AGENTS R6).
 pub use peregrine_storage::{
-    Cursor, DownloadJobRow, JobPhase, JobRecord, PageRequest, StorageError, WatchProgressRow,
+    Cursor, DownloadJobRow, JobPhase, JobRecord, PageRequest, PairedDevice, StorageError,
+    WatchProgressRow,
 };
 pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,
@@ -48,6 +50,7 @@ pub use runtime::{
     RuntimeError, SessionId, ShellStatus, StartedCapture, StartedJob, StartedPlayback,
     TitleEpisodeDetail, TitlePlayback, TitleSeasonDetail, WatchAvailabilityView, WatchOfferView,
 };
+pub use web::{WebConfig, WebError, WebService, WebStatus};
 // What one rail holds, for the reason the block above gives: the command surface answers a DTO
 // built from a `RailItem`, and it may not reach into `peregrine-app`'s job module to name it.
 pub use jobs::discover_rails::RailItem;

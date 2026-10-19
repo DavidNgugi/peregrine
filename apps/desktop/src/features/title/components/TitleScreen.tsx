@@ -20,7 +20,7 @@
  * `PG-E5`, and `PG-E16` for the player itself.
  */
 
-import { Button, EmptyState, ErrorState, Screen, Section, Skeleton, Table } from "@peregrine/ui";
+import { Button, EmptyState, ErrorState, Screen, Section, Skeleton } from "@peregrine/ui";
 import {
   normalizeIpcError,
   playExternally,
@@ -218,9 +218,25 @@ export function TitleScreen({
         ? t("library.kind.films")
         : t("library.kind.series");
 
+  // **One number, and it is the only fact the page does not already state.** This used to be a
+  // four-column table of items, copies, size, and missing counts, whose common row for a film was
+  // `1 · 1 · 1.4 GB · —` — a database readout rather than something a reader can use. Items and
+  // copies are counts whose actionable form is a per-file list with qualities (PG-E14-11), and the
+  // library screen keeps its copies column for comparing titles across rows. What is left is the
+  // question this page can answer today — how much space the title takes — and the one state worth
+  // the danger colour: files the last scan could not find.
+  const size = title === null || title.bytes === 0 ? null : sizeLabel(title.bytes, t);
+  // A title whose every file is missing is the hero's `fileMissing` reason, which already says so;
+  // a second sentence beside it would be the same fact twice. The partial case is the one no other
+  // surface states, and it is the one that looks present in a listing until it is played.
+  const missing =
+    title === null || title.missingFiles === 0 || detail.offer === "absent"
+      ? null
+      : t("title.library.missing", { count: title.missingFiles });
+
   return (
     <Screen backLabel={backLabel} onBack={onBack} title={title?.name ?? kindLabel}>
-      <Section description={kindLabel} title={t("title.section")}>
+      <Section description={size ?? kindLabel} title={t("title.section")}>
         {detail.loading ? null : detail.failed ? (
           <ErrorState body={t("title.unavailable.body")} title={t("title.unavailable.title")} />
         ) : detail.missing || title === null ? (
@@ -300,7 +316,16 @@ export function TitleScreen({
               rating={detail.rating}
               released={detail.released}
               seasons={seasons.seasons.length}
-            />
+            >
+              {/* Answers the same question the actions do, so it sits under them in the hero's column
+                  rather than as a section below the poster. */}
+              <WatchProviders data={watch.data} />
+            </TitleHero>
+            {missing === null ? null : (
+              <p className="text-caption text-state-danger" role="status">
+                {missing}
+              </p>
+            )}
             {playFailure === null ? null : (
               <p className="text-caption text-state-danger" role="status">
                 {messageOf(playFailure)}
@@ -366,38 +391,6 @@ export function TitleScreen({
               reloadKey={acquire?.titleId === title.id ? (acquire?.outcome ?? null) : null}
               titleId={title.id}
             />
-            {/* The library's own arithmetic stays a table: four counts are a row of numbers rather than
-                something a hero draws, and a reader comparing them across pages wants them aligned. */}
-            <Table
-              columns={[
-                {
-                  id: "items",
-                  header: t("title.column.items"),
-                  numeric: true,
-                  cell: () => String(title.items),
-                },
-                {
-                  id: "files",
-                  header: t("library.column.files"),
-                  numeric: true,
-                  cell: () => String(title.files),
-                },
-                {
-                  id: "size",
-                  header: t("library.column.size"),
-                  numeric: true,
-                  cell: () => sizeLabel(title.bytes, t),
-                },
-                {
-                  id: "missing",
-                  header: t("library.column.missing"),
-                  numeric: true,
-                  cell: () => (title.missingFiles === 0 ? "—" : String(title.missingFiles)),
-                },
-              ]}
-              rowKey={() => "totals"}
-              rows={[title]}
-            />
           </div>
         )}
       </Section>
@@ -411,10 +404,6 @@ export function TitleScreen({
           {t("title.refreshing")}
         </p>
       ) : null}
-
-      {/* A film has no season section, and a show whose provider named no seasons draws none either:
-          a heading over an empty switcher would be a promise nobody made. */}
-      <WatchProviders data={watch.data} />
 
       <CastRail
         cast={detail.cast}

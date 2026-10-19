@@ -413,6 +413,14 @@ export const en = {
     },
     title: {
       section: "In your library",
+      // What the page says about the copy the library holds. The size rides in the section's
+      // description, because it is the one number the hero does not already state; a missing file is
+      // the one state worth the damage colour, and it is said only when there is one. Both plural
+      // forms for the reason `card.votes` gives: a count of one is not a count of many.
+      library: {
+        missing_one: "A file for this title is missing.",
+        missing_other: "{{count}} files for this title are missing.",
+      },
       refreshing: "Fetching details, cast, episodes, and artwork…",
       offers: {
         title: "Other qualities available",
@@ -426,11 +434,6 @@ export const en = {
           resolution: "{{value}} is not in your preferred qualities",
           source: "{{value}} is not a preferred source",
         },
-      },
-      column: {
-        items: "Items",
-        episode: "Episode",
-        name: "Name",
       },
       unnamedEpisode: "Not named yet",
       poster: {
@@ -827,6 +830,9 @@ export const en = {
         approve: "Approve",
         deny: "Deny",
         revoke: "Revoke",
+        pending: "Waiting for approval",
+        devices: "Paired devices",
+        caveat: "The TV stops when Peregrine quits or this machine sleeps.",
         failed: "Web access could not be changed. Try again.",
       },
       network: {
@@ -844,29 +850,7 @@ export const en = {
         binding:
           "Binding torrent traffic to a chosen interface or SOCKS5 proxy is not built yet. Until it is, the operating system's routing and firewall are the only guarantee.",
       },
-      devices: {
-        title: "TV and other screens",
-        description:
-          "Let a browser on this network browse and play the library. The surface stays off until you start it, and it can only read and play: no settings, no deleting, no downloads.",
-        address: "Address",
-        port: "Port",
-        start: "Start",
-        stop: "Stop",
-        running: "Listening at {{address}}.",
-        open: "Open {{url}} in the TV's browser.",
-        pending: "Waiting for approval",
-        noPending: "No device is asking to connect.",
-        approve: "Approve",
-        deny: "Deny",
-        paired: "Paired devices",
-        noDevices: "No device is paired.",
-        revoke: "Revoke",
-        revoked: "Revoked",
-        lastSeen: "Last seen {{when}}",
-        neverSeen: "Never used",
-        caveat:
-          "The TV stops working when Peregrine quits or this machine sleeps. Nothing outside this network can reach it.",
-      },
+
       shortcuts: {
         title: "Keyboard shortcuts",
         description: "Every shortcut this build has, written the way this platform writes them.",

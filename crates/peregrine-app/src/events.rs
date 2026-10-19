@@ -140,6 +140,13 @@ pub const NOTIFICATION_RAISED: Topic = Topic::new("notification://raised", 1);
 /// terminal state showed nothing until the last season still had been fetched.
 pub const TITLE_REFRESHED: Topic = Topic::new("title://refreshed", 1);
 
+/// A device asked to pair with the LAN surface (ADR 0028).
+///
+/// A trigger for the desktop prompt and never a source of truth: the payload carries the code the
+/// person compares with the television, and the pending list is the answer to re-read. It is
+/// deliberately not persisted: a request that outlived the process that made it is not a request.
+pub const WEB_PAIR_REQUESTED: Topic = Topic::new("web://pair_requested", 1);
+
 /// Every topic this build emits, declared once.
 ///
 /// `cargo xtask gen-ipc` writes this list into the generated TypeScript, so a topic the
@@ -151,6 +158,7 @@ pub const TOPICS: &[Topic] = &[
     DOWNLOAD_STATS,
     NOTIFICATION_RAISED,
     TITLE_REFRESHED,
+    WEB_PAIR_REQUESTED,
 ];
 
 /// One value on one topic.
@@ -459,6 +467,7 @@ mod tests {
                 ("download://stats", 1),
                 ("notification://raised", 1),
                 ("title://refreshed", 1),
+                ("web://pair_requested", 1),
             ],
             "the event manifest changed; regenerate the bindings in the same commit"
         );

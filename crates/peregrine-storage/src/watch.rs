@@ -56,6 +56,8 @@ pub struct EpisodeProgressRow {
     pub watched: bool,
     /// How far through they are, as a fraction in `0.0..=1.0`.
     pub percent: f64,
+    /// How far into the episode, in milliseconds, so a Resume control starts where they stopped.
+    pub position_ms: i64,
 }
 
 /// One day's total watched milliseconds, for the history graph.
@@ -238,7 +240,7 @@ pub(crate) async fn list_progress_for_title(
     title_id: i64,
 ) -> Result<Vec<EpisodeProgressRow>, StorageError> {
     let rows = sqlx::query_as::<_, EpisodeProgressQueryRow>(
-        "SELECT e.season_number, e.episode_number, p.watched, p.percent \
+        "SELECT e.season_number, e.episode_number, p.watched, p.percent, p.position_ms \
            FROM watch_progress p \
            JOIN episode e ON e.id = p.episode_id \
            JOIN title t ON t.id = p.title_id \
@@ -269,6 +271,7 @@ pub(crate) async fn list_progress_for_title(
                 })?,
                 watched: row.watched != 0,
                 percent: row.percent,
+                position_ms: row.position_ms,
             })
         })
         .collect()
@@ -308,6 +311,7 @@ struct EpisodeProgressQueryRow {
     episode_number: i64,
     watched: i64,
     percent: f64,
+    position_ms: i64,
 }
 
 /// Reads a page of one account's progress, most recently updated first.

@@ -28,7 +28,7 @@ Status: target architecture, partly built. What works today is in the [README](.
 | A plugin runtime that executes third-party code | Remote code execution inside a torrent client is the single worst security decision available to us. Extensibility is compile-time traits, not loaded scripts. |
 | Telemetry by default | Opt-in crash reports only, scrubbed, self-hostable. |
 | Transcoding on the desktop playback path | mpv plays essentially every container and codec directly. Transcoding burns CPU for no benefit. Transcode exists only for casting, where the renderer forces it. |
-| A media server for other devices **in 1.0** | Not in scope for 1.0: the desktop app stays a client. A server mode is planned for Phase 7 and specified in [adr/0018](./adr/0018-media-server.md) — folder export and DLNA first, then a Jellyfin-compatible API subset and a headless service. It is deliberately after 1.0 because a long-lived listener is a different security posture and depends on the core being stable |
+| A media server for other devices **in 1.0** | Not in scope for 1.0: the desktop app stays a client. A server mode is planned for Phase 7 and specified in [adr/0018](./adr/0018-media-server.md) — folder export and DLNA first, then a Jellyfin-compatible API subset and a headless service. It is deliberately after 1.0 because a long-lived listener is a different security posture and depends on the core being stable. The first slice of that client — the TV web surface — is served by the running desktop app under [adr/0028](./adr/0028-tv-web-client.md): off by default, bound to one address, read-only, and reachable only on the local network |
 
 ---
 

@@ -103,6 +103,11 @@ may_depend_on = [
 ]
 runtime = [
   "anyhow",
+  # The LAN surface (ADR 0028) is a leaf within this crate: `axum` routes the read-only API,
+  # `tower-http` serves the built client and the security headers, and both are already in the
+  # graph through `peregrine-stream`.
+  "axum",
+  "tower-http",
   "dashmap",
   # The managed Prowlarr component pack (ADR 0024): `reqwest` downloads the pinned
   # artefact, `sha2` verifies it, `zip`/`tar`/`flate2` unpack it, and `quick-xml`

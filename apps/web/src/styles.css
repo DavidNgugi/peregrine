@@ -1,0 +1,909 @@
+/* The ten-foot layout: large type, generous spacing, a focus ring a person can see from a sofa. */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+body {
+  font-size: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+video:focus-visible {
+  outline: 4px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding-bottom: 48px;
+}
+
+.screen.center {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 18px;
+  padding: 0 8vw;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 28px 48px;
+}
+
+.brand {
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.dim {
+  color: var(--text-secondary);
+}
+
+.small {
+  font-size: 16px;
+}
+
+.center-text {
+  text-align: center;
+  margin: 18vh 0;
+}
+
+.error {
+  color: var(--state-danger);
+  padding: 0 48px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 28px 24px;
+  padding: 0 48px;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 14px;
+  background: var(--surface-1);
+  box-shadow: 0 10px 24px -14px oklch(0 0 0 / 0.7);
+}
+
+.poster.placeholder {
+  border: 1px solid var(--border-subtle);
+  box-shadow: none;
+}
+
+.tile-title {
+  font-size: 17px;
+  line-height: 1.25;
+  color: var(--text-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.tile:focus-visible .tile-title {
+  color: var(--text-primary);
+}
+
+.chip {
+  position: absolute;
+  left: 10px;
+  bottom: 46px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface-scrim);
+  color: var(--state-warn);
+  font-size: 15px;
+  font-weight: 650;
+  backdrop-filter: blur(6px);
+}
+
+.code {
+  font-size: clamp(48px, 9vw, 112px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  margin: 12px 0;
+}
+
+.title-page {
+  display: grid;
+  grid-template-columns: minmax(220px, 340px) minmax(0, 1fr);
+  gap: 48px;
+  padding: 12px 48px;
+  align-items: start;
+}
+
+.title-art .poster {
+  box-shadow: 0 20px 50px -20px oklch(0 0 0 / 0.8);
+}
+
+.title-info h1 {
+  font-size: clamp(36px, 4.4vw, 64px);
+  line-height: 1.05;
+  margin: 0 0 14px;
+  letter-spacing: -0.02em;
+}
+
+.overview {
+  font-size: 21px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 62ch;
+  margin: 22px 0;
+}
+
+.play,
+.back {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 14px 34px;
+  background: var(--surface-2);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.play {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: transparent;
+  font-size: 22px;
+  padding: 16px 48px;
+}
+
+.play:disabled {
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.note {
+  color: var(--state-warn);
+  font-size: 17px;
+}
+
+.player {
+  position: relative;
+  height: 100vh;
+  padding: 0;
+  background: #000;
+}
+
+.player video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: #000;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 28px;
+  background: var(--surface-0);
+}
+
+.player-controls .control {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 18px;
+  background: var(--surface-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.seek {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.time {
+  min-width: 132px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.player-title {
+  max-width: 28ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-tertiary);
+}
+
+.player-message {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: var(--surface-scrim);
+  color: var(--text-primary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.secondary {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 14px 30px;
+  background: var(--surface-2);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+/* Touch and small screens: the same screens, a two-to-three column grid, and a player whose
+   controls wrap into two rows rather than overflowing a phone. */
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.screen {
+  min-height: 100dvh;
+}
+
+.tile-title,
+.brand,
+.title-info h1 {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  body {
+    font-size: 17px;
+  }
+
+  .topbar {
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 18px 16px;
+    gap: 12px;
+  }
+
+  .brand {
+    font-size: 23px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 20px 12px;
+    padding: 0 18px;
+  }
+
+  .poster {
+    border-radius: 10px;
+  }
+
+  .tile-title {
+    font-size: 14px;
+    -webkit-line-clamp: 2;
+  }
+
+  .chip {
+    left: 6px;
+    bottom: 40px;
+    padding: 2px 7px;
+    font-size: 12px;
+  }
+
+  .title-page {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 8px 18px 28px;
+  }
+
+  .title-art {
+    max-width: 180px;
+  }
+
+  .title-info h1 {
+    font-size: clamp(28px, 9vw, 40px);
+  }
+
+  .overview {
+    font-size: 16px;
+    line-height: 1.5;
+    margin: 14px 0;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .play,
+  .secondary {
+    width: 100%;
+    text-align: center;
+    padding: 13px 20px;
+  }
+
+  .screen.center {
+    padding: 0 24px;
+  }
+
+  .code {
+    font-size: clamp(40px, 13vw, 76px);
+    letter-spacing: 0.08em;
+  }
+
+  .player {
+    height: 100dvh;
+  }
+
+  .player video {
+    object-fit: contain;
+  }
+
+  .player-controls {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .player-controls .control,
+  .player-controls .back {
+    min-height: 44px;
+    padding: 8px 13px;
+  }
+
+  .time {
+    min-width: 0;
+    font-size: 14px;
+  }
+
+  .seek {
+    order: 10;
+    flex-basis: 100%;
+    height: 36px;
+  }
+
+  .player-title {
+    display: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .player-controls {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, oklch(0 0 0 / 0.8), transparent);
+    z-index: 2;
+  }
+
+  .player-controls .control,
+  .player-controls .back {
+    min-height: 40px;
+    padding: 6px 12px;
+  }
+
+  .player video {
+    height: 100dvh;
+  }
+
+  .player-title {
+    display: none;
+  }
+}
+
+/* ---- Home, rails, and the title page ---- */
+
+.screen.home {
+  padding-bottom: 96px;
+}
+
+.hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: min(70vh, 680px);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+
+.hero-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--surface-0) 0%,
+    oklch(0 0 0 / 0.45) 45%,
+    oklch(0 0 0 / 0.05) 100%
+  );
+}
+
+.hero-copy,
+.title-hero-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+  padding: 0 48px 44px;
+}
+
+.hero-copy h1,
+.title-hero-copy h1 {
+  margin: 0;
+  font-size: clamp(40px, 5vw, 74px);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+}
+
+.hero-meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero-overview {
+  margin: 0;
+  max-width: 66ch;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rail {
+  margin-top: 30px;
+}
+
+.rail h2 {
+  margin: 0 0 12px;
+  padding: 0 48px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.rail-track {
+  display: flex;
+  gap: 14px;
+  padding: 4px 48px 14px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.rail-track::-webkit-scrollbar {
+  display: none;
+}
+
+.card {
+  flex: 0 0 164px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  scroll-snap-align: start;
+}
+
+.card-art {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.card-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--surface-1);
+}
+
+.card-progress {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: oklch(1 0 0 / 0.28);
+}
+
+.card-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.card-rating {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-scrim);
+  color: var(--state-warn);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.card-name {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.caption {
+  padding: 0 48px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.library-count {
+  padding: 8px 48px 0;
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.nav,
+.tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav.current,
+.tab.current {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.tabbar {
+  display: none;
+}
+
+/* ---- Title page ---- */
+
+.title-screen {
+  padding-bottom: 64px;
+}
+
+.title-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: min(64vh, 620px);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+
+.title-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--surface-0) 0%,
+    oklch(0 0 0 / 0.35) 60%,
+    oklch(0 0 0 / 0.05) 100%
+  );
+}
+
+.title-hero-copy .back {
+  align-self: flex-start;
+  margin-bottom: 6px;
+}
+
+.title-body {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding-top: 18px;
+}
+
+.seasons {
+  display: flex;
+  gap: 10px;
+  padding: 0 48px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seasons::-webkit-scrollbar {
+  display: none;
+}
+
+.season {
+  flex: 0 0 auto;
+  padding: 8px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.season.current {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 48px;
+}
+
+.episodes h2 {
+  margin: 0 0 4px;
+  font-size: 24px;
+}
+
+.episodes-empty {
+  padding: 0 48px;
+}
+
+.episode {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.episode:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.episode-still {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.episode-still img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.episode-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.episode-number {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.episode-name {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 620;
+}
+
+.episode-meta {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.episode-overview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.episode-action {
+  padding: 0 14px;
+  color: var(--accent);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .topbar-nav {
+    display: none;
+  }
+
+  .tabbar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 6;
+    display: flex;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface-0);
+  }
+
+  .tab {
+    flex: 1;
+    min-height: 56px;
+    border-radius: 0;
+    font-size: 15px;
+  }
+
+  .screen:not(.player):not(.title-screen):not(.center) {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .hero {
+    min-height: 56vh;
+  }
+
+  .hero-copy,
+  .title-hero-copy {
+    padding: 0 18px 24px;
+    gap: 10px;
+  }
+
+  .hero-copy h1,
+  .title-hero-copy h1 {
+    font-size: clamp(30px, 10vw, 46px);
+  }
+
+  .hero-overview {
+    font-size: 15px;
+    -webkit-line-clamp: 3;
+  }
+
+  .rail {
+    margin-top: 22px;
+  }
+
+  .rail h2 {
+    padding: 0 18px;
+    font-size: 18px;
+  }
+
+  .rail-track {
+    gap: 10px;
+    padding: 2px 18px 10px;
+  }
+
+  .card {
+    flex-basis: 122px;
+  }
+
+  .card-name {
+    font-size: 12px;
+  }
+
+  .title-hero {
+    min-height: 52vh;
+  }
+
+  .seasons,
+  .episodes,
+  .episodes-empty {
+    padding: 0 18px;
+  }
+
+  .episode {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .episode-action {
+    padding: 0 4px 6px;
+  }
+
+  .episode-overview {
+    -webkit-line-clamp: 3;
+  }
+
+  .caption,
+  .library-count {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+}

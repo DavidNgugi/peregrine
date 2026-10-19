@@ -2835,6 +2835,135 @@ impl Runtime {
         }))
     }
 
+    /// The LAN surface over this runtime's own reads, for the shell to start and stop.
+    ///
+    /// The service holds the runtime, not the other way round: it is built by the composition root
+    /// (the shell) once the runtime exists, and nothing in the core starts a listener on its own.
+    #[must_use]
+    pub fn web_service(self: &Arc<Self>) -> crate::web::WebService {
+        crate::web::WebService::new(
+            Arc::clone(self),
+            Arc::clone(&self.database),
+            Arc::clone(&self.bus),
+            Arc::clone(&self.artwork),
+            Arc::clone(&self.clock),
+            Arc::clone(&self.tokens),
+            self.config.data_directory().join("hls"),
+        )
+    }
+
+    /// One catalogue title's identity, for a page reached from a discovery rail.
+    ///
+    /// The read a non-library title needs: a rail names a catalogue row the library does not hold,
+    /// and opening it should say what it is and that no copy is here rather than answering 404.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn title_identity(
+        &self,
+        id: i64,
+    ) -> Result<Option<peregrine_storage::TitleIdentity>, RuntimeError> {
+        Ok(self
+            .database
+            .title_identity(installation_scope(), id)
+            .await?)
+    }
+
+    /// The episode row id for one season and episode number, when the library holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn episode_id(
+        &self,
+        title_id: i64,
+        season_number: u32,
+        episode_number: u32,
+    ) -> Result<Option<i64>, RuntimeError> {
+        Ok(self
+            .database
+            .episode_id_for(title_id, season_number, episode_number)
+            .await?)
+    }
+
+    /// The file a LAN client may play directly, when the library holds one.
+    ///
+    /// `None` is "the title has no copy on disk", which is an answer rather than a failure; a
+    /// container a browser cannot demux is returned so the caller can name the refusal instead of
+    /// handing the element bytes it will reject with an error code and no reason.
+    ///
+    /// The path is a [`SafePath`], so the check that it lives under a configured root happened
+    /// once, in [`Runtime::playable`], and the server never assembles a path of its own.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::UnknownTitle`], [`RuntimeError::FileOutsideRoots`], or
+    /// [`RuntimeError::Storage`].
+    pub async fn web_playback(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Option<crate::web::WebPlaybackTarget>, RuntimeError> {
+        match self.playable(title_id, episode_id).await {
+            Ok((file, path)) => {
+                // The episode the chosen file belongs to is what progress is keyed by: a series'
+                // resume row is per episode, and a title-level row would resume the wrong one.
+                let evidence = self
+                    .database
+                    .title_evidence(installation_scope(), title_id)
+                    .await?;
+                let episode_id = evidence
+                    .items
+                    .iter()
+                    .find(|item| item.files.iter().any(|held| held.id == file.id))
+                    .and_then(|item| item.item.episode_id);
+                Ok(Some(crate::web::WebPlaybackTarget {
+                    path: path.as_path().to_path_buf(),
+                    size_bytes: file.size_bytes,
+                    playback: peregrine_domain::LocalPlayback::of_name(file.path.as_str()),
+                    episode_id,
+                    duration_ms: file
+                        .duration_ms
+                        .and_then(|duration| i64::try_from(duration).ok()),
+                }))
+            }
+            Err(RuntimeError::NoPlayableFile) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Where this title's playable file was left, in the same store the desktop player writes.
+    ///
+    /// `None` when the title has no file or nobody has watched it yet; the two are different on
+    /// screen only in that one has a Resume control and the other starts from the beginning.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn web_progress(
+        &self,
+        title_id: i64,
+    ) -> Result<Option<crate::web::WebProgress>, RuntimeError> {
+        let Some(target) = self.web_playback(title_id, None).await? else {
+            return Ok(None);
+        };
+        let Some(progress) = self
+            .database
+            .watch_progress(installation_scope(), title_id, target.episode_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(crate::web::WebProgress {
+            episode_id: target.episode_id,
+            position_ms: progress.position_ms(),
+            duration_ms: progress.duration_ms(),
+            percent: progress.percent(),
+            watched: progress.watched(),
+        }))
+    }
+
     /// Whether this title has no poster for a capture to improve on.
     ///
     /// **The rule, in one place, because two commands ask it**: the player captures a frame while it
@@ -7147,6 +7276,184 @@ mod tests {
         (title_id, film)
     }
 
+    /// A downloaded film the browser demuxes, with a known runtime, for the direct and progress
+    /// assertions. The bytes are a fixture, not a decodable film: nothing here plays them.
+    async fn downloaded_mp4(runtime: &Runtime, directory: &TempDir) -> (i64, std::path::PathBuf) {
+        use peregrine_domain::{MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText};
+
+        let folder = directory.path().join("downloads").join("A Film");
+        std::fs::create_dir_all(&folder).expect("the download folder");
+        let film = folder.join("A Film (2024).mp4");
+        std::fs::write(&film, vec![0_u8; 4096]).expect("the fixture file");
+        let at = jiff::Timestamp::from_millisecond(0).expect("in range");
+        let title_id = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "A Film".to_owned(),
+                original_name: None,
+                sort_name: "a film".to_owned(),
+                at: 0,
+            })
+            .await
+            .expect("the title");
+        let item_id = runtime
+            .database
+            .insert_media_item(MediaItem {
+                id: 0,
+                title_id,
+                episode_id: None,
+                state: MediaItemState::Available,
+                origin: MediaOrigin::Torrent,
+                preferred_file_id: None,
+                quality_label: None,
+                created_at: at,
+                updated_at: at,
+            })
+            .await
+            .expect("the item");
+        runtime
+            .database
+            .insert_media_file(MediaFile {
+                id: 0,
+                media_item_id: item_id,
+                path: NonEmptyText::new(film.to_string_lossy().as_ref()).expect("fixture text"),
+                root_id: None,
+                size_bytes: 4096,
+                mtime_ms: at,
+                added_at: at,
+                missing_since: None,
+                container: None,
+                duration_ms: Some(7_200_000),
+                video_codec: None,
+                video_profile: None,
+                width: None,
+                height: None,
+                bit_depth: None,
+                hdr_format: None,
+                frame_rate: None,
+                bitrate_kbps: None,
+                audio_codec: None,
+                audio_channels: None,
+                audio_layout: None,
+                audio_languages: None,
+                subtitle_format: None,
+                probe_version: None,
+                probe_json: None,
+                quality_label: None,
+                updated_at: at,
+            })
+            .await
+            .expect("the file");
+        (title_id, film)
+    }
+
+    /// The HLS routes over a real transcode: a playlist, an init segment, and a media segment.
+    ///
+    /// Ignored because it needs a real ffmpeg with a permitted encoder; run it with
+    /// `cargo test -p peregrine-app a_real_mkv_plays_through_the_hls_routes -- --ignored`.
+    #[tokio::test]
+    #[ignore = "needs a real ffmpeg with a permitted H.264 encoder on PATH"]
+    async fn a_real_mkv_plays_through_the_hls_routes() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        use crate::web::WebConfig;
+
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let (title_id, film) = downloaded_title(&runtime, &directory).await;
+        let made = std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x180:rate=24",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440",
+                "-t",
+                "3",
+                "-c:v",
+                "mpeg4",
+                "-c:a",
+                "pcm_s16le",
+            ])
+            .arg(&film)
+            .status()
+            .expect("the fixture is generated");
+        assert!(made.success());
+
+        let service = Arc::new(Arc::new(runtime).web_service());
+        let status = service
+            .start(WebConfig::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .unwrap();
+        let port = status.address.expect("a bound address").port();
+        let base = format!("http://127.0.0.1:{port}");
+        let offer = service
+            .request_pair(IpAddr::V4(Ipv4Addr::LOCALHOST), "Test TV", None)
+            .unwrap();
+        let device = service.approve(&offer.pair_id).await.unwrap();
+        let crate::web::PairStatus::Approved {
+            token: Some(token), ..
+        } = service.pair_status(&offer.pair_id)
+        else {
+            panic!("the approval yields a token");
+        };
+        let client = reqwest::Client::new();
+        let ticket: serde_json::Value = client
+            .post(format!("{base}/api/playback/{title_id}"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "positionMs": 0 }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(ticket["kind"], "hls", "an MKV is transcoded: {ticket}");
+        let playlist_url = ticket["url"].as_str().expect("a playlist URL").to_owned();
+        let playlist = client
+            .get(format!("{base}{playlist_url}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(playlist.status(), 200);
+        let body = playlist.text().await.unwrap();
+        assert!(body.contains("#EXTM3U"));
+        assert!(body.contains("init.mp4"));
+        let directory_url = playlist_url.replace("index.m3u8", "");
+        let init = client
+            .get(format!("{base}{directory_url}init.mp4"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(init.status(), 200);
+        let segment = body
+            .lines()
+            .find(|line| {
+                std::path::Path::new(line)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("m4s"))
+            })
+            .expect("a segment");
+        let media = client
+            .get(format!("{base}{directory_url}{segment}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(media.status(), 200);
+        assert_eq!(media.headers().get("content-type").unwrap(), "video/mp4");
+        assert!(service.revoke(device.id).await.unwrap());
+        service.stop().await;
+    }
+
     /// A mark the user set outranks a playback report in both directions: watching a film someone
     /// marked watched must not unmark it, and replaying one they marked unwatched must not mark it.
     #[tokio::test]
@@ -7599,5 +7906,322 @@ mod tests {
             .is_none(),
             "a title the library holds nothing of has nothing to play"
         );
+    }
+
+    /// The LAN surface, end to end: a code, an approval, a cookie, a read, a revoke.
+    ///
+    /// This is the security acceptance of ADR 0028 in one test. It binds a real loopback socket and
+    /// speaks HTTP to it, because the parts that can be wrong -- the Host check, the cookie the
+    /// browser carries, the token hash the database stores, and the immediate refusal after a revoke
+    /// -- are all between the pieces a unit test would mock.
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One scenario read top to bottom: pairing, auth, refusal, revoke.
+    async fn the_lan_surface_pairs_a_device_reads_the_library_and_refuses_it_after_a_revoke() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        use crate::web::WebConfig;
+
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let (direct_id, _direct_file) = downloaded_mp4(&runtime, &directory).await;
+        let (hls_id, _hls_file) = downloaded_title(&runtime, &directory).await;
+        // The desktop writes a position first; the TV read has to answer with it, which is the
+        // other direction of the same row this test writes over HTTP below.
+        runtime
+            .record_progress(hls_id, None, 30_000, Some(7_200_000))
+            .await
+            .unwrap();
+        let service = Arc::new(Arc::new(runtime).web_service());
+        // The built client is served when the checkout has one, which is the debug path
+        // `web_client_dir` uses; a checkout that has not run the web build still gets the API.
+        let web_dir =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/web/dist");
+        let mut config = WebConfig::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        if web_dir.join("index.html").is_file() {
+            config = config.with_app_dir(web_dir);
+        }
+        let status = service.start(config).await.unwrap();
+        let port = status.address.expect("a bound address").port();
+        let base = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        let offer: serde_json::Value = client
+            .post(format!("{base}/api/pair"))
+            .json(&serde_json::json!({ "name": "Test TV", "platform": "test" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let pair_id = offer["pairId"].as_str().expect("a pair id").to_owned();
+        let code = offer["code"].as_str().expect("a code").to_owned();
+        assert_eq!(code.len(), 8);
+
+        let refused = client
+            .get(format!("{base}/api/library"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 401, "an unpaired read is refused");
+
+        let device = service.approve(&pair_id).await.unwrap();
+        assert_eq!(device.scopes, "read,stream");
+
+        let approved = client
+            .get(format!("{base}/api/pair/{pair_id}"))
+            .send()
+            .await
+            .unwrap();
+        let cookie = approved
+            .headers()
+            .get("set-cookie")
+            .expect("the approval sets the browser cookie")
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let body: serde_json::Value = approved.json().await.unwrap();
+        assert_eq!(body["state"], "approved");
+        assert!(body["token"].as_str().expect("a token").len() >= 32);
+
+        let library = client
+            .get(format!("{base}/api/library"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(library.status(), 200);
+        let rows: serde_json::Value = library.json().await.unwrap();
+
+        // The home read is the rails the client draws: a hero, the local rails, and whatever the
+        // provider cache holds.
+        let home: serde_json::Value = client
+            .get(format!("{base}/api/home"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            home["hero"].is_object(),
+            "a library title is offered as the hero: {home}"
+        );
+        let rails = home["rails"].as_array().expect("rails");
+        assert!(
+            rails.iter().any(|rail| rail["id"] == "library"),
+            "the library rail is always drawn: {rails:?}"
+        );
+
+        assert!(
+            rows.as_array().expect("an array").len() >= 2,
+            "the two seeded titles are listed: {rows}"
+        );
+
+        // A title nobody has played has no Resume control; after one report it has the position
+        // the desktop would also read from the same row.
+        let fresh: serde_json::Value = client
+            .get(format!("{base}/api/title/{direct_id}"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(fresh["progress"].is_null(), "nothing has been watched yet");
+        assert_eq!(fresh["inLibrary"], true);
+        assert!(
+            fresh["episodes"].as_array().is_some() && fresh["similar"].as_array().is_some(),
+            "the title page always carries the two rail arrays"
+        );
+        let from_desktop: serde_json::Value = client
+            .get(format!("{base}/api/title/{hls_id}"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            from_desktop["progress"]["positionMs"], 30_000,
+            "a desktop position is offered as Resume on the TV"
+        );
+        let written = client
+            .post(format!("{base}/api/progress"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({
+                "titleId": direct_id,
+                "episodeId": null,
+                "positionMs": 60_000,
+                "durationMs": 7_200_000
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(written.status(), 204);
+        let resumed: serde_json::Value = client
+            .get(format!("{base}/api/title/{direct_id}"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(resumed["progress"]["positionMs"], 60_000);
+        assert_eq!(resumed["progress"]["durationMs"], 7_200_000);
+
+        let wrong_episode = client
+            .post(format!("{base}/api/progress"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({
+                "titleId": direct_id,
+                "episodeId": 999,
+                "positionMs": 1_000,
+                "durationMs": 7_200_000
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            wrong_episode.status(),
+            404,
+            "a report cannot name an episode this title has no file for"
+        );
+
+        // The direct ticket carries the resume position and a URL that answers a byte range.
+        let ticket: serde_json::Value = client
+            .post(format!("{base}/api/playback/{direct_id}"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({ "positionMs": 60_000 }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(ticket["kind"], "direct");
+        assert_eq!(ticket["startPositionMs"], 60_000);
+        assert_eq!(ticket["durationMs"], 7_200_000);
+        let media_url = ticket["url"].as_str().expect("a media URL");
+        let ranged = client
+            .get(format!("{base}{media_url}"))
+            .header("cookie", &cookie)
+            .header("range", "bytes=0-15")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ranged.status(), 206);
+        assert!(ranged.headers().get("content-range").is_some());
+
+        // A container the webview does not demux goes to the transcoder; a fixture whose bytes are
+        // not a film is refused with a named failure rather than served as a broken element.
+        let transcode = client
+            .post(format!("{base}/api/playback/{hls_id}"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({ "positionMs": 0 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            transcode.status(),
+            503,
+            "a file ffmpeg cannot read is refused"
+        );
+
+        let missing = client
+            .get(format!("{base}/api/title/999999"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), 404, "an unknown title is not found");
+        let no_file = client
+            .post(format!("{base}/api/playback/999999"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({ "positionMs": 0 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(no_file.status(), 404, "an unknown title cannot be played");
+
+        // The client page is the same origin as the API, and it carries the policy the listener
+        // promises: no inline script, no frame, no foreign origin.
+        if service.status().await.running {
+            let page = client.get(format!("{base}/")).send().await.unwrap();
+            if page.status() == 200 {
+                assert!(page.headers().get("content-security-policy").is_some());
+                assert!(page.text().await.unwrap().contains("Peregrine"));
+            }
+        }
+
+        let foreign = client
+            .get(format!("{base}/api/library"))
+            .header("host", "evil.example")
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), 403, "a foreign Host is refused");
+
+        assert!(service.revoke(device.id).await.unwrap());
+        let after = client
+            .get(format!("{base}/api/library"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(after.status(), 401, "a revoked token is refused at once");
+
+        // A refused request is terminal, and one address cannot ask without a limit.
+        let second: serde_json::Value = client
+            .post(format!("{base}/api/pair"))
+            .json(&serde_json::json!({ "name": "Second TV" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let second_id = second["pairId"].as_str().expect("a pair id").to_owned();
+        service.deny(&second_id).unwrap();
+        let denied: serde_json::Value = client
+            .get(format!("{base}/api/pair/{second_id}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(denied["state"], "denied");
+
+        for _ in 0..3 {
+            let allowed = client
+                .post(format!("{base}/api/pair"))
+                .json(&serde_json::json!({ "name": "Another TV" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(allowed.status(), 200);
+        }
+        let limited = client
+            .post(format!("{base}/api/pair"))
+            .json(&serde_json::json!({ "name": "One too many" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            limited.status(),
+            429,
+            "an address cannot ask without a limit"
+        );
+
+        service.stop().await;
     }
 }

@@ -21,7 +21,6 @@ import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import { AboutSection } from "./AboutSection.js";
-import { DevicesSection } from "./DevicesSection.js";
 import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
@@ -170,8 +169,6 @@ export function SettingsScreen({
       <NetworkSection />
 
       <WebAccessSection />
-
-      <DevicesSection />
 
       <ManagedProwlarrSection prowlarr={prowlarr} />
 

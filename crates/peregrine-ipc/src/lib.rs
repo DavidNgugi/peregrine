@@ -32,6 +32,7 @@ pub mod runtime;
 pub mod shortcuts;
 pub mod system;
 pub mod watch;
+pub mod web;
 
 // The shell reads the tray's counters through [`runtime::shell_status`] and may not depend
 // on `peregrine-app` directly, so the type that function answers with is named here rather
@@ -54,6 +55,7 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 /// exported. Everything in docs/ARCHITECTURE.md §7 joins this list as it is
 /// built; today that is the `system` and `jobs` namespaces.
 #[must_use]
+#[allow(clippy::too_many_lines)] // One registration table; a reader has to see every command in one place.
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         // `build_info` is generic over the runtime, so the macro cannot infer which one
@@ -100,6 +102,16 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::list_seasons,
             library::match_unmatched,
             library::forget_match_rule,
+            web::web_start,
+            web::web_stop,
+            web::web_status,
+            web::web_lan_address,
+            web::web_pairings,
+            web::web_approve,
+            web::web_approve_code,
+            web::web_deny,
+            web::web_devices,
+            web::web_revoke,
             providers::status,
             providers::set_key,
             providers::test_connection,

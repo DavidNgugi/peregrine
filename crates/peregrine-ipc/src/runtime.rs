@@ -28,6 +28,11 @@ use crate::error::{AppError, ErrorCode};
 /// starts it from `setup` and a command can be invoked before that succeeded.
 pub struct RuntimeState {
     runtime: Option<Arc<Runtime>>,
+    /// The LAN surface over the same runtime (ADR 0028), built with it and never listening until
+    /// a command starts it.
+    web: Option<Arc<peregrine_app::WebService>>,
+    /// Where the built TV client lives, when this installation has one.
+    web_app_dir: Option<PathBuf>,
     /// Why there is no runtime, in words that are safe to show (`ARCHITECTURE` §7 rule 3).
     unavailable: Option<&'static str>,
 }
@@ -50,12 +55,38 @@ impl RuntimeState {
         })
     }
 
+    /// The LAN surface, when the runtime started.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorCode::Internal`] when startup failed, for the same reason as [`Self::runtime`].
+    pub fn web(&self) -> Result<&Arc<peregrine_app::WebService>, AppError> {
+        self.web.as_ref().ok_or_else(|| {
+            AppError::new(ErrorCode::Internal)
+                .with_detail(
+                    "Peregrine did not finish starting, so the LAN surface is unavailable.",
+                )
+                .with_cause(
+                    self.unavailable
+                        .unwrap_or("the application runtime is not running"),
+                )
+        })
+    }
+
+    /// Where the built client lives, when this installation has one.
+    pub fn web_app_dir(&self) -> Option<&PathBuf> {
+        self.web_app_dir.as_ref()
+    }
+
     /// Wraps a runtime for the tests in this crate, which build one directly rather than
     /// through [`serve`] so that none of them installs a process-wide log subscriber.
     #[cfg(test)]
     pub(crate) fn for_test(runtime: Arc<Runtime>) -> Self {
+        let web = Some(Arc::new(runtime.web_service()));
         Self {
             runtime: Some(runtime),
+            web,
+            web_app_dir: None,
             unavailable: None,
         }
     }
@@ -65,6 +96,8 @@ impl RuntimeState {
     pub(crate) fn failed(reason: &'static str) -> Self {
         Self {
             runtime: None,
+            web: None,
+            web_app_dir: None,
             unavailable: Some(reason),
         }
     }
@@ -91,13 +124,18 @@ pub fn serve<R: tauri::Runtime>(
     artwork_directory: PathBuf,
 ) -> Result<(), StartupError> {
     let outcome = start(app, data_directory, artwork_directory);
+    let web_app_dir = web_client_dir(app);
     let state = match &outcome {
         Ok(runtime) => RuntimeState {
             runtime: Some(Arc::clone(runtime)),
+            web: Some(Arc::new(runtime.web_service())),
+            web_app_dir,
             unavailable: None,
         },
         Err(error) => RuntimeState {
             runtime: None,
+            web: None,
+            web_app_dir,
             unavailable: Some(reason(error)),
         },
     };
@@ -195,9 +233,42 @@ pub async fn shutdown<R: tauri::Runtime>(app: &AppHandle<R>) {
         // to report on the way out.
         return;
     };
+    if let Ok(web) = state.web() {
+        web.stop().await;
+    }
     if let Ok(runtime) = state.runtime() {
         runtime.shutdown().await;
     }
+}
+
+/// Where the built TV client lives, when this installation has one.
+///
+/// A directory is not a bundle: the first slice serves whatever is at one of three places rather
+/// than embedding the assets, which is a packaging task (ADR 0028 §6). The environment variable is
+/// the development path, `web/` beside the binary is the packaged path, and the checkout's
+/// `apps/web/dist` is the same-machine path a debug build uses so the TV can be opened while the
+/// client is iterated on.
+fn web_client_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("PEREGRINE_WEB_DIR") {
+        let path = PathBuf::from(explicit);
+        if path.join("index.html").is_file() {
+            return Some(path);
+        }
+    }
+    if let Ok(resources) = app.path().resource_dir() {
+        let path = resources.join("web");
+        if path.join("index.html").is_file() {
+            return Some(path);
+        }
+    }
+    #[cfg(debug_assertions)]
+    {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/web/dist");
+        if path.join("index.html").is_file() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// The counts the shell's tray presents, read from the running runtime (PG-E1-09).

@@ -761,7 +761,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 
 ## Frontend packages
 
-The compiled frontend (`apps/desktop/dist`) bundles the 50 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
+The compiled frontend (`apps/desktop/dist`) bundles the 82 packages below. They are the runtime closure of `apps/desktop` and of the workspace packages it links, read from `pnpm-lock.yaml` by following `dependencies` and `optionalDependencies`.
 
 Development-only packages are not redistributed and cannot appear here: pnpm records a workspace project's development dependencies in the lockfile but never resolves their transitive dependencies, so the Vite, ESLint, and Vitest toolchains have no edge into this walk. An optional *peer* that pnpm auto-installed for another package's types (`typescript`, `@types/react`) is excluded for the same reason: the bundle imports no code from it.
 
@@ -807,15 +807,47 @@ Licence expressions and texts are not repeated here: `docs/DEPENDENCIES.md` §3 
 | `@tauri-apps/plugin-dialog` | 2.8.2 |
 | `@tauri-apps/plugin-notification` | 2.6.0 |
 | `@types/json-schema` | 7.0.15 |
+| `@types/node` | 24.19.1 |
+| `@types/qrcode` | 1.5.6 |
+| `ansi-regex` | 5.0.1 |
+| `ansi-styles` | 4.3.0 |
+| `camelcase` | 5.3.1 |
 | `class-variance-authority` | 0.7.1 |
+| `cliui` | 6.0.0 |
 | `clsx` | 2.1.1 |
+| `color-convert` | 2.0.1 |
+| `color-name` | 1.1.4 |
+| `decamelize` | 1.2.0 |
+| `dijkstrajs` | 1.0.3 |
+| `emoji-regex` | 8.0.0 |
+| `find-up` | 4.1.0 |
+| `get-caller-file` | 2.0.5 |
 | `html-parse-stringify` | 4.0.1 |
 | `i18next` | 26.4.2 |
+| `is-fullwidth-code-point` | 3.0.0 |
+| `locate-path` | 5.0.0 |
+| `p-limit` | 2.3.0 |
+| `p-locate` | 4.1.0 |
+| `p-try` | 2.2.0 |
+| `path-exists` | 4.0.0 |
+| `pngjs` | 5.0.0 |
+| `qrcode` | 1.5.4 |
 | `react` | 19.3.0 |
 | `react-dom` | 19.3.0 |
 | `react-error-boundary` | 6.1.6 |
 | `react-i18next` | 17.0.16 |
+| `require-directory` | 2.1.1 |
+| `require-main-filename` | 2.0.0 |
 | `scheduler` | 0.28.0 |
+| `set-blocking` | 2.0.0 |
+| `string-width` | 4.2.3 |
+| `strip-ansi` | 6.0.1 |
 | `tailwind-merge` | 3.7.0 |
+| `undici-types` | 7.24.6 |
 | `use-sync-external-store` | 1.7.0 |
+| `which-module` | 2.0.1 |
+| `wrap-ansi` | 6.2.0 |
+| `y18n` | 4.0.3 |
+| `yargs` | 15.4.1 |
+| `yargs-parser` | 18.1.3 |
 | `zustand` | 5.0.15 |

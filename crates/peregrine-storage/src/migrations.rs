@@ -172,7 +172,7 @@ mod tests {
     ];
 
     /// The tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 46] = [
+    const DOCUMENTED_TABLES: [&str; 47] = [
         "account",
         "cast_session",
         "company",
@@ -198,6 +198,7 @@ mod tests {
         "media_file",
         "media_item",
         "notification",
+        "paired_device",
         "person",
         "provider_cache",
         "quality_profile",
@@ -2310,6 +2311,8 @@ mod tests {
         "INSERT INTO dataset_state (name) VALUES ('imdb.ratings')",
         "INSERT INTO notification (event, title, created_at) \
          VALUES ('download.completed', 'Download complete', 0)",
+        "INSERT INTO paired_device (name, token_hash, scopes, created_at) \
+         VALUES ('Test TV', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'read,stream', 0)",
         "INSERT INTO cast_session (device_id, state, delivery, started_at) \
          VALUES (1, 'playing', 'direct', 0)",
         "INSERT INTO discover_rail (rail, position, title_id) VALUES ('popular_movies', 0, 1)",
@@ -2378,6 +2381,8 @@ mod tests {
         SELECT 'media_item' AS table_name, COUNT(*) AS n FROM media_item
         UNION ALL
         SELECT 'notification' AS table_name, COUNT(*) AS n FROM notification
+        UNION ALL
+        SELECT 'paired_device' AS table_name, COUNT(*) AS n FROM paired_device
         UNION ALL
         SELECT 'person' AS table_name, COUNT(*) AS n FROM person
         UNION ALL

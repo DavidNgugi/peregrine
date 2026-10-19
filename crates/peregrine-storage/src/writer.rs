@@ -87,6 +87,24 @@ pub(crate) enum WriteRequest {
         id: i64,
         change: Box<JobChange>,
     },
+    /// Record one device paired to the LAN surface (ADR 0028).
+    InsertPairedDevice(crate::pairing::NewPairedDevice),
+    /// Record a paired device's last-seen stamp and address.
+    TouchPairedDevice {
+        /// The device row.
+        id: i64,
+        /// Unix milliseconds.
+        at: i64,
+        /// The address it presented, when the connection carried one.
+        address: Option<String>,
+    },
+    /// Revoke a paired device, which refuses its next request.
+    RevokePairedDevice {
+        /// The device row.
+        id: i64,
+        /// Unix milliseconds.
+        at: i64,
+    },
     /// Insert one title in its `stub` state.
     InsertStubTitle(Box<StubTitle>),
     /// Insert one `season` row.
@@ -885,6 +903,7 @@ async fn apply_watch_options(
     }
 }
 
+#[allow(clippy::too_many_lines)] // One dispatch table; a reader has to see the whole chain in one place.
 async fn apply(
     connection: &mut sqlx::SqliteConnection,
     request: WriteRequest,
@@ -987,7 +1006,33 @@ async fn apply(
             .await
             .map(|rows| WriteResponse::RetentionPruned { rows })
             .map_err(StorageError::from_sqlx),
+        other @ (WriteRequest::InsertPairedDevice(_)
+        | WriteRequest::TouchPairedDevice { .. }
+        | WriteRequest::RevokePairedDevice { .. }) => apply_pairing(connection, other).await,
         other => apply_download_write(connection, other).await,
+    }
+}
+
+/// Applies the requests that write paired devices (ADR 0028).
+async fn apply_pairing(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::InsertPairedDevice(device) => crate::pairing::insert(connection, &device)
+            .await
+            .map(|id| WriteResponse::RowInserted { id }),
+        WriteRequest::TouchPairedDevice { id, at, address } => {
+            crate::pairing::touch(connection, id, at, address.as_deref())
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
+        WriteRequest::RevokePairedDevice { id, at } => crate::pairing::revoke(connection, id, at)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed }),
+        other => {
+            unreachable!("`apply` routed a non-pairing request to the pairing writer: {other:?}")
+        }
     }
 }
 

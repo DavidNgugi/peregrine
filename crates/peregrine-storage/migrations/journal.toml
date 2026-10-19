@@ -90,3 +90,7 @@ sha256 = "8776b7c362a3f89de3dd1fc562608e18695d7dea6b25c13dbcf6f57f3bb1f655"
 [[migration]]
 file = "0022_watch_availability.sql"
 sha256 = "7532539a50ba6480feaad88aae64bbf31edd26f37eb764eae15c19ce89a37c0e"
+
+[[migration]]
+file = "0023_paired_device.sql"
+sha256 = "794abe6876a93be156eeac645faf6eee9226b92c09e2180ebe00301b3f2f9e8f"

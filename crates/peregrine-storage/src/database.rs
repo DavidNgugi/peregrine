@@ -1952,6 +1952,78 @@ impl Database {
         crate::schedule::due(&self.readers, scope, today).await
     }
 
+    /// Records one device paired to the LAN surface and answers its row id.
+    pub async fn insert_paired_device(
+        &self,
+        device: crate::pairing::NewPairedDevice,
+    ) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertPairedDevice(device))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("insert_paired_device", &other)),
+        }
+    }
+
+    /// The device a presented token hash belongs to, revoked or not.
+    ///
+    /// Refusal is the caller's decision: authentication refuses a revoked row, and the device list
+    /// draws it, so filtering here would make one of the two answer wrong.
+    pub async fn paired_device_for_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<crate::pairing::PairedDevice>, StorageError> {
+        crate::pairing::for_token(&self.readers, token_hash).await
+    }
+
+    /// One paired device by its row id, revoked or not.
+    pub async fn paired_device(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::pairing::PairedDevice>, StorageError> {
+        crate::pairing::by_id(&self.readers, id).await
+    }
+
+    /// Every paired device, oldest first.
+    pub async fn paired_devices(&self) -> Result<Vec<crate::pairing::PairedDevice>, StorageError> {
+        crate::pairing::list(&self.readers).await
+    }
+
+    /// Records that a device was seen, answering whether the row is still active.
+    pub async fn touch_paired_device(
+        &self,
+        id: i64,
+        at: i64,
+        address: Option<&str>,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::TouchPairedDevice {
+                id,
+                at,
+                address: address.map(str::to_owned),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("touch_paired_device", &other)),
+        }
+    }
+
+    /// Revokes one paired device, answering whether this call was the one that revoked it.
+    pub async fn revoke_paired_device(&self, id: i64, at: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RevokePairedDevice { id, at })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("revoke_paired_device", &other)),
+        }
+    }
+
     /// Removes watch progress for one title, or for every title when the id is absent.
     ///
     /// Returns how many rows went, so a reader who cleared a title with no history is not told
