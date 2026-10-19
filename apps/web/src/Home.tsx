@@ -59,7 +59,7 @@ export function TileCard({
   tile,
   onOpen,
   autofocus = false,
-  watchlisted = false,
+  watchlisted = tile.watchlisted,
 }: {
   readonly tile: Tile;
   readonly onOpen: (tile: Tile) => void;
