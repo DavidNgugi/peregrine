@@ -178,6 +178,7 @@ fn watch_lan_address<R: tauri::Runtime>(app: AppHandle<R>, web: Arc<peregrine_ap
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(5));
+            web.tick_power();
             let status = tauri::async_runtime::block_on(web.status());
             let Some(bound) = status.address else {
                 continue;
@@ -235,7 +236,8 @@ fn start<R: tauri::Runtime>(
         data_directory,
         artwork_directory,
         Arc::new(TauriSink { app: app.clone() }),
-    );
+    )
+    .with_power(Arc::new(peregrine_platform::SystemPower));
     let config = match bundled_mpv(app) {
         Some(binary) => config.with_player_binary(binary),
         None => config,

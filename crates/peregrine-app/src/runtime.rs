@@ -177,6 +177,10 @@ pub struct RuntimeConfig {
     /// The external player. Injected for the same reason: the real one opens a window, and a unit
     /// test must not; [`RuntimeConfig::with_player`] is what a test replaces.
     player: Arc<dyn peregrine_domain::PlayerBackend>,
+    /// The system-sleep assertion (PG-E1-17). Injected so a test can record what was held and
+    /// released, and so the shell supplies the per-OS adapter while every other host takes the
+    /// no-op default.
+    power: Arc<dyn peregrine_platform::PowerSave>,
 }
 
 impl RuntimeConfig {
@@ -196,7 +200,18 @@ impl RuntimeConfig {
             tray_enabled: true,
             secrets: Arc::new(peregrine_secrets::KeyringStore::new()),
             player: Arc::new(peregrine_playback::MpvPlayer::new()),
+            power: Arc::new(peregrine_platform::NoPowerSave),
         }
+    }
+
+    /// Replaces the system-sleep assertion.
+    ///
+    /// The default holds nothing, which keeps a test from touching the machine's power state; the
+    /// shell is the one caller that supplies the platform's own adapter.
+    #[must_use]
+    pub fn with_power(mut self, power: Arc<dyn peregrine_platform::PowerSave>) -> Self {
+        self.power = power;
+        self
     }
 
     /// Replaces the log filter directives.
@@ -2875,6 +2890,11 @@ impl Runtime {
             Arc::clone(&self.tokens),
             self.config.data_directory().join("hls"),
         )
+    }
+
+    /// The system-sleep assertion this runtime was built with (PG-E1-17).
+    pub(crate) fn power(&self) -> Arc<dyn peregrine_platform::PowerSave> {
+        Arc::clone(&self.config.power)
     }
 
     /// One catalogue title's identity, for a page reached from a discovery rail.

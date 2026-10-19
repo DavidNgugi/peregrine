@@ -11,6 +11,8 @@ publish = false
 
 [dependencies]
 peregrine-app = { workspace = true }
+# The system-sleep assertion the shell hands the runtime (PG-E1-17).
+peregrine-platform = { workspace = true }
 # The shortcut registry's accelerators are `muda`'s, so the platform modifier is the
 # same value the application menu is built from rather than a second table that can
 # drift (PG-E1-08). `tauri` already carries `muda` on every desktop platform.

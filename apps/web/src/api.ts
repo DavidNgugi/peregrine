@@ -106,6 +106,11 @@ export interface Download {
   readonly error: string | null;
 }
 
+/** The host's charge, when the host is a notebook with a battery. */
+export interface HostData {
+  readonly battery: { readonly percent: number; readonly charging: boolean } | null;
+}
+
 export interface Season {
   readonly number: number;
   readonly name: string | null;
@@ -230,6 +235,7 @@ export const api = {
   watchlist: (): Promise<Tile[]> => request<Tile[]>("/api/watchlist"),
   downloads: (): Promise<Download[]> => request<Download[]>("/api/downloads"),
   me: (): Promise<Me> => request<Me>("/api/me"),
+  host: (): Promise<HostData> => request<HostData>("/api/host"),
   acquire: (titleId: number, season?: number, episode?: number): Promise<AcquireResult> =>
     request<AcquireResult>("/api/acquire", "POST", {
       titleId,

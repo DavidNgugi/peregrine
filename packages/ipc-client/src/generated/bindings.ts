@@ -509,6 +509,17 @@ export const commands = {
 	 */
 	webLanHostname: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("web_lan_hostname")),
 	/**
+	 *  Keeps the machine awake while the surface is on, or stops doing so.
+	 * 
+	 *  Playback holds its own assertion regardless: a stream that dies because the host slept is a
+	 *  defect, not a preference.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::Internal`] when the runtime never started.
+	 */
+	webSetKeepAwake: (enabled: boolean) => typedError<WebStatusDto, AppError_Serialize>(__TAURI_INVOKE("web_set_keep_awake", { enabled })),
+	/**
 	 *  The pairing requests waiting for a person.
 	 * 
 	 *  # Errors
@@ -2471,6 +2482,8 @@ export type WebStatusDto = {
 	address: string | null,
 	/**  The hostname it also answers to, when one was configured. */
 	hostname: string | null,
+	/**  Whether the machine is being kept awake while the surface is on. */
+	keepAwake: boolean,
 	/**  The bound port, when it is running. */
 	port: number | null,
 	/**  How many pairing requests are waiting for a person. */

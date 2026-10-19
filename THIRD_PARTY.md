@@ -64,7 +64,7 @@ These are separate programs invoked as subprocesses and never linked into the ap
 
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 740 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 752 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -182,10 +182,13 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `cssparser-macros` | 0.7.1 |
 | `ctor` | 1.0.13 |
 | `ctutils` | 0.4.3 |
+| `darling` | 0.20.11 |
 | `darling` | 0.23.0 |
 | `darling` | 0.24.1 |
+| `darling_core` | 0.20.11 |
 | `darling_core` | 0.23.0 |
 | `darling_core` | 0.24.1 |
+| `darling_macro` | 0.20.11 |
 | `darling_macro` | 0.23.0 |
 | `darling_macro` | 0.24.1 |
 | `dashmap` | 6.2.1 |
@@ -195,6 +198,9 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `defmt-macros` | 1.1.1 |
 | `defmt-parser` | 1.0.0 |
 | `deranged` | 0.5.8 |
+| `derive_builder` | 0.20.2 |
+| `derive_builder_core` | 0.20.2 |
+| `derive_builder_macro` | 0.20.2 |
 | `derive_more` | 2.1.1 |
 | `derive_more-impl` | 2.1.1 |
 | `digest` | 0.10.7 |
@@ -351,10 +357,12 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `js-sys` | 0.3.106 |
 | `json-patch` | 4.2.0 |
 | `jsonptr` | 0.7.1 |
+| `keepawake` | 0.6.1 |
 | `keyboard-types` | 0.8.3 |
 | `keyring` | 4.2.0 |
 | `keyring-core` | 1.0.1 |
 | `lazy_static` | 1.5.1 |
+| `lazycell` | 1.3.0 |
 | `leaky-bucket` | 1.1.2 |
 | `libappindicator` | 0.9.0 |
 | `libappindicator-sys` | 0.9.0 |
@@ -382,6 +390,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `log` | 0.4.34 |
 | `lru-slab` | 0.1.3 |
 | `mac-notification-sys` | 0.6.15 |
+| `mach2` | 0.7.0 |
 | `markup5ever` | 0.39.0 |
 | `matchers` | 0.2.0 |
 | `matchit` | 0.8.4 |
@@ -434,6 +443,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `objc2-encode` | 4.1.0 |
 | `objc2-exception-helper` | 0.1.1 |
 | `objc2-foundation` | 0.3.2 |
+| `objc2-io-kit` | 0.3.2 |
 | `objc2-io-surface` | 0.3.2 |
 | `objc2-quartz-core` | 0.3.2 |
 | `objc2-security` | 0.3.2 |
@@ -588,6 +598,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `sqlx-postgres` | 0.9.0 |
 | `sqlx-sqlite` | 0.9.0 |
 | `stable_deref_trait` | 1.2.1 |
+| `starship-battery` | 0.12.0 |
 | `string_cache` | 0.9.0 |
 | `string_cache_codegen` | 0.6.1 |
 | `stringprep` | 0.1.5 |
@@ -685,6 +696,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `unicode-segmentation` | 1.13.3 |
 | `untrusted` | 0.7.1 |
 | `untrusted` | 0.9.0 |
+| `uom` | 0.38.0 |
 | `url` | 2.5.8 |
 | `urlencoding` | 2.1.3 |
 | `urlpattern` | 0.6.0 |

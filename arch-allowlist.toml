@@ -251,6 +251,10 @@ pure = false
 [crates.peregrine-ipc]
 may_depend_on = [
   "peregrine-app",
+  # The shell builds the runtime's power policy. The assertion is a per-OS adapter and
+  # peregrine-platform is the leaf that owns it, so the config is handed the platform's
+  # implementation here rather than the app reaching for it (PG-E1-17).
+  "peregrine-platform",
 ]
 runtime = [
   # The shortcut registry's accelerators are `muda`'s own `Modifiers`/`Code` and its
@@ -319,6 +323,15 @@ may_depend_on = [
 runtime = [
   "jiff",
   "serde",
+  # Holding the system awake while a device streams or the surface is on (PG-E1-17). The
+  # assertion is an IOPMAssertion on macOS, SetThreadExecutionState on Windows, and a
+  # logind/ScreenSaver inhibit on Linux; this binding covers all three, which is one
+  # implementation instead of three cfg blocks and never an unsafe call in this crate.
+  "keepawake",
+  # The host's charge for the low-battery warning a stream shows (PG-E1-17). The per-OS
+  # reader is the binding's job; the alternative is three readers and the Windows FFI that
+  # AGENTS R9 keeps out of this workspace.
+  "starship-battery",
   # The sidecar verifier hashes the artefact the pinned manifest describes; it is
   # the same SHA-256 implementation the migration journal already uses
   # (docs/adr/0022 §3), not a second hash crate for the same job.

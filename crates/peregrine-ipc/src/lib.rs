@@ -108,6 +108,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             web::web_status,
             web::web_lan_address,
             web::web_lan_hostname,
+            web::web_set_keep_awake,
             web::web_pairings,
             web::web_approve,
             web::web_approve_code,

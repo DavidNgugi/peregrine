@@ -21,6 +21,10 @@ tracing = { workspace = true }
 # The production id generator is the one shipping site allowed to touch a random
 # source (AGENTS R14); `cargo xtask check-determinism` enforces that.
 ulid = { workspace = true }
+# The system-sleep assertion behind the LAN surface and playback (PG-E1-17).
+keepawake = { workspace = true }
+# The host's charge for the low-battery warning (PG-E1-17).
+starship-battery = { workspace = true }
 
 [dev-dependencies]
 # The adapter and the fake answer to one set of assertions: these tests run the shared

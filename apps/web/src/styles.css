@@ -277,6 +277,20 @@ video:focus-visible {
   color: var(--text-primary);
 }
 
+.player-warning {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(90vw, 640px);
+  padding: 12px 20px;
+  border: 1px solid var(--state-danger);
+  border-radius: 10px;
+  background: var(--surface-scrim);
+  color: var(--text-primary);
+  text-align: center;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

@@ -6,6 +6,9 @@ export const WEB_PORT = 8642;
 /** The renderer's own autostart choice, which the backend does not need to know about. */
 export const WEB_AUTO_KEY = "peregrine.web.autoStart";
 
+/** The renderer's own choice to keep the machine awake while the surface is on. */
+export const WEB_KEEP_AWAKE_KEY = "peregrine.web.keepAwake";
+
 /** The event the shell pushes when the listener moves to the machine's new address. */
 export const WEB_STATUS_EVENT = "web://status";
 
@@ -22,4 +25,5 @@ export async function startWebAccess(): Promise<void> {
   ]);
   if (address === null) throw new Error("No local network address was found.");
   await unwrap(commands.webStart(address, WEB_PORT, hostname));
+  await unwrap(commands.webSetKeepAwake(localStorage.getItem(WEB_KEEP_AWAKE_KEY) === "1"));
 }

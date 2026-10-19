@@ -48,6 +48,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/watchlist", get(watchlist))
         .route("/api/downloads", get(downloads))
         .route("/api/me", get(me))
+        .route("/api/host", get(host))
         .route("/api/acquire", post(acquire))
         .route("/api/search", get(search))
         .route("/api/browse", get(browse))
@@ -476,6 +477,29 @@ async fn downloads(
 
 async fn me(State(service): State<Arc<WebService>>, Device(device): Device) -> Json<MeDto> {
     Json(service.me(&device))
+}
+
+/// The host's charge, which the player uses for a warning before the stream dies with it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostDto {
+    battery: Option<BatteryDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatteryDto {
+    percent: u8,
+    charging: bool,
+}
+
+async fn host(State(service): State<Arc<WebService>>, Device(_device): Device) -> Json<HostDto> {
+    Json(HostDto {
+        battery: service.battery().map(|battery| BatteryDto {
+            percent: battery.percent,
+            charging: battery.charging,
+        }),
+    })
 }
 
 #[derive(Debug, Deserialize)]

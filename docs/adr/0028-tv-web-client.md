@@ -98,7 +98,9 @@ the one origin every browser on the network can open; a television's browser gen
 mDNS name. The platform's Bonjour name is offered beside it and accepted by the Host gate, and a device that
 does resolve it keeps its pairing cookie across an address change, because the cookie is scoped to the
 origin and the name outlives the address. That hostname is the machine's own Bonjour name, not an in-app
-responder.
+responder. The listener holds a system-sleep assertion while a device is streaming — released a minute after the
+last media request — and while the surface is on if the person enables the keep-awake switch; the player
+warns when the host's charge is below ten percent, because the stream dies with the machine.
 
 ### 6. What is deliberately not in this slice
 
@@ -119,7 +121,7 @@ Positive:
 
 Negative and accepted:
 
-- **The desktop app is not a server.** The TV stops when the app quits or the machine sleeps; that is stated in the UI rather than discovered in the living room. The daemon (E36) remains the answer for always-on.
+- **The desktop app is not a server.** The TV stops when the app quits, the lid closes, or the machine is put to sleep; that is stated in the UI rather than discovered in the living room. While a device is streaming the surface holds a system-sleep assertion, and it holds one whenever the surface is on if the person turns on **Keep this computer awake** (which states the battery cost); the idle timer therefore does not end a film, but the daemon (E36) remains the answer for always-on.
 - **A transcode costs the host.** One session per device and four at once is the bound; a seek restarts the encoder, so rapid scrubbing is a burst of short transcodes rather than a cheap seek, and a host without a hardware encoder pays for it in CPU.
 - **Plain HTTP is the LAN default.** A token is revocable and read/stream by default (or also `acquire` when explicitly granted), but it is visible to anything that can sniff the network. This is the same posture ADR 0018 §4 accepted, and TLS remains the reverse-proxy path.
 - **A second client is a second UI to maintain.** The mitigation is that it shares the theme, the i18n catalogue, and the API contract, and has no business rules of its own (R7).

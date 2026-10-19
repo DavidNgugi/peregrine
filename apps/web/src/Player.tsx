@@ -34,6 +34,30 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
   const pending = useRef<number | null>(null);
   const timer = useRef<number | null>(null);
   const reportRef = useRef<(keepalive?: boolean) => void>(() => {});
+  const [battery, setBattery] = useState<{
+    readonly percent: number;
+    readonly charging: boolean;
+  } | null>(null);
+
+  // The host's charge is what the stream dies with, so the warning belongs on the screen doing
+  // the streaming rather than on the computer it is coming from.
+  useEffect(() => {
+    let cancelled = false;
+    const read = (): void => {
+      void api
+        .host()
+        .then((host) => {
+          if (!cancelled) setBattery(host.battery);
+        })
+        .catch(() => {});
+    };
+    read();
+    const interval = window.setInterval(read, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     document.querySelector<HTMLElement>("[data-autofocus]")?.focus();
@@ -275,6 +299,12 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         <ChevronLeftIcon />
       </button>
       <video autoPlay playsInline ref={video} />
+      {battery !== null && battery.percent < 10 && !battery.charging ? (
+        <p className="player-warning" role="alert">
+          The computer running Peregrine is at {battery.percent}% battery. Playback stops when it
+          runs out.
+        </p>
+      ) : null}
       {message === null ? null : <p className="player-message">{message}</p>}
       <div className="player-controls">
         <button className="control" data-focus="true" onClick={toggle} type="button">

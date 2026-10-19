@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 
 use peregrine_domain::catalogue::TitleKind;
 use peregrine_domain::{Clock, LocalPlayback, SessionToken, TokenSource};
+use peregrine_platform::{Inhibitor, PowerSave};
 use peregrine_providers::{BrowseRequest, BrowseSort};
 use peregrine_storage::{Database, NewPairedDevice, PairedDevice, StorageError};
 use serde::Serialize;
@@ -118,6 +119,8 @@ pub struct WebStatus {
     /// A name is what keeps a browser's pairing cookie valid across an address change: the cookie
     /// belongs to the origin, and a name is one origin where two addresses are two.
     pub hostname: Option<String>,
+    /// Whether the person asked for the machine to stay awake while the surface is on.
+    pub keep_awake: bool,
     /// How many pairing requests are waiting for a person.
     pub pending: usize,
 }
@@ -379,6 +382,25 @@ struct Running {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// How long after the last media request the playback assertion is released.
+///
+/// Long enough to cover the gap between HLS segments and a paused player's next range request,
+/// short enough that a film that ended does not keep the machine awake for an hour.
+const STREAM_POWER_WINDOW_MS: i64 = 60_000;
+
+/// What the surface is holding awake, and why.
+#[derive(Default)]
+struct PowerState {
+    /// The person's switch: hold the surface's assertion while the listener runs.
+    keep_awake: bool,
+    /// Held while the listener runs and `keep_awake` is on.
+    listening: Option<Box<dyn Inhibitor>>,
+    /// Held while a device is asking for media.
+    streaming: Option<Box<dyn Inhibitor>>,
+    /// The last media request, in Unix milliseconds.
+    last_stream_ms: i64,
+}
+
 /// The LAN surface, its pairing registry, and its playback grants.
 ///
 /// One value rather than three, because all three die together: stopping the listener clears the
@@ -397,6 +419,8 @@ pub struct WebService {
     transcoder: tokio::sync::Mutex<Option<Arc<transcode::Transcoder>>>,
     seen: Mutex<HashMap<i64, i64>>,
     hosts: Mutex<Vec<String>>,
+    power: Arc<dyn PowerSave>,
+    power_state: Mutex<PowerState>,
     running: tokio::sync::Mutex<Option<Running>>,
     refresh_started: Mutex<HashSet<i64>>,
 }
@@ -413,6 +437,7 @@ impl WebService {
         tokens: Arc<dyn TokenSource + Send + Sync>,
         transcode_root: PathBuf,
     ) -> Self {
+        let power = runtime.power();
         Self {
             runtime,
             transcode_root,
@@ -427,6 +452,8 @@ impl WebService {
             transcoder: tokio::sync::Mutex::new(None),
             seen: Mutex::new(HashMap::new()),
             hosts: Mutex::new(Vec::new()),
+            power,
+            power_state: Mutex::new(PowerState::default()),
             running: tokio::sync::Mutex::new(None),
             refresh_started: Mutex::new(HashSet::new()),
         }
@@ -462,6 +489,7 @@ impl WebService {
         let address = next.address;
         *running = Some(next);
         drop(running);
+        self.sync_listening(true);
         info!(%address, "the LAN surface is listening");
         Ok(self.status().await)
     }
@@ -581,6 +609,7 @@ impl WebService {
                 .lock()
                 .expect("the host list lock is not poisoned")
                 .clear();
+            self.release_power();
             info!("the LAN surface stopped");
         }
     }
@@ -593,14 +622,88 @@ impl WebService {
             .lock()
             .expect("the pairing lock is not poisoned")
             .waiting();
+        let keep_awake = self
+            .power_state
+            .lock()
+            .expect("the power state lock is not poisoned")
+            .keep_awake;
         WebStatus {
             running: running.is_some(),
             address: running.as_ref().map(|running| running.address),
             hostname: running
                 .as_ref()
                 .and_then(|running| running.hostname.clone()),
+            keep_awake,
             pending,
         }
+    }
+
+    /// Turns the person's keep-awake switch on or off and answers the new status.
+    ///
+    /// Playback holds its own assertion regardless: a stream that dies because the host slept is
+    /// a defect, not a preference.
+    pub async fn set_keep_awake(&self, enabled: bool) -> WebStatus {
+        self.power_state
+            .lock()
+            .expect("the power state lock is not poisoned")
+            .keep_awake = enabled;
+        let running = self.running.lock().await.is_some();
+        self.sync_listening(running);
+        self.status().await
+    }
+
+    /// Releases the playback assertion once no device has asked for media for a minute.
+    ///
+    /// Called from the shell's address watcher, which already wakes on a fixed interval; the
+    /// policy stays here so a second host does not have to reimplement the window.
+    pub fn tick_power(&self) {
+        let now = self.now();
+        let mut state = self
+            .power_state
+            .lock()
+            .expect("the power state lock is not poisoned");
+        if state.streaming.is_some()
+            && now.saturating_sub(state.last_stream_ms) >= STREAM_POWER_WINDOW_MS
+        {
+            state.streaming = None;
+        }
+    }
+
+    /// Holds or releases the surface's own assertion to match `keep_awake` and `running`.
+    fn sync_listening(&self, running: bool) {
+        let mut state = self
+            .power_state
+            .lock()
+            .expect("the power state lock is not poisoned");
+        let wanted = running && state.keep_awake;
+        if wanted && state.listening.is_none() {
+            state.listening = Some(self.power.inhibit("Web access is on"));
+        } else if !wanted {
+            state.listening = None;
+        }
+    }
+
+    /// Records a media request and holds the playback assertion if it is not held already.
+    fn touch_stream(&self) {
+        let now = self.now();
+        let mut state = self
+            .power_state
+            .lock()
+            .expect("the power state lock is not poisoned");
+        state.last_stream_ms = now;
+        if state.streaming.is_none() {
+            state.streaming = Some(self.power.inhibit("A device is streaming"));
+        }
+    }
+
+    /// Drops both assertions; the listener is going away.
+    fn release_power(&self) {
+        let mut state = self
+            .power_state
+            .lock()
+            .expect("the power state lock is not poisoned");
+        state.listening = None;
+        state.streaming = None;
     }
 
     /// Whether a Host value names this listener.
@@ -934,6 +1037,12 @@ impl WebService {
             .paired_device(id)
             .await?
             .ok_or(WebError::DeviceMissing)
+    }
+
+    /// The host's charge, when the host has a battery.
+    #[must_use]
+    pub fn battery(&self) -> Option<peregrine_platform::BatteryState> {
+        peregrine_platform::battery::state()
     }
 
     /// Authenticates a token and records the device as seen.
@@ -1760,6 +1869,9 @@ impl WebService {
             let _ = session.child.kill().await;
             let _ = tokio::fs::remove_dir_all(&session.dir).await;
         }
+        if grant.is_some() {
+            self.touch_stream();
+        }
         grant
     }
 
@@ -1804,12 +1916,17 @@ impl WebService {
             .lock()
             .expect("the session lock is not poisoned");
         sessions.retain(|_, grant| grant.expires_at_ms > now_ms);
-        sessions.get(token).map(|grant| MediaGrant {
+        let grant = sessions.get(token).map(|grant| MediaGrant {
             device_id: grant.device_id,
             path: grant.path.clone(),
             size_bytes: grant.size_bytes,
             mime: grant.mime,
-        })
+        });
+        drop(sessions);
+        if grant.is_some() {
+            self.touch_stream();
+        }
+        grant
     }
 
     /// Whether a grant's device is still paired and not revoked.
@@ -2291,9 +2408,11 @@ fn allowed_hosts(address: SocketAddr, hostname: Option<&str>) -> Vec<String> {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use peregrine_domain::SessionToken;
+    use peregrine_platform::{Inhibitor, NoPowerSave, PowerSave};
     use peregrine_testkit::MemorySecretStore;
     use tempfile::TempDir;
 
@@ -2362,14 +2481,51 @@ mod tests {
         assert!(hosts.contains(&"studio-mac.local".to_owned()));
     }
 
+    /// A power policy that counts the assertions it is holding.
+    #[derive(Default)]
+    struct RecordingPower {
+        held: Arc<AtomicUsize>,
+    }
+
+    impl RecordingPower {
+        fn held(&self) -> usize {
+            self.held.load(Ordering::SeqCst)
+        }
+    }
+
+    impl PowerSave for RecordingPower {
+        fn inhibit(&self, _reason: &str) -> Box<dyn Inhibitor> {
+            self.held.fetch_add(1, Ordering::SeqCst);
+            Box::new(HeldPower(Arc::clone(&self.held)))
+        }
+    }
+
+    struct HeldPower(Arc<AtomicUsize>);
+
+    impl Inhibitor for HeldPower {}
+
+    impl Drop for HeldPower {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     /// A listener over a temporary runtime, for the tests that need a real socket.
     async fn listening(directory: &TempDir) -> (Arc<super::WebService>, Arc<Runtime>, u16) {
+        listening_with(directory, Arc::new(NoPowerSave)).await
+    }
+
+    async fn listening_with(
+        directory: &TempDir,
+        power: Arc<dyn PowerSave>,
+    ) -> (Arc<super::WebService>, Arc<Runtime>, u16) {
         let config = RuntimeConfig::new(
             directory.path(),
             directory.path().join("cache/images"),
             Arc::new(RecordingSink::default()) as Arc<dyn EventSink>,
         )
-        .with_secrets(Arc::new(MemorySecretStore::new()));
+        .with_secrets(Arc::new(MemorySecretStore::new()))
+        .with_power(power);
         let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
         drop(subscriber);
         let runtime = Arc::new(Runtime::start(config, logging).await.unwrap());
@@ -2428,6 +2584,51 @@ mod tests {
             std::net::TcpStream::connect_timeout(&second, Duration::from_millis(500)).is_ok(),
             "the address it moved to answers"
         );
+
+        web.stop().await;
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_keep_awake_switch_holds_and_releases_the_surface_assertion() {
+        let directory = TempDir::new().unwrap();
+        let power = Arc::new(RecordingPower::default());
+        let (web, runtime, _port) =
+            listening_with(&directory, Arc::clone(&power) as Arc<dyn PowerSave>).await;
+        assert_eq!(power.held(), 0, "the switch is off by default");
+
+        web.set_keep_awake(true).await;
+        assert_eq!(power.held(), 1);
+        web.set_keep_awake(false).await;
+        assert_eq!(power.held(), 0);
+        web.set_keep_awake(true).await;
+        assert_eq!(power.held(), 1);
+
+        web.stop().await;
+        assert_eq!(power.held(), 0, "stopping the surface drops what it held");
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn playback_holds_until_a_minute_after_the_last_media_request() {
+        let directory = TempDir::new().unwrap();
+        let power = Arc::new(RecordingPower::default());
+        let (web, runtime, _port) =
+            listening_with(&directory, Arc::clone(&power) as Arc<dyn PowerSave>).await;
+
+        web.touch_stream();
+        assert_eq!(power.held(), 1, "a stream keeps the machine awake");
+
+        let now = web.now();
+        {
+            let mut state = web
+                .power_state
+                .lock()
+                .expect("the power state lock is not poisoned");
+            state.last_stream_ms = now - super::STREAM_POWER_WINDOW_MS - 1;
+        }
+        web.tick_power();
+        assert_eq!(power.held(), 0, "an idle player releases it");
 
         web.stop().await;
         runtime.shutdown().await;

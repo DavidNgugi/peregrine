@@ -1,7 +1,12 @@
 import { Button, IconButton, SettingsSection, Switch } from "@peregrine/ui";
 import { commands, unwrap } from "@peregrine/ipc-client";
 import { copyText } from "../../../lib/clipboard.js";
-import { WEB_AUTO_KEY, WEB_STATUS_EVENT, startWebAccess } from "../../../lib/webAccess.js";
+import {
+  WEB_AUTO_KEY,
+  WEB_KEEP_AWAKE_KEY,
+  WEB_STATUS_EVENT,
+  startWebAccess,
+} from "../../../lib/webAccess.js";
 import type { PairedDeviceDto, PendingPairDto, WebStatusDto } from "@peregrine/ipc-client";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import QRCode from "qrcode";
@@ -143,6 +148,14 @@ export function WebAccessSection(): ReactElement {
     setAuto(on);
     if (on) void start();
   };
+  const chooseKeepAwake = useCallback(async (on: boolean): Promise<void> => {
+    try {
+      localStorage.setItem(WEB_KEEP_AWAKE_KEY, on ? "1" : "0");
+      setStatus(await unwrap(commands.webSetKeepAwake(on)));
+    } catch {
+      setFailed(true);
+    }
+  }, []);
 
   // The address is what every browser on the network can open; a Bonjour name is only as good
   // as the client's resolver, and a television's browser usually has none. The name is offered
@@ -187,6 +200,15 @@ export function WebAccessSection(): ReactElement {
           description={t("settings.web.autoDescription")}
           label={t("settings.web.auto")}
           onChange={chooseAuto}
+        />
+
+        <Switch
+          checked={status?.keepAwake === true}
+          description={t("settings.web.keepAwakeDescription")}
+          label={t("settings.web.keepAwake")}
+          onChange={(on) => {
+            void chooseKeepAwake(on);
+          }}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border-subtle px-3 py-2">

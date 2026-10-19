@@ -25,6 +25,8 @@ pub struct WebStatusDto {
     pub address: Option<String>,
     /// The hostname it also answers to, when one was configured.
     pub hostname: Option<String>,
+    /// Whether the machine is being kept awake while the surface is on.
+    pub keep_awake: bool,
     /// The bound port, when it is running.
     pub port: Option<u16>,
     /// How many pairing requests are waiting for a person.
@@ -163,6 +165,24 @@ pub async fn web_status(state: State<'_, RuntimeState>) -> Result<WebStatusDto, 
 #[specta::specta]
 pub fn web_lan_address() -> Result<Option<String>, AppError> {
     Ok(detected_lan_address().map(|address| address.to_string()))
+}
+
+/// Keeps the machine awake while the surface is on, or stops doing so.
+///
+/// Playback holds its own assertion regardless: a stream that dies because the host slept is a
+/// defect, not a preference.
+///
+/// # Errors
+///
+/// [`ErrorCode::Internal`] when the runtime never started.
+#[tauri::command]
+#[specta::specta]
+pub async fn web_set_keep_awake(
+    state: State<'_, RuntimeState>,
+    enabled: bool,
+) -> Result<WebStatusDto, AppError> {
+    let status = state.web()?.set_keep_awake(enabled).await;
+    Ok(status_dto(&status))
 }
 
 /// The Bonjour name this machine answers to, when the platform advertises one.
@@ -309,6 +329,7 @@ pub(crate) fn status_dto(status: &WebStatus) -> WebStatusDto {
         running: status.running,
         address: status.address.map(|address| address.ip().to_string()),
         hostname: status.hostname.clone(),
+        keep_awake: status.keep_awake,
         port: status.address.map(|address| address.port()),
         pending: u32::try_from(status.pending).unwrap_or(u32::MAX),
     }

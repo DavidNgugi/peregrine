@@ -666,6 +666,14 @@ fn web_lan_hostname_without_a_runtime(_harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { crate::web::web_lan_hostname().map(drop) })
 }
 
+fn web_set_keep_awake_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_set_keep_awake(harness.dead_state(), true)
+            .await
+            .map(drop)
+    })
+}
+
 fn web_pairings_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { crate::web::web_pairings(harness.dead_state()).map(drop) })
 }
@@ -753,6 +761,11 @@ fn web_cases() -> Vec<ContractCase> {
                 reason: "the name is read from the platform, not from the core",
             },
             drive: web_lan_hostname_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_set_keep_awake",
+            expected: fails(),
+            drive: web_set_keep_awake_without_a_runtime,
         },
         ContractCase {
             command: "web_pairings",

@@ -16,12 +16,16 @@
 //! component that fails verification has to become a named missing capability
 //! rather than an error surfaced mid-job.
 
+pub mod battery;
 pub mod clock;
 pub mod ids;
+pub mod power;
 pub mod sidecar;
 pub mod trash;
 
+pub use battery::BatteryState;
 pub use clock::SystemClock;
 pub use ids::{TokenMinter, UlidGenerator};
+pub use power::{Inhibitor, NoPowerSave, PowerSave, SystemPower};
 pub use sidecar::VerifiedSidecar;
 pub use trash::SystemTrash;

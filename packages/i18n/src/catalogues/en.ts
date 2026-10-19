@@ -827,6 +827,9 @@ export const en = {
         description: "Let a TV or browser on this network watch your library after you approve it.",
         auto: "Start when Peregrine opens",
         autoDescription: "Off until you turn it on. The address is shown here when it starts.",
+        keepAwake: "Keep this computer awake",
+        keepAwakeDescription:
+          "While web access is on, the computer will not sleep, so a device can connect at any time. Playback keeps it awake on its own. This uses more battery.",
         status: "Listener",
         address: "On your local network",
         noLan:
