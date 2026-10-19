@@ -63,6 +63,7 @@ function tileOf(download: Download): Tile | null {
     playable: true,
     percent: null,
     positionMs: 0,
+    watchlisted: false,
   };
 }
 

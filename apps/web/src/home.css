@@ -99,6 +99,26 @@
   opacity: 0;
 }
 
+.card-rating,
+.card-preview-rating {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-rating svg,
+.card-preview-rating svg {
+  width: 12px;
+  height: 12px;
+}
+
+.card-preview-rating {
+  color: var(--state-warn);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .card-preview {
   position: absolute;
   right: 0;

@@ -1354,6 +1354,14 @@ impl WebService {
             });
         }
 
+        // The watchlist is one read for the whole page, and every rail and hero candidate takes
+        // its mark from it. A tile in Browse and the same title in Continue Watching cannot then
+        // disagree about whether it is saved.
+        let watchlisted = self.watchlisted_ids().await?;
+        for rail in &mut rails {
+            mark_watchlisted(&mut rail.items, &watchlisted);
+        }
+
         if hero.is_none()
             && let Some(first) = library.first()
             && let Some(detail) = self.runtime.library_title(first.id).await?
@@ -1364,9 +1372,15 @@ impl WebService {
         // The desktop's hero rotates through several titles; collect one candidate per title that
         // has a backdrop, keeping the rails' order so the rotation starts on the same film the
         // rest of the screen leads with.
-        let heroes = hero_candidates(&rails, hero.as_ref());
+        let mut heroes = hero_candidates(&rails, hero.as_ref());
         if hero.is_none() {
             hero = heroes.first().cloned();
+        }
+        if let Some(hero) = &mut hero {
+            hero.watchlisted = watchlisted.contains(&hero.id);
+        }
+        for tile in &mut heroes {
+            tile.watchlisted = watchlisted.contains(&tile.id);
         }
 
         Ok(HomeDto {
@@ -1746,6 +1760,21 @@ impl WebService {
         Ok(result)
     }
 
+    /// The title ids the account's watchlist holds, read once for a page's tiles.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the watchlist read fails.
+    async fn watchlisted_ids(&self) -> Result<HashSet<i64>, WebError> {
+        Ok(self
+            .runtime
+            .watchlist()
+            .await?
+            .into_iter()
+            .map(|row| row.entry.title_id)
+            .collect())
+    }
+
     /// The account's My List as tiles, newest first.
     ///
     /// # Errors
@@ -1758,6 +1787,9 @@ impl WebService {
                 continue;
             };
             items.push(tile_from_detail(detail, None, 0));
+        }
+        for item in &mut items {
+            item.watchlisted = true;
         }
         Ok(items)
     }
@@ -1777,13 +1809,16 @@ impl WebService {
             return Ok(Vec::new());
         }
         let query: String = query.chars().take(120).collect();
-        Ok(self
+        let watchlisted = self.watchlisted_ids().await?;
+        let mut items: Vec<TileDto> = self
             .runtime
             .search_tiles(&query, 60, kind)
             .await?
             .into_iter()
             .map(tile_from_rail)
-            .collect())
+            .collect();
+        mark_watchlisted(&mut items, &watchlisted);
+        Ok(items)
     }
 
     /// One page of the provider's browse list, or the library when the provider is absent.
@@ -1805,15 +1840,18 @@ impl WebService {
             genre,
             None,
         );
+        let watchlisted = self.watchlisted_ids().await?;
         if let Ok(answer) = self.runtime.browse(&request).await {
+            let mut items: Vec<TileDto> = answer.items.into_iter().map(tile_from_rail).collect();
+            mark_watchlisted(&mut items, &watchlisted);
             return Ok(BrowseDto {
-                items: answer.items.into_iter().map(tile_from_rail).collect(),
+                items,
                 has_more: answer.has_more,
                 source: "provider".to_owned(),
             });
         }
         // No provider, or a provider having a bad minute: the library is still a browse screen.
-        let items = self
+        let mut items: Vec<TileDto> = self
             .runtime
             .library_titles(None, 100)
             .await?
@@ -1821,6 +1859,7 @@ impl WebService {
             .filter(|entry| entry.row.title.kind == kind)
             .map(|entry| tile_from_entry(&entry))
             .collect();
+        mark_watchlisted(&mut items, &watchlisted);
         Ok(BrowseDto {
             items,
             has_more: false,
@@ -2026,9 +2065,10 @@ impl WebService {
         if !in_library {
             return Ok((Vec::new(), Vec::new()));
         }
+        let watchlisted = self.watchlisted_ids().await?;
         // A title page is useful without the network: the provider's similar list is a bonus, so
         // a slow or unreachable provider gets three seconds and then an empty rail, not a spinner.
-        let (similar, genres): (Vec<TileDto>, Vec<GenreDto>) =
+        let (mut similar, genres): (Vec<TileDto>, Vec<GenreDto>) =
             match tokio::time::timeout(std::time::Duration::from_secs(3), self.runtime.similar(id))
                 .await
             {
@@ -2045,12 +2085,13 @@ impl WebService {
                 ),
                 _ => (Vec::new(), Vec::new()),
             };
+        mark_watchlisted(&mut similar, &watchlisted);
         if !similar.is_empty() {
             return Ok((similar, genres));
         }
         // A provider with nothing to say should not leave the page without a rail. The library's
         // other titles are a truthful "more like this" and cost one local read.
-        let similar = self
+        let mut similar: Vec<TileDto> = self
             .runtime
             .library_titles(None, 20)
             .await?
@@ -2058,6 +2099,7 @@ impl WebService {
             .filter(|entry| entry.row.title.id != id)
             .map(|entry| tile_from_entry(&entry))
             .collect();
+        mark_watchlisted(&mut similar, &watchlisted);
         Ok((similar, genres))
     }
     /// Mints a playback session for one device and one title.
@@ -2560,6 +2602,8 @@ pub struct TileDto {
     pub percent: Option<f64>,
     /// Where it was left, in milliseconds, so a hero's Play resumes.
     pub position_ms: i64,
+    /// Whether the account's watchlist holds this title, so every tile can carry its mark.
+    pub watchlisted: bool,
 }
 
 /// One horizontal rail on the home screen.
@@ -2897,6 +2941,7 @@ fn tile_from_entry(entry: &crate::LibraryTitleEntry) -> TileDto {
         playable: entry.row.files > 0,
         percent: None,
         position_ms: 0,
+        watchlisted: false,
     }
 }
 
@@ -2918,6 +2963,7 @@ fn tile_from_detail(
         playable: detail.playback.support.is_some(),
         percent,
         position_ms,
+        watchlisted: false,
     }
 }
 fn tile_from_rail(item: crate::RailItem) -> TileDto {
@@ -2933,6 +2979,14 @@ fn tile_from_rail(item: crate::RailItem) -> TileDto {
         playable: item.playable,
         percent: None,
         position_ms: 0,
+        watchlisted: false,
+    }
+}
+
+/// Marks every tile the account's watchlist holds, from one set the page read once.
+fn mark_watchlisted(tiles: &mut [TileDto], ids: &HashSet<i64>) {
+    for tile in tiles {
+        tile.watchlisted = ids.contains(&tile.id);
     }
 }
 
@@ -3010,6 +3064,7 @@ fn allowed_hosts(address: SocketAddr, hostname: Option<&str>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3023,12 +3078,39 @@ mod tests {
     use peregrine_domain::{PlaybackPreference, SubtitleMode};
 
     use super::{
-        EpisodeDto, JobDownload, TitleDownloads, WebConfig, WebError, WebSubtitleTrack,
-        chosen_subtitle, code_for, hash_token, mime_for, scope_allows, subtitle_dtos, subtitle_url,
+        EpisodeDto, JobDownload, TileDto, TitleDownloads, WebConfig, WebError, WebSubtitleTrack,
+        chosen_subtitle, code_for, hash_token, mark_watchlisted, mime_for, scope_allows,
+        subtitle_dtos, subtitle_url,
     };
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
     use crate::{Observability, Runtime, RuntimeConfig};
+
+    fn tile(id: i64) -> TileDto {
+        TileDto {
+            id,
+            name: format!("Title {id}"),
+            kind: "movie".to_owned(),
+            year: None,
+            poster: None,
+            backdrop: None,
+            rating: None,
+            overview: None,
+            playable: false,
+            percent: None,
+            position_ms: 0,
+            watchlisted: false,
+        }
+    }
+
+    #[test]
+    fn a_tiles_watchlist_mark_comes_from_the_pages_one_set() {
+        let ids = HashSet::from([2_i64]);
+        let mut tiles = vec![tile(1), tile(2)];
+        mark_watchlisted(&mut tiles, &ids);
+        assert!(!tiles[0].watchlisted);
+        assert!(tiles[1].watchlisted);
+    }
 
     #[test]
     fn a_token_hash_is_sha256_lowercase_hex_and_never_the_token() {

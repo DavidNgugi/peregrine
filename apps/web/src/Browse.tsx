@@ -242,7 +242,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
       ) : (
         <div className="browse-grid">
           {items.map((tile) => (
-            <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
+            <TileCard key={tile.id} onOpen={onOpen} tile={tile} watchlisted={tile.watchlisted} />
           ))}
         </div>
       )}

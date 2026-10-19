@@ -11,7 +11,7 @@ import {
   type PreviewEvent,
   type PreviewState,
 } from "./hover-preview.js";
-import { BookmarkIcon } from "./icons.js";
+import { BookmarkIcon, StarIcon } from "./icons.js";
 
 /** The one input the ladder answers to: a mouse or trackpad, not a remote or a finger. */
 const FINE_POINTER = "(hover: hover) and (pointer: fine)";
@@ -20,14 +20,20 @@ function finePointer(): boolean {
   return typeof window !== "undefined" && window.matchMedia(FINE_POINTER).matches;
 }
 
-/** The line a tile and its panel share: what kind of title this is, and how it is rated. */
-function tileMeta(tile: Tile): string {
+/** The facts under a title's name: what it is, and when it came out. */
+function tileFacts(tile: Tile): string {
   return [
     tile.kind === "show" ? "Series" : "Film",
     typeof tile.year === "number" ? String(tile.year) : null,
-    tile.rating === null ? null : tile.rating.toFixed(1),
   ]
     .filter((part): part is string => part !== null)
+    .join("  ·  ");
+}
+
+/** The line a hero and its panel share: the facts and the score. */
+function tileMeta(tile: Tile): string {
+  return [tileFacts(tile), tile.rating === null ? null : tile.rating.toFixed(1)]
+    .filter((part): part is string => part !== null && part !== "")
     .join("  ·  ");
 }
 
@@ -130,7 +136,7 @@ export function TileCard({
   const showsPanel = panelVisible(preview, focused);
   const scale = hoverable ? previewScale(preview) : 1;
   const settling = preview.phase === "idle" && preview.animating;
-  const meta = tileMeta(tile);
+  const facts = tileFacts(tile);
   const overview = panelOverview(tile);
 
   const onTransitionEnd = (event: TransitionEvent<HTMLButtonElement>): void => {
@@ -177,7 +183,10 @@ export function TileCard({
           </span>
         )}
         {tile.rating === null ? null : (
-          <span className="card-rating">{tile.rating.toFixed(1)}</span>
+          <span className="card-rating">
+            <StarIcon />
+            {tile.rating.toFixed(1)}
+          </span>
         )}
         {watchlisted ? (
           <span aria-hidden="true" className="card-bookmark">
@@ -187,7 +196,13 @@ export function TileCard({
         {showsPanel ? (
           <span aria-hidden="true" className="card-preview">
             <span className="card-preview-name">{tile.name}</span>
-            <span className="card-preview-meta">{meta}</span>
+            {facts === "" ? null : <span className="card-preview-meta">{facts}</span>}
+            {tile.rating === null ? null : (
+              <span className="card-preview-rating">
+                <StarIcon />
+                {tile.rating.toFixed(1)}
+              </span>
+            )}
             {overview === null ? null : <span className="card-preview-overview">{overview}</span>}
           </span>
         ) : null}
@@ -230,7 +245,7 @@ export function RailRow({
       {open ? (
         <div className="rail-track" id={panelId}>
           {rail.items.map((tile) => (
-            <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
+            <TileCard key={tile.id} onOpen={onOpen} tile={tile} watchlisted={tile.watchlisted} />
           ))}
         </div>
       ) : null}

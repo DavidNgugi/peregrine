@@ -78,7 +78,12 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
         <div className="browse-grid">
           {items.map((tile, index) => (
             <div className="card-cell" key={tile.id}>
-              <TileCard autofocus={index === 0} onOpen={onOpen} tile={tile} watchlisted={true} />
+              <TileCard
+                autofocus={index === 0}
+                onOpen={onOpen}
+                tile={tile}
+                watchlisted={tile.watchlisted}
+              />
               <button
                 aria-label={"Remove " + tile.name + " from My List"}
                 className="card-remove"

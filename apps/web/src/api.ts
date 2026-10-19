@@ -82,6 +82,8 @@ export interface Tile {
   readonly playable: boolean;
   readonly percent: number | null;
   readonly positionMs: number;
+  /** Whether the account's watchlist holds this title, so every tile can carry its mark. */
+  readonly watchlisted: boolean;
 }
 
 export interface Rail {

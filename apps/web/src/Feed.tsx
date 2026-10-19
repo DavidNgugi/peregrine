@@ -140,7 +140,7 @@ export function TitleFeed({
         <>
           <div className="feed-grid" id={gridId}>
             {items.map((tile) => (
-              <TileCard key={tile.id} onOpen={onOpen} tile={tile} />
+              <TileCard key={tile.id} onOpen={onOpen} tile={tile} watchlisted={tile.watchlisted} />
             ))}
           </div>
           <div aria-hidden="true" className="feed-sentinel" ref={sentinel} />
