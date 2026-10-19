@@ -7,7 +7,7 @@ import { BookmarkIcon } from "./icons.js";
 import {
   downloadAction,
   seasonAcquireMessage,
-  seasonDownloadLabel,
+  seasonDownloadAction,
   shownDownloadState,
 } from "./title-actions.js";
 
@@ -116,6 +116,10 @@ export function TitleScreen({
           movie ? "Download" : "Download series",
         );
   const titleDownloadKey = movie ? "title" : "series";
+  const seasonAction =
+    selectedSeason === undefined
+      ? null
+      : seasonDownloadAction(episodes, selectedSeason, watchingDownload);
   const heroDownload =
     !canPlay &&
     canAcquire &&
@@ -582,15 +586,17 @@ export function TitleScreen({
             <div className="section-head">
               <h2>Episodes</h2>
               <div className="section-head-actions">
-                {canAcquire && selectedSeason !== undefined ? (
+                {canAcquire && selectedSeason !== undefined && seasonAction !== null ? (
                   <button
                     className="season-download"
                     data-focus="true"
-                    disabled={pending !== null}
+                    disabled={pending !== null || seasonAction.disabled}
                     onClick={() => void downloadSeason(selectedSeason)}
                     type="button"
                   >
-                    {pending === "season" ? "Queuing..." : seasonDownloadLabel(selectedSeason)}
+                    {pending === "season"
+                      ? "Queuing season " + String(selectedSeason) + "..."
+                      : seasonAction.label}
                   </button>
                 ) : null}
                 <button

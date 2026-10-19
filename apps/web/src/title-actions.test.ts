@@ -1,11 +1,34 @@
 import { describe, expect, it } from "vitest";
 
+import type { Episode } from "./api.js";
 import {
   downloadAction,
   seasonAcquireMessage,
+  seasonDownloadAction,
   seasonDownloadLabel,
   shownDownloadState,
 } from "./title-actions.js";
+
+function episode(overrides: Partial<Episode> = {}): Episode {
+  return {
+    seasonNumber: 1,
+    episodeNumber: 1,
+    name: null,
+    overview: null,
+    still: null,
+    runtimeMinutes: null,
+    rating: null,
+    airDate: null,
+    files: 0,
+    percent: 0,
+    positionMs: 0,
+    watched: false,
+    playable: false,
+    downloadState: null,
+    downloadPercent: null,
+    ...overrides,
+  };
+}
 
 describe("shownDownloadState", () => {
   it("keeps a queued click visible until the title read catches up", () => {
@@ -17,6 +40,65 @@ describe("shownDownloadState", () => {
     expect(shownDownloadState("downloading", true)).toBe("downloading");
     expect(shownDownloadState("completed", true)).toBe("completed");
     expect(shownDownloadState("failed", true)).toBe("failed");
+  });
+});
+
+describe("seasonDownloadAction", () => {
+  it("offers the season when nothing is queued", () => {
+    expect(seasonDownloadAction([episode(), episode({ episodeNumber: 2 })], 1, false)).toEqual({
+      label: "Download season 1",
+      disabled: false,
+    });
+  });
+
+  it("counts a queued or just-clicked season as queued", () => {
+    expect(seasonDownloadAction([episode({ downloadState: "queued" })], 1, false)).toEqual({
+      label: "Queued season 1",
+      disabled: true,
+    });
+    expect(seasonDownloadAction([episode()], 1, true)).toEqual({
+      label: "Queued season 1",
+      disabled: true,
+    });
+  });
+
+  it("reports the whole season's percentage across done, active, and missing", () => {
+    const action = seasonDownloadAction(
+      [
+        episode({ episodeNumber: 1, playable: true }),
+        episode({ episodeNumber: 2, downloadState: "downloading", downloadPercent: 40 }),
+      ],
+      1,
+      false,
+    );
+    expect(action).toEqual({ label: "Downloading season 1 · 70%", disabled: true });
+  });
+
+  it("says downloaded only when every episode is on disk", () => {
+    expect(
+      seasonDownloadAction(
+        [episode({ episodeNumber: 1, playable: true }), episode({ episodeNumber: 2 })],
+        1,
+        false,
+      ),
+    ).toEqual({ label: "Download season 1", disabled: false });
+    expect(
+      seasonDownloadAction(
+        [
+          episode({ episodeNumber: 1, playable: true }),
+          episode({ episodeNumber: 2, playable: true }),
+        ],
+        1,
+        false,
+      ),
+    ).toEqual({ label: "Season 1 downloaded", disabled: true });
+  });
+
+  it("offers a retry after a failure", () => {
+    expect(seasonDownloadAction([episode({ downloadState: "failed" })], 1, true)).toEqual({
+      label: "Retry season 1",
+      disabled: false,
+    });
   });
 });
 

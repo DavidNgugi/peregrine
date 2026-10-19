@@ -462,6 +462,12 @@ export const en = {
         markSeasonWatched: "Mark season watched",
         markSeasonUnwatched: "Mark season unwatched",
         markFailed: "That watch mark could not be saved. Try again.",
+        downloadSeason: "Download season {{season}}",
+        queuingSeason: "Queuing season {{season}}…",
+        queuedSeason: "Queued season {{season}}",
+        downloadingSeason: "Downloading season {{season}} · {{percent}}%",
+        retrySeason: "Retry season {{season}}",
+        seasonDownloaded: "Season {{season}} downloaded",
         none: {
           title: "Nothing listed for this season.",
           body: "No provider has described this season's episodes yet, and the library holds none of them.",

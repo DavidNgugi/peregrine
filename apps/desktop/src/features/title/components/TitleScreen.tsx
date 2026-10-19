@@ -38,6 +38,7 @@ import { SeasonSwitcher } from "./SeasonSwitcher.js";
 import { logUiError } from "../../../lib/error-log.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import type { AcquireControl } from "../hooks/useAcquire.js";
+import { seasonDownloadPlan } from "../hooks/season-download.js";
 import type { TitleDetail } from "../hooks/useTitle.js";
 import type { TitleSeasons } from "../hooks/useSeasons.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
@@ -151,8 +152,56 @@ export function TitleScreen({
   // one page-wide acquire state would drop the previous episode's label the moment a second one was
   // clicked. The requested set bridges that gap; the queue row takes over as soon as it exists.
   const [requested, setRequested] = useState<ReadonlySet<string>>(() => new Set());
+  const [seasonStarting, setSeasonStarting] = useState(false);
   const episodeKey = (season: number, episode: number): string =>
     `${String(season)}:${String(episode)}`;
+  const seasonNumber = seasons.season?.seasonNumber ?? 0;
+  const seasonPlan = seasonDownloadPlan({
+    titleId: title?.id ?? 0,
+    season: seasonNumber,
+    episodes: seasons.episodes,
+    downloads: downloadRows ?? [],
+    requested,
+    busy: seasonStarting,
+  });
+  const seasonLabel =
+    seasonPlan.status === "active"
+      ? t("title.episodes.downloadingSeason", {
+          season: seasonNumber,
+          percent: seasonPlan.percent,
+        })
+      : seasonPlan.status === "queued"
+        ? t("title.episodes.queuedSeason", { season: seasonNumber })
+        : seasonPlan.status === "done"
+          ? t("title.episodes.seasonDownloaded", { season: seasonNumber })
+          : seasonPlan.status === "retry"
+            ? t("title.episodes.retrySeason", { season: seasonNumber })
+            : t("title.episodes.downloadSeason", { season: seasonNumber });
+  const seasonDisabled =
+    seasonStarting ||
+    seasonPlan.status === "active" ||
+    seasonPlan.status === "queued" ||
+    seasonPlan.status === "done" ||
+    seasonPlan.missing.length === 0;
+  const downloadSeason = async (): Promise<void> => {
+    if (acquire === undefined || title === null || seasonPlan.missing.length === 0) {
+      return;
+    }
+    setSeasonStarting(true);
+    try {
+      for (const episode of seasonPlan.missing) {
+        setRequested((previous) =>
+          new Set(previous).add(episodeKey(episode.seasonNumber, episode.episodeNumber)),
+        );
+        await acquire.start(title.id, {
+          season: episode.seasonNumber,
+          episode: episode.episodeNumber,
+        });
+      }
+    } finally {
+      setSeasonStarting(false);
+    }
+  };
   useEffect(() => {
     const queued = new Set(
       (downloadRows ?? [])
@@ -440,6 +489,20 @@ export function TitleScreen({
 
             {seasons.episodes.length === 0 ? null : (
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {acquire === undefined ? null : (
+                  <Button
+                    disabled={seasonDisabled}
+                    onClick={() => {
+                      void downloadSeason();
+                    }}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {seasonStarting
+                      ? t("title.episodes.queuingSeason", { season: seasonNumber })
+                      : seasonLabel}
+                  </Button>
+                )}
                 <Button
                   disabled={seasons.marking}
                   onClick={() => {

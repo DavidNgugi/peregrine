@@ -5,7 +5,7 @@
  * percent formatting the old page never re-read — is testable without a DOM.
  */
 
-import type { DownloadState, SeasonAcquireResult } from "./api.js";
+import type { DownloadState, Episode, SeasonAcquireResult } from "./api.js";
 import { downloadLabel, downloadTone } from "./download-state.js";
 
 /** A download button's text and whether it can be pressed. */
@@ -48,6 +48,72 @@ export function shownDownloadState(state: DownloadState, watching: boolean): Dow
 /** The label of a season's download control. */
 export function seasonDownloadLabel(season: number): string {
   return "Download season " + String(season);
+}
+
+/** What a season's download control says and whether it can be pressed. */
+export interface SeasonDownloadAction {
+  readonly label: string;
+  readonly disabled: boolean;
+}
+
+/**
+ * A season's control, from every episode the page holds for that season.
+ *
+ * The percentage is the whole season, not the current transfer: an episode already on disk counts
+ * as 100, an active one contributes its own percent, and an episode nobody has queued contributes
+ * zero. That is the number a person means by "how much of the season is downloaded".
+ */
+export function seasonDownloadAction(
+  episodes: readonly Episode[],
+  season: number,
+  watching: boolean,
+): SeasonDownloadAction {
+  const held = episodes.filter((episode) => episode.seasonNumber === season);
+  if (held.length === 0) {
+    return { label: seasonDownloadLabel(season), disabled: true };
+  }
+  let active = 0;
+  let queued = 0;
+  let failed = 0;
+  let done = 0;
+  let missing = 0;
+  let percent = 0;
+  for (const episode of held) {
+    const tone = downloadTone(episode.downloadState);
+    if (episode.playable || tone === "done") {
+      done += 1;
+      percent += 100;
+    } else if (tone === "active") {
+      active += 1;
+      percent += percentOf(episode.downloadPercent);
+    } else if (tone === "queued") {
+      queued += 1;
+      missing += 1;
+    } else {
+      if (tone === "failed") failed += 1;
+      missing += 1;
+    }
+  }
+  const whole = Math.round(percent / held.length);
+  if (active > 0) {
+    return {
+      label: "Downloading season " + String(season) + " · " + String(whole) + "%",
+      disabled: true,
+    };
+  }
+  if (queued > 0) {
+    return { label: "Queued season " + String(season), disabled: true };
+  }
+  if (done === held.length) {
+    return { label: "Season " + String(season) + " downloaded", disabled: true };
+  }
+  if (failed > 0) {
+    return { label: "Retry season " + String(season), disabled: missing === 0 };
+  }
+  if (watching) {
+    return { label: "Queued season " + String(season), disabled: true };
+  }
+  return { label: seasonDownloadLabel(season), disabled: missing === 0 };
 }
 
 /** What a season acquisition queued, and what it could not, as one announced sentence. */

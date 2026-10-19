@@ -26,7 +26,7 @@ The server re-checks every input: the title must exist, an episode must belong t
 
 ### 2. A season download is one request, many audited jobs
 
-`POST /api/acquire/season` `{ titleId, season }` resolves the season's episodes, skips the ones already playable on disk, and asks `Runtime::start_acquire` for each remaining episode with the same quality profile, safety gate, disk floor, and seeding policy the desktop uses. Each accepted episode leaves a `web_audit` row naming the device, title, episode, and job before the queue is touched. One episode failing does not fail the request; the answer reports `queued`, `alreadyPlayable`, and `failed`.
+`POST /api/acquire/season` `{ titleId, season }` resolves the season's episodes, skips the ones already playable on disk, and asks `Runtime::start_acquire` for each remaining episode with the same quality profile, safety gate, disk floor, and seeding policy the desktop uses. Each accepted episode leaves a `web_audit` row naming the device, title, episode, and job before the queue is touched. One episode failing does not fail the request; the answer reports `queued`, `alreadyPlayable`, and `failed`. The control reads the season's queue rows: it is disabled while the season is queued or active, and its label becomes `Downloading season N · p%`, where the percentage counts finished episodes as 100, active jobs at their own progress, and everything else as zero. The desktop page uses the same rule from the same queue rows, with one per-episode acquisition per missing episode.
 
 ### 3. Subtitles are converted to WebVTT at the edge
 
