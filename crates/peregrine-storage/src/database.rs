@@ -9,8 +9,8 @@ use tracing::{info, warn};
 
 use peregrine_domain::catalogue::WatchAvailability;
 use peregrine_domain::{
-    AccountScope, DownloadEvent, DownloadState, LibraryRoot, MediaFile, MediaItem, ScanMode,
-    SubtitleTrack, TorrentDescription, UnmatchedFile, WatchProgress, WatchlistEntry,
+    AccountScope, DownloadEvent, DownloadState, LibraryRoot, MediaFile, MediaItem,
+    PayloadDescription, ScanMode, SubtitleTrack, UnmatchedFile, WatchProgress, WatchlistEntry,
 };
 
 use crate::catalogue::{StubTitle, TitleExternalId, TitleIdentity};
@@ -255,6 +255,122 @@ impl Database {
         crate::jobs::list(&self.readers, request).await
     }
 
+    /// Every configured Usenet provider, primary first.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails or a row holds a value this build cannot parse.
+    pub async fn usenet_servers(&self) -> Result<Vec<crate::usenet::UsenetServer>, StorageError> {
+        crate::usenet::list(&self.readers).await
+    }
+
+    /// One Usenet provider by id.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails or the row holds an unreadable value.
+    pub async fn usenet_server(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::usenet::UsenetServer>, StorageError> {
+        crate::usenet::get(&self.readers, id).await
+    }
+
+    /// Inserts one Usenet provider and returns the row the database holds.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Conflict`] when the name or the host/port/username triple is taken.
+    pub async fn create_usenet_server(
+        &self,
+        server: crate::usenet::NewUsenetServer,
+    ) -> Result<crate::usenet::UsenetServer, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::Usenet(crate::usenet::Write::Insert(server)))
+            .await?
+        {
+            WriteResponse::Usenet(crate::usenet::Outcome::Inserted(server)) => Ok(server),
+            other => Err(unexpected_response("create_usenet_server", &other)),
+        }
+    }
+
+    /// Replaces one provider's editable columns, answering the row or None.
+    pub async fn update_usenet_server(
+        &self,
+        id: i64,
+        server: crate::usenet::NewUsenetServer,
+    ) -> Result<Option<crate::usenet::UsenetServer>, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::Usenet(crate::usenet::Write::Update {
+                id,
+                server,
+            }))
+            .await?
+        {
+            WriteResponse::Usenet(crate::usenet::Outcome::Updated(server)) => Ok(server),
+            other => Err(unexpected_response("update_usenet_server", &other)),
+        }
+    }
+
+    /// Deletes one provider, answering whether it was there.
+    pub async fn delete_usenet_server(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::Usenet(crate::usenet::Write::Delete { id }))
+            .await?
+        {
+            WriteResponse::Usenet(crate::usenet::Outcome::Deleted(deleted)) => Ok(deleted),
+            other => Err(unexpected_response("delete_usenet_server", &other)),
+        }
+    }
+
+    /// Records one health answer, answering whether the row was there.
+    pub async fn record_usenet_health(
+        &self,
+        id: i64,
+        health: peregrine_domain::UsenetHealth,
+        at: jiff::Timestamp,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::Usenet(crate::usenet::Write::Health {
+                id,
+                health,
+                at,
+            }))
+            .await?
+        {
+            WriteResponse::Usenet(crate::usenet::Outcome::Health(found)) => Ok(found),
+            other => Err(unexpected_response("record_usenet_health", &other)),
+        }
+    }
+
+    /// The one Usenet policy row.
+    pub async fn usenet_setting(&self) -> Result<crate::usenet::UsenetSetting, StorageError> {
+        crate::usenet::setting(&self.readers).await
+    }
+
+    /// Writes the one Usenet policy row and answers what it now holds.
+    pub async fn set_usenet_setting(
+        &self,
+        setting: crate::usenet::UsenetSetting,
+        at: jiff::Timestamp,
+    ) -> Result<crate::usenet::UsenetSetting, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::Usenet(crate::usenet::Write::Setting {
+                setting,
+                at,
+            }))
+            .await?
+        {
+            WriteResponse::Usenet(crate::usenet::Outcome::Setting(setting)) => Ok(setting),
+            other => Err(unexpected_response("set_usenet_setting", &other)),
+        }
+    }
+
     /// Creates one `download_job` row in `queued` and returns the row the database holds.
     ///
     /// `queued` is a literal in the statement: it is the one state `FLOWS` F6 admits a job in,
@@ -276,6 +392,24 @@ impl Database {
         {
             WriteResponse::DownloadJobCreated(row) => Ok(*row),
             other => Err(unexpected_response("create_download_job", &other)),
+        }
+    }
+
+    /// Sets what a live download job is doing inside its transfer state.
+    ///
+    /// `Ok(None)` means no live job holds that id. A stage never moves the state machine.
+    pub async fn set_download_stage(
+        &self,
+        id: i64,
+        stage: peregrine_domain::DownloadStage,
+    ) -> Result<Option<peregrine_domain::DownloadStage>, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetDownloadStage { id, stage })
+            .await?
+        {
+            WriteResponse::DownloadStageSet { stage } => Ok(stage),
+            other => Err(unexpected_response("set_download_stage", &other)),
         }
     }
 
@@ -426,7 +560,7 @@ impl Database {
     pub async fn select_download_files(
         &self,
         job_id: i64,
-        description: TorrentDescription,
+        description: PayloadDescription,
         selection: &[usize],
     ) -> Result<(), StorageError> {
         match self

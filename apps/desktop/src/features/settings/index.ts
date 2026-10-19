@@ -10,6 +10,8 @@ export { useProviders } from "./hooks/useProviders.js";
 export type { CredentialOutcome, ProviderSettings } from "./hooks/useProviders.js";
 export { useProwlarr } from "./hooks/useProwlarr.js";
 export type { ManagedProwlarr, ProwlarrOutcome } from "./hooks/useProwlarr.js";
+export { useUsenet } from "./hooks/useUsenet.js";
+export type { UsenetSettings } from "./hooks/useUsenet.js";
 export { useAutoStart } from "./hooks/useAutoStart.js";
 export type { AutoStartControl, AutoStartState } from "./hooks/useAutoStart.js";
 export { useShortcutDispatch, useShortcuts } from "./hooks/useShortcuts.js";

@@ -2,7 +2,7 @@
 //!
 //! The one place the inspection gate, the torrent engine port, and the download repositories are
 //! combined. It is deliberately not the whole of acquisition: the metadata-only fetch that produces
-//! a [`TorrentDescription`] is `PG-E10-03`'s, the release decision that chooses one is `PG-E12-10`'s,
+//! a [`PayloadDescription`] is `PG-E10-03`'s, the release decision that chooses one is `PG-E12-10`'s,
 //! and the queue's commands and screen are `PG-E13`'s. What this slice owns is the sequence between
 //! them and the two invariants that only exist inside that sequence.
 //!
@@ -20,7 +20,7 @@
 //!    [`SafePath`] (`ADR` 0005). A destination that cannot be resolved is refused **before** the job
 //!    row is inserted, so a job that could never be added leaves no row behind.
 //! 3. The job row is inserted at `queued` — the literal the repository's own insert writes.
-//! 4. `Admitted` → `inspecting`, then the real [`TorrentInspector`] runs over the description the
+//! 4. `Admitted` → `inspecting`, then the real [`PayloadInspector`] runs over the description the
 //!    caller supplied.
 //! 5. The report that inspection produced is applied as `Inspected(report)`. That transition is what
 //!    persists `safety_report_json`, and `DownloadEvent` is the *only* way this service moves a
@@ -95,8 +95,8 @@ use jiff::Timestamp;
 use peregrine_domain::{
     AccountScope, Clock, DeletionEntry, DeletionPlan, DownloadEvent, DownloadState, InfoHash,
     InspectionLimits, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, OptIn,
-    PathGuard, PathGuardError, SafePath, SafetyReport, TorrentDescription, TorrentInspector,
-    TransitionRejected, Trash, TrashError, Verdict,
+    PathGuard, PathGuardError, PayloadDescription, PayloadInspector, Protocol, SafePath,
+    SafetyReport, TransitionRejected, Trash, TrashError, Verdict,
 };
 use peregrine_storage::{
     Database, DownloadFileRow, DownloadJobRow, DownloadSource, DownloadStatistics,
@@ -106,6 +106,7 @@ use peregrine_torrent::{
     AddIntent, AddRefused, AddRequest, EngineError, FileSelection, TorrentEngine, TorrentHandle,
     TorrentSource,
 };
+use peregrine_usenet::{AddNzbRequest, NzbDocument, ServerConfig, UsenetEngine, UsenetHandle};
 use thiserror::Error;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
@@ -232,6 +233,22 @@ pub enum AcquisitionError {
     /// ([AGENTS R22]).
     #[error(transparent)]
     Trash(#[from] TrashError),
+
+    /// A Usenet job was started before a provider was configured.
+    #[error("no Usenet provider is configured")]
+    UsenetUnavailable,
+
+    /// The Usenet engine refused the add because the report was not an allowed one.
+    #[error(transparent)]
+    UsenetAddRefused(#[from] peregrine_usenet::AddRefused),
+
+    /// The Usenet engine refused an operation.
+    #[error(transparent)]
+    UsenetEngine(#[from] peregrine_usenet::EngineError),
+
+    /// The NZB could not be written beside the payload.
+    #[error("the NZB could not be stored beside the payload: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Why a volume's free space could not be read.
@@ -275,9 +292,23 @@ pub struct StartRequest {
     /// The job's columns, except the two the service fills in.
     pub job: NewDownloadJob,
     /// The torrent's file list, as the metadata fetch (`PG-E10-03`) produced it.
-    pub description: TorrentDescription,
+    pub description: PayloadDescription,
     /// The torrent's identity, which is also the dedupe key.
     pub info_hash: InfoHash,
+}
+
+/// What one [`AcquisitionService::start_usenet`] is given.
+pub struct UsenetStartRequest {
+    /// Which account is asking, and therefore what it may see (`AGENTS` R34).
+    pub account: AccountScope,
+    /// The job's columns, except the source path and admission instant the service fills in.
+    pub job: NewDownloadJob,
+    /// The parsed post, already bounded by the parser.
+    pub document: NzbDocument,
+    /// The NZB bytes, stored beside the payload so a restart can re-inspect it.
+    pub nzb_bytes: Vec<u8>,
+    /// The providers this job may use, primary first.
+    pub servers: Vec<ServerConfig>,
 }
 
 /// What one [`AcquisitionService::start`] produced.
@@ -320,6 +351,14 @@ pub struct AcquisitionService {
     /// without the row carrying a number. A job started by another process has no handle here and
     /// is `PG-E10-08`'s to reattach.
     handles: Mutex<HashMap<i64, TorrentHandle>>,
+    /// The Usenet engine, when this session has a configured provider. `None` leaves the transfer
+    /// protocol unavailable rather than failing the whole service.
+    usenet: Option<Arc<dyn UsenetEngine>>,
+    /// The Usenet jobs this process started, keyed by row id.
+    usenet_handles: Mutex<HashMap<i64, UsenetHandle>>,
+    /// The archive tools, when this build found them. None means an archive-only payload fails
+    /// with a named refusal rather than reporting a completion with nothing imported.
+    post: Option<crate::usenet_post::PostTools>,
     /// The last instant each job's statistics reached the database, which is the whole of the
     /// coalescing state.
     written_at: Mutex<HashMap<i64, Timestamp>>,
@@ -402,6 +441,9 @@ impl AcquisitionService {
             trash,
             notices: Arc::new(NoDownloadNotices),
             handles: Mutex::new(HashMap::new()),
+            usenet: None,
+            usenet_handles: Mutex::new(HashMap::new()),
+            post: None,
             written_at: Mutex::new(HashMap::new()),
             pump: Mutex::new(None),
         }
@@ -412,6 +454,21 @@ impl AcquisitionService {
     #[must_use]
     pub fn with_notices(mut self, notices: Arc<dyn DownloadNotices>) -> Self {
         self.notices = notices;
+        self
+    }
+
+    /// Gives the service a Usenet engine. Without one, a Usenet start answers `Unavailable`
+    /// rather than failing the torrent path this session still has.
+    #[must_use]
+    pub fn with_usenet(mut self, engine: Arc<dyn UsenetEngine>) -> Self {
+        self.usenet = Some(engine);
+        self
+    }
+
+    /// Gives the service the archive tools a Usenet payload may need.
+    #[must_use]
+    pub fn with_postprocess(mut self, tools: crate::usenet_post::PostTools) -> Self {
+        self.post = Some(tools);
         self
     }
 
@@ -486,11 +543,14 @@ impl AcquisitionService {
     /// sweep: one finished job must not stop every other transfer's progress.
     async fn sample(&self) {
         let ids: Vec<i64> = {
-            let handles = match self.handles.lock() {
-                Ok(handles) => handles,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            handles.keys().copied().collect()
+            let mut ids = std::collections::BTreeSet::new();
+            if let Ok(handles) = self.handles.lock() {
+                ids.extend(handles.keys().copied());
+            }
+            if let Ok(handles) = self.usenet_handles.lock() {
+                ids.extend(handles.keys().copied());
+            }
+            ids.into_iter().collect()
         };
         for id in ids {
             if let Err(error) = self.statistics(id).await {
@@ -534,7 +594,7 @@ impl AcquisitionService {
         //    floor admission uses, so a torrent too large for the volume is refused by inspection
         //    rather than after it.
         let limits = self.limits_for(&save_path);
-        let report = TorrentInspector::new(limits).inspect(
+        let report = PayloadInspector::new(limits).inspect(
             &request.description,
             &self.destination,
             OptIn::NotGranted,
@@ -606,6 +666,107 @@ impl AcquisitionService {
         })
     }
 
+    /// Starts one Usenet job: writes the NZB beside the payload, runs the gate, and hands the
+    /// parsed post to the engine.
+    ///
+    /// The order is the torrent path's order. The NZB is stored before the row is inserted so the
+    /// source column names a file that exists, the report is persisted before the engine is handed
+    /// the post, and a refused job is parked in `blocked` with nothing added.
+    ///
+    /// # Errors
+    ///
+    /// The same refusals as `start`, plus `UsenetUnavailable` when no provider engine is composed.
+    pub async fn start_usenet(
+        &self,
+        request: UsenetStartRequest,
+    ) -> Result<Started, AcquisitionError> {
+        let engine = self
+            .usenet
+            .as_ref()
+            .ok_or(AcquisitionError::UsenetUnavailable)?;
+        if self
+            .database
+            .title_identity(request.account, request.job.title_id)
+            .await?
+            .is_none()
+        {
+            return Err(AcquisitionError::TitleUnavailable);
+        }
+        let save_path = self
+            .destination
+            .resolve(std::path::Path::new(request.job.save_path.as_str()))
+            .map_err(|source| AcquisitionError::SavePath { source })?;
+        tokio::fs::create_dir_all(save_path.as_path()).await?;
+        let nzb_path = save_path.as_path().join("source.nzb");
+        tokio::fs::write(&nzb_path, &request.nzb_bytes).await?;
+        let source = NonEmptyText::new(&nzb_path.to_string_lossy())
+            .map_err(|_| AcquisitionError::UnsupportedSource)?;
+
+        let description = request.document.description();
+        let limits = self.limits_for(&save_path);
+        let opt_in = if self.database.usenet_setting().await?.allow_archives {
+            OptIn::Granted
+        } else {
+            OptIn::NotGranted
+        };
+        let report = PayloadInspector::new(limits).inspect(&description, &self.destination, opt_in);
+        let verdict = report.verdict();
+        let selection: Vec<usize> = (0..description.entries().len()).collect();
+
+        let mut job = request.job;
+        job.info_hash = None;
+        job.protocol = Protocol::Usenet;
+        job.source = DownloadSource::NzbFile(source);
+        job.save_path = text_of(&save_path)?;
+        job.added_at = self.clock.now();
+        let row = match self.database.create_download_job(job).await {
+            Ok(row) => row,
+            Err(StorageError::Conflict { .. }) => return Err(AcquisitionError::Duplicate),
+            Err(error) => return Err(AcquisitionError::Storage(error)),
+        };
+        if verdict == Verdict::Allowed {
+            self.admit_space(&save_path, description.total_bytes())?;
+        }
+        self.apply(row.id, DownloadEvent::Admitted).await?;
+        self.apply(row.id, DownloadEvent::Inspected(report.clone()))
+            .await?;
+        let row = self.reload(row.id).await?;
+        if verdict != Verdict::Allowed {
+            return Ok(Started {
+                job: row,
+                state: DownloadState::Blocked,
+                verdict,
+                added: false,
+                selection: Vec::new(),
+            });
+        }
+
+        let add = AddNzbRequest::new(
+            request.document,
+            save_path,
+            FileSelection::new(selection.iter().copied()),
+            request.servers,
+            &report,
+        )?;
+        let handle = engine.add(add).await?;
+        self.usenet_handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(row.id, handle);
+        self.apply(row.id, DownloadEvent::EngineAccepted).await?;
+        self.database
+            .select_download_files(row.id, description, &selection)
+            .await?;
+        let row = self.reload(row.id).await?;
+        Ok(Started {
+            state: row.state,
+            job: row,
+            verdict,
+            added: true,
+            selection,
+        })
+    }
+
     /// Applies one event through the repository's single writer, mapping its refusals.
     async fn apply(
         &self,
@@ -666,13 +827,13 @@ impl AcquisitionService {
     pub fn verdict_for(
         &self,
         save_path: &str,
-        description: &TorrentDescription,
+        description: &PayloadDescription,
     ) -> Result<Verdict, AcquisitionError> {
         let resolved = self
             .destination
             .resolve(std::path::Path::new(save_path))
             .map_err(|source| AcquisitionError::SavePath { source })?;
-        Ok(TorrentInspector::new(self.limits_for(&resolved))
+        Ok(PayloadInspector::new(self.limits_for(&resolved))
             .inspect(description, &self.destination, OptIn::NotGranted)
             .verdict())
     }
@@ -723,7 +884,7 @@ impl AcquisitionService {
         id: i64,
         save_path: &SafePath,
         selection: &[usize],
-        description: &TorrentDescription,
+        description: &PayloadDescription,
         report: &SafetyReport,
     ) -> Result<TorrentHandle, AcquisitionError> {
         let row = self.reload(id).await?;
@@ -733,7 +894,7 @@ impl AcquisitionService {
             ),
             // The engine is handed contents and never a path outside the download root
             // (ADR 0005), so a row that stores a path needs the adapter that reads it.
-            Some(DownloadSource::TorrentFile(_)) | None => {
+            Some(DownloadSource::TorrentFile(_) | DownloadSource::NzbFile(_)) | None => {
                 return Err(AcquisitionError::UnsupportedSource);
             }
         };
@@ -787,7 +948,7 @@ impl AcquisitionService {
     pub async fn consent(
         &self,
         id: i64,
-        description: &TorrentDescription,
+        description: &PayloadDescription,
     ) -> Result<DownloadState, AcquisitionError> {
         let row = self.reload(id).await?;
         let save_path = self
@@ -796,7 +957,7 @@ impl AcquisitionService {
             .map_err(|source| AcquisitionError::SavePath { source })?;
         let limits = self.limits_for(&save_path);
         let report =
-            TorrentInspector::new(limits).inspect(description, &self.destination, OptIn::Granted);
+            PayloadInspector::new(limits).inspect(description, &self.destination, OptIn::Granted);
         if report.total_bytes() > limits.max_total_bytes() {
             self.admit_space(&save_path, description.total_bytes())?;
         }
@@ -827,6 +988,15 @@ impl AcquisitionService {
     /// [`AcquisitionError::NotFound`] when this process holds no handle for the job — a job started
     /// before a restart is `PG-E10-08`'s to reattach — and the engine and domain refusals.
     pub async fn pause(&self, id: i64) -> Result<DownloadState, AcquisitionError> {
+        if let Some(handle) = self.usenet_handle(id) {
+            let engine = self
+                .usenet
+                .as_ref()
+                .ok_or(AcquisitionError::UsenetUnavailable)?;
+            let state = self.apply(id, DownloadEvent::Paused).await?;
+            engine.pause(handle).await?;
+            return Ok(state);
+        }
         let handle = self.handle(id)?;
         let state = self.apply(id, DownloadEvent::Paused).await?;
         self.engine.pause(handle).await?;
@@ -839,6 +1009,14 @@ impl AcquisitionService {
     /// that says `downloading` while nothing transfers — which is the failure a user cannot
     /// diagnose. A resume of a job that never paused is [`AcquisitionError::TransitionRefused`].
     pub async fn resume(&self, id: i64) -> Result<DownloadState, AcquisitionError> {
+        if let Some(handle) = self.usenet_handle(id) {
+            let engine = self
+                .usenet
+                .as_ref()
+                .ok_or(AcquisitionError::UsenetUnavailable)?;
+            engine.resume(handle).await?;
+            return self.apply(id, DownloadEvent::Resumed).await;
+        }
         let handle = self.handle(id)?;
         self.engine.resume(handle).await?;
         self.apply(id, DownloadEvent::Resumed).await
@@ -851,6 +1029,16 @@ impl AcquisitionService {
     /// only for a job this process actually added; the domain's transition is what refuses a second
     /// removal after the fact.
     pub async fn remove(&self, id: i64) -> Result<DownloadState, AcquisitionError> {
+        let usenet_handle = self
+            .usenet_handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        if let Some(handle) = usenet_handle
+            && let Some(engine) = self.usenet.as_ref()
+        {
+            engine.remove(handle).await?;
+        }
         let handle = self
             .handles
             .lock()
@@ -916,6 +1104,9 @@ impl AcquisitionService {
         &self,
         id: i64,
     ) -> Result<Option<DownloadStatistics>, AcquisitionError> {
+        if let Some(handle) = self.usenet_handle(id) {
+            return self.statistics_usenet(id, handle).await;
+        }
         let handle = self.handle(id)?;
         let now = self.clock.now();
         {
@@ -968,6 +1159,329 @@ impl AcquisitionService {
             self.finish_download(id, handle).await?;
         }
         Ok(Some(statistics))
+    }
+
+    /// Re-inspects a blocked Usenet job with the archive opt-in and hands it to the engine.
+    ///
+    /// The NZB is read back from the job's own source file, not from a caller, so the consent
+    /// cannot describe a different post. The setting is written first, so a later acquisition of
+    /// the same kind passes the gate without a second prompt.
+    ///
+    /// # Errors
+    ///
+    /// The same refusals as consent for a torrent, plus a missing source and a parse failure.
+    pub async fn consent_usenet(
+        &self,
+        id: i64,
+        servers: Vec<ServerConfig>,
+    ) -> Result<DownloadState, AcquisitionError> {
+        let engine = self
+            .usenet
+            .as_ref()
+            .ok_or(AcquisitionError::UsenetUnavailable)?;
+        let row = self.reload(id).await?;
+        let Some(DownloadSource::NzbFile(path)) = row.source.as_ref() else {
+            return Err(AcquisitionError::UnsupportedSource);
+        };
+        let bytes = tokio::fs::read(path.as_str()).await?;
+        let document =
+            NzbDocument::parse(&bytes).map_err(|_| AcquisitionError::UnsupportedSource)?;
+        let description = document.description();
+        let save_path = self
+            .destination
+            .resolve(std::path::Path::new(row.save_path.as_str()))
+            .map_err(|source| AcquisitionError::SavePath { source })?;
+        let limits = self.limits_for(&save_path);
+        let report =
+            PayloadInspector::new(limits).inspect(&description, &self.destination, OptIn::Granted);
+        match report.verdict() {
+            Verdict::Allowed => {}
+            Verdict::OptInRequired => return Err(AcquisitionError::OptInStillRequired),
+            Verdict::Blocked => return Err(AcquisitionError::NoOverride),
+        }
+        self.admit_space(&save_path, description.total_bytes())?;
+        let mut setting = self.database.usenet_setting().await?;
+        setting.allow_archives = true;
+        self.database
+            .set_usenet_setting(setting, self.clock.now())
+            .await?;
+        self.apply(id, DownloadEvent::Consented(report.clone()))
+            .await?;
+        let selection: Vec<usize> = (0..description.entries().len()).collect();
+        let add = AddNzbRequest::new(
+            document,
+            save_path,
+            FileSelection::new(selection.iter().copied()),
+            servers,
+            &report,
+        )?;
+        let handle = engine.add(add).await?;
+        self.usenet_handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id, handle);
+        self.apply(id, DownloadEvent::EngineAccepted).await?;
+        self.database
+            .select_download_files(id, description, &selection)
+            .await?;
+        Ok(self.reload(id).await?.state)
+    }
+
+    /// Reattaches the Usenet jobs a previous process left live.
+    ///
+    /// The NZB and the persisted safety report are the state; there is no engine blob to recover.
+    /// A job that was paused is added and paused again. A job whose source is gone is left alone
+    /// and will fail on the next tick rather than being silently completed.
+    ///
+    /// # Errors
+    ///
+    /// Storage refusals, a missing or unreadable NZB, and the engine's own refusals.
+    pub async fn reattach_usenet(
+        &self,
+        servers: Vec<ServerConfig>,
+    ) -> Result<usize, AcquisitionError> {
+        let engine = self
+            .usenet
+            .as_ref()
+            .ok_or(AcquisitionError::UsenetUnavailable)?;
+        if servers.is_empty() {
+            return Ok(0);
+        }
+        let jobs = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                &[DownloadState::Downloading, DownloadState::Paused],
+                PageRequest::first(1_000),
+            )
+            .await?;
+        let mut reattached = 0;
+        for row in jobs {
+            if row.protocol != Protocol::Usenet {
+                continue;
+            }
+            let Some(DownloadSource::NzbFile(path)) = row.source.as_ref() else {
+                continue;
+            };
+            let Ok(bytes) = tokio::fs::read(path.as_str()).await else {
+                continue;
+            };
+            let Ok(document) = NzbDocument::parse(&bytes) else {
+                continue;
+            };
+            let Some(report) = row.safety_report.clone() else {
+                continue;
+            };
+            let Ok(save_path) = self
+                .destination
+                .resolve(std::path::Path::new(row.save_path.as_str()))
+            else {
+                continue;
+            };
+            let selection: Vec<usize> = (0..document.files().len()).collect();
+            let Ok(add) = AddNzbRequest::new(
+                document,
+                save_path,
+                FileSelection::new(selection),
+                servers.clone(),
+                &report,
+            ) else {
+                continue;
+            };
+            let handle = engine.add(add).await?;
+            if row.state == DownloadState::Paused {
+                engine.pause(handle).await?;
+            }
+            self.usenet_handles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(row.id, handle);
+            reattached += 1;
+        }
+        Ok(reattached)
+    }
+
+    /// The Usenet handle this process holds for a job, if any.
+    fn usenet_handle(&self, id: i64) -> Option<UsenetHandle> {
+        self.usenet_handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&id)
+            .copied()
+    }
+
+    /// Persists one Usenet tick at the same one-second budget as a torrent tick.
+    async fn statistics_usenet(
+        &self,
+        id: i64,
+        handle: UsenetHandle,
+    ) -> Result<Option<DownloadStatistics>, AcquisitionError> {
+        let engine = self
+            .usenet
+            .as_ref()
+            .ok_or(AcquisitionError::UsenetUnavailable)?;
+        let now = self.clock.now();
+        {
+            let written = self
+                .written_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(last) = written.get(&id)
+                && now.as_millisecond().saturating_sub(last.as_millisecond()) < TICK_INTERVAL_MILLIS
+            {
+                return Ok(None);
+            }
+        }
+        let row = self.reload(id).await?;
+        self.apply(id, DownloadEvent::Progress).await?;
+        let stats = engine.stats(handle).await?;
+        let statistics = DownloadStatistics {
+            downloaded_bytes: stats.downloaded_bytes,
+            uploaded_bytes: 0,
+            progress_permille: stats.progress_permille(),
+            download_rate_bps: stats.rate_bps,
+            upload_rate_bps: 0,
+            peers_connected: 0,
+            peers_swarm: 0,
+            eta_seconds: stats.eta_seconds,
+            ratio: None,
+        };
+        if let Ok(available) = self
+            .volume
+            .available_bytes(std::path::Path::new(row.save_path.as_str()))
+            && available < self.free_space_floor
+        {
+            self.apply(id, DownloadEvent::DiskFull).await?;
+            engine.pause(handle).await?;
+        }
+        if !self
+            .database
+            .record_download_statistics(id, statistics)
+            .await?
+        {
+            return Err(AcquisitionError::NotFound);
+        }
+        self.written_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id, now);
+        self.bus.publish(Event::new(
+            DOWNLOAD_STATS,
+            id.to_string(),
+            payload(id, &statistics),
+        ));
+        if stats.error.is_some() {
+            self.usenet_handles
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&id);
+            self.apply(id, DownloadEvent::EngineFailed).await?;
+            return Ok(Some(statistics));
+        }
+        if stats.complete && row.state == DownloadState::Downloading {
+            self.finish_usenet(id, handle).await?;
+        }
+        Ok(Some(statistics))
+    }
+
+    /// Finishes one Usenet job: the post is whole, so it is imported and the engine forgets it.
+    async fn finish_usenet(&self, id: i64, handle: UsenetHandle) -> Result<(), AcquisitionError> {
+        self.usenet_handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        self.written_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        let result = self.complete_usenet(id).await;
+        if let Some(engine) = self.usenet.as_ref()
+            && let Err(error) = engine.remove(handle).await
+        {
+            warn!(%error, job = id, "a completed Usenet job could not be stopped");
+        }
+        result
+    }
+
+    /// The half of completion that does not need a live engine handle.
+    ///
+    /// A restart reconciles a row that already reached 100 %, and a job whose engine handle died
+    /// with the previous process must still run the post-process and import. The caller owns handle
+    /// removal, because the restart path has no handle to remove.
+    async fn complete_usenet(&self, id: i64) -> Result<(), AcquisitionError> {
+        let mut files = self.database.download_files(unrestricted(), id).await?;
+        let mut has_media = files.iter().any(|file| file.selected && file.is_media);
+        if !has_media && let Some(tools) = self.post.as_ref() {
+            let row = self.reload(id).await?;
+            let _ = self
+                .database
+                .set_download_stage(id, peregrine_domain::DownloadStage::Extracting)
+                .await;
+            let max_bytes = self
+                .volume
+                .available_bytes(std::path::Path::new(row.save_path.as_str()))
+                .unwrap_or(0)
+                .saturating_sub(self.free_space_floor);
+            match crate::usenet_post::process(
+                tools,
+                &self.database,
+                &self.destination,
+                &row,
+                &files,
+                max_bytes,
+            )
+            .await
+            {
+                Ok(_) => {
+                    files = self.database.download_files(unrestricted(), id).await?;
+                    has_media = files.iter().any(|file| file.selected && file.is_media);
+                }
+                Err(error) => {
+                    warn!(%error, job = id, "a Usenet archive could not be post-processed");
+                }
+            }
+            let _ = self
+                .database
+                .set_download_stage(id, peregrine_domain::DownloadStage::Transfer)
+                .await;
+        }
+        if !has_media {
+            // A silent `completed` with nothing in the library would be worse than an honest
+            // failure.
+            let _ = self.apply(id, DownloadEvent::EngineFailed).await;
+            warn!(
+                job = id,
+                "a Usenet payload held no media entry after post-processing"
+            );
+            return Ok(());
+        }
+        self.apply(id, DownloadEvent::PayloadComplete).await?;
+        let row = self.reload(id).await?;
+        if let Err(error) = self.import_completed(&row).await {
+            warn!(%error, job = id, "a completed Usenet download could not be added to the library");
+        }
+        if self
+            .database
+            .usenet_setting()
+            .await?
+            .delete_archives_after_import
+        {
+            let job_dir = std::path::Path::new(row.save_path.as_str());
+            for file in files.iter().filter(|file| file.selected) {
+                let archive = crate::usenet_post::is_archive(file.path.as_str());
+                let par2 = crate::usenet_post::is_par2(file.path.as_str());
+                if !archive && !par2 {
+                    continue;
+                }
+                let candidate = job_dir.join(file.path.as_str());
+                if let Ok(safe) = self.destination.resolve(&candidate)
+                    && let Err(error) = self.trash.move_to_trash(safe.as_path())
+                {
+                    warn!(%error, job = id, "a Usenet archive could not be moved to the trash");
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Finishes one job whose payload is whole: the two domain edges, the import, and the stop.
@@ -1030,6 +1544,11 @@ impl AcquisitionService {
             if job.state != DownloadState::Downloading || job.progress_permille < 1_000 {
                 continue;
             }
+            if job.protocol == Protocol::Usenet {
+                self.complete_usenet(job.id).await?;
+                finished += 1;
+                continue;
+            }
             self.apply(job.id, DownloadEvent::PayloadComplete).await?;
             self.apply(job.id, DownloadEvent::SeedingSatisfied).await?;
             let row = self.reload(job.id).await?;
@@ -1039,6 +1558,57 @@ impl AcquisitionService {
             finished += 1;
         }
         Ok(finished)
+    }
+
+    /// Removes source NZBs whose job is gone, so a cancelled job does not leave a directory behind.
+    ///
+    /// Only a file named exactly `source.nzb` is considered, and only under the download root. A
+    /// directory named by a live job is left alone; a symlink is not followed.
+    ///
+    /// # Errors
+    ///
+    /// Storage when the job list cannot be read.
+    pub async fn sweep_orphan_nzbs(&self) -> Result<usize, AcquisitionError> {
+        let jobs = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                DownloadState::ALL,
+                PageRequest::first(10_000),
+            )
+            .await?;
+        let live: std::collections::HashSet<std::path::PathBuf> = jobs
+            .iter()
+            .map(|job| std::path::PathBuf::from(job.save_path.as_str()))
+            .collect();
+        let mut stack = vec![(self.destination.root().to_path_buf(), 0_u8)];
+        let mut swept = 0usize;
+        while let Some((directory, depth)) = stack.pop() {
+            if depth > 4 {
+                continue;
+            }
+            let Ok(mut entries) = tokio::fs::read_dir(&directory).await else {
+                continue;
+            };
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                let Ok(metadata) = entry.metadata().await else {
+                    continue;
+                };
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                if metadata.is_dir() {
+                    stack.push((path, depth + 1));
+                } else if entry.file_name() == "source.nzb"
+                    && !live.contains(&directory)
+                    && self.trash.move_to_trash(&path).is_ok()
+                {
+                    swept += 1;
+                }
+            }
+        }
+        Ok(swept)
     }
 
     /// Gives the library the media files a completed download wrote.
@@ -1080,7 +1650,10 @@ impl AcquisitionService {
                         title_id: row.title_id,
                         episode_id: row.episode_id,
                         state: MediaItemState::Available,
-                        origin: MediaOrigin::Torrent,
+                        origin: match row.protocol {
+                            Protocol::Torrent => MediaOrigin::Torrent,
+                            Protocol::Usenet => MediaOrigin::Usenet,
+                        },
                         preferred_file_id: None,
                         quality_label: None,
                         created_at: at,
@@ -1324,10 +1897,11 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use peregrine_domain::{AccountId, EntryKind, InfoHash, TorrentEntry};
+    use peregrine_domain::{AccountId, EntryKind, InfoHash, PayloadEntry};
     use peregrine_storage::{AddedBy, MagnetUri, PageRequest};
     use peregrine_testkit::{
         DEFAULT_EPOCH_MILLISECONDS, EngineCall, EngineOperation, FakeClock, FakeTorrentEngine,
+        FakeUsenetEngine,
     };
     use peregrine_torrent::{Bytes, EngineError};
     use tempfile::TempDir;
@@ -1425,10 +1999,10 @@ mod tests {
     const FLOOR: u64 = 1_000;
 
     /// One torrent of two entries, which is what the fake engine is told it holds.
-    fn description() -> TorrentDescription {
-        TorrentDescription::new(vec![
-            TorrentEntry::new("Movie.2024.1080p.mkv", 1_000, EntryKind::File),
-            TorrentEntry::new("Movie.2024.1080p.srt", 1_000, EntryKind::File),
+    fn description() -> PayloadDescription {
+        PayloadDescription::new(vec![
+            PayloadEntry::new("Movie.2024.1080p.mkv", 1_000, EntryKind::File),
+            PayloadEntry::new("Movie.2024.1080p.srt", 1_000, EntryKind::File),
         ])
     }
 
@@ -1459,6 +2033,8 @@ mod tests {
             audio_summary: Some("DTS 5.1".to_owned()),
             reported_size_bytes: Some(2_000),
             info_hash: None,
+            protocol: peregrine_domain::Protocol::Torrent,
+            nzb_sha256: None,
             source: DownloadSource::Magnet(MagnetUri::new(text(
                 "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
             ))),
@@ -1470,7 +2046,18 @@ mod tests {
         }
     }
 
-    fn request(title_id: i64, byte: u8, description: TorrentDescription) -> StartRequest {
+    fn usenet_job(title_id: i64) -> NewDownloadJob {
+        let mut job = new_job(title_id);
+        job.release_title = "Movie.2024.1080p.WEB-DL-GROUP".to_owned();
+        job.info_hash = None;
+        job.protocol = peregrine_domain::Protocol::Usenet;
+        job.nzb_sha256 = peregrine_domain::NzbHash::parse(&"a".repeat(64));
+        job.source = DownloadSource::NzbFile(text("/tmp/source.nzb"));
+        job.reported_size_bytes = Some(5);
+        job
+    }
+
+    fn request(title_id: i64, byte: u8, description: PayloadDescription) -> StartRequest {
         StartRequest {
             account: account(),
             job: new_job(title_id),
@@ -1499,6 +2086,14 @@ mod tests {
     }
 
     async fn harness() -> Harness {
+        harness_with(false).await
+    }
+
+    async fn usenet_harness() -> Harness {
+        harness_with(true).await
+    }
+
+    async fn harness_with(usenet: bool) -> Harness {
         let directory = TempDir::new().expect("a temporary directory");
         let database = Arc::new(
             Database::open(directory.path().join("peregrine.sqlite"))
@@ -1534,6 +2129,11 @@ mod tests {
             Arc::clone(&bus),
             Arc::clone(&trash) as Arc<dyn Trash>,
         );
+        let service = if usenet {
+            service.with_usenet(Arc::new(FakeUsenetEngine::new()))
+        } else {
+            service
+        };
         Harness {
             service,
             engine,
@@ -1551,7 +2151,7 @@ mod tests {
         async fn start(
             &self,
             byte: u8,
-            description: TorrentDescription,
+            description: PayloadDescription,
         ) -> Result<Started, AcquisitionError> {
             self.service
                 .start(request(self.title_id, byte, description))
@@ -1662,7 +2262,7 @@ mod tests {
         let blocked = harness
             .start(
                 2,
-                TorrentDescription::new(vec![TorrentEntry::new(
+                PayloadDescription::new(vec![PayloadEntry::new(
                     "../authorized_keys",
                     1,
                     EntryKind::File,
@@ -1678,7 +2278,7 @@ mod tests {
         let opt_in = harness
             .start(
                 3,
-                TorrentDescription::new(vec![TorrentEntry::new("extras.zip", 1, EntryKind::File)]),
+                PayloadDescription::new(vec![PayloadEntry::new("extras.zip", 1, EntryKind::File)]),
             )
             .await
             .expect("an opt-in refusal is a decision too");
@@ -1699,7 +2299,7 @@ mod tests {
     async fn consent_lifts_an_opt_in_block_and_completes_the_add() {
         let harness = harness().await;
         let archive =
-            TorrentDescription::new(vec![TorrentEntry::new("extras.zip", 1, EntryKind::File)]);
+            PayloadDescription::new(vec![PayloadEntry::new("extras.zip", 1, EntryKind::File)]);
         let blocked = harness
             .start(4, archive.clone())
             .await
@@ -1727,6 +2327,254 @@ mod tests {
         assert_eq!(row.state, DownloadState::Downloading);
     }
 
+    #[tokio::test]
+    async fn a_usenet_post_is_gated_stored_and_handed_to_the_engine() {
+        let harness = usenet_harness().await;
+        let nzb = "<nzb><file subject=\"movie.mkv\" date=\"0\" poster=\"p\">\
+                   <segments><segment bytes=\"5\" number=\"1\">&lt;one@test&gt;</segment>\
+                   </segments></file></nzb>";
+        let document = NzbDocument::parse(nzb.as_bytes()).expect("the fixture parses");
+        let servers = vec![ServerConfig {
+            nntp: peregrine_usenet::NntpConfig {
+                host: "news.example.test".to_owned(),
+                port: 563,
+                tls: true,
+                username: "reader".to_owned(),
+                password: None,
+            },
+            connections: 1,
+            priority: 0,
+        }];
+
+        let started = harness
+            .service
+            .start_usenet(UsenetStartRequest {
+                account: account(),
+                job: usenet_job(harness.title_id),
+                document,
+                nzb_bytes: nzb.as_bytes().to_vec(),
+                servers,
+            })
+            .await
+            .expect("a clean post starts");
+
+        assert_eq!(started.state, DownloadState::Downloading);
+        assert!(started.added, "the post reached the engine");
+        assert_eq!(started.job.protocol, peregrine_domain::Protocol::Usenet);
+        let Some(DownloadSource::NzbFile(path)) = started.job.source.as_ref() else {
+            panic!("the source is the stored NZB");
+        };
+        assert!(
+            std::path::Path::new(path.as_str()).is_file(),
+            "the NZB is stored"
+        );
+        let files = harness
+            .database
+            .download_files(unrestricted(), started.job.id)
+            .await
+            .expect("the file rows");
+        assert_eq!(files.len(), 1);
+        assert!(files[0].selected);
+    }
+
+    #[tokio::test]
+    async fn a_usenet_archive_waits_for_consent_then_starts() {
+        let harness = usenet_harness().await;
+        let nzb = "<nzb><file subject=\"extras.zip\" date=\"0\" poster=\"p\">\
+                   <segments><segment bytes=\"5\" number=\"1\">&lt;one@test&gt;</segment>\
+                   </segments></file></nzb>";
+        let document = NzbDocument::parse(nzb.as_bytes()).expect("the fixture parses");
+        let servers = vec![ServerConfig {
+            nntp: peregrine_usenet::NntpConfig {
+                host: "news.example.test".to_owned(),
+                port: 563,
+                tls: true,
+                username: "reader".to_owned(),
+                password: None,
+            },
+            connections: 1,
+            priority: 0,
+        }];
+        let blocked = harness
+            .service
+            .start_usenet(UsenetStartRequest {
+                account: account(),
+                job: usenet_job(harness.title_id),
+                document,
+                nzb_bytes: nzb.as_bytes().to_vec(),
+                servers: servers.clone(),
+            })
+            .await
+            .expect("the gate parks the archive");
+        assert_eq!(blocked.state, DownloadState::Blocked);
+        assert!(!blocked.added);
+
+        let state = harness
+            .service
+            .consent_usenet(blocked.job.id, servers)
+            .await
+            .expect("consent lifts the block");
+        assert_eq!(state, DownloadState::Downloading);
+        assert!(
+            harness
+                .database
+                .usenet_setting()
+                .await
+                .unwrap()
+                .allow_archives
+        );
+    }
+
+    #[tokio::test]
+    async fn a_live_usenet_job_is_reattached_from_its_stored_nzb() {
+        let harness = usenet_harness().await;
+        let nzb = "<nzb><file subject=\"movie.mkv\" date=\"0\" poster=\"p\">\
+                   <segments><segment bytes=\"5\" number=\"1\">&lt;one@test&gt;</segment>\
+                   </segments></file></nzb>";
+        let document = NzbDocument::parse(nzb.as_bytes()).expect("the fixture parses");
+        let servers = vec![ServerConfig {
+            nntp: peregrine_usenet::NntpConfig {
+                host: "news.example.test".to_owned(),
+                port: 563,
+                tls: true,
+                username: "reader".to_owned(),
+                password: None,
+            },
+            connections: 1,
+            priority: 0,
+        }];
+        let started = harness
+            .service
+            .start_usenet(UsenetStartRequest {
+                account: account(),
+                job: usenet_job(harness.title_id),
+                document,
+                nzb_bytes: nzb.as_bytes().to_vec(),
+                servers: servers.clone(),
+            })
+            .await
+            .expect("the post starts");
+
+        let guard = PathGuard::new(harness.directory.path().join("downloads"))
+            .expect("the fixture root is absolute");
+        let restarted = AcquisitionService::new(
+            Arc::clone(&harness.database),
+            Arc::new(FakeTorrentEngine::new()),
+            Arc::clone(&harness.clock) as Arc<dyn Clock + Send + Sync>,
+            guard,
+            Arc::clone(&harness.volume) as Arc<dyn VolumeSpace>,
+            FLOOR,
+            Arc::clone(&harness.bus),
+            TrashLog::new(),
+        )
+        .with_usenet(Arc::new(FakeUsenetEngine::new()));
+        let count = restarted
+            .reattach_usenet(servers)
+            .await
+            .expect("the live post is reattached");
+        assert_eq!(count, 1);
+        let stats = restarted
+            .statistics(started.job.id)
+            .await
+            .expect("the reattached job answers")
+            .expect("a live row");
+        assert_eq!(stats.downloaded_bytes, 0);
+        assert_eq!(stats.progress_permille, 0);
+    }
+
+    #[tokio::test]
+    async fn a_usenet_post_that_finished_before_restart_is_imported_without_a_seed_edge() {
+        let harness = usenet_harness().await;
+        let nzb = "<nzb><file subject=\"movie.mkv\" date=\"0\" poster=\"p\">\
+                   <segments><segment bytes=\"5\" number=\"1\">&lt;one@test&gt;</segment>\
+                   </segments></file></nzb>";
+        let document = NzbDocument::parse(nzb.as_bytes()).expect("the fixture parses");
+        let servers = vec![ServerConfig {
+            nntp: peregrine_usenet::NntpConfig {
+                host: "news.example.test".to_owned(),
+                port: 563,
+                tls: true,
+                username: "reader".to_owned(),
+                password: None,
+            },
+            connections: 1,
+            priority: 0,
+        }];
+        let started = harness
+            .service
+            .start_usenet(UsenetStartRequest {
+                account: account(),
+                job: usenet_job(harness.title_id),
+                document,
+                nzb_bytes: nzb.as_bytes().to_vec(),
+                servers,
+            })
+            .await
+            .expect("the post starts");
+        harness
+            .database
+            .record_download_statistics(
+                started.job.id,
+                DownloadStatistics {
+                    downloaded_bytes: 5,
+                    uploaded_bytes: 0,
+                    progress_permille: 1_000,
+                    download_rate_bps: 0,
+                    upload_rate_bps: 0,
+                    peers_connected: 0,
+                    peers_swarm: 0,
+                    eta_seconds: None,
+                    ratio: None,
+                },
+            )
+            .await
+            .expect("the tick writes");
+        assert_eq!(
+            harness
+                .service
+                .reconcile_finished()
+                .await
+                .expect("reconciled"),
+            1
+        );
+        let row = harness
+            .database
+            .download_job(account(), started.job.id)
+            .await
+            .expect("read")
+            .expect("row");
+        assert_eq!(row.state, DownloadState::Completed);
+    }
+
+    #[tokio::test]
+    async fn an_orphan_nzb_is_swept_but_a_live_job_keeps_its_own() {
+        let harness = harness().await;
+        harness
+            .start(
+                30,
+                PayloadDescription::new(vec![PayloadEntry::new("movie.mkv", 1, EntryKind::File)]),
+            )
+            .await
+            .expect("the job starts");
+        let root = harness.directory.path().join("downloads");
+        tokio::fs::create_dir_all(root.join("Movies"))
+            .await
+            .expect("the live directory");
+        tokio::fs::write(root.join("Movies/source.nzb"), b"live")
+            .await
+            .expect("the live source");
+        tokio::fs::create_dir_all(root.join("orphan"))
+            .await
+            .expect("the orphan directory");
+        tokio::fs::write(root.join("orphan/source.nzb"), b"orphan")
+            .await
+            .expect("the orphan source");
+
+        assert_eq!(harness.service.sweep_orphan_nzbs().await.expect("swept"), 1);
+        assert!(root.join("Movies/source.nzb").is_file());
+        assert!(!root.join("orphan/source.nzb").exists());
+    }
+
     /// F6 draws inspection before the free-space check, and this is why: a torrent the gate has
     /// already refused says so even on a volume with no room. Answering "free some space" instead
     /// would send the user to do that for a download that still cannot start, and the report the
@@ -1736,7 +2584,7 @@ mod tests {
         let harness = harness().await;
         harness.volume.set(0);
         let archive =
-            TorrentDescription::new(vec![TorrentEntry::new("extras.zip", 1, EntryKind::File)]);
+            PayloadDescription::new(vec![PayloadEntry::new("extras.zip", 1, EntryKind::File)]);
 
         let started = harness
             .start(15, archive)
@@ -1764,7 +2612,7 @@ mod tests {
     async fn consent_on_a_full_volume_leaves_the_job_blocked() {
         let harness = harness().await;
         let archive =
-            TorrentDescription::new(vec![TorrentEntry::new("extras.zip", 1, EntryKind::File)]);
+            PayloadDescription::new(vec![PayloadEntry::new("extras.zip", 1, EntryKind::File)]);
         let blocked = harness
             .start(16, archive.clone())
             .await
@@ -1804,7 +2652,7 @@ mod tests {
     #[tokio::test]
     async fn a_torrent_refused_after_consent_stays_blocked() {
         let harness = harness().await;
-        let traversal = TorrentDescription::new(vec![TorrentEntry::new(
+        let traversal = PayloadDescription::new(vec![PayloadEntry::new(
             "../authorized_keys",
             1,
             EntryKind::File,
@@ -1822,7 +2670,7 @@ mod tests {
         assert!(matches!(error, AcquisitionError::NoOverride));
 
         // And the report the caller could hand in without re-inspecting is refused by the domain.
-        let stale = TorrentInspector::new(InspectionLimits::new(1_000, u64::MAX)).inspect(
+        let stale = PayloadInspector::new(InspectionLimits::new(1_000, u64::MAX)).inspect(
             &archive_for_stale(),
             &PathGuard::new(harness.directory.path().join("downloads")).expect("absolute"),
             OptIn::NotGranted,
@@ -1846,8 +2694,8 @@ mod tests {
     }
 
     /// A description whose opt-in report is not granted, used to drive the domain's own refusal.
-    fn archive_for_stale() -> TorrentDescription {
-        TorrentDescription::new(vec![TorrentEntry::new("extras.zip", 1, EntryKind::File)])
+    fn archive_for_stale() -> PayloadDescription {
+        PayloadDescription::new(vec![PayloadEntry::new("extras.zip", 1, EntryKind::File)])
     }
 
     /// Two live jobs for one info hash is a typed conflict; the same release after `removed` starts
@@ -2404,7 +3252,7 @@ mod tests {
         let blocked = harness
             .start(
                 17,
-                TorrentDescription::new(vec![TorrentEntry::new("extras.zip", 1, EntryKind::File)]),
+                PayloadDescription::new(vec![PayloadEntry::new("extras.zip", 1, EntryKind::File)]),
             )
             .await
             .expect("it parks");

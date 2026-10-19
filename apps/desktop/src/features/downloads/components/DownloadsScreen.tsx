@@ -190,9 +190,17 @@ export function DownloadsScreen({
       },
     },
     {
+      id: "protocol",
+      header: t("downloads.column.protocol"),
+      cell: (row) => t(`downloads.protocol.${row.protocol}`, { defaultValue: row.protocol }),
+    },
+    {
       id: "state",
       header: t("downloads.column.state"),
-      cell: (row) => t(`downloads.state.${row.state}`),
+      cell: (row) =>
+        row.stage === "transfer"
+          ? t(`downloads.state.${row.state}`)
+          : t(`downloads.stage.${row.stage}`, { defaultValue: row.stage }),
     },
     {
       id: "reason",
@@ -251,7 +259,10 @@ export function DownloadsScreen({
       id: "peers",
       header: t("downloads.column.peers"),
       numeric: true,
-      cell: (row) => `${String(row.peersConnected)} / ${String(row.peersSwarm)}`,
+      cell: (row) =>
+        row.protocol === "usenet"
+          ? t("downloads.none")
+          : `${String(row.peersConnected)} / ${String(row.peersSwarm)}`,
     },
     {
       id: "actions",
@@ -261,6 +272,20 @@ export function DownloadsScreen({
         const paused = row.state === "paused";
         return (
           <div className="flex items-center gap-2">
+            {row.protocol === "usenet" &&
+            row.state === "blocked" &&
+            row.findings.some((finding) => finding.reason === "nested_archive") ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void actions.consent(row.id);
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                {t("downloads.action.allowArchives")}
+              </Button>
+            ) : null}
             {!paused && !FINISHED_STATES.has(row.state) ? (
               <Button
                 disabled={busy}

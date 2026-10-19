@@ -5,23 +5,29 @@
 //! of those past a command's budget. The selection itself is pure and lives in peregrine-domain
 //! (`rank::best_candidate`); this file only supplies the candidates and the profile.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use peregrine_domain::rank::{Candidate, ReleaseRanker, alternative_candidates, ranked_candidates};
 use peregrine_domain::{
-    AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, ReleaseName, Resolution, Verdict,
+    AccountScope, Clock, DEFAULT_HD_CEILING_BYTES, NonEmptyText, NzbHash, Protocol, ReleaseName,
+    Resolution, Verdict,
 };
-use peregrine_indexers::{FetchedTorrent, IndexerRelease, TorrentSource as IndexerSource};
+use peregrine_indexers::{
+    FetchedRelease, IndexerRelease, ReleaseSource, TorrentSource as IndexerSource, UsenetSource,
+};
 use peregrine_secrets::SecretStore;
 use peregrine_storage::{
     AddedBy, Database, DownloadSource, JobChange, JobPhase, MagnetUri, NewDownloadJob, NewOffer,
 };
 use peregrine_sync::{Job, JobContext, JobError, JobFuture};
 use peregrine_torrent::{TorrentMetadataFetch, TorrentSource as EngineSource};
+use peregrine_usenet::NzbDocument;
+use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::acquisition::{AcquisitionService, StartRequest};
+use crate::acquisition::{AcquisitionService, StartRequest, UsenetStartRequest};
 use crate::events::{Event, EventBus, JOB_PROGRESS};
 use crate::indexers;
 use crate::notify::NotifyOffers;
@@ -58,7 +64,7 @@ pub struct ChosenOffer {
     /// Its stated seeders.
     pub seeders: Option<u32>,
     /// Where its bytes are fetched from, looked up from the row rather than sent over IPC.
-    pub source: IndexerSource,
+    pub source: ReleaseSource,
 }
 
 /// One episode to acquire rather than the whole title.
@@ -68,6 +74,14 @@ pub struct EpisodePick {
     pub season: u32,
     /// The episode's number within that season.
     pub episode: u32,
+}
+
+/// One candidate prepared for the service, in the protocol it arrived as.
+enum Prepared {
+    /// A torrent, with the metadata the gate judges.
+    Torrent(Box<StartRequest>),
+    /// A Usenet post, with the parsed NZB the gate judges.
+    Usenet(Box<UsenetStartRequest>),
 }
 
 /// Which title to acquire, which episode of it, and the release to acquire when the user has chosen
@@ -330,7 +344,7 @@ impl AcquireJob {
         // destination and the volume, so only the gate can refuse what the ranker chose. Walk the
         // ranked list — the search runs once — and gate each candidate before `start` persists
         // anything.
-        let mut refused: Option<StartRequest> = None;
+        let mut refused: Option<Prepared> = None;
         let mut last_error: Option<JobError> = None;
         for index in ranked.into_iter().take(MAX_CANDIDATES_TRIED) {
             if cancellation.is_cancelled() {
@@ -347,13 +361,15 @@ impl AcquireJob {
                     continue;
                 }
             };
-            let verdict = self
-                .acquisition
-                .verdict_for(request.job.save_path.as_str(), &request.description)
-                .map_err(|error| JobError::failed(error.to_string()))?;
-            if verdict == Verdict::Blocked {
-                refused = Some(request);
-                continue;
+            if let Prepared::Torrent(torrent) = &request {
+                let verdict = self
+                    .acquisition
+                    .verdict_for(torrent.job.save_path.as_str(), &torrent.description)
+                    .map_err(|error| JobError::failed(error.to_string()))?;
+                if verdict == Verdict::Blocked {
+                    refused = Some(request);
+                    continue;
+                }
             }
             return self.start_candidate(job, attempt, request).await;
         }
@@ -404,6 +420,11 @@ impl AcquireJob {
                     .size_bytes
                     .and_then(|value| i64::try_from(value).ok()),
                 seeders: release.seeders.map(i64::from),
+                protocol: if release.source.is_torrent() {
+                    "torrent".to_owned()
+                } else {
+                    "usenet".to_owned()
+                },
             });
         }
         if offers.is_empty() {
@@ -429,30 +450,31 @@ impl AcquireJob {
     /// One ranked candidate as a start request: its source, its metadata, and the destination
     /// folder. A metadata failure belongs to that candidate, so the caller decides whether to step
     /// on to the next.
+    #[allow(clippy::too_many_lines)] // One protocol branch per source; splitting hides the order.
     async fn prepare(
         &self,
         chosen: &IndexerRelease,
         title_name: &str,
-    ) -> Result<StartRequest, JobError> {
+    ) -> Result<Prepared, JobError> {
         // What the engine is handed: a magnet when the indexer gave one, an info hash completed
         // into the same urn:btih form, or the .torrent bytes fetched from the URL Prowlarr serves
         // as its magnetUrl -- a proxy download URL, not a magnet, which the engine would try to GET.
         let mut magnet_uri = String::new();
         let engine_source = match &chosen.source {
-            IndexerSource::Magnet(uri) => {
+            ReleaseSource::Torrent(IndexerSource::Magnet(uri)) => {
                 magnet_uri = uri.clone();
                 EngineSource::Magnet(NonEmptyText::new(uri).map_err(|error| {
                     JobError::failed(format!("the release's magnet is not usable: {error}"))
                 })?)
             }
-            IndexerSource::InfoHash(hash) => {
+            ReleaseSource::Torrent(IndexerSource::InfoHash(hash)) => {
                 magnet_uri = format!("magnet:?xt=urn:btih:{hash}");
                 EngineSource::Magnet(NonEmptyText::new(&magnet_uri).map_err(|error| {
                     JobError::failed(format!("the release's magnet is not usable: {error}"))
                 })?)
             }
-            IndexerSource::TorrentUrl(url) => {
-                let fetched = indexers::fetch_torrent_async(Arc::clone(&self.store), url.clone())
+            ReleaseSource::Torrent(IndexerSource::TorrentUrl(_)) => {
+                let fetched = indexers::fetch_async(Arc::clone(&self.store), chosen.source.clone())
                     .await
                     .map_err(|error| {
                         JobError::failed(format!(
@@ -460,16 +482,86 @@ impl AcquireJob {
                         ))
                     })?;
                 match fetched {
-                    FetchedTorrent::Bytes(bytes) => EngineSource::TorrentFile(bytes),
+                    FetchedRelease::TorrentBytes(bytes) => EngineSource::TorrentFile(bytes),
                     // The proxy answered 301 with a magnet, which is the source the engine wanted
                     // all along; the row keeps it, so nothing has to be re-derived from bytes.
-                    FetchedTorrent::Magnet(uri) => {
+                    FetchedRelease::Magnet(uri) => {
                         magnet_uri.clone_from(&uri);
                         EngineSource::Magnet(NonEmptyText::new(&uri).map_err(|error| {
                             JobError::failed(format!("the release's magnet is not usable: {error}"))
                         })?)
                     }
+                    FetchedRelease::NzbBytes(_) => {
+                        return Err(JobError::failed(
+                            "a Usenet source answered a torrent fetch".to_owned(),
+                        ));
+                    }
                 }
+            }
+            ReleaseSource::Usenet(UsenetSource::NzbUrl(_)) => {
+                let fetched = indexers::fetch_async(Arc::clone(&self.store), chosen.source.clone())
+                    .await
+                    .map_err(|error| {
+                        JobError::failed(format!("the release's NZB could not be fetched: {error}"))
+                    })?;
+                let FetchedRelease::NzbBytes(bytes) = fetched else {
+                    return Err(JobError::failed(
+                        "a torrent source answered a Usenet fetch".to_owned(),
+                    ));
+                };
+                let document = NzbDocument::parse(&bytes).map_err(|error| {
+                    JobError::failed(format!("the release's NZB is not usable: {error}"))
+                })?;
+                let nzb_sha256 = NzbHash::parse(&sha256_hex(&bytes)).ok_or_else(|| {
+                    JobError::failed("the release's NZB has no usable checksum".to_owned())
+                })?;
+                let episode_id = match self.target.episode {
+                    Some(pick) => self
+                        .database
+                        .episode_id_for(self.target.title_id, pick.season, pick.episode)
+                        .await
+                        .map_err(|error| {
+                            JobError::failed(format!("the episode could not be read: {error}"))
+                        })?,
+                    None => None,
+                };
+                let save_path = NonEmptyText::new(&folder_for(title_name)).map_err(|error| {
+                    JobError::failed(format!("the destination folder is not usable: {error}"))
+                })?;
+                let servers =
+                    crate::usenet::server_configs(&self.database, Arc::clone(&self.store))
+                        .await
+                        .map_err(|error| JobError::failed(error.to_string()))?;
+                let job =
+                    NewDownloadJob {
+                        title_id: self.target.title_id,
+                        episode_id,
+                        release_title: chosen.raw_title.clone(),
+                        release_source: None,
+                        release_group: None,
+                        resolution: None,
+                        video_codec: None,
+                        hdr_format: None,
+                        audio_summary: None,
+                        reported_size_bytes: chosen.size_bytes,
+                        info_hash: None,
+                        protocol: Protocol::Usenet,
+                        nzb_sha256: Some(nzb_sha256),
+                        source: DownloadSource::NzbFile(NonEmptyText::new("source.nzb").map_err(
+                            |_| JobError::failed("the NZB name is not usable".to_owned()),
+                        )?),
+                        save_path,
+                        priority: 100,
+                        added_by: AddedBy::Auto,
+                        added_at: self.clock.now(),
+                    };
+                return Ok(Prepared::Usenet(Box::new(UsenetStartRequest {
+                    account: self.account,
+                    job,
+                    document,
+                    nzb_bytes: bytes,
+                    servers,
+                })));
             }
         };
 
@@ -523,6 +615,8 @@ impl AcquireJob {
             audio_summary: None,
             reported_size_bytes: chosen.size_bytes,
             info_hash: None,
+            protocol: peregrine_domain::Protocol::Torrent,
+            nzb_sha256: None,
             source: row_source,
             save_path,
             priority: 100,
@@ -530,12 +624,12 @@ impl AcquireJob {
             added_at: self.clock.now(),
         };
 
-        Ok(StartRequest {
+        Ok(Prepared::Torrent(Box::new(StartRequest {
             account: self.account,
             job: job_row,
             description: fetched.description().clone(),
             info_hash: fetched.info_hash(),
-        })
+        })))
     }
 
     /// Hands one prepared candidate to the acquisition service, which persists the row and either
@@ -544,13 +638,13 @@ impl AcquireJob {
         &self,
         job: ulid::Ulid,
         attempt: u32,
-        request: StartRequest,
+        request: Prepared,
     ) -> peregrine_sync::JobResult {
-        let started = self
-            .acquisition
-            .start(request)
-            .await
-            .map_err(|error| JobError::failed(error.to_string()))?;
+        let started = match request {
+            Prepared::Torrent(request) => self.acquisition.start(*request).await,
+            Prepared::Usenet(request) => self.acquisition.start_usenet(*request).await,
+        }
+        .map_err(|error| JobError::failed(error.to_string()))?;
         self.phase(job, attempt, 1000).await;
         Ok(Box::new(started.job.id))
     }
@@ -581,6 +675,16 @@ fn search_query(name: &str, episode: Option<EpisodePick>) -> String {
         Some(pick) => format!("{name} S{:02}E{:02}", pick.season, pick.episode),
         None => name.to_owned(),
     }
+}
+
+/// The lower-case SHA-256 of a post, the Usenet dedupe key.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
 }
 
 /// A safe single-segment folder for a release, derived from the title's name.

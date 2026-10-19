@@ -337,7 +337,7 @@ CREATE TABLE media_item (
   title_id      INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
   episode_id    INTEGER REFERENCES episode(id) ON DELETE CASCADE,
   state         TEXT NOT NULL CHECK (state IN ('wanted','downloading','available','partial','failed')),
-  origin        TEXT NOT NULL CHECK (origin IN ('scan','torrent','manual')),
+  origin        TEXT NOT NULL CHECK (origin IN ('scan','torrent','manual','usenet')),
   preferred_file_id INTEGER,
   quality_label TEXT,                     -- best-known quality of the primary file
   created_at    INTEGER NOT NULL,
@@ -594,6 +594,11 @@ CREATE TABLE download_job (
   info_hash          TEXT,
   magnet_uri         TEXT,
   torrent_file_path  TEXT,
+  protocol           TEXT NOT NULL DEFAULT 'torrent' CHECK (protocol IN ('torrent','usenet')),
+  nzb_sha256         TEXT,           -- the Usenet dedupe key, 64 lower-case hex
+  nzb_path           TEXT,           -- the application copy of the .nzb
+  stage              TEXT NOT NULL DEFAULT 'transfer'
+                     CHECK (stage IN ('transfer','repairing','extracting','importing')),
   save_path          TEXT NOT NULL,
   downloaded_bytes   INTEGER NOT NULL DEFAULT 0,
   uploaded_bytes     INTEGER NOT NULL DEFAULT 0,
@@ -625,17 +630,51 @@ CREATE INDEX download_job_title_idx  ON download_job (title_id, episode_id);
 CREATE UNIQUE INDEX download_job_hash_uq ON download_job (info_hash)
   WHERE info_hash IS NOT NULL
     AND state IN ('queued','inspecting','metadata','downloading','paused','seeding');
+-- The Usenet equivalent: at most one live job per post, keyed by the NZB's SHA-256.
+CREATE UNIQUE INDEX download_job_nzb_uq ON download_job (nzb_sha256)
+  WHERE nzb_sha256 IS NOT NULL
+    AND state IN ('queued','inspecting','metadata','downloading','paused','seeding');
 
 CREATE TABLE download_file (
   id                INTEGER PRIMARY KEY,
   download_job_id   INTEGER NOT NULL REFERENCES download_job(id) ON DELETE CASCADE,
-  torrent_file_index INTEGER NOT NULL,
+  file_index        INTEGER NOT NULL,      -- the entry's position in the payload's list
   path              TEXT NOT NULL,         -- relative, validated by the inspection gate
   size_bytes        INTEGER NOT NULL,
   selected          INTEGER NOT NULL DEFAULT 1 CHECK (selected IN (0,1)),
   is_media          INTEGER NOT NULL DEFAULT 0 CHECK (is_media IN (0,1)),
   blocked_reason    TEXT,
-  UNIQUE (download_job_id, torrent_file_index)
+  UNIQUE (download_job_id, file_index)
+);
+
+
+-- The provider a Usenet transfer contacts. The password is a keyring key name, never a value.
+CREATE TABLE usenet_server (
+  id              INTEGER PRIMARY KEY,
+  name            TEXT NOT NULL UNIQUE,
+  host            TEXT NOT NULL,
+  port            INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+  tls             INTEGER NOT NULL DEFAULT 1 CHECK (tls IN (0,1)),
+  username        TEXT NOT NULL DEFAULT '',
+  password_secret TEXT NOT NULL,
+  connections     INTEGER NOT NULL DEFAULT 8 CHECK (connections BETWEEN 1 AND 64),
+  priority        INTEGER NOT NULL DEFAULT 100,
+  enabled         INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  health_state    TEXT NOT NULL DEFAULT 'unknown'
+                  CHECK (health_state IN ('unknown','ok','degraded','failing','disabled')),
+  last_check_at   INTEGER,
+  created_at      INTEGER NOT NULL,
+  UNIQUE (host, port, username)
+);
+CREATE INDEX usenet_server_enabled_idx ON usenet_server (enabled, priority);
+
+-- One row. Archives are an opt-in; cleanup after import is the default.
+CREATE TABLE usenet_setting (
+  id                           INTEGER PRIMARY KEY CHECK (id = 1),
+  allow_archives               INTEGER NOT NULL DEFAULT 0 CHECK (allow_archives IN (0,1)),
+  delete_archives_after_import INTEGER NOT NULL DEFAULT 1
+                               CHECK (delete_archives_after_import IN (0,1)),
+  updated_at                   INTEGER NOT NULL
 );
 
 -- Why a release won. Kept so ranking is auditable and regressions are explainable.
@@ -650,7 +689,8 @@ CREATE TABLE release_decision (
   rank_position  INTEGER NOT NULL,
   chosen         INTEGER NOT NULL DEFAULT 0 CHECK (chosen IN (0,1)),
   reasons_json   TEXT NOT NULL,     -- per-rule contributions
-  created_at     INTEGER NOT NULL
+  created_at     INTEGER NOT NULL,
+  protocol       TEXT NOT NULL DEFAULT 'torrent' CHECK (protocol IN ('torrent','usenet'))
 );
 CREATE INDEX release_decision_title_idx ON release_decision (title_id, created_at DESC);
 ```
@@ -1188,7 +1228,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I1 | Exactly one `external_id` row per `(provider, value)`; a title never claims another title's ID. | `UNIQUE (provider, value)` |
 | I2 | A `media_item` for an episode exists at most once per episode; a movie item exists at most once per movie. | Partial unique indices |
 | I3 | A `media_file.path` is unique and canonical. Two items never claim one file. | `UNIQUE (path)` |
-| I4 | Every non-terminal `download_job` has a `safety_report_json` before `state` advances past `inspecting`. | `download::transition` in the domain makes it a type: the only events that reach `metadata` carry a `SafetyReport`, which only `TorrentInspector::inspect` or the persisted JSON can produce. The repository calls that guard rather than re-deciding (PG-E4-11) |
+| I4 | Every non-terminal `download_job` has a `safety_report_json` before `state` advances past `inspecting`. | `download::transition` in the domain makes it a type: the only events that reach `metadata` carry a `SafetyReport`, which only `PayloadInspector::inspect` or the persisted JSON can produce. The repository calls that guard rather than re-deciding (PG-E4-11) |
 | I5 | No `download_file.path` may be absolute, contain `..`, or escape the job's `save_path`. | Validated at insert; re-validated on read of the persisted report |
 | I6 | `watch_progress.percent = position_ms / duration_ms`, and `watched = 1` implies `percent ≥ 0.92` unless set manually. **This is a floor, not the playback threshold:** [FLOWS](./FLOWS.md) F10 marks a title watched at ≥ 0.95 or at the credits, and the lower bound here exists so that a manual or imported mark between the two is representable. | Domain function is the only writer |
 | I7 | `episode.season_number`/`episode_number` are unique within a title. | `UNIQUE (title_id, season_number, episode_number)`. The enrichment upsert matches on that key and **never writes the numbers**, which is §2.3's rule made mechanical: `enrichment_never_rewrites_the_canonical_numbering` in `peregrine-storage`'s `catalogue` module feeds a provider's answer out of order and with a gap, so a positional write — renumbering from the order an answer happened to list — fails it, and the `episode_ordering` overlay beside the row is asserted untouched |
@@ -1220,7 +1260,7 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I33 | A custom avatar is a raster image, bounded in size and dimensions, with EXIF and GPS stripped, and never an SVG or animated format. | Import path validates, decodes through the bounded image path, re-encodes without metadata, and rejects SVG outright |
 | I34 | At most one `guest` account exists, its name is not editable, and it carries no custom avatar. | Partial unique index on `kind`; the service refuses a rename or avatar change for `guest` |
 | I35 | Quality-profile size floors never exceed ceilings, and a release group cannot be both allowed and blocked. | Domain tests `contradictory_size_caps_are_rejected_at_construction`, `contradictory_group_rules_are_rejected_at_construction`, `contradictory_rules_are_rejected_during_deserialization`, and `a_group_on_both_lists_is_rejected_during_deserialization` |
-| I36 | Artwork has at most one row per owner, role, provider, path, and language, where "no language" is the empty string rather than NULL; and at most one *live* download job exists per info hash, while terminal jobs may repeat. | `artwork_language_is_a_sentinel_and_never_null`, `the_info_hash_index_is_unique_among_live_jobs_only`, and the two upgrade tests in `peregrine-storage`'s `migrations` module |
+| I36 | Artwork has at most one row per owner, role, provider, path, and language, where "no language" is the empty string rather than NULL; and at most one *live* download job exists per info hash or per NZB SHA-256, while terminal jobs may repeat. | `artwork_language_is_a_sentinel_and_never_null`, `the_info_hash_index_is_unique_among_live_jobs_only`, and the two upgrade tests in `peregrine-storage`'s `migrations` module |
 | I37 | Content outside an account's scope is indistinguishable from content that does not exist: a restricted scope cannot see an adult-flagged title or one with no certification, and a read returns the same answer for a hidden title as for an absent one. | `a_restricted_scope_hides_adult_and_unrated_content`, `a_restricted_page_is_still_a_full_page`, `a_fresh_stub_is_not_visible_to_a_restricted_scope`, and `an_unrestricted_scope_sees_every_title` in `peregrine-storage`'s `catalogue` module, and `a_restricted_scope_gets_the_same_answer_for_hidden_and_absent_content` and `a_restricted_page_is_still_a_full_page` in its `fts` module; the scope itself is `peregrine-domain`'s `AccountScope` |
 | I38 | The repository layer emits only declared events: `event_log.kind`, `subject_kind` and `subject_id` can hold no value that `peregrine-domain`'s event vocabulary does not name, and no API accepts a kind as a string. | The seal is a type, not a check: `NewEvent` holds `peregrine_domain::Event`, `Event::as_str` is an exhaustive match so an unnamed variant fails `cargo check`, and a `compile_fail` doctest in `peregrine-storage`'s `writer` module pins that the old string field cannot be constructed. `the_download_vocabulary_covers_the_machine` walks the download machine's own legal-cell matrix in both directions, and `an_appended_event_reads_back_as_the_declared_event` proves a written row parses back to the event that wrote it |
 | I40 | A user's match correction is stored as a pattern and consulted before a file is parked, so the title the parse read places later files that read the same way; a rule settles *which title* a name means and never where in it the file sits. | `UNIQUE (pattern)` on `match_rule`; `the_second_occurrence_of_a_corrected_name_is_placed_without_asking` in `peregrine-app`'s `library::index` module proves the read, `a_rule_never_settles_a_numbering_question` proves an episode-shaped refusal is decided first, and `one_pattern_has_one_rule` proves the upsert |
@@ -1236,7 +1276,7 @@ The "Enforced by" column above states the *mechanism* an invariant is meant to h
 - **Enforced by tests that now name them:** I14 by `quiet_hours_never_hold_back_a_critical_event` and `a_critical_event_that_cannot_be_disabled_still_respects_focus`; I15 by `the_scanner_finds_each_forbidden_class`; I25, I26 and I27 by the scoped-read tests in `peregrine-storage`'s `catalogue` module — including the notification reads, by `a_restricted_scope_hides_notifications_about_hidden_subjects` and `a_restricted_scope_hides_notifications_about_an_episode_of_a_hidden_title` in its `notify` module — and by the scoped search tests in its `fts` module. The enforcement was already real; only the cross-reference was missing, and adding it is cheaper than asking a reader to trust the column.
 - **I41** by `a_paired_device_round_trips_without_storing_its_token` and `revoking_keeps_the_row_and_is_reported_once` in `peregrine-storage`'s `pairing` module, and by the refused-after-revoke case in `peregrine-app`'s LAN test.
 - **Stated for a table that exists, where the promised mechanism is genuinely absent:** only **I10** — deleting a title must cascade to rows and never to files, and nothing deletes a title at all, because deletion is PG-E15's. Two others that first looked like this group were checked and are narrower than they appear:
-  - **I5** is enforced **upstream**, not by the column. No repository writes `download_file` today, and it does not need to: `TorrentInspector` refuses `../escape.mkv` and absolute entries with a typed reason before any row could be written, so a traversing path cannot reach the table through the only path that exists. What the column promises — validating again at insert and on read — is defence in depth that lands with the `download_file` writer, and it should not be described as missing.
+  - **I5** is enforced **upstream**, not by the column. No repository writes `download_file` today, and it does not need to: `PayloadInspector` refuses `../escape.mkv` and absolute entries with a typed reason before any row could be written, so a traversing path cannot reach the table through the only path that exists. What the column promises — validating again at insert and on read — is defence in depth that lands with the `download_file` writer, and it should not be described as missing.
   - **I8** is **vacuously true**: nothing writes `settings` in production yet, so no plaintext secret can coexist with a `secret_ref` in it. The test the column promises would assert over an empty table and prove nothing; it belongs with the settings registry (PG-E20-01), which is where the values that could carry a secret start to exist.
   - I25's wider read set is the same shape as I5: the scope is genuinely enforced on every read that exists, and the invariant's remaining force is over episode and notification reads that have not been written yet. The search read landed with PG-E3-12, the library and watch-state reads with PG-E3-10 — `media_item`, `media_file`, `unmatched_file`, `subtitle_track`, `watch_progress` and `watchlist_entry` each take an `AccountScope` and put it in the `WHERE` clause, and `a_restricted_scope_cannot_see_an_adult_items_files`, `a_restricted_scope_cannot_see_progress_for_hidden_titles` and their neighbours are the tests. Episode reads exist only on the **scanner's** surface, which is the exception above rather than a gap in this invariant: `season_id_for` and `episode_id_for` take no scope because a placement is decided from a filename and the row it looks up must be found whether or not any account may see the title (`PG-E14-07`). A *scoped* episode read — one a screen makes on behalf of an account — still does not exist, and that is what this invariant's remaining force is over.
   - **The scope a user-facing read runs under is now one function rather than a per-call-site guess.** `peregrine-app`'s `installation_scope` is what this table means by "defaulting to unrestricted on a single-account installation": accounts are `PG-E35`'s epic, a fresh installation seeds no account row, and what a scope *carries* is a ceiling and a curation flag — neither of which this build has. The account id it names is inert for both predicates an unrestricted scope applies (`hidden_by_scope` is zero, which makes the predicate a no-op), which is why the constant can exist before the accounts epic does. When that lands it becomes a resolution — the default account's `rating_ceiling` and `curated_only` — and every call site keeps passing a scope, which is why the constant lives with its reason rather than at each call site with none.

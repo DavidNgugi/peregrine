@@ -37,16 +37,42 @@ pub enum TorrentSource {
     TorrentUrl(String),
 }
 
+/// Where a Usenet release's NZB can be fetched from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UsenetSource {
+    /// An HTTP(S) URL for the NZB, usually Prowlarr's proxy download URL.
+    NzbUrl(String),
+}
+
+/// A release's source, whichever protocol carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReleaseSource {
+    /// A `BitTorrent` source.
+    Torrent(TorrentSource),
+    /// A Usenet source.
+    Usenet(UsenetSource),
+}
+
+impl ReleaseSource {
+    /// Whether this is a torrent.
+    #[must_use]
+    pub const fn is_torrent(&self) -> bool {
+        matches!(self, Self::Torrent(_))
+    }
+}
+
 /// What fetching a release's HTTP URL produced.
 ///
 /// Prowlarr's proxy URL answers 301 with a `magnet:` Location for a torrent indexer -- a scheme an
-/// HTTP client cannot follow -- and the .torrent body for one that serves a file directly.
+/// HTTP client cannot follow -- and the .torrent or .nzb body for one that serves a file directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FetchedTorrent {
+pub enum FetchedRelease {
     /// The .torrent file's own bytes.
-    Bytes(Vec<u8>),
+    TorrentBytes(Vec<u8>),
     /// The magnet the proxy redirected to.
     Magnet(String),
+    /// The .nzb file's own bytes.
+    NzbBytes(Vec<u8>),
 }
 
 /// One release an indexer found, in this application's vocabulary.
@@ -67,7 +93,7 @@ pub struct IndexerRelease {
     /// How many leeches the indexer reported.
     pub leechers: Option<u32>,
     /// Where the bytes can be fetched from.
-    pub source: TorrentSource,
+    pub source: ReleaseSource,
     /// Which indexer this result came from.
     pub indexer: Option<String>,
     /// When the indexer says the release was published, as it stated it.
@@ -84,6 +110,6 @@ pub trait Indexer: Send + Sync {
     /// Asks whether the configured endpoint and credential work.
     fn check(&self) -> IndexerFuture<'_, ()>;
 
-    /// Fetches the .torrent bytes behind a `TorrentSource::TorrentUrl`.
-    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, FetchedTorrent>;
+    /// Fetches the bytes behind a URL source, or answers the magnet a torrent source already is.
+    fn fetch<'a>(&'a self, source: &'a ReleaseSource) -> IndexerFuture<'a, FetchedRelease>;
 }

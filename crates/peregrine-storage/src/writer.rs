@@ -365,6 +365,13 @@ pub(crate) enum WriteRequest {
         /// The event, which the domain judges against the state the row holds.
         event: Box<peregrine_domain::DownloadEvent>,
     },
+    /// Set what a live `download_job` is doing inside its transfer state.
+    SetDownloadStage {
+        /// The row.
+        id: i64,
+        /// The stage the transfer entered.
+        stage: peregrine_domain::DownloadStage,
+    },
     /// Delete one finished `download_job` row — the queue entry, never the files on disk.
     DeleteDownloadJob {
         /// The row.
@@ -372,6 +379,8 @@ pub(crate) enum WriteRequest {
     },
     /// Delete every finished `download_job` row.
     DeleteFinishedDownloadJobs,
+    /// A Usenet provider or policy change, applied by the repository that owns it.
+    Usenet(crate::usenet::Write),
     /// Replace the offers a search found for one title, keeping anything already acted on.
     ReplaceReleaseOffers {
         /// The title the offers belong to.
@@ -403,7 +412,7 @@ pub(crate) enum WriteRequest {
         /// The job.
         job_id: i64,
         /// The metadata's file list, which the inspection gate judged.
-        description: Box<peregrine_domain::TorrentDescription>,
+        description: Box<peregrine_domain::PayloadDescription>,
         /// The engine's selection, as indices into that list.
         selection: Vec<usize>,
     },
@@ -479,10 +488,16 @@ pub(crate) enum WriteResponse {
     DownloadJobRefused {
         rejection: peregrine_domain::TransitionRejected,
     },
+    /// The stage a live `download_job` now records, or `None` when no live row exists.
+    DownloadStageSet {
+        stage: Option<peregrine_domain::DownloadStage>,
+    },
     /// Whether a finished `download_job` row was deleted.
     DownloadJobDeleted { removed: bool },
     /// How many finished `download_job` rows a clear removed.
     DownloadJobsCleared { removed: u64 },
+    /// The answer to a Usenet provider or policy change.
+    Usenet(crate::usenet::Outcome),
     /// How many offers a search stored.
     ReleaseOffersStored { written: u64 },
     /// The offer a choice named, or `None` when it was already acted on.
@@ -1079,6 +1094,11 @@ async fn apply_download_write(
                 Err(crate::download::DownloadTransitionError::Storage(error)) => Err(error),
             }
         }
+        WriteRequest::SetDownloadStage { id, stage } => {
+            crate::download::set_stage(connection, id, stage)
+                .await
+                .map(|stage| WriteResponse::DownloadStageSet { stage })
+        }
         WriteRequest::DeleteDownloadJob { id } => crate::download::delete_finished(connection, id)
             .await
             .map(|removed| WriteResponse::DownloadJobDeleted { removed }),
@@ -1087,6 +1107,9 @@ async fn apply_download_write(
                 .await
                 .map(|removed| WriteResponse::DownloadJobsCleared { removed })
         }
+        WriteRequest::Usenet(write) => crate::usenet::apply(connection, write)
+            .await
+            .map(WriteResponse::Usenet),
         WriteRequest::ReplaceReleaseOffers {
             title_id,
             offers,

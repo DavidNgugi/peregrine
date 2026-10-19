@@ -36,6 +36,8 @@ pub mod scan;
 pub mod session;
 pub mod subtitle;
 pub mod text;
+pub mod transfer;
+pub mod usenet;
 pub mod watch;
 
 pub use account::{AccountError, AccountId, AccountScope, Visibility};
@@ -68,12 +70,15 @@ pub use centre::{
 };
 pub use deeplink::{ExternalLink, ExternalLinkError};
 pub use deletion::{DeletionEntry, DeletionPlan, Trash, TrashError};
-pub use download::{DownloadEvent, DownloadState, TransitionRejected, transition};
+pub use download::{
+    DownloadEvent, DownloadStage, DownloadState, NzbHash, Protocol, TransitionRejected, transition,
+    transition_for,
+};
 pub use event::{Event, SubjectKind, WatchSubject};
 pub use id::{ExternalId, ExternalIdError, InfoHash, InfoHashError, Provider};
 pub use inspect::{
-    EntryKind, Finding, InspectionLimits, OptIn, Reason, SafetyReport, TorrentDescription,
-    TorrentEntry, TorrentInspector, Verdict,
+    EntryKind, Finding, InspectionLimits, OptIn, PayloadDescription, PayloadEntry,
+    PayloadInspector, Reason, SafetyReport, Verdict,
 };
 pub use library::{
     LibraryRoot, LibraryRootKind, MediaFile, MediaItem, MediaItemState, MediaOrigin,
@@ -119,6 +124,8 @@ pub use subtitle::{
     SubtitleDocument, SubtitleTiming, TimingError,
 };
 pub use text::{NonEmptyText, TextError};
+pub use transfer::{ByteRate, Bytes, FileSelection};
+pub use usenet::UsenetHealth;
 pub use watch::{
     EpisodePlacement, FinalizeOutcome, RESUME_PERCENT, RESUME_REWIND_MS, ResumePoint,
     WATCHED_PERCENT, finalize, is_watched, next_episode, resume_point,

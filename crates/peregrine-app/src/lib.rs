@@ -20,6 +20,8 @@ pub mod prowlarr;
 pub mod runtime;
 #[cfg(test)]
 mod testing;
+pub mod usenet;
+pub mod usenet_post;
 mod volume;
 pub mod web;
 
@@ -95,7 +97,7 @@ pub use peregrine_providers::error::ProviderError;
 pub use indexers::{DEFAULT_LIMIT, IndexerConfigError, IndexerStatus, MAX_LIMIT, PROWLARR};
 pub use peregrine_indexers::{
     ConfiguredIndexer, IndexerDefinition, IndexerError, IndexerField, IndexerOption,
-    IndexerRelease, NewIndexer, TorrentSource,
+    IndexerRelease, NewIndexer, ReleaseSource, TorrentSource, UsenetSource,
 };
 // The rail vocabulary, for the same reason: the command surface answers a DTO whose `rail` field
 // is one of these, and a caller that had to reach for `peregrine-providers` to name it would be a

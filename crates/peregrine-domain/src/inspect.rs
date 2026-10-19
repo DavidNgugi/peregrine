@@ -1,6 +1,6 @@
 //! Torrent inspection: whether a described file set may be written to disk.
 //!
-//! [`TorrentInspector`] judges a torrent's *description* — the path text, byte
+//! [`PayloadInspector`] judges a torrent's *description* — the path text, byte
 //! size, and link kind of every entry — and returns a [`SafetyReport`]. It is
 //! pure. `peregrine-domain` has no filesystem (AGENTS R6), so it never stats a
 //! path and cannot see how much space the volume has; the free-space floor enters
@@ -126,15 +126,15 @@ pub enum EntryKind {
 /// One file a torrent says it will write.
 ///
 /// Every field is untrusted: this is metadata written by a stranger, so
-/// construction validates nothing and [`TorrentInspector`] is what judges it.
+/// construction validates nothing and [`PayloadInspector`] is what judges it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TorrentEntry {
+pub struct PayloadEntry {
     path: String,
     bytes: u64,
     kind: EntryKind,
 }
 
-impl TorrentEntry {
+impl PayloadEntry {
     /// Describes one entry.
     pub fn new(path: impl Into<String>, bytes: u64, kind: EntryKind) -> Self {
         Self {
@@ -162,19 +162,19 @@ impl TorrentEntry {
 
 /// Every file a torrent describes, before a byte is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TorrentDescription {
-    entries: Vec<TorrentEntry>,
+pub struct PayloadDescription {
+    entries: Vec<PayloadEntry>,
 }
 
-impl TorrentDescription {
+impl PayloadDescription {
     /// Describes a torrent's file set.
-    pub fn new(entries: Vec<TorrentEntry>) -> Self {
+    pub fn new(entries: Vec<PayloadEntry>) -> Self {
         Self { entries }
     }
 
     /// The entries, in the order the metadata listed them. The order is not part
     /// of the judgement.
-    pub fn entries(&self) -> &[TorrentEntry] {
+    pub fn entries(&self) -> &[PayloadEntry] {
         &self.entries
     }
 
@@ -395,11 +395,11 @@ impl SafetyReport {
 
 /// Judges a torrent description against one set of limits.
 #[derive(Debug, Clone, Copy)]
-pub struct TorrentInspector {
+pub struct PayloadInspector {
     limits: InspectionLimits,
 }
 
-impl TorrentInspector {
+impl PayloadInspector {
     /// Builds an inspector with the given caps.
     pub const fn new(limits: InspectionLimits) -> Self {
         Self { limits }
@@ -412,7 +412,7 @@ impl TorrentInspector {
     /// once and reused is a grant that silently covers the next download.
     pub fn inspect(
         &self,
-        description: &TorrentDescription,
+        description: &PayloadDescription,
         guard: &PathGuard,
         opt_in: OptIn,
     ) -> SafetyReport {
@@ -611,21 +611,21 @@ mod tests {
         PathGuard::new(root()).expect("a canonical absolute root")
     }
 
-    fn file(path: &str, bytes: u64) -> TorrentEntry {
-        TorrentEntry::new(path, bytes, EntryKind::File)
+    fn file(path: &str, bytes: u64) -> PayloadEntry {
+        PayloadEntry::new(path, bytes, EntryKind::File)
     }
 
-    fn link(path: &str, kind: EntryKind) -> TorrentEntry {
-        TorrentEntry::new(path, 1, kind)
+    fn link(path: &str, kind: EntryKind) -> PayloadEntry {
+        PayloadEntry::new(path, 1, kind)
     }
 
     /// Caps wide enough that only the rule under test can fire.
-    fn uncapped() -> TorrentInspector {
-        TorrentInspector::new(InspectionLimits::new(1_000_000, u64::MAX))
+    fn uncapped() -> PayloadInspector {
+        PayloadInspector::new(InspectionLimits::new(1_000_000, u64::MAX))
     }
 
-    fn inspected(entries: Vec<TorrentEntry>, opt_in: OptIn) -> SafetyReport {
-        uncapped().inspect(&TorrentDescription::new(entries), &guard(), opt_in)
+    fn inspected(entries: Vec<PayloadEntry>, opt_in: OptIn) -> SafetyReport {
+        uncapped().inspect(&PayloadDescription::new(entries), &guard(), opt_in)
     }
 
     fn findings(report: &SafetyReport) -> Vec<(Reason, Option<&str>)> {
@@ -637,8 +637,8 @@ mod tests {
     }
 
     /// A description of `count` allowlisted entries of one byte each.
-    fn many(count: usize) -> TorrentDescription {
-        TorrentDescription::new(
+    fn many(count: usize) -> PayloadDescription {
+        PayloadDescription::new(
             (0..count)
                 .map(|index| file(&format!("file-{index:04}.mkv"), 1))
                 .collect(),
@@ -1051,7 +1051,7 @@ mod tests {
         assert_eq!(limits.max_files(), InspectionLimits::DEFAULT_MAX_FILES);
         assert_eq!(limits.max_files(), 500);
 
-        let inspector = TorrentInspector::new(limits);
+        let inspector = PayloadInspector::new(limits);
         let at_cap = inspector.inspect(&many(500), &guard(), OptIn::NotGranted);
         assert_eq!(at_cap.findings(), []);
         assert_eq!(at_cap.verdict(), Verdict::Allowed);
@@ -1065,7 +1065,7 @@ mod tests {
 
     #[test]
     fn an_explicit_file_count_cap_admits_exactly_the_cap() {
-        let inspector = TorrentInspector::new(InspectionLimits::new(2, u64::MAX));
+        let inspector = PayloadInspector::new(InspectionLimits::new(2, u64::MAX));
         assert_eq!(
             inspector
                 .inspect(&many(2), &guard(), OptIn::NotGranted)
@@ -1083,9 +1083,9 @@ mod tests {
         let limits = InspectionLimits::with_available(3_000, 1_000);
         assert_eq!(limits.max_total_bytes(), 2_000);
 
-        let inspector = TorrentInspector::new(limits);
+        let inspector = PayloadInspector::new(limits);
         let at_cap = inspector.inspect(
-            &TorrentDescription::new(vec![file("movie.mkv", 2_000)]),
+            &PayloadDescription::new(vec![file("movie.mkv", 2_000)]),
             &guard(),
             OptIn::NotGranted,
         );
@@ -1094,7 +1094,7 @@ mod tests {
         assert_eq!(at_cap.total_bytes(), 2_000);
 
         let above_cap = inspector.inspect(
-            &TorrentDescription::new(vec![file("movie.mkv", 2_001)]),
+            &PayloadDescription::new(vec![file("movie.mkv", 2_001)]),
             &guard(),
             OptIn::NotGranted,
         );
@@ -1105,15 +1105,15 @@ mod tests {
 
     #[test]
     fn an_explicit_total_size_cap_admits_exactly_the_cap() {
-        let inspector = TorrentInspector::new(InspectionLimits::new(10, 1_000));
+        let inspector = PayloadInspector::new(InspectionLimits::new(10, 1_000));
         let at_cap = inspector.inspect(
-            &TorrentDescription::new(vec![file("movie.mkv", 1_000)]),
+            &PayloadDescription::new(vec![file("movie.mkv", 1_000)]),
             &guard(),
             OptIn::NotGranted,
         );
         assert_eq!(at_cap.verdict(), Verdict::Allowed);
         let above_cap = inspector.inspect(
-            &TorrentDescription::new(vec![file("movie.mkv", 1_001)]),
+            &PayloadDescription::new(vec![file("movie.mkv", 1_001)]),
             &guard(),
             OptIn::NotGranted,
         );
@@ -1123,9 +1123,9 @@ mod tests {
     #[test]
     fn an_enormous_reported_size_saturates_rather_than_overflowing() {
         let description =
-            TorrentDescription::new(vec![file("a.mkv", u64::MAX), file("b.mkv", u64::MAX)]);
+            PayloadDescription::new(vec![file("a.mkv", u64::MAX), file("b.mkv", u64::MAX)]);
         assert_eq!(description.total_bytes(), u64::MAX);
-        let report = TorrentInspector::new(InspectionLimits::new(10, u64::MAX)).inspect(
+        let report = PayloadInspector::new(InspectionLimits::new(10, u64::MAX)).inspect(
             &description,
             &guard(),
             OptIn::NotGranted,
@@ -1244,13 +1244,13 @@ mod tests {
         ])
     }
 
-    fn entry_strategy() -> impl Strategy<Value = TorrentEntry> {
+    fn entry_strategy() -> impl Strategy<Value = PayloadEntry> {
         (path_strategy(), any::<u64>(), kind_strategy())
-            .prop_map(|(path, bytes, kind)| TorrentEntry::new(path, bytes, kind))
+            .prop_map(|(path, bytes, kind)| PayloadEntry::new(path, bytes, kind))
     }
 
-    fn description_strategy() -> impl Strategy<Value = TorrentDescription> {
-        prop::collection::vec(entry_strategy(), 0..6).prop_map(TorrentDescription::new)
+    fn description_strategy() -> impl Strategy<Value = PayloadDescription> {
+        prop::collection::vec(entry_strategy(), 0..6).prop_map(PayloadDescription::new)
     }
 
     fn limits_strategy() -> impl Strategy<Value = InspectionLimits> {
@@ -1270,7 +1270,7 @@ mod tests {
             limits in limits_strategy(),
             opt_in in opt_in_strategy(),
         ) {
-            let _ = TorrentInspector::new(limits).inspect(&description, &guard(), opt_in);
+            let _ = PayloadInspector::new(limits).inspect(&description, &guard(), opt_in);
         }
 
         #[test]
@@ -1279,7 +1279,7 @@ mod tests {
             limits in limits_strategy(),
             opt_in in opt_in_strategy(),
         ) {
-            let inspector = TorrentInspector::new(limits);
+            let inspector = PayloadInspector::new(limits);
             let first = inspector.inspect(&description, &guard(), opt_in);
             let second = inspector.inspect(&description, &guard(), opt_in);
             prop_assert_eq!(&first, &second);
@@ -1297,13 +1297,13 @@ mod tests {
             limits in limits_strategy(),
             opt_in in opt_in_strategy(),
         ) {
-            let inspector = TorrentInspector::new(limits);
-            let listed = TorrentDescription::new(
+            let inspector = PayloadInspector::new(limits);
+            let listed = PayloadDescription::new(
                 pairs.iter().map(|(entry, _)| entry.clone()).collect(),
             );
             let mut keyed = pairs;
             keyed.sort_by_key(|(_, key)| *key);
-            let shuffled = TorrentDescription::new(
+            let shuffled = PayloadDescription::new(
                 keyed.into_iter().map(|(entry, _)| entry).collect(),
             );
             prop_assert_eq!(
@@ -1317,7 +1317,7 @@ mod tests {
             description in description_strategy(),
             limits in limits_strategy(),
         ) {
-            let inspector = TorrentInspector::new(limits);
+            let inspector = PayloadInspector::new(limits);
             let refused = inspector.inspect(&description, &guard(), OptIn::NotGranted);
             let accepted = inspector.inspect(&description, &guard(), OptIn::Granted);
             prop_assert_eq!(refused.findings(), accepted.findings());

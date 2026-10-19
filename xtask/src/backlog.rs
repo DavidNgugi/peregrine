@@ -43,7 +43,8 @@ impl Task {
             30..=31 => 6,
             32..=34 => 7,
             35 => 8,
-            _ => 9,
+            36..=37 => 9,
+            _ => 10,
         }
     }
 }
@@ -448,6 +449,7 @@ mod tests {
         assert_eq!(at("PG-E35-01"), 8);
         assert_eq!(at("PG-E36-01"), 9);
         assert_eq!(at("PG-E37-16"), 9);
+        assert_eq!(at("PG-E38-01"), 10);
     }
 
     #[test]

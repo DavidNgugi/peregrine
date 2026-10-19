@@ -85,7 +85,7 @@ use std::num::NonZeroU32;
 use std::pin::Pin;
 
 use peregrine_domain::id::InfoHash;
-use peregrine_domain::inspect::{SafetyReport, TorrentDescription, Verdict};
+use peregrine_domain::inspect::{PayloadDescription, SafetyReport, Verdict};
 use peregrine_domain::path::SafePath;
 use peregrine_domain::text::NonEmptyText;
 
@@ -182,64 +182,7 @@ impl fmt::Debug for TorrentSource {
     }
 }
 
-/// Which files of a torrent are being written.
-///
-/// A selection is a *set*: the constructor sorts and de-duplicates, so two spellings of one
-/// selection compare equal and a caller can compare a live selection with a requested one. It is a
-/// set of indices into the metadata's file list rather than a set of paths, because a path in a
-/// torrent's metadata is untrusted text (`peregrine_domain::inspect`) and only the engine knows what
-/// an index names.
-///
-/// It may be empty, and an empty one is refused by `add` and by `select`: a torrent with nothing
-/// selected writes nothing, which is a removal, and a transfer that never moves is the failure a
-/// user cannot diagnose.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct FileSelection {
-    indices: Vec<usize>,
-}
-
-impl FileSelection {
-    /// The selection naming `indices`, in canonical order.
-    #[must_use]
-    pub fn new(indices: impl IntoIterator<Item = usize>) -> Self {
-        let mut indices: Vec<usize> = indices.into_iter().collect();
-        indices.sort_unstable();
-        indices.dedup();
-        Self { indices }
-    }
-
-    /// The selection naming nothing.
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self {
-            indices: Vec::new(),
-        }
-    }
-
-    /// The selected file indices, ascending and without repetition.
-    #[must_use]
-    pub fn indices(&self) -> &[usize] {
-        &self.indices
-    }
-
-    /// Whether no file is selected.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
-    }
-
-    /// How many files are selected.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.indices.len()
-    }
-
-    /// Whether `index` is in the selection.
-    #[must_use]
-    pub fn contains(&self, index: usize) -> bool {
-        self.indices.binary_search(&index).is_ok()
-    }
-}
+pub use peregrine_domain::transfer::FileSelection;
 
 /// The session's own state for one torrent, as the bytes a caller persists.
 ///
@@ -611,13 +554,13 @@ impl EngineLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchedMetadata {
     info_hash: InfoHash,
-    description: TorrentDescription,
+    description: PayloadDescription,
 }
 
 impl FetchedMetadata {
     /// Names the torrent and the files it says it will write.
     #[must_use]
-    pub const fn new(info_hash: InfoHash, description: TorrentDescription) -> Self {
+    pub const fn new(info_hash: InfoHash, description: PayloadDescription) -> Self {
         Self {
             info_hash,
             description,
@@ -632,7 +575,7 @@ impl FetchedMetadata {
 
     /// The files the metadata describes.
     #[must_use]
-    pub const fn description(&self) -> &TorrentDescription {
+    pub const fn description(&self) -> &PayloadDescription {
         &self.description
     }
 }
@@ -834,7 +777,7 @@ mod tests {
     use std::sync::Arc;
 
     use peregrine_domain::inspect::{
-        EntryKind, InspectionLimits, OptIn, TorrentDescription, TorrentEntry, TorrentInspector,
+        EntryKind, InspectionLimits, OptIn, PayloadDescription, PayloadEntry, PayloadInspector,
     };
     use peregrine_domain::path::PathGuard;
     use peregrine_domain::text::NonEmptyText;
@@ -865,8 +808,8 @@ mod tests {
     /// A report from the real inspector, so every one below is one production code could produce.
     pub(crate) fn report(path: &str, opt_in: OptIn) -> SafetyReport {
         let description =
-            TorrentDescription::new(vec![TorrentEntry::new(path, 1, EntryKind::File)]);
-        TorrentInspector::new(InspectionLimits::new(1_000, u64::MAX)).inspect(
+            PayloadDescription::new(vec![PayloadEntry::new(path, 1, EntryKind::File)]);
+        PayloadInspector::new(InspectionLimits::new(1_000, u64::MAX)).inspect(
             &description,
             &guard(),
             opt_in,
@@ -1156,31 +1099,6 @@ mod tests {
         let source = TorrentSource::TorrentFile(vec![0; 42]);
 
         assert_eq!(format!("{source:?}"), "TorrentFile(42 bytes)");
-    }
-
-    #[test]
-    fn a_selection_is_a_canonical_set() {
-        let selection = FileSelection::new([3, 1, 3, 0, 1]);
-
-        assert_eq!(selection.indices(), [0, 1, 3]);
-        assert_eq!(selection.len(), 3);
-        assert!(selection.contains(3));
-        assert!(!selection.contains(2));
-        assert_eq!(selection, FileSelection::new([0, 1, 3]));
-        assert!(!selection.is_empty());
-    }
-
-    #[test]
-    fn an_empty_selection_is_representable_and_knows_it() {
-        // Representable because the conformance suite drives it, and refused by `add` and `select`
-        // because a torrent with nothing selected writes nothing.
-        let selection = FileSelection::empty();
-
-        assert!(selection.is_empty());
-        assert_eq!(selection.len(), 0);
-        assert_eq!(selection.indices(), &[] as &[usize]);
-        assert!(!selection.contains(0));
-        assert_eq!(selection, FileSelection::new(Vec::new()));
     }
 
     #[test]

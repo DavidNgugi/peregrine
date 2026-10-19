@@ -31,6 +31,7 @@ mod ids;
 mod metadata;
 mod secrets;
 mod torrent;
+mod usenet;
 
 pub use clock::{DEFAULT_EPOCH_MILLISECONDS, FakeClock};
 pub use conformance::{
@@ -41,3 +42,4 @@ pub use ids::CountingIds;
 pub use metadata::{FakeMetadataProvider, fake_descriptor};
 pub use secrets::MemorySecretStore;
 pub use torrent::{EngineCall, EngineOperation, FakeTorrentEngine};
+pub use usenet::{FakeUsenetEngine, usenet_engine_satisfies_the_port};

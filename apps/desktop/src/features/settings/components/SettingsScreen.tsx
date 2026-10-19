@@ -20,6 +20,7 @@ import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
+import type { UsenetSettings } from "../hooks/useUsenet.js";
 import { AboutSection } from "./AboutSection.js";
 import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
@@ -27,6 +28,7 @@ import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
 import { NetworkSection } from "./NetworkSection.js";
 import { WebAccessSection } from "./WebAccessSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
+import { UsenetSection } from "./UsenetSection.js";
 
 interface SettingsScreenProps {
   /**
@@ -61,6 +63,9 @@ interface SettingsScreenProps {
    */
   readonly indexers: IndexerSettings;
 
+  /** The Usenet providers and archive policy, as the shell read them. */
+  readonly usenet: UsenetSettings;
+
   /**
    * The managed Prowlarr instance, as the shell read it.
    *
@@ -91,6 +96,7 @@ export function SettingsScreen({
   libraries,
   providers,
   indexers,
+  usenet,
   prowlarr,
   onBack,
   backLabel,
@@ -101,6 +107,7 @@ export function SettingsScreen({
 
   return (
     <Screen backLabel={backLabel} onBack={onBack} title={t("settings.title")}>
+      <UsenetSection usenet={usenet} />
       <SettingsSection
         description={t("settings.shortcuts.description")}
         title={t("settings.shortcuts.title")}

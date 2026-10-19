@@ -626,6 +626,25 @@ Read from the 5.0 wiki cross-checked against tag source, because the wiki is sta
 - **Verified by reading source + wiki:** the comparer orders, quality-profile fields, size specifications, custom-format matching and scoring, the upgrade check order, the specification priority/stop-at-first-rejecting-group behaviour, the rejection enum and `ReleaseResource`, the download-client port/settings, the tracked-download states, import fallback, transfer modes, history/blocklist shapes, and the queue API.
 - **Not verified:** the SPDX licence of Sonarr/Radarr (not read here); whether any Seerr code path other than the servarr clients uses `/release`.
 
+## 8. SABnzbd (sabnzbd/sabnzbd) and par2cmdline (Parchive/par2cmdline)
+
+Read for ADR 0030, not for code reuse: both are GPL, and SABnzbd is Python.
+
+### What it confirms
+- A Usenet job is **repair → extract → import**, with the repair stage driven by a par2 set and the extract stage by an external tool; SABnzbd shells out to `unrar`/`7z` rather than linking RAR support.
+- Provider failover is per-article: a missing article is asked of the next server before it is counted missing. There is no swarm, so one provider's retention is the whole availability story.
+- Direct unpack is an optimisation over an archive, not a different pipeline: the same listing and the same extract decision, answered while downloading. We defer it (ADR 0030) rather than pretend the sequential downloader can serve random ranges.
+- Passwords come from the NZB's `meta` element, never from a per-provider setting.
+
+### Concrete mistakes to avoid
+- Its history and retry model is server-side queue state; Peregrine keeps the job row and the NZB as the state, because there is no daemon to babysit.
+- Its post-processing is configurable in a dozen directions (unpack, delete, recan, script). Peregrine keeps two switches: allow archives, and delete them after import.
+- It trusts the archive listing enough to extract; Peregrine runs the listing through `PayloadInspector` first, then re-walks the extracted tree through `PathGuard`.
+
+### Verification status
+- **Verified by reading source and documentation:** the repair/extract/import stages, the external-tool boundary, per-article failover, and the NZB password source.
+- **Not verified:** current SABnzbd version behaviour under a hostile archive; this tree's own hostile-listing fixtures are the authority.
+
 ## Cross-cutting recommendations for Peregrine
 1. `peregrine-providers` should be a Rust trait returning our own normalized types (not a borrowed TMDB shape), with a cache-aside layer and per-provider key ceilings — seerr's structure without seerr's type leak.
 2. `peregrine-torrent` needs what none of Peeri, torlink, or qBittorrent has: explicit piece-level scheduling (sequential plus head/tail priority), deadline-driven readahead tied to the demuxer's next-needed byte range, and a byte-range HTTP server that can answer for *in-flight* data. qBittorrent returns zero hits for `set_piece_deadline`/`add_piece` across its source, so this is a genuine gap in the state of the art rather than a refinement. Adopt VLC's `stream_t` semantics as the interface.

@@ -6,7 +6,7 @@
 //!
 //! - **I4** — a non-terminal job does not advance past `inspecting` without a persisted safety
 //!   report. The two events that cross the gate carry the [`SafetyReport`] itself: the value
-//!   [`TorrentInspector`](crate::inspect::TorrentInspector) produces and
+//!   [`PayloadInspector`](crate::inspect::PayloadInspector) produces and
 //!   `download_job.safety_report_json` stores. There is no other spelling of those events, so no
 //!   caller can reach `metadata` by writing a state down.
 //! - **A refusal with no override and a refusal the user may take anyway go different ways.**
@@ -34,6 +34,79 @@ use thiserror::Error;
 
 use crate::inspect::{SafetyReport, Verdict};
 use crate::stored_enum;
+
+stored_enum! {
+    /// How a job's payload is transferred, as `download_job.protocol` stores it.
+    ///
+    /// The two protocols share the queue and the state machine, but not the engine, the
+    /// dedupe key, or the completion edge: a torrent seeds after its payload is whole and a
+    /// Usenet job is finished.
+    Protocol {
+        /// A `BitTorrent` transfer through the embedded engine.
+        Torrent => "torrent",
+        /// A Usenet transfer over NNTP.
+        Usenet => "usenet",
+    }
+}
+
+impl Protocol {
+    /// Whether this is a torrent.
+    #[must_use]
+    pub const fn is_torrent(self) -> bool {
+        matches!(self, Self::Torrent)
+    }
+}
+
+stored_enum! {
+    /// What a job is doing inside its transfer state, as `download_job.stage` stores it.
+    ///
+    /// A stage is presentation and progress, never a state transition: the state machine still
+    /// decides whether a job may move. Usenet uses the non-transfer stages while it repairs,
+    /// extracts, and imports a payload; a torrent stays at `transfer`.
+    DownloadStage {
+        /// Fetching the payload.
+        Transfer => "transfer",
+        /// Verifying and repairing a par2 set.
+        Repairing => "repairing",
+        /// Extracting an archive.
+        Extracting => "extracting",
+        /// Adding the extracted media to the library.
+        Importing => "importing",
+    }
+}
+
+/// The SHA-256 of an NZB, as `download_job.nzb_sha256` stores it.
+///
+/// It is the Usenet dedupe key in the same way an info hash is a torrent's: two live jobs for
+/// the same post are one job. It is a content hash, not a credential, but it is not printed by
+/// a `Debug` either — a hash in a log line is the identity of what a person downloaded.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct NzbHash(String);
+
+impl NzbHash {
+    /// Parses 64 hexadecimal characters, normalising to lower case.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Some(Self(value.to_ascii_lowercase()))
+        } else {
+            None
+        }
+    }
+
+    /// The hash, lower-case hexadecimal.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for NzbHash {
+    /// Prints the type and nothing of the value.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("NzbHash(..)")
+    }
+}
 
 stored_enum! {
     /// A job's state, as `download_job.state` stores it.
@@ -121,7 +194,7 @@ pub enum DownloadEvent {
     ///
     /// This is the only event that carries a job out of `inspecting` and into `metadata`
     /// (through [`Verdict::Allowed`]), and the report cannot be built without running
-    /// [`TorrentInspector::inspect`](crate::inspect::TorrentInspector::inspect) or reading the
+    /// [`PayloadInspector::inspect`](crate::inspect::PayloadInspector::inspect) or reading the
     /// persisted `safety_report_json`. That is I4 as a type rather than as a rule a caller has
     /// to remember.
     Inspected(SafetyReport),
@@ -271,6 +344,23 @@ pub fn transition(
     state: DownloadState,
     event: DownloadEvent,
 ) -> Result<DownloadState, TransitionRejected> {
+    transition_for(state, event, Protocol::Torrent)
+}
+
+/// Applies one event under an explicit protocol.
+///
+/// A torrent's whole payload moves to `seeding`; a Usenet job has nothing to seed and moves
+/// straight to `completed`. Every other edge is protocol-independent, and `SeedingSatisfied`
+/// remains a torrent-only event.
+///
+/// # Errors
+///
+/// The same refusals as [`transition`].
+pub fn transition_for(
+    state: DownloadState,
+    event: DownloadEvent,
+    protocol: Protocol,
+) -> Result<DownloadState, TransitionRejected> {
     // The name is read before the event is matched, so every rejection can name what it refused
     // without having to move a report back out of the pattern that consumed it.
     let name = event.name();
@@ -322,7 +412,10 @@ pub fn transition(
             // A full disk joins the two deliberate stops, because ARCHITECTURE §15 pauses a
             // transfer rather than failing it.
             DownloadEvent::Paused | DownloadEvent::DiskFull => Ok(DownloadState::Paused),
-            DownloadEvent::PayloadComplete => Ok(DownloadState::Seeding),
+            DownloadEvent::PayloadComplete => Ok(match protocol {
+                Protocol::Torrent => DownloadState::Seeding,
+                Protocol::Usenet => DownloadState::Completed,
+            }),
             DownloadEvent::EngineFailed => Ok(DownloadState::Failed),
             DownloadEvent::Removed => Ok(DownloadState::Removed),
             DownloadEvent::Progress => Ok(state),
@@ -351,7 +444,7 @@ pub fn transition(
 pub(crate) mod tests {
     use super::*;
     use crate::inspect::{
-        EntryKind, InspectionLimits, OptIn, TorrentDescription, TorrentEntry, TorrentInspector,
+        EntryKind, InspectionLimits, OptIn, PayloadDescription, PayloadEntry, PayloadInspector,
     };
     use crate::path::PathGuard;
     use proptest::prelude::*;
@@ -362,15 +455,15 @@ pub(crate) mod tests {
     }
 
     /// Caps wide enough that only the rule under test can fire.
-    fn inspector() -> TorrentInspector {
-        TorrentInspector::new(InspectionLimits::new(1_000_000, u64::MAX))
+    fn inspector() -> PayloadInspector {
+        PayloadInspector::new(InspectionLimits::new(1_000_000, u64::MAX))
     }
 
     /// Runs the real inspector over one entry, so every report here is one the production code
     /// could have produced.
     fn report(path: &str, opt_in: OptIn) -> SafetyReport {
         let description =
-            TorrentDescription::new(vec![TorrentEntry::new(path, 1, EntryKind::File)]);
+            PayloadDescription::new(vec![PayloadEntry::new(path, 1, EntryKind::File)]);
         inspector().inspect(&description, &guard(), opt_in)
     }
 
@@ -1098,5 +1191,58 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_usenet_payload_completes_where_a_torrent_seeds() {
+        assert_eq!(
+            transition_for(
+                DownloadState::Downloading,
+                DownloadEvent::PayloadComplete,
+                Protocol::Torrent,
+            ),
+            Ok(DownloadState::Seeding)
+        );
+        assert_eq!(
+            transition_for(
+                DownloadState::Downloading,
+                DownloadEvent::PayloadComplete,
+                Protocol::Usenet,
+            ),
+            Ok(DownloadState::Completed)
+        );
+    }
+
+    #[test]
+    fn the_protocol_and_stage_vocabularies_match_their_constraints() {
+        assert_eq!(
+            Protocol::ALL
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>(),
+            ["torrent", "usenet"]
+        );
+        assert_eq!(
+            DownloadStage::ALL
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>(),
+            ["transfer", "repairing", "extracting", "importing"]
+        );
+    }
+
+    #[test]
+    fn an_nzb_hash_is_sixty_four_hexadecimal_characters() {
+        let hash = "a".repeat(64);
+        assert_eq!(
+            NzbHash::parse(&hash).map(|value| value.as_str().to_owned()),
+            Some(hash)
+        );
+        assert!(NzbHash::parse(&"a".repeat(63)).is_none());
+        assert!(NzbHash::parse(&"g".repeat(64)).is_none());
+        assert_eq!(
+            NzbHash::parse(&"A".repeat(64)).map(|value| value.as_str().to_owned()),
+            Some("a".repeat(64))
+        );
     }
 }

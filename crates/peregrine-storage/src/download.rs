@@ -92,8 +92,9 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use peregrine_domain::{
-    AccountScope, DownloadEvent, DownloadState, EntryKind, InfoHash, ItemJob, NonEmptyText,
-    SafetyReport, TorrentDescription, TorrentEntry, TransitionRejected, is_media_extension,
+    AccountScope, DownloadEvent, DownloadStage, DownloadState, EntryKind, InfoHash, ItemJob,
+    NonEmptyText, NzbHash, PayloadDescription, PayloadEntry, Protocol, SafetyReport,
+    TransitionRejected, is_media_extension,
 };
 use sqlx::Connection as _;
 
@@ -174,7 +175,7 @@ impl fmt::Debug for MagnetUri {
     }
 }
 
-/// Where a job's torrent comes from, as the two columns `download_job` stores it in.
+/// Where a job's payload comes from, as the source columns `download_job` stores it in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadSource {
     /// A magnet URI the user, an indexer, or a deep link supplied.
@@ -184,6 +185,10 @@ pub enum DownloadSource {
     /// The path is what the row stores; the *contents* are what the engine is handed, so the
     /// file has to still exist when the job is added (`PG-E10-08`, ADR 0005).
     TorrentFile(NonEmptyText),
+    /// The application's own copy of the `.nzb` file, by path.
+    ///
+    /// The path is what the row stores; the parsed document is what the engine is handed.
+    NzbFile(NonEmptyText),
 }
 
 /// A download job as it is admitted, before the gate has run (`FLOWS` F6).
@@ -218,7 +223,11 @@ pub struct NewDownloadJob {
     pub reported_size_bytes: Option<u64>,
     /// The torrent's identity, when the release carried one.
     pub info_hash: Option<InfoHash>,
-    /// How the engine is told which torrent this is.
+    /// The protocol this job transfers over.
+    pub protocol: Protocol,
+    /// The NZB's SHA-256, when the source is Usenet.
+    pub nzb_sha256: Option<NzbHash>,
+    /// How the engine is told what to transfer.
     pub source: DownloadSource,
     /// The absolute destination the guard resolved, which every file path is relative to.
     pub save_path: NonEmptyText,
@@ -303,8 +312,14 @@ pub struct DownloadJobRow {
     pub reported_size_bytes: Option<u64>,
     /// The torrent's identity, when the row holds one this build can read.
     pub info_hash: Option<InfoHash>,
-    /// How the engine is told which torrent this is, when the row records a source.
+    /// How the engine is told what to transfer, when the row records a source.
     pub source: Option<DownloadSource>,
+    /// The protocol this job transfers over.
+    pub protocol: Protocol,
+    /// What the job is doing inside its transfer state.
+    pub stage: DownloadStage,
+    /// The NZB's SHA-256, when the source is Usenet.
+    pub nzb_sha256: Option<NzbHash>,
     /// The absolute destination the guard resolved.
     pub save_path: NonEmptyText,
     /// Payload bytes received so far.
@@ -353,7 +368,7 @@ pub struct DownloadFileRow {
     /// The job the entry belongs to.
     pub download_job_id: i64,
     /// The engine's index for the entry, which is its position in the metadata's list.
-    pub torrent_file_index: i64,
+    pub file_index: i64,
     /// The relative path the metadata gave, which the inspection gate validated.
     pub path: NonEmptyText,
     /// The size the metadata claims for the entry.
@@ -390,25 +405,27 @@ pub enum DownloadTransitionError {
 ///
 /// # Errors
 ///
-/// [`StorageError::Conflict`] when `download_job_hash_uq` refuses a second *live* job for the
-/// same info hash (I36). The message deliberately does not name the hash: a validated infohash
-/// is not emitted anywhere (SECURITY T13), and the caller already holds the value it passed.
+/// [`StorageError::Conflict`] when `download_job_hash_uq` or `download_job_nzb_uq` refuses a
+/// second *live* job for the same source (I36). The message deliberately does not name the hash:
+/// a validated hash is not emitted anywhere (SECURITY T13), and the caller already holds the
+/// value it passed.
 pub(crate) async fn insert(
     connection: &mut sqlx::SqliteConnection,
     job: &NewDownloadJob,
 ) -> Result<DownloadJobRow, StorageError> {
     let save_path = absolute_path(&job.save_path, "download_job.save_path")?;
-    let (magnet, torrent_file) = match &job.source {
-        DownloadSource::Magnet(uri) => (Some(uri.as_str()), None),
-        DownloadSource::TorrentFile(path) => (None, Some(path.as_str())),
+    let (magnet, torrent_file, nzb_file) = match &job.source {
+        DownloadSource::Magnet(uri) => (Some(uri.as_str()), None, None),
+        DownloadSource::TorrentFile(path) => (None, Some(path.as_str()), None),
+        DownloadSource::NzbFile(path) => (None, None, Some(path.as_str())),
     };
     let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
     let result = sqlx::query(
         "INSERT INTO download_job (title_id, episode_id, state, priority, release_title, \
          release_source, release_group, resolution, video_codec, hdr_format, audio_summary, \
-         reported_size_bytes, info_hash, magnet_uri, torrent_file_path, save_path, added_by, \
-         added_at) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, \
-         ?14, ?15, ?16, ?17)",
+         reported_size_bytes, info_hash, magnet_uri, torrent_file_path, nzb_sha256, nzb_path, \
+         protocol, save_path, added_by, added_at) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7, \
+         ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
     )
     .bind(job.title_id)
     .bind(job.episode_id)
@@ -428,6 +445,9 @@ pub(crate) async fn insert(
     .bind(job.info_hash.map(|hash| hash.to_hex()))
     .bind(magnet)
     .bind(torrent_file)
+    .bind(job.nzb_sha256.as_ref().map(NzbHash::as_str))
+    .bind(nzb_file)
+    .bind(job.protocol.as_str())
     .bind(save_path.as_str())
     .bind(job.added_by.as_str())
     .bind(as_millis(job.added_at))
@@ -436,7 +456,7 @@ pub(crate) async fn insert(
     .map_err(|error| {
         if is_unique_violation(&error) {
             StorageError::Conflict {
-                detail: "a live download job already holds this torrent's info hash".to_owned(),
+                detail: "a live download job already holds this release".to_owned(),
             }
         } else {
             StorageError::from_sqlx(error)
@@ -471,12 +491,14 @@ pub(crate) async fn transition(
     // a job dismissed from `blocked` keeps the report that explains the block.
     let report = report_of(&event).map(encode_report).transpose()?;
     let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
-    let stored = sqlx::query_scalar::<_, String>("SELECT state FROM download_job WHERE id = ?1")
-        .bind(id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(StorageError::from_sqlx)?;
-    let Some(stored) = stored else {
+    let stored = sqlx::query_as::<_, (String, String)>(
+        "SELECT state, protocol FROM download_job WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    let Some((stored, protocol)) = stored else {
         transaction
             .rollback()
             .await
@@ -487,7 +509,11 @@ pub(crate) async fn transition(
         column: "download_job.state",
         found: stored.clone(),
     })?;
-    let next = match peregrine_domain::transition(current, event) {
+    let protocol = Protocol::parse(&protocol).ok_or_else(|| StorageError::UnexpectedValue {
+        column: "download_job.protocol",
+        found: protocol.clone(),
+    })?;
+    let next = match peregrine_domain::transition_for(current, event, protocol) {
         Ok(next) => next,
         Err(rejection) => {
             // Rolled back rather than dropped, so the connection is out of the read
@@ -598,14 +624,14 @@ pub(crate) async fn record_statistics(
 pub(crate) async fn select_files(
     connection: &mut sqlx::SqliteConnection,
     job_id: i64,
-    description: &TorrentDescription,
+    description: &PayloadDescription,
     selection: &[usize],
 ) -> Result<(), StorageError> {
     let entries = description.entries();
     for index in selection {
         if *index >= entries.len() {
             return Err(StorageError::UnexpectedValue {
-                column: "download_file.torrent_file_index",
+                column: "download_file.file_index",
                 found: index.to_string(),
             });
         }
@@ -622,7 +648,7 @@ pub(crate) async fn select_files(
     let mut rows = Vec::with_capacity(entries.len());
     for (position, entry) in entries.iter().enumerate() {
         let index = i64::try_from(position).map_err(|_| StorageError::UnexpectedValue {
-            column: "download_file.torrent_file_index",
+            column: "download_file.file_index",
             found: position.to_string(),
         })?;
         rows.push((
@@ -637,9 +663,9 @@ pub(crate) async fn select_files(
     let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
     for (index, path, size_bytes, is_selected, media) in rows {
         sqlx::query(
-            "INSERT INTO download_file (download_job_id, torrent_file_index, path, size_bytes, \
+            "INSERT INTO download_file (download_job_id, file_index, path, size_bytes, \
              selected, is_media) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-             ON CONFLICT (download_job_id, torrent_file_index) DO UPDATE SET \
+             ON CONFLICT (download_job_id, file_index) DO UPDATE SET \
              path = excluded.path, size_bytes = excluded.size_bytes, \
              selected = excluded.selected, is_media = excluded.is_media",
         )
@@ -658,6 +684,28 @@ pub(crate) async fn select_files(
         .await
         .map_err(StorageError::from_sqlx)?;
     Ok(())
+}
+
+/// Sets what a live job is doing inside its transfer state.
+///
+/// A stage is presentation, not a state: the statement scopes out the terminal rows so a late
+/// post-processing tick cannot rewrite the stage of a job that has finished, and it never writes
+/// `state`. `None` means no live job holds that id.
+pub(crate) async fn set_stage(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    stage: DownloadStage,
+) -> Result<Option<DownloadStage>, StorageError> {
+    let result = sqlx::query(
+        "UPDATE download_job SET stage = ?1 WHERE id = ?2 \
+         AND state NOT IN ('completed','failed','removed')",
+    )
+    .bind(stage.as_str())
+    .bind(id)
+    .execute(connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok((result.rows_affected() > 0).then_some(stage))
 }
 
 /// Persists the engine's own state for one job, reporting whether the job was there.
@@ -692,10 +740,11 @@ async fn read_by_id(
         "SELECT id, job_id, title_id, episode_id, media_item_id, quality_profile_id, indexer_id, \
          state, priority, is_upgrade, release_title, release_source, release_group, resolution, \
          video_codec, hdr_format, audio_summary, reported_size_bytes, info_hash, magnet_uri, \
-         torrent_file_path, save_path, downloaded_bytes, uploaded_bytes, progress_permille, \
-         download_rate_bps, upload_rate_bps, peers_connected, peers_swarm, eta_seconds, ratio, \
-         safety_report_json, error_code, error_message, added_by, added_at, started_at, \
-         completed_at, seeding_until, removed_at FROM download_job WHERE id = ?1",
+         torrent_file_path, nzb_sha256, nzb_path, protocol, stage, save_path, downloaded_bytes, \
+         uploaded_bytes, progress_permille, download_rate_bps, upload_rate_bps, peers_connected, \
+         peers_swarm, eta_seconds, ratio, safety_report_json, error_code, error_message, added_by, \
+         added_at, started_at, completed_at, seeding_until, removed_at FROM download_job \
+         WHERE id = ?1",
     )
     .bind(id)
     .fetch_one(connection)
@@ -791,7 +840,7 @@ pub(crate) async fn job(
         "SELECT d.id, d.job_id, d.title_id, d.episode_id, d.media_item_id, d.quality_profile_id, \
          d.indexer_id, d.state, d.priority, d.is_upgrade, d.release_title, d.release_source, \
          d.release_group, d.resolution, d.video_codec, d.hdr_format, d.audio_summary, \
-         d.reported_size_bytes, d.info_hash, d.magnet_uri, d.torrent_file_path, d.save_path, \
+         d.reported_size_bytes, d.info_hash, d.magnet_uri, d.torrent_file_path, d.nzb_sha256, d.nzb_path, d.protocol, d.stage, d.save_path, \
          d.downloaded_bytes, d.uploaded_bytes, d.progress_permille, d.download_rate_bps, \
          d.upload_rate_bps, d.peers_connected, d.peers_swarm, d.eta_seconds, d.ratio, \
          d.safety_report_json, d.error_code, d.error_message, d.added_by, d.added_at, \
@@ -823,7 +872,7 @@ pub(crate) async fn list_jobs(
         "SELECT d.id, d.job_id, d.title_id, d.episode_id, d.media_item_id, d.quality_profile_id, \
          d.indexer_id, d.state, d.priority, d.is_upgrade, d.release_title, d.release_source, \
          d.release_group, d.resolution, d.video_codec, d.hdr_format, d.audio_summary, \
-         d.reported_size_bytes, d.info_hash, d.magnet_uri, d.torrent_file_path, d.save_path, \
+         d.reported_size_bytes, d.info_hash, d.magnet_uri, d.torrent_file_path, d.nzb_sha256, d.nzb_path, d.protocol, d.stage, d.save_path, \
          d.downloaded_bytes, d.uploaded_bytes, d.progress_permille, d.download_rate_bps, \
          d.upload_rate_bps, d.peers_connected, d.peers_swarm, d.eta_seconds, d.ratio, \
          d.safety_report_json, d.error_code, d.error_message, d.added_by, d.added_at, \
@@ -846,7 +895,7 @@ pub(crate) async fn list_jobs(
 /// Reads one job's file rows, in the metadata's own order, when `scope` may see its title.
 ///
 /// Not paged, and the module doc says why: the bound is one torrent's metadata list, not the
-/// table's growth. The order is `torrent_file_index` rather than the row id, because that is the
+/// table's growth. The order is `file_index` rather than the row id, because that is the
 /// order the engine and the metadata use, and a caller selecting a file for playback needs the
 /// index rather than the newest row.
 pub(crate) async fn files(
@@ -855,13 +904,13 @@ pub(crate) async fn files(
     job_id: i64,
 ) -> Result<Vec<DownloadFileRow>, StorageError> {
     let rows = sqlx::query_as::<_, FileRow>(
-        "SELECT f.id, f.download_job_id, f.torrent_file_index, f.path, f.size_bytes, f.selected, \
+        "SELECT f.id, f.download_job_id, f.file_index, f.path, f.size_bytes, f.selected, \
          f.is_media FROM download_file f \
          JOIN download_job d ON d.id = f.download_job_id \
          JOIN title t ON t.id = d.title_id \
          WHERE f.download_job_id = ?1 \
            AND (?2 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
-         ORDER BY f.torrent_file_index",
+         ORDER BY f.file_index",
     )
     .bind(job_id)
     .bind(hidden_by_scope(scope))
@@ -951,6 +1000,10 @@ struct JobRow {
     info_hash: Option<String>,
     magnet_uri: Option<String>,
     torrent_file_path: Option<String>,
+    nzb_sha256: Option<String>,
+    nzb_path: Option<String>,
+    protocol: String,
+    stage: String,
     save_path: String,
     downloaded_bytes: i64,
     uploaded_bytes: i64,
@@ -972,6 +1025,39 @@ struct JobRow {
     removed_at: Option<i64>,
 }
 
+fn parse_nzb_sha256(found: Option<String>) -> Result<Option<NzbHash>, StorageError> {
+    found
+        .map(|value| {
+            NzbHash::parse(&value).ok_or_else(|| StorageError::UnexpectedValue {
+                column: "download_job.nzb_sha256",
+                found: value,
+            })
+        })
+        .transpose()
+}
+
+fn source_from(
+    magnet: Option<String>,
+    torrent: Option<String>,
+    nzb: Option<String>,
+) -> Result<Option<DownloadSource>, StorageError> {
+    Ok(match (magnet, torrent, nzb) {
+        (Some(uri), _, _) => Some(DownloadSource::Magnet(MagnetUri(text(
+            uri,
+            "download_job.magnet_uri",
+        )?))),
+        (None, Some(path), _) => Some(DownloadSource::TorrentFile(text(
+            path,
+            "download_job.torrent_file_path",
+        )?)),
+        (None, None, Some(path)) => Some(DownloadSource::NzbFile(text(
+            path,
+            "download_job.nzb_path",
+        )?)),
+        (None, None, None) => None,
+    })
+}
+
 impl TryFrom<JobRow> for DownloadJobRow {
     type Error = StorageError;
 
@@ -986,6 +1072,17 @@ impl TryFrom<JobRow> for DownloadJobRow {
                 column: "download_job.added_by",
                 found: row.added_by.clone(),
             })?;
+        let protocol =
+            Protocol::parse(&row.protocol).ok_or_else(|| StorageError::UnexpectedValue {
+                column: "download_job.protocol",
+                found: row.protocol.clone(),
+            })?;
+        let download_stage =
+            DownloadStage::parse(&row.stage).ok_or_else(|| StorageError::UnexpectedValue {
+                column: "download_job.stage",
+                found: row.stage.clone(),
+            })?;
+        let nzb_sha256 = parse_nzb_sha256(row.nzb_sha256)?;
         // `from_hex` accepts either case, so a row another build wrote in upper case still reads;
         // what this build writes is the lowercase form the unique index compares.
         let info_hash = row
@@ -997,17 +1094,7 @@ impl TryFrom<JobRow> for DownloadJobRow {
                 })
             })
             .transpose()?;
-        let source = match (row.magnet_uri, row.torrent_file_path) {
-            (Some(uri), _) => Some(DownloadSource::Magnet(MagnetUri(text(
-                uri,
-                "download_job.magnet_uri",
-            )?))),
-            (None, Some(path)) => Some(DownloadSource::TorrentFile(text(
-                path,
-                "download_job.torrent_file_path",
-            )?)),
-            (None, None) => None,
-        };
+        let source = source_from(row.magnet_uri, row.torrent_file_path, row.nzb_path)?;
         let safety_report = row
             .safety_report_json
             .map(|json| decode_report(&json))
@@ -1036,6 +1123,9 @@ impl TryFrom<JobRow> for DownloadJobRow {
                 .transpose()?,
             info_hash,
             source,
+            protocol,
+            stage: download_stage,
+            nzb_sha256,
             save_path: absolute_path(
                 &text(row.save_path, "download_job.save_path")?,
                 "download_job.save_path",
@@ -1070,7 +1160,7 @@ impl TryFrom<JobRow> for DownloadJobRow {
 struct FileRow {
     id: i64,
     download_job_id: i64,
-    torrent_file_index: i64,
+    file_index: i64,
     path: String,
     size_bytes: i64,
     selected: i64,
@@ -1084,7 +1174,7 @@ impl TryFrom<FileRow> for DownloadFileRow {
         Ok(Self {
             id: row.id,
             download_job_id: row.download_job_id,
-            torrent_file_index: row.torrent_file_index,
+            file_index: row.file_index,
             path: text(row.path, "download_file.path")?,
             size_bytes: unsigned(row.size_bytes, "download_file.size_bytes")?,
             selected: row.selected != 0,
@@ -1141,7 +1231,7 @@ fn encode_states(states: &[DownloadState]) -> String {
 /// The domain's own extension classifier, so the flag means what the scanner's means. A link is
 /// never media: the gate refuses one, and an entry nothing will be written from is not a file the
 /// library could import.
-fn is_media(entry: &TorrentEntry) -> bool {
+fn is_media(entry: &PayloadEntry) -> bool {
     if entry.kind() != EntryKind::File {
         return false;
     }
@@ -1242,7 +1332,7 @@ mod tests {
     use crate::page::Cursor;
     use crate::test_support::{NOW, account, database, dump, episode, path_of, season, title};
     use peregrine_domain::AccountId;
-    use peregrine_domain::inspect::{InspectionLimits, OptIn, TorrentInspector};
+    use peregrine_domain::inspect::{InspectionLimits, OptIn, PayloadInspector};
     use peregrine_domain::path::PathGuard;
     use proptest::prelude::*;
     use tempfile::TempDir;
@@ -1301,6 +1391,8 @@ mod tests {
             audio_summary: Some("DTS 5.1".to_owned()),
             reported_size_bytes: Some(8_000_000_000),
             info_hash: Some(hash(1)),
+            protocol: Protocol::Torrent,
+            nzb_sha256: None,
             source: DownloadSource::Magnet(MagnetUri::new(text(
                 "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
             ))),
@@ -1309,6 +1401,17 @@ mod tests {
             added_by: AddedBy::User,
             added_at: at(NOW),
         }
+    }
+
+    /// A Usenet job the way the service will admit one: an NZB hash, an NZB path, and no
+    /// info hash.
+    fn new_nzb_job(directory: &TempDir, title_id: i64, sha256: &str) -> NewDownloadJob {
+        let mut job = new_job(directory, title_id);
+        job.info_hash = None;
+        job.protocol = Protocol::Usenet;
+        job.nzb_sha256 = NzbHash::parse(sha256);
+        job.source = DownloadSource::NzbFile(text("/data/nzb/0123456789abcdef.nzb"));
+        job
     }
 
     /// The root the gate judges fixture paths against.
@@ -1322,8 +1425,8 @@ mod tests {
     /// Runs the real inspector over one entry, so every report is one the gate could produce.
     fn report(directory: &TempDir, path: &str, opt_in: OptIn) -> SafetyReport {
         let description =
-            TorrentDescription::new(vec![TorrentEntry::new(path, 1, EntryKind::File)]);
-        TorrentInspector::new(InspectionLimits::new(1_000_000, u64::MAX)).inspect(
+            PayloadDescription::new(vec![PayloadEntry::new(path, 1, EntryKind::File)]);
+        PayloadInspector::new(InspectionLimits::new(1_000_000, u64::MAX)).inspect(
             &description,
             &guard(directory),
             opt_in,
@@ -1448,6 +1551,94 @@ mod tests {
                 .len(),
             1,
             "the refused insert wrote nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_usenet_job_round_trips_its_protocol_and_nzb_source() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _, _) = catalogue(&directory).await;
+        let sha256 = "a".repeat(64);
+        let stored = database
+            .create_download_job(new_nzb_job(&directory, certified, &sha256))
+            .await
+            .expect("a Usenet job is admitted");
+
+        assert_eq!(stored.protocol, Protocol::Usenet);
+        assert_eq!(stored.stage, DownloadStage::Transfer);
+        assert_eq!(
+            stored.nzb_sha256.as_ref().map(NzbHash::as_str),
+            Some(sha256.as_str())
+        );
+        assert!(matches!(stored.source, Some(DownloadSource::NzbFile(_))));
+    }
+
+    #[tokio::test]
+    async fn a_live_usenet_job_holds_its_nzb_hash_until_it_is_terminal() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _, _) = catalogue(&directory).await;
+        let sha256 = "b".repeat(64);
+        let first = database
+            .create_download_job(new_nzb_job(&directory, certified, &sha256))
+            .await
+            .expect("the first job is admitted");
+
+        let error = database
+            .create_download_job(new_nzb_job(&directory, certified, &sha256))
+            .await
+            .expect_err("a live job already holds this post");
+        assert!(
+            matches!(error, StorageError::Conflict { .. }),
+            "the NZB index must reach the caller as a matchable conflict: {error:?}"
+        );
+
+        database
+            .transition_download_job(first.id, DownloadEvent::Removed)
+            .await
+            .expect("a queued job can be removed");
+        database
+            .create_download_job(new_nzb_job(&directory, certified, &sha256))
+            .await
+            .expect("a terminal job leaves the live set");
+    }
+
+    #[tokio::test]
+    async fn a_stage_is_written_only_while_a_job_is_live() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _, _) = catalogue(&directory).await;
+        let job = database
+            .create_download_job(new_job(&directory, certified))
+            .await
+            .expect("a job is admitted");
+
+        assert_eq!(
+            database
+                .set_download_stage(job.id, DownloadStage::Repairing)
+                .await
+                .unwrap(),
+            Some(DownloadStage::Repairing)
+        );
+        assert_eq!(
+            database
+                .download_job(any_account(), job.id)
+                .await
+                .unwrap()
+                .expect("the job is there")
+                .stage,
+            DownloadStage::Repairing
+        );
+
+        database
+            .transition_download_job(job.id, DownloadEvent::Removed)
+            .await
+            .expect("a queued job can be removed");
+        assert_eq!(
+            database
+                .set_download_stage(job.id, DownloadStage::Extracting)
+                .await
+                .unwrap(),
+            None,
+            "a terminal row keeps the stage it finished at"
         );
     }
 
@@ -2037,11 +2228,11 @@ mod tests {
         let (database, _, _, _) = catalogue(&directory).await;
         let id = admit(&database, &directory, 1).await;
 
-        let description = TorrentDescription::new(vec![
-            TorrentEntry::new("Show/S01E01.mkv", 1_000, EntryKind::File),
-            TorrentEntry::new("Show/S01E02.mkv", 2_000, EntryKind::File),
-            TorrentEntry::new("Show/notes.txt", 10, EntryKind::File),
-            TorrentEntry::new("Show/link.mkv", 5, EntryKind::Symlink),
+        let description = PayloadDescription::new(vec![
+            PayloadEntry::new("Show/S01E01.mkv", 1_000, EntryKind::File),
+            PayloadEntry::new("Show/S01E02.mkv", 2_000, EntryKind::File),
+            PayloadEntry::new("Show/notes.txt", 10, EntryKind::File),
+            PayloadEntry::new("Show/link.mkv", 5, EntryKind::Symlink),
         ]);
         database
             .select_download_files(id, description, &[0])
@@ -2050,9 +2241,7 @@ mod tests {
 
         let rows = database.download_files(any_account(), id).await.unwrap();
         assert_eq!(
-            rows.iter()
-                .map(|row| row.torrent_file_index)
-                .collect::<Vec<_>>(),
+            rows.iter().map(|row| row.file_index).collect::<Vec<_>>(),
             vec![0, 1, 2, 3],
             "the metadata's own order is the read's order"
         );
@@ -2088,9 +2277,9 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let (database, _, _, _) = catalogue(&directory).await;
         let id = admit(&database, &directory, 1).await;
-        let description = TorrentDescription::new(vec![
-            TorrentEntry::new("Show/S01E01.mkv", 1_000, EntryKind::File),
-            TorrentEntry::new("Show/S01E02.mkv", 2_000, EntryKind::File),
+        let description = PayloadDescription::new(vec![
+            PayloadEntry::new("Show/S01E01.mkv", 1_000, EntryKind::File),
+            PayloadEntry::new("Show/S01E02.mkv", 2_000, EntryKind::File),
         ]);
 
         database
@@ -2124,7 +2313,7 @@ mod tests {
         let id = admit(&database, &directory, 1).await;
 
         database
-            .select_download_files(id, TorrentDescription::new(Vec::new()), &[])
+            .select_download_files(id, PayloadDescription::new(Vec::new()), &[])
             .await
             .unwrap();
         assert!(
@@ -2136,9 +2325,9 @@ mod tests {
             "an empty metadata list writes no rows"
         );
 
-        let description = TorrentDescription::new(vec![
-            TorrentEntry::new("Show/S01E01.mkv", 1_000, EntryKind::File),
-            TorrentEntry::new("Show/S01E02.mkv", 2_000, EntryKind::File),
+        let description = PayloadDescription::new(vec![
+            PayloadEntry::new("Show/S01E01.mkv", 1_000, EntryKind::File),
+            PayloadEntry::new("Show/S01E02.mkv", 2_000, EntryKind::File),
         ]);
         database
             .select_download_files(id, description, &[])
@@ -2164,7 +2353,7 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let (database, _, _, _) = catalogue(&directory).await;
         let id = admit(&database, &directory, 1).await;
-        let description = TorrentDescription::new(vec![TorrentEntry::new(
+        let description = PayloadDescription::new(vec![PayloadEntry::new(
             "Show/S01E01.mkv",
             1,
             EntryKind::File,
@@ -2178,7 +2367,7 @@ mod tests {
             matches!(
                 error,
                 StorageError::UnexpectedValue {
-                    column: "download_file.torrent_file_index",
+                    column: "download_file.file_index",
                     ..
                 }
             ),
@@ -2200,9 +2389,9 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let (database, _, _, _) = catalogue(&directory).await;
         let id = admit(&database, &directory, 1).await;
-        let description = TorrentDescription::new(vec![
-            TorrentEntry::new("Show/S01E01.mkv", 1, EntryKind::File),
-            TorrentEntry::new("Show/S01E02.mkv", u64::MAX, EntryKind::File),
+        let description = PayloadDescription::new(vec![
+            PayloadEntry::new("Show/S01E01.mkv", 1, EntryKind::File),
+            PayloadEntry::new("Show/S01E02.mkv", u64::MAX, EntryKind::File),
         ]);
 
         let error = database
@@ -2306,7 +2495,7 @@ mod tests {
             admitted.push(database.create_download_job(job).await.unwrap().id);
         }
         let (visible, hidden_adult, hidden_unrated) = (admitted[0], admitted[1], admitted[2]);
-        let description = TorrentDescription::new(vec![TorrentEntry::new(
+        let description = PayloadDescription::new(vec![PayloadEntry::new(
             "Show/S01E01.mkv",
             1,
             EntryKind::File,
@@ -2646,7 +2835,7 @@ mod tests {
         let (database, _, _, _) = catalogue(&directory).await;
         let path = path_of(&directory);
         let id = admit(&database, &directory, 1).await;
-        let description = TorrentDescription::new(vec![TorrentEntry::new(
+        let description = PayloadDescription::new(vec![PayloadEntry::new(
             "Show/S01E01.mkv",
             1,
             EntryKind::File,
@@ -2836,6 +3025,8 @@ mod tests {
                     audio_summary: audio_summary.clone(),
                     reported_size_bytes,
                     info_hash: info_hash.map(InfoHash::from_bytes),
+                    protocol: Protocol::Torrent,
+                    nzb_sha256: None,
                     source: source.clone(),
                     save_path,
                     priority,
@@ -2924,10 +3115,10 @@ mod tests {
                     .await
                     .expect("inserts")
                     .id;
-                let description = TorrentDescription::new(
+                let description = PayloadDescription::new(
                     files
                         .iter()
-                        .map(|(path, bytes, _)| TorrentEntry::new(path.clone(), *bytes, EntryKind::File))
+                        .map(|(path, bytes, _)| PayloadEntry::new(path.clone(), *bytes, EntryKind::File))
                         .collect(),
                 );
                 let selection: Vec<usize> = files
@@ -2949,7 +3140,7 @@ mod tests {
                 prop_assert_eq!(rows.len(), files.len());
                 for (position, ((path, bytes, selected), row)) in files.iter().zip(rows.iter()).enumerate() {
                     prop_assert_eq!(row.download_job_id, id);
-                    prop_assert_eq!(row.torrent_file_index, i64::try_from(position).expect("small"));
+                    prop_assert_eq!(row.file_index, i64::try_from(position).expect("small"));
                     prop_assert_eq!(row.path.as_str(), path.as_str());
                     prop_assert_eq!(row.size_bytes, *bytes);
                     prop_assert_eq!(row.selected, *selected);

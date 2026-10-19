@@ -21,7 +21,7 @@ use tracing::warn;
 
 use crate::sidecar::verify::Artifact;
 
-/// The three third-party executables declared in `sidecars.toml`.
+/// The third-party executables declared in `sidecars.toml`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Component {
     /// Upstream's GPL build; playback and every media surface.
@@ -31,11 +31,22 @@ pub enum Component {
     /// The LGPL-only full build shipped as an on-demand pack; transcode, remux,
     /// and bitmap subtitle extraction.
     Ffmpeg,
+    /// The archive extractor a Usenet RAR/7z set needs; a separate process because
+    /// its unRAR restriction is not compatible with ours (ADR 0030).
+    SevenZip,
+    /// The repair tool a Usenet par2 set needs; GPL, so a separate process.
+    Par2,
 }
 
 impl Component {
     /// Every component, in the order a status surface should list them.
-    pub const ALL: [Self; 3] = [Self::Mpv, Self::Ffprobe, Self::Ffmpeg];
+    pub const ALL: [Self; 5] = [
+        Self::Mpv,
+        Self::Ffprobe,
+        Self::Ffmpeg,
+        Self::SevenZip,
+        Self::Par2,
+    ];
 
     /// The name the manifest and the status surface use.
     #[must_use]
@@ -44,6 +55,8 @@ impl Component {
             Self::Mpv => "mpv",
             Self::Ffprobe => "ffprobe",
             Self::Ffmpeg => "ffmpeg",
+            Self::SevenZip => "7zz",
+            Self::Par2 => "par2",
         }
     }
 
@@ -79,15 +92,21 @@ pub enum Capability {
     Transcode,
     /// Bitmap subtitle extraction: the full `ffmpeg` pack.
     SubtitleExtract,
+    /// Extraction of a Usenet archive: `7zz`.
+    Extract,
+    /// Repair of a Usenet par2 set: `par2`.
+    Repair,
 }
 
 impl Capability {
     /// Every capability, in the order a status surface should list them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self::Probe,
         Self::Playback,
         Self::Transcode,
         Self::SubtitleExtract,
+        Self::Extract,
+        Self::Repair,
     ];
 
     /// The stable name used in Settings and Diagnostics, and in error text.
@@ -98,6 +117,8 @@ impl Capability {
             Self::Playback => "playback",
             Self::Transcode => "transcode",
             Self::SubtitleExtract => "subtitle-extract",
+            Self::Extract => "extract",
+            Self::Repair => "repair",
         }
     }
 
@@ -108,6 +129,8 @@ impl Capability {
             Self::Probe => &[Component::Ffprobe],
             Self::Playback => &[Component::Mpv],
             Self::Transcode | Self::SubtitleExtract => &[Component::Ffmpeg],
+            Self::Extract => &[Component::SevenZip],
+            Self::Repair => &[Component::Par2],
         }
     }
 }

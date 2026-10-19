@@ -100,6 +100,7 @@ may_depend_on = [
   # declaring their own (PG-E4-19). The crate never ships this edge.
   "peregrine-testkit",
   "peregrine-torrent",
+  "peregrine-usenet",
 ]
 runtime = [
   "anyhow",
@@ -117,6 +118,9 @@ runtime = [
   "jiff",
   "quick-xml",
   "reqwest",
+  # The Usenet engine's password is handed over as a `SecretString`; the app never formats it and
+  # the engine's Debug prints only that a password exists (ADR 0030).
+  "secrecy",
   "serde",
   "serde_json",
   "sha2",
@@ -481,6 +485,8 @@ may_depend_on = [
   # against a copy of the port would make it assert a copy's contract. The edge points from a test
   # crate to a leaf, so it is not a cycle and no shipping build changes.
   "peregrine-torrent",
+  # The Usenet engine conformance suite names its port for the same reason (ADR 0030).
+  "peregrine-usenet",
 ]
 runtime = [
   # Both are the vocabulary of the ports: a fake clock answers with `jiff::Timestamp`
@@ -506,6 +512,31 @@ runtime = [
   "thiserror",
   "tokio",
   "tokio-util",
+  "tracing",
+]
+build = []
+pure = false
+
+
+[crates.peregrine-usenet]
+may_depend_on = [
+  "peregrine-domain",
+]
+runtime = [
+  # The NZB reader. A bounded pull parser over untrusted XML; the crate already reads Prowlarr's
+  # config.xml with the same dependency, so this is one parser in the graph rather than two.
+  "quick-xml",
+  # The password a post carries is held in a wrapper that cannot be printed or serialized.
+  "secrecy",
+  "thiserror",
+  # The transport: async sockets, TLS, public roots, yEnc checksums, and cancellation.
+  "tokio",
+  "tokio-util",
+  "tokio-rustls",
+  "rustls",
+  "webpki-roots",
+  "crc32fast",
+  "sha2",
   "tracing",
 ]
 build = []

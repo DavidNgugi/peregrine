@@ -100,5 +100,104 @@
       "licence": "LGPL-3.0-or-later",
       "notes": "Same build as ffmpeg."
     }
+  },
+  "7zz": {
+    "macos-arm64": {
+      "version": "25.01",
+      "url": "https://www.7-zip.org/a/7z2501-mac.tar.xz",
+      "sha256": "26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0",
+      "size": 1876264,
+      "archive": "tar.xz",
+      "binary": "7zz",
+      "licence": "LGPL-2.1-or-later",
+      "notes": "Official upstream build, unpatched. The macOS archive is universal; the same bytes serve Intel."
+    },
+    "macos-x86_64": {
+      "version": "25.01",
+      "url": "https://www.7-zip.org/a/7z2501-mac.tar.xz",
+      "sha256": "26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0",
+      "size": 1876264,
+      "archive": "tar.xz",
+      "binary": "7zz",
+      "licence": "LGPL-2.1-or-later",
+      "notes": "Same universal macOS archive as arm64."
+    },
+    "linux-x86_64": {
+      "version": "25.01",
+      "url": "https://www.7-zip.org/a/7z2501-linux-x64.tar.xz",
+      "sha256": "4ca3b7c6f2f67866b92622818b58233dc70367be2f36b498eb0bdeaaa44b53f4",
+      "size": 1571044,
+      "archive": "tar.xz",
+      "binary": "7zz",
+      "licence": "LGPL-2.1-or-later",
+      "notes": "Official upstream build, unpatched."
+    },
+    "linux-arm64": {
+      "version": "25.01",
+      "url": "https://www.7-zip.org/a/7z2501-linux-arm64.tar.xz",
+      "sha256": "39c5140f02ce4436599303c59a149f654cb1bbc47cdc105a942120d747ae040d",
+      "size": 1326736,
+      "archive": "tar.xz",
+      "binary": "7zz",
+      "licence": "LGPL-2.1-or-later",
+      "notes": "Official upstream build, unpatched."
+    },
+    "windows-x86_64": {
+      "build": "7zip-source",
+      "licence": "LGPL-2.1-or-later",
+      "notes": "Built from the pinned 7-Zip source in CI; the upstream console package is a nested 7z archive the fetcher cannot stage. Digest recorded in the release manifest."
+    }
+  },
+  "par2": {
+    "macos-arm64": {
+      "version": "v1.4.0",
+      "url": "https://github.com/Parchive/par2cmdline/releases/download/v1.4.0/par2cmdline-1.4.0-macos-arm64.zip",
+      "sha256": "717479548d42832ee9bd062cf9aeb6876aeeddf33867a74f2e2b370d94888da6",
+      "size": 124329,
+      "archive": "zip",
+      "binary": "par2",
+      "licence": "GPL-2.0-or-later",
+      "notes": "Upstream release binary, unpatched."
+    },
+    "macos-x86_64": {
+      "version": "v1.4.0",
+      "url": "https://github.com/Parchive/par2cmdline/releases/download/v1.4.0/par2cmdline-1.4.0-macos-amd64.zip",
+      "sha256": "cf19586a405289abe815aadb1284b251c1e4ddafd8cad47695c33dd9bf83297c",
+      "size": 129366,
+      "archive": "zip",
+      "binary": "par2",
+      "licence": "GPL-2.0-or-later",
+      "notes": "Upstream release binary, unpatched."
+    },
+    "linux-x86_64": {
+      "version": "v1.4.0",
+      "url": "https://github.com/Parchive/par2cmdline/releases/download/v1.4.0/par2cmdline-1.4.0-linux-amd64.zip",
+      "sha256": "6360228699d66b0141e2583b4f4b17260344c28f599bfe2e28db596b26703105",
+      "size": 1047662,
+      "archive": "zip",
+      "binary": "par2",
+      "licence": "GPL-2.0-or-later",
+      "notes": "Upstream release binary, unpatched."
+    },
+    "linux-arm64": {
+      "version": "v1.4.0",
+      "url": "https://github.com/Parchive/par2cmdline/releases/download/v1.4.0/par2cmdline-1.4.0-linux-arm64.zip",
+      "sha256": "309be700a15ed5c44049d8e48c103cc117473320d13b7028bd51788afb0b9a0e",
+      "size": 865189,
+      "archive": "zip",
+      "binary": "par2",
+      "licence": "GPL-2.0-or-later",
+      "notes": "Upstream release binary, unpatched."
+    },
+    "windows-x86_64": {
+      "version": "v1.4.0",
+      "url": "https://github.com/Parchive/par2cmdline/releases/download/v1.4.0/par2cmdline-1.4.0-win-x64.zip",
+      "sha256": "200130143dba1e12f9d1be567d5a446e785d2093e5d735225d8ad0539125b71c",
+      "size": 258011,
+      "archive": "zip",
+      "binary": "par2.exe",
+      "licence": "GPL-2.0-or-later",
+      "notes": "Upstream release binary, unpatched."
+    }
   }
 }

@@ -26,6 +26,12 @@ pub enum IndexerError {
     /// The answer was larger than this build will read.
     #[error("the indexer's answer exceeded the size this build will read")]
     BodyTooLarge,
+    /// The source is not one that can be fetched, such as an info hash with no URL.
+    #[error("that release has no URL this build can fetch")]
+    UnsupportedSource,
+    /// The download proxy redirected more times than this build follows.
+    #[error("the indexer redirected too many times")]
+    TooManyRedirects,
     /// No credential is configured, so no request was made.
     #[error("no indexer credential is configured")]
     Unconfigured,

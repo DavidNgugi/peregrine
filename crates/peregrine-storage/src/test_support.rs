@@ -249,7 +249,7 @@ fn library_rows() -> Vec<String> {
             "INSERT INTO download_job (id, title_id, state, release_title, save_path, added_at, \
              completed_at) VALUES (1, 1, 'completed', 'A.Release', '/downloads', {old}, {old})"
         ),
-        "INSERT INTO download_file (id, download_job_id, torrent_file_index, path, size_bytes) \
+        "INSERT INTO download_file (id, download_job_id, file_index, path, size_bytes) \
          VALUES (1, 1, 0, '/downloads/a.mkv', 4096)"
             .to_owned(),
         format!(

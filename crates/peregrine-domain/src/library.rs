@@ -91,6 +91,8 @@ stored_enum! {
         Torrent => "torrent",
         /// Added by hand.
         Manual => "manual",
+        /// Fulfilled by a Usenet download.
+        Usenet => "usenet",
     }
 }
 
@@ -1321,7 +1323,7 @@ mod tests {
             MediaItemState,
             ["wanted", "downloading", "available", "partial", "failed"]
         );
-        assert_check_values!(MediaOrigin, ["scan", "torrent", "manual"]);
+        assert_check_values!(MediaOrigin, ["scan", "torrent", "manual", "usenet"]);
         assert_check_values!(
             SubtitleOrigin,
             ["embedded", "external", "downloaded", "generated"]

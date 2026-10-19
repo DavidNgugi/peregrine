@@ -69,7 +69,7 @@ use librqbit::{
     TorrentStats as EngineTorrentStats, TorrentStatsState,
 };
 use peregrine_domain::id::InfoHash;
-use peregrine_domain::inspect::{EntryKind, TorrentDescription, TorrentEntry};
+use peregrine_domain::inspect::{EntryKind, PayloadDescription, PayloadEntry};
 use peregrine_domain::text::NonEmptyText;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 
@@ -191,11 +191,11 @@ impl TorrentMetadataFetch for LibrqbitEngine {
                     return Err(EngineError::Failed);
                 }
             };
-            let entries: Vec<TorrentEntry> = list
+            let entries: Vec<PayloadEntry> = list
                 .info
                 .iter_file_details()
                 .map(|file| {
-                    TorrentEntry::new(
+                    PayloadEntry::new(
                         file.filename.to_pathbuf().to_string_lossy().into_owned(),
                         file.len,
                         EntryKind::File,
@@ -204,7 +204,7 @@ impl TorrentMetadataFetch for LibrqbitEngine {
                 .collect();
             Ok(FetchedMetadata::new(
                 InfoHash::from_bytes(list.info_hash.0),
-                TorrentDescription::new(entries),
+                PayloadDescription::new(entries),
             ))
         })
     }

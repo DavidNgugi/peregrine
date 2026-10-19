@@ -172,7 +172,7 @@ mod tests {
     ];
 
     /// The tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 48] = [
+    const DOCUMENTED_TABLES: [&str; 50] = [
         "account",
         "cast_session",
         "company",
@@ -215,6 +215,8 @@ mod tests {
         "title_genre",
         "title_keyword",
         "unmatched_file",
+        "usenet_server",
+        "usenet_setting",
         "watch_availability",
         "watch_offer",
         "watch_progress",
@@ -459,6 +461,29 @@ mod tests {
     ];
 
     // Migration 0004.
+    const USENET_SERVER: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("name", "TEXT", 1, None, 0),
+        ("host", "TEXT", 1, None, 0),
+        ("port", "INTEGER", 1, None, 0),
+        ("tls", "INTEGER", 1, Some("1"), 0),
+        ("username", "TEXT", 1, Some("''"), 0),
+        ("password_secret", "TEXT", 1, None, 0),
+        ("connections", "INTEGER", 1, Some("8"), 0),
+        ("priority", "INTEGER", 1, Some("100"), 0),
+        ("enabled", "INTEGER", 1, Some("0"), 0),
+        ("health_state", "TEXT", 1, Some("'unknown'"), 0),
+        ("last_check_at", "INTEGER", 0, None, 0),
+        ("created_at", "INTEGER", 1, None, 0),
+    ];
+
+    const USENET_SETTING: &[ColumnShape] = &[
+        ("id", "INTEGER", 0, None, 1),
+        ("allow_archives", "INTEGER", 1, Some("0"), 0),
+        ("delete_archives_after_import", "INTEGER", 1, Some("1"), 0),
+        ("updated_at", "INTEGER", 1, None, 0),
+    ];
+
     const MEDIA_ITEM: &[ColumnShape] = &[
         ("id", "INTEGER", 0, None, 1),
         ("title_id", "INTEGER", 1, None, 0),
@@ -690,12 +715,16 @@ mod tests {
         ("completed_at", "INTEGER", 0, None, 0),
         ("seeding_until", "INTEGER", 0, None, 0),
         ("removed_at", "INTEGER", 0, None, 0),
+        ("protocol", "TEXT", 1, Some("'torrent'"), 0),
+        ("nzb_sha256", "TEXT", 0, None, 0),
+        ("nzb_path", "TEXT", 0, None, 0),
+        ("stage", "TEXT", 1, Some("'transfer'"), 0),
     ];
 
     const DOWNLOAD_FILE: &[ColumnShape] = &[
         ("id", "INTEGER", 0, None, 1),
         ("download_job_id", "INTEGER", 1, None, 0),
-        ("torrent_file_index", "INTEGER", 1, None, 0),
+        ("file_index", "INTEGER", 1, None, 0),
         ("path", "TEXT", 1, None, 0),
         ("size_bytes", "INTEGER", 1, None, 0),
         ("selected", "INTEGER", 1, Some("1"), 0),
@@ -721,6 +750,7 @@ mod tests {
         ("size_bytes", "INTEGER", 0, None, 0),
         ("seeders", "INTEGER", 0, None, 0),
         ("dismissed", "INTEGER", 1, Some("0"), 0),
+        ("protocol", "TEXT", 1, Some("'torrent'"), 0),
     ];
 
     // Migration 0007.
@@ -838,7 +868,7 @@ mod tests {
     ];
 
     /// Every documented table with the column shape its migration must produce.
-    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 44] = [
+    const DOCUMENTED_COLUMNS: [(&str, &[ColumnShape]); 46] = [
         ("account", ACCOUNT),
         ("cast_session", CAST_SESSION),
         ("company", COMPANY),
@@ -868,6 +898,8 @@ mod tests {
         ("release_decision", RELEASE_DECISION),
         ("season", SEASON),
         ("secret_ref", SECRET_REF),
+        ("usenet_server", USENET_SERVER),
+        ("usenet_setting", USENET_SETTING),
         ("settings", SETTINGS),
         ("smart_collection", SMART_COLLECTION),
         ("subtitle_download", SUBTITLE_DOWNLOAD),
@@ -1031,12 +1063,13 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 46] = [
+    const DOCUMENTED_INDICES: [&str; 48] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "discover_rail_title_idx",
         "download_job_active_idx",
         "download_job_hash_uq",
+        "download_job_nzb_uq",
         "download_job_title_idx",
         "download_schedule_due_idx",
         "episode_absolute_idx",
@@ -1073,6 +1106,7 @@ mod tests {
         "title_kind_release_idx",
         "title_sort_name_idx",
         "title_sync_idx",
+        "usenet_server_enabled_idx",
         "watch_offer_title_idx",
         "watch_progress_account_idx",
         "watch_progress_continue_idx",
@@ -1168,6 +1202,10 @@ mod tests {
         ("download_job_hash_uq", "UNIQUE INDEX download_job_hash_uq"),
         ("download_job_hash_uq", "WHERE info_hash IS NOT NULL"),
         ("download_job_hash_uq", "'seeding'"),
+        ("download_job_nzb_uq", "UNIQUE INDEX download_job_nzb_uq"),
+        ("download_job_nzb_uq", "WHERE nzb_sha256 IS NOT NULL"),
+        ("download_job_nzb_uq", "'seeding'"),
+        ("usenet_server_enabled_idx", "(enabled, priority)"),
         ("release_decision_title_idx", "(title_id, created_at DESC)"),
         ("provider_cache_expiry_idx", "(expires_at)"),
         ("provider_cache_resource_idx", "(provider, resource)"),
@@ -2303,7 +2341,7 @@ mod tests {
         "INSERT INTO indexer (kind, name) VALUES ('builtin', 'Local')",
         "INSERT INTO download_job (title_id, state, release_title, save_path, added_at) \
          VALUES (1, 'queued', 'Alien 1979 1080p', '/downloads', 0)",
-        "INSERT INTO download_file (download_job_id, torrent_file_index, path, size_bytes) \
+        "INSERT INTO download_file (download_job_id, file_index, path, size_bytes) \
          VALUES (1, 0, 'alien.mkv', 1)",
         "INSERT INTO download_schedule (account_id, title_id, release_on, created_at, updated_at) \
          VALUES (1, 1, '2030-01-01', 0, 0)",
@@ -2328,6 +2366,8 @@ mod tests {
         "INSERT INTO image_cache \
          (key, provider, path, variant, disk_path, bytes, created_at, last_used_at) \
          VALUES ('sha256:image', 'tmdb', '/poster.jpg', 'w342', '/cache/ab.webp', 1, 0, 0)",
+        "INSERT INTO usenet_server (name, host, port, password_secret, created_at) \
+         VALUES ('Primary', 'news.example.test', 563, 'provider.usenet.one', 0)",
         "INSERT INTO watch_sync (title_id, synced_at) VALUES (1, 0)",
         "INSERT INTO watch_availability (title_id, region, source, link) \
          VALUES (1, 'US', 'tmdb', 'https://example.test/watch')",
@@ -2425,6 +2465,10 @@ mod tests {
         SELECT 'watch_offer' AS table_name, COUNT(*) AS n FROM watch_offer
         UNION ALL
         SELECT 'watch_progress' AS table_name, COUNT(*) AS n FROM watch_progress
+        UNION ALL
+        SELECT 'usenet_server' AS table_name, COUNT(*) AS n FROM usenet_server
+        UNION ALL
+        SELECT 'usenet_setting' AS table_name, COUNT(*) AS n FROM usenet_setting
         UNION ALL
         SELECT 'watch_sync' AS table_name, COUNT(*) AS n FROM watch_sync
         UNION ALL

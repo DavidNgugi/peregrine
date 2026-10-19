@@ -8,6 +8,7 @@
 
 import {
   clearFinishedDownloads,
+  commands,
   deleteDownload,
   dismissDownload,
   normalizeIpcError,
@@ -41,6 +42,8 @@ export interface DownloadActions {
   readonly planDeletion: (id: number) => Promise<DeletionPlanDto | null>;
   /** Moves one row's files to the trash and clears the entry. */
   readonly deleteFiles: (id: number) => Promise<void>;
+  /** Lifts a Usenet archive block by granting the standing opt-in. */
+  readonly consent: (id: number) => Promise<void>;
 }
 
 /** The moves, each re-reading the queue through `onChanged`. */
@@ -98,6 +101,21 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     [failed],
   );
 
+  const consent = useCallback(
+    (id: number) =>
+      move(
+        id,
+        async (job: number) => {
+          const result = await commands.consentUsenetDownload({ id: job });
+          if (result.status === "error") {
+            throw normalizeIpcError(result.error);
+          }
+        },
+        "consentUsenetDownload",
+      ),
+    [move],
+  );
+
   const clearFinished = useCallback(async (): Promise<void> => {
     setState({ busyId: null, clearing: true, planningId: null, error: null });
     try {
@@ -109,5 +127,15 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     }
   }, [failed, onChanged]);
 
-  return { ...state, pause, resume, remove, dismiss, clearFinished, planDeletion, deleteFiles };
+  return {
+    ...state,
+    pause,
+    resume,
+    remove,
+    dismiss,
+    clearFinished,
+    planDeletion,
+    deleteFiles,
+    consent,
+  };
 }

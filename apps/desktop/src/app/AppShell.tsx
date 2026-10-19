@@ -33,6 +33,7 @@ import {
   useProwlarr,
   useLibraryRoots,
   useProviders,
+  useUsenet,
   useShortcutDispatch,
   useShortcuts,
 } from "../features/settings/index.js";
@@ -215,6 +216,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const libraries = useLibraryRoots();
   const providers = useProviders();
   const indexers = useIndexers();
+  const usenet = useUsenet();
   const prowlarr = useProwlarr();
   // The managed instance writes the Prowlarr key out of band when it starts, so the indexer
   // section's one read is stale the moment that happens. Re-read when the managed state flips to
@@ -521,6 +523,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               <SettingsScreen
                 backLabel={t("shell.back")}
                 indexers={indexers}
+                usenet={usenet}
                 prowlarr={prowlarr}
                 libraries={libraries}
                 onBack={canBack ? goBack : undefined}

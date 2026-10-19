@@ -7,7 +7,8 @@ use serde::Deserialize;
 
 use crate::error::IndexerError;
 use crate::port::{
-    FetchedTorrent, Indexer, IndexerFuture, IndexerQuery, IndexerRelease, TorrentSource,
+    FetchedRelease, Indexer, IndexerFuture, IndexerQuery, IndexerRelease, ReleaseSource,
+    TorrentSource, UsenetSource,
 };
 
 /// The most bytes this adapter will read from a search answer.
@@ -22,12 +23,17 @@ const REJECTION_BODY_CAP: usize = 64 * 1024;
 /// How long a request may take before it is abandoned.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How many redirects a download proxy may answer before the fetch gives up.
+const MAX_REDIRECTS: usize = 5;
+
 /// One configured Prowlarr instance.
 ///
 /// The credential is held as a string because this crate may not depend on the secrets crate; the
 /// type deliberately does not implement Debug, so a key cannot reach a log through it.
 pub struct Prowlarr {
     client: reqwest::Client,
+    /// The client that never follows a redirect, so a download proxy's `Location` is judged here.
+    fetch_client: reqwest::Client,
     base: String,
     api_key: String,
 }
@@ -56,8 +62,14 @@ impl Prowlarr {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|_| IndexerError::Transport)?;
+        let fetch_client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| IndexerError::Transport)?;
         Ok(Self {
             client,
+            fetch_client,
             base,
             api_key,
         })
@@ -150,39 +162,66 @@ impl Indexer for Prowlarr {
                 .send()
                 .await
                 .map_err(|_| IndexerError::Transport)?;
-            let _ = self.read_capped(response).await?;
-            Ok(())
+            if response.status().is_success() {
+                Ok(())
+            } else {
+                Err(self.rejection(response).await)
+            }
         })
     }
 
-    fn fetch_torrent<'a>(&'a self, url: &'a str) -> IndexerFuture<'a, FetchedTorrent> {
+    fn fetch<'a>(&'a self, source: &'a ReleaseSource) -> IndexerFuture<'a, FetchedRelease> {
         Box::pin(async move {
-            // Prowlarr's proxy URL already carries its api key, so no header is added here. For a
-            // torrent indexer it answers 301 with a magnet: Location -- a scheme an HTTP client
-            // cannot follow -- and for one that serves a file, the .torrent body, capped like a
-            // search answer. Verified live against 2.6.5.5623: the 301 Location is the magnet.
-            let response = self
-                .client
-                .get(url)
-                .send()
-                .await
-                .map_err(|_| IndexerError::Transport)?;
-            if response.status().is_redirection() {
-                let location = response
-                    .headers()
-                    .get(reqwest::header::LOCATION)
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap_or_default();
-                if location
-                    .trim_start()
-                    .to_ascii_lowercase()
-                    .starts_with("magnet:")
-                {
-                    return Ok(FetchedTorrent::Magnet(location.to_owned()));
+            // A magnet is already the answer. Everything else is one URL that may redirect: a
+            // torrent indexer answers with a magnet, and a file indexer answers with the bytes.
+            let mut next = match source {
+                ReleaseSource::Torrent(TorrentSource::Magnet(uri)) => {
+                    return Ok(FetchedRelease::Magnet(uri.clone()));
                 }
-                return Err(IndexerError::Status(response.status().as_u16()));
+                ReleaseSource::Torrent(TorrentSource::TorrentUrl(url))
+                | ReleaseSource::Usenet(UsenetSource::NzbUrl(url)) => url.clone(),
+                ReleaseSource::Torrent(TorrentSource::InfoHash(_)) => {
+                    return Err(IndexerError::UnsupportedSource);
+                }
+            };
+            // Prowlarr's proxy URL already carries its api key, so no header is added. Redirects
+            // are followed here rather than by the client: a cross-origin hop must not inherit
+            // anything the proxy URL held, and a magnet hop is not an HTTP redirect at all.
+            for _ in 0..=MAX_REDIRECTS {
+                let response = self
+                    .fetch_client
+                    .get(&next)
+                    .send()
+                    .await
+                    .map_err(|_| IndexerError::Transport)?;
+                if response.status().is_redirection() {
+                    let location = response
+                        .headers()
+                        .get(reqwest::header::LOCATION)
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or_default()
+                        .trim()
+                        .to_owned();
+                    if location.to_ascii_lowercase().starts_with("magnet:") {
+                        return Ok(FetchedRelease::Magnet(location));
+                    }
+                    let base = reqwest::Url::parse(&next).map_err(|_| IndexerError::Transport)?;
+                    let target = base
+                        .join(&location)
+                        .map_err(|_| IndexerError::Status(response.status().as_u16()))?;
+                    if !matches!(target.scheme(), "http" | "https") {
+                        return Err(IndexerError::Status(response.status().as_u16()));
+                    }
+                    next = target.to_string();
+                    continue;
+                }
+                let bytes = self.read_capped(response).await?;
+                return Ok(match source {
+                    ReleaseSource::Torrent(_) => FetchedRelease::TorrentBytes(bytes),
+                    ReleaseSource::Usenet(_) => FetchedRelease::NzbBytes(bytes),
+                });
             }
-            Ok(FetchedTorrent::Bytes(self.read_capped(response).await?))
+            Err(IndexerError::TooManyRedirects)
         })
     }
 
@@ -223,6 +262,7 @@ struct WireRelease {
     seeders: Option<i64>,
     leechers: Option<i64>,
     magnet_url: Option<String>,
+    download_url: Option<String>,
     info_hash: Option<String>,
     indexer: Option<String>,
     publish_date: Option<String>,
@@ -237,26 +277,37 @@ fn stated(value: Option<String>) -> Option<String> {
 }
 
 impl WireRelease {
-    /// The release this entry describes, or None when it is not a torrent with a usable source.
+    /// The release this entry describes, or None when the protocol carries no usable source.
     fn into_release(self) -> Option<IndexerRelease> {
-        // A usenet result has no info hash and no magnet, so a torrent engine cannot use it; dropping
-        // it here keeps the port's vocabulary torrent-only rather than a flag every caller checks.
-        if let Some(protocol) = self.protocol.as_deref()
-            && !protocol.eq_ignore_ascii_case("torrent")
-        {
-            return None;
-        }
         let raw_title = stated(self.title)?;
-        // Prowlarr calls the field magnetUrl, but for several indexers it is that indexer's own
-        // proxy download URL -- an http(s) address for the .torrent -- and passing it to the engine
-        // as a magnet asks the engine to GET it and fail. Classify on what it actually is.
-        let source = match (stated(self.magnet_url), stated(self.info_hash)) {
-            (Some(uri), _) if uri.starts_with("magnet:") => TorrentSource::Magnet(uri),
-            (Some(url), _) if url.starts_with("http://") || url.starts_with("https://") => {
-                TorrentSource::TorrentUrl(url)
-            }
-            (_, Some(hash)) => TorrentSource::InfoHash(hash),
-            _ => return None,
+        let protocol = self
+            .protocol
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("torrent");
+        let source = if protocol.eq_ignore_ascii_case("usenet") {
+            // A Usenet result has no info hash and no magnet: its source is the proxy's download
+            // URL, which a caller fetches before parsing the NZB.
+            let url = stated(self.download_url).or_else(|| stated(self.magnet_url))?;
+            ReleaseSource::Usenet(UsenetSource::NzbUrl(url))
+        } else if protocol.eq_ignore_ascii_case("torrent")
+            || protocol.eq_ignore_ascii_case("unknown")
+        {
+            // Prowlarr calls the field magnetUrl, but for several indexers it is that indexer's own
+            // proxy download URL -- an http(s) address for the .torrent -- and passing it to the
+            // engine as a magnet asks the engine to GET it and fail. Classify on what it is.
+            let torrent = match (stated(self.magnet_url), stated(self.info_hash)) {
+                (Some(uri), _) if uri.starts_with("magnet:") => TorrentSource::Magnet(uri),
+                (Some(url), _) if url.starts_with("http://") || url.starts_with("https://") => {
+                    TorrentSource::TorrentUrl(url)
+                }
+                (_, Some(hash)) => TorrentSource::InfoHash(hash),
+                _ => return None,
+            };
+            ReleaseSource::Torrent(torrent)
+        } else {
+            return None;
         };
         Some(IndexerRelease {
             title: ReleaseName::parse(&raw_title),
@@ -734,5 +785,55 @@ impl Prowlarr {
             return Err(IndexerError::Status(response.status().as_u16()));
         }
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wire(protocol: &str, download: Option<&str>) -> WireRelease {
+        WireRelease {
+            title: Some("Movie.2024.1080p".to_owned()),
+            size: Some(1),
+            seeders: None,
+            leechers: None,
+            magnet_url: None,
+            download_url: download.map(str::to_owned),
+            info_hash: None,
+            indexer: Some("Test".to_owned()),
+            publish_date: None,
+            guid: None,
+            protocol: Some(protocol.to_owned()),
+        }
+    }
+
+    #[test]
+    fn a_usenet_release_carries_its_nzb_url() {
+        let release = wire("usenet", Some("https://example.test/a.nzb"))
+            .into_release()
+            .expect("a Usenet result survives");
+        assert!(matches!(
+            release.source,
+            ReleaseSource::Usenet(UsenetSource::NzbUrl(_))
+        ));
+    }
+
+    #[test]
+    fn a_torrent_release_still_carries_its_magnet() {
+        let mut release = wire("torrent", None);
+        release.magnet_url = Some("magnet:?xt=urn:btih:abc".to_owned());
+        assert!(matches!(
+            release.into_release().expect("a torrent result").source,
+            ReleaseSource::Torrent(TorrentSource::Magnet(_))
+        ));
+    }
+
+    #[test]
+    fn an_unknown_protocol_is_dropped() {
+        assert!(
+            wire("other", Some("https://example.test/a.nzb"))
+                .into_release()
+                .is_none()
+        );
     }
 }

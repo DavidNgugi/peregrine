@@ -8,6 +8,7 @@ import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
 import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
+import type { UsenetSettings } from "../hooks/useUsenet.js";
 import { SettingsScreen } from "./SettingsScreen.js";
 
 const i18n = createI18n();
@@ -93,6 +94,28 @@ function noIndexers(): IndexerSettings {
  * test off the IPC bridge.
  */
 /** The managed Prowlarr read as a resolved, unsupported one: this suite is about the shortcut list. */
+function noUsenet(): UsenetSettings {
+  return {
+    status: {
+      configured: false,
+      servers: [],
+      allowArchives: false,
+      deleteArchivesAfterImport: true,
+      extractAvailable: false,
+      repairAvailable: false,
+    },
+    loading: false,
+    failed: false,
+    busy: false,
+    error: null,
+    save: () => Promise.resolve(),
+    remove: () => Promise.resolve(),
+    test: () => Promise.resolve(),
+    setArchives: () => Promise.resolve(),
+    refresh: () => Promise.resolve(),
+  };
+}
+
 function noProwlarr(): ManagedProwlarr {
   return {
     status: null,
@@ -114,12 +137,14 @@ function markup(
   libraries: LibraryRoots = noLibraries(),
   providers: ProviderSettings = noProviders(),
   indexers: IndexerSettings = noIndexers(),
+  usenet: UsenetSettings = noUsenet(),
   prowlarr: ManagedProwlarr = noProwlarr(),
 ): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <SettingsScreen
         indexers={indexers}
+        usenet={usenet}
         libraries={libraries}
         prowlarr={prowlarr}
         providers={providers}

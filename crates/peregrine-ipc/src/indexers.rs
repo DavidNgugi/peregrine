@@ -12,7 +12,7 @@ use std::sync::Arc;
 use peregrine_app::indexers;
 use peregrine_app::{
     ConfiguredIndexer, IndexerConfigError, IndexerDefinition, IndexerField, IndexerOption,
-    IndexerRelease, IndexerStatus, MAX_LIMIT, Secret, TorrentSource,
+    IndexerRelease, IndexerStatus, MAX_LIMIT, ReleaseSource, Secret, TorrentSource, UsenetSource,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -70,10 +70,11 @@ pub struct ReleaseCandidateDto {
 
 impl From<IndexerRelease> for ReleaseCandidateDto {
     fn from(value: IndexerRelease) -> Self {
-        let source = match value.source {
-            TorrentSource::Magnet(_) => "magnet",
-            TorrentSource::InfoHash(_) => "infoHash",
-            TorrentSource::TorrentUrl(_) => "torrentUrl",
+        let source = match &value.source {
+            ReleaseSource::Torrent(TorrentSource::Magnet(_)) => "magnet",
+            ReleaseSource::Torrent(TorrentSource::InfoHash(_)) => "infoHash",
+            ReleaseSource::Torrent(TorrentSource::TorrentUrl(_)) => "torrentUrl",
+            ReleaseSource::Usenet(UsenetSource::NzbUrl(_)) => "nzbUrl",
         };
         Self {
             title: value.raw_title,

@@ -109,6 +109,14 @@ name = "selectors"
 version = "=0.38.0"
 allow = ["MPL-2.0"]
 
+# The Mozilla root certificate store for the Usenet transport (ADR 0030). It is data, not code,
+# and CDLA-Permissive-2.0 is a permissive data licence; scoped per crate and version like the MPL
+# exceptions above, so a new CDLA dependency still has to be argued for.
+[[licenses.exceptions]]
+name = "webpki-roots"
+version = "=1.0.9"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

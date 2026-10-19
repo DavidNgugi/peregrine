@@ -16,6 +16,7 @@ members = [
   "crates/peregrine-providers",
   "crates/peregrine-sync",
   "crates/peregrine-torrent",
+  "crates/peregrine-usenet",
   "crates/peregrine-indexers",
   "crates/peregrine-monitor",
   "crates/peregrine-mcp",
@@ -29,6 +30,7 @@ members = [
   "crates/peregrine-testkit",
   "xtask",
 ]
+exclude = ["crates/peregrine-usenet/fuzz"]
 # Every member except the Tauri shell. The shell's link is the most expensive step in the tree by a
 # wide margin, and nothing that iterates on the core needs it: a bare `cargo build`, `cargo test`, or
 # `cargo clippy` now covers the crates instead of rebuilding `tauri`, `wry`, and the plugin stack.
@@ -42,6 +44,7 @@ default-members = [
   "crates/peregrine-providers",
   "crates/peregrine-sync",
   "crates/peregrine-torrent",
+  "crates/peregrine-usenet",
   "crates/peregrine-indexers",
   "crates/peregrine-monitor",
   "crates/peregrine-mcp",
@@ -85,6 +88,7 @@ peregrine-stream = { path = "crates/peregrine-stream" }
 peregrine-sync = { path = "crates/peregrine-sync" }
 peregrine-testkit = { path = "crates/peregrine-testkit" }
 peregrine-torrent = { path = "crates/peregrine-torrent" }
+peregrine-usenet = { path = "crates/peregrine-usenet" }
 # The loopback media server's HTTP stack (docs/ARCHITECTURE.md §5, ADR 0023). `axum` for the router,
 # `tower-http`'s `fs` feature for byte-range delivery of one file — range parsing, `Content-Range`,
 # `Accept-Ranges`, `HEAD`, and `416` are HTTP, not our logic, and hand-rolling them is where the
@@ -172,6 +176,13 @@ tempfile = { version = "3.27.0" }
 # real socket (ADR 0023): `axum`'s `tokio` feature would enable it transitively, and relying on a
 # feature another crate happens to turn on is the hazard PG-E0-20 records.
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "process"] }
+# The Usenet transport's TLS stack (ADR 0030). `tokio-rustls` is the async wrapper; `rustls` is
+# already in the graph through `reqwest`, so the provider and the version match it; `webpki-roots`
+# is the public root store, which keeps the crate free of a platform TLS dependency.
+tokio-rustls = { version = "0.26.6" }
+rustls = { version = "0.23.46" }
+webpki-roots = { version = "1.0.9" }
+crc32fast = { version = "1.5.2" }
 tokio-util = { version = "0.7.19" }
 toml = { version = "1.1.7" }
 # Moving a deleted file to the operating system's trash is a per-OS operation with a

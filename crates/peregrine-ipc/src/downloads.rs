@@ -92,6 +92,10 @@ pub struct DownloadJobDto {
     pub release_title: String,
     /// The state machine's current state, as its stored spelling.
     pub state: String,
+    /// The transfer protocol, as its stored spelling: `torrent` or `usenet`.
+    pub protocol: String,
+    /// What the job is doing inside its transfer state.
+    pub stage: String,
     /// Completion in permille, where 1000 is the whole payload.
     #[specta(type = Number)]
     pub progress_permille: i64,
@@ -141,6 +145,8 @@ impl DownloadJobDto {
             episode_number: None,
             release_title: row.release_title.clone(),
             state: row.state.as_str().to_owned(),
+            protocol: row.protocol.as_str().to_owned(),
+            stage: row.stage.as_str().to_owned(),
             progress_permille: row.progress_permille,
             reported_size_bytes: row.reported_size_bytes,
             downloaded_bytes: row.downloaded_bytes,
@@ -257,8 +263,16 @@ fn acquisition_error(error: &AcquisitionError) -> AppError {
         AcquisitionError::DiskFull { .. } => {
             AppError::new(ErrorCode::InvalidInput).with_detail(error.to_string())
         }
-        AcquisitionError::UnsupportedSource | AcquisitionError::Trash(TrashError::Unavailable) => {
+        AcquisitionError::UnsupportedSource
+        | AcquisitionError::UsenetUnavailable
+        | AcquisitionError::Trash(TrashError::Unavailable) => {
             AppError::new(ErrorCode::Unsupported).with_detail(error.to_string())
+        }
+        AcquisitionError::UsenetAddRefused(_) => {
+            AppError::new(ErrorCode::UnsafeContent).with_detail(error.to_string())
+        }
+        AcquisitionError::UsenetEngine(_) | AcquisitionError::Io(_) => {
+            AppError::new(ErrorCode::Network).with_detail(error.to_string())
         }
         AcquisitionError::SavePath { .. }
         | AcquisitionError::SpaceUnknown { .. }
@@ -671,6 +685,8 @@ pub struct ReleaseOfferDto {
     pub size_bytes: Option<u64>,
     /// The seeders the indexer stated.
     pub seeders: Option<u32>,
+    /// The protocol this offer transfers over: `torrent` or `usenet`.
+    pub protocol: String,
 }
 
 /// The offers a search left for one title.
@@ -692,6 +708,7 @@ pub async fn list_release_offers(
                 reason: row.reasons_json,
                 size_bytes: row.size_bytes.and_then(|value| u64::try_from(value).ok()),
                 seeders: row.seeders.and_then(|value| u32::try_from(value).ok()),
+                protocol: row.protocol,
             })
             .collect(),
     ))

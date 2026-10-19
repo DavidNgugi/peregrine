@@ -28,7 +28,12 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = new Set(process.argv.slice(2));
 const force = args.has("--force");
-const components = args.has("--all") ? ["mpv", "ffmpeg", "ffprobe"] : ["mpv", "ffprobe"];
+const requested = process.argv.slice(2).filter((argument) => !argument.startsWith("--"));
+const components = requested.length
+  ? requested
+  : args.has("--all")
+    ? ["mpv", "ffmpeg", "ffprobe", "7zz", "par2"]
+    : ["mpv", "ffprobe", "7zz", "par2"];
 
 const lock = JSON.parse(readFileSync(join(root, "packaging/sidecars.lock.json"), "utf8"));
 
@@ -167,7 +172,12 @@ for (const component of components) {
   }
 
   const isMacMpv = component === "mpv" && key.startsWith("macos");
-  const directory = isMacMpv ? join(stage, "mpv.app") : join(stage, component);
+  // The Usenet tools are standalone executables; Windows needs the extension its loader expects.
+  const toolName =
+    (component === "7zz" || component === "par2") && process.platform === "win32"
+      ? `${component}.exe`
+      : component;
+  const directory = isMacMpv ? join(stage, "mpv.app") : join(stage, toolName);
   const staged =
     component === "mpv" ? join(directory, isMacMpv ? "Contents/MacOS/mpv" : "mpv.exe") : directory;
   if (existsSync(staged) && !force) {

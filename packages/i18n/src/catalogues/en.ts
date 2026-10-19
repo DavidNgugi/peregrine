@@ -97,6 +97,7 @@ export const en = {
       eta: { seconds: "{{value}} s", minutes: "{{value}} min", hours: "{{value}} h" },
       column: {
         title: "Title",
+        protocol: "Protocol",
         state: "State",
         reason: "Reason",
         progress: "Progress",
@@ -109,6 +110,7 @@ export const en = {
       action: {
         pause: "Pause",
         resume: "Resume",
+        allowArchives: "Allow archives",
         remove: "Remove",
         dismiss: "Dismiss",
         delete: "Delete files",
@@ -137,6 +139,15 @@ export const en = {
         body: "Every finished entry leaves the list. Files already downloaded are not deleted.",
         confirm: "Clear finished",
         cancel: "Cancel",
+      },
+      stage: {
+        repairing: "Repairing",
+        extracting: "Extracting",
+        importing: "Importing",
+      },
+      protocol: {
+        torrent: "Torrent",
+        usenet: "Usenet",
       },
       state: {
         queued: "Queued",
@@ -916,6 +927,34 @@ export const en = {
         label: "Start Peregrine when you sign in",
         failed:
           "The system would not change whether Peregrine starts with it. Your account may not allow it.",
+      },
+      usenet: {
+        title: "Usenet",
+        description:
+          "The provider Peregrine downloads from. The password is stored in your operating system's keychain, never in Peregrine's database.",
+        empty: "No Usenet provider is configured.",
+        disabled: "Disabled",
+        test: "Test",
+        edit: "Edit",
+        remove: "Remove",
+        add: "Add a provider",
+        editTitle: "Edit provider",
+        name: "Name",
+        host: "Host",
+        port: "Port",
+        username: "Username",
+        password: "Password",
+        connections: "Connections",
+        save: "Save",
+        allowArchives: "Allow archives in Usenet downloads",
+        deleteArchives: "Remove archives after import",
+        tools: "Archive tools",
+        extract: "Extractor",
+        repair: "Repair",
+        available: "ready",
+        missing: "missing",
+        failedTitle: "The Usenet providers could not be read",
+        failed: "The core did not answer the provider list. Try again.",
       },
       indexers: {
         title: "Indexers",

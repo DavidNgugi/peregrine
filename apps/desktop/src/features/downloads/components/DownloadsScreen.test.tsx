@@ -27,6 +27,8 @@ function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
     episodeNumber: null,
     releaseTitle: "The.Matrix.1999.1080p",
     state: "downloading",
+    protocol: "torrent",
+    stage: "transfer",
     progressPermille: 500,
     reportedSizeBytes: 1_000,
     downloadedBytes: 500,

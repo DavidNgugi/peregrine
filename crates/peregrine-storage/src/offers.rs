@@ -27,6 +27,8 @@ pub struct NewOffer {
     pub size_bytes: Option<i64>,
     /// Its stated seeders.
     pub seeders: Option<i64>,
+    /// The protocol the release transfers over: `torrent` or `usenet`.
+    pub protocol: String,
 }
 
 /// One stored offer, without its source.
@@ -48,6 +50,8 @@ pub struct OfferRow {
     pub size_bytes: Option<i64>,
     /// Its stated seeders.
     pub seeders: Option<i64>,
+    /// The protocol the release transfers over.
+    pub protocol: String,
 }
 
 /// Replaces the offers a new search found, leaving anything the user already acted on.
@@ -71,7 +75,7 @@ pub(crate) async fn replace_offers(
     let mut inserted = 0usize;
     for offer in offers {
         let result = sqlx::query(
-            "INSERT INTO release_decision (title_id, release_title, indexer, score, rank_position, chosen, reasons_json, created_at, source_json, size_bytes, seeders, dismissed) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10, 0)",
+            "INSERT INTO release_decision (title_id, release_title, indexer, score, rank_position, chosen, reasons_json, created_at, source_json, size_bytes, seeders, protocol, dismissed) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
         )
         .bind(title_id)
         .bind(&offer.release_title)
@@ -83,6 +87,7 @@ pub(crate) async fn replace_offers(
         .bind(&offer.source_json)
         .bind(offer.size_bytes)
         .bind(offer.seeders)
+        .bind(&offer.protocol)
         .execute(&mut *connection)
         .await
         .map_err(StorageError::from_sqlx)?;
@@ -97,7 +102,7 @@ pub(crate) async fn list_offers(
     title_id: i64,
 ) -> Result<Vec<OfferRow>, StorageError> {
     sqlx::query_as::<_, OfferRow>(
-        "SELECT id, release_title, indexer, score, rank_position, reasons_json, size_bytes, seeders FROM release_decision WHERE title_id = ?1 AND chosen = 0 AND dismissed = 0 ORDER BY rank_position ASC, id ASC",
+        "SELECT id, release_title, indexer, score, rank_position, reasons_json, size_bytes, seeders, protocol FROM release_decision WHERE title_id = ?1 AND chosen = 0 AND dismissed = 0 ORDER BY rank_position ASC, id ASC",
     )
     .bind(title_id)
     .fetch_all(pool)

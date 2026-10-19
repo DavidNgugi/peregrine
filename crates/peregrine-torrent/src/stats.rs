@@ -10,41 +10,7 @@ use std::time::Duration;
 
 use peregrine_domain::InfoHash;
 
-/// A number of bytes: a transfer size, a file's length, or an offset into one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Bytes(u64);
-
-impl Bytes {
-    /// Wraps a byte count.
-    #[must_use]
-    pub const fn new(bytes: u64) -> Self {
-        Self(bytes)
-    }
-
-    /// The count, for arithmetic and for a caller that has to spell it out.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-}
-
-/// A transfer rate in bytes per second.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct ByteRate(u64);
-
-impl ByteRate {
-    /// Wraps a rate of `bytes` per second.
-    #[must_use]
-    pub const fn per_second(bytes: u64) -> Self {
-        Self(bytes)
-    }
-
-    /// The rate, in bytes per second.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-}
+pub use peregrine_domain::transfer::{ByteRate, Bytes};
 
 /// How many peers a torrent is connected to, and how many of them are seeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -281,14 +247,6 @@ impl TorrentStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bytes_and_rates_carry_their_unit() {
-        assert_eq!(Bytes::new(1_500).get(), 1_500);
-        assert_eq!(ByteRate::per_second(0).get(), 0);
-        assert_eq!(Bytes::default(), Bytes::new(0));
-        assert!(Bytes::new(1) < Bytes::new(2), "a byte count is ordered");
-    }
 
     #[test]
     fn a_ratio_with_nothing_downloaded_is_absent_rather_than_zero() {

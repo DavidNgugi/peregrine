@@ -28,6 +28,7 @@ peregrine-secrets = { workspace = true }
 # asserts against the trait, and the trait lives in the crate that will hold its adapters
 # (PG-E10-01).
 peregrine-torrent = { workspace = true }
+peregrine-usenet = { workspace = true }
 
 [dev-dependencies]
 # The metadata provider suite and the torrent engine suite are asynchronous, because those ports

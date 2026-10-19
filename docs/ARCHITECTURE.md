@@ -12,7 +12,7 @@ Status: target architecture, partly built. What works today is in the [README](.
 
 - Discovery of movies, series, and anime from free metadata providers, with cached, instant, filterable browsing.
 - Local library: scan, match, organize, play, delete.
-- Torrent acquisition with quality profiles, a queue, and progress surfaced per card and in a dedicated screen.
+- Torrent and Usenet acquisition with quality profiles, a queue, and progress surfaced per card and in a dedicated screen.
 - Playback through mpv with resume, next-up, subtitles, audio-track and language management.
 - Watchlist, watch progress, collections.
 - Casting to Chromecast and DLNA renderers.
@@ -240,6 +240,7 @@ graph TD
 | `peregrine-providers` | `MetadataProvider`, `SubtitleProvider` adapters; response normalization; matching/scoring; rate limiting; conditional requests. | `domain`, `reqwest`, `governor` | No provider type escapes the adapter module. Every response passes through a size-capped, validating decode. |
 | `peregrine-sync` | Job scheduler, priority queues, resource token buckets, incremental change sync, IMDb dataset ingestion, image cache manager, blurhash generation. | `domain`, `storage`, `providers`, `image` | Cooperative cancellation on every job; no job may hold a write transaction across a network call. |
 | `peregrine-torrent` | `TorrentEngine` port + librqbit adapter; torrent/magnet ingestion; the safety inspection pipeline; piece-priority policy for streaming; per-file selection; seeding policy. | `domain`, `librqbit` | Never touches the filesystem outside the configured download root. Inspection runs before any byte is written. |
+| `peregrine-usenet` | `UsenetEngine` port + NNTP adapter; bounded NZB/yEnc parsing; article assembly; per-provider failover; pause/resume/statistics. | `domain`, `quick-xml`, `tokio-rustls`, `crc32fast` | Implicit TLS except loopback; a message-id with a line break is refused; no byte is written outside the guarded job directory. |
 | `peregrine-indexers` | `Indexer` port + Prowlarr, Jackett, local `.torrent`/magnet, and built-in adapters (disabled by default, no bundled domain list); result normalization and info-hash de-duplication; release-name and quality scoring feeds. | `domain`, `providers` | Never polls a rate-limited endpoint on a schedule. No bundled default domains. Adapters ship disabled. |
 | `peregrine-monitor` | `Monitor` port plus the watching policy: per-scope monitors, the availability state machine, evidence-based transitions, dedupe keys, per-source cadence, and the daily digest. Enqueues jobs rather than scheduling its own polls. Post-1.0 ([adr/0016](./adr/0016-monitoring-and-availability.md)). | `domain`, `sync`, `providers` | A state transition without recorded evidence is a bug. Never polls a source faster than it can change. |
 | `peregrine-mcp` | The stdio MCP server that agent clients launch: JSON-RPC framing, protocol-version negotiation, tool schemas, and a bridge to the running app over a per-user local socket. Contains no business logic and no database access. Post-1.0 ([adr/0017](./adr/0017-mcp-server.md)). | `domain` | Never opens the database. Every call goes through the app's services so scopes, approvals, and audit cannot be bypassed. |
@@ -515,6 +516,7 @@ Full threat model, controls, and test plan: [../SECURITY.md](../SECURITY.md). Ar
 
 | Area | Commitment |
 | --- | --- |
+| Usenet ingestion | Parse the NZB under file/segment caps → inspect the entry list → store the NZB beside the payload → download into the job directory → list an archive before extraction → walk the extracted tree for links, escapes, and caps. The import is the enforced boundary (ADR 0030). |
 | Torrent ingestion | Sniff metadata → validate every file path → extension allowlist → cap file count (default 500) and total size (the volume's free space above the floor) → reject symlinks, absolute paths, `..`, Windows reserved names, and unicode-spoofed executable extensions → produce a `SafetyReport`. Executables and scripts are blocked with no override; nested archives and disk-image files are blocked by default with an explicit advanced opt-in. |
 | Content execution | Downloaded media is never opened with the OS default handler. Playback goes through mpv with a hardened flag set (`--no-config`, `--load-scripts=no`, `--no-ytdl`, `--sub-auto=no`, empty `--script-opts`). |
 | Path handling | All filesystem operations go through `PathGuard::resolve`, which canonicalizes, rejects symlink escapes, requires containment within a configured root, and returns a typed `SafePath` that the fs layer accepts. There is no other way to obtain a writable path. |

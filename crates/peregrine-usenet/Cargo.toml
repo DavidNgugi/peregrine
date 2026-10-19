@@ -1,0 +1,33 @@
+[package]
+name = "peregrine-usenet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NNTP transport, NZB parsing, and the Usenet transfer engine."
+publish = false
+
+[dependencies]
+peregrine-domain = { workspace = true }
+quick-xml = { workspace = true }
+secrecy = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+crc32fast = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+# `start_paused` lets the greeting-timeout test advance virtual time instead of waiting IO_TIMEOUT.
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

@@ -528,8 +528,8 @@ pub(crate) mod tests {
 
     use futures::executor::block_on;
     use peregrine_domain::inspect::{
-        EntryKind, InspectionLimits, OptIn, SafetyReport, TorrentDescription, TorrentEntry,
-        TorrentInspector,
+        EntryKind, InspectionLimits, OptIn, PayloadDescription, PayloadEntry, PayloadInspector,
+        SafetyReport,
     };
     use peregrine_domain::path::{PathGuard, SafePath};
 
@@ -556,12 +556,12 @@ pub(crate) mod tests {
 
     /// A report from the real inspector, so every fixture here is one production code could produce.
     pub(crate) fn allowed_report() -> SafetyReport {
-        let description = TorrentDescription::new(vec![TorrentEntry::new(
+        let description = PayloadDescription::new(vec![PayloadEntry::new(
             "Movie.2024.1080p.mkv",
             4_096,
             EntryKind::File,
         )]);
-        TorrentInspector::new(InspectionLimits::new(1_000, u64::MAX)).inspect(
+        PayloadInspector::new(InspectionLimits::new(1_000, u64::MAX)).inspect(
             &description,
             &guard(),
             OptIn::NotGranted,

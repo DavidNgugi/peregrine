@@ -268,6 +268,14 @@ fn a_missing_mpv_costs_playback_and_nothing_else() {
             Component::Ffmpeg,
             Ok(verified_token(root.path(), b"ffmpeg-fixture")),
         ),
+        (
+            Component::SevenZip,
+            Ok(verified_token(root.path(), b"7zz-fixture")),
+        ),
+        (
+            Component::Par2,
+            Ok(verified_token(root.path(), b"par2-fixture")),
+        ),
     ];
     let report = CapabilityReport::from_outcomes(&outcomes);
 
@@ -288,10 +296,12 @@ fn a_missing_mpv_costs_playback_and_nothing_else() {
         playback.reasons[0].1
     );
 
-    assert_eq!(report.granted.len(), 3);
+    assert_eq!(report.granted.len(), 5);
     assert!(report.loss(Capability::Probe).is_none());
     assert!(report.loss(Capability::Transcode).is_none());
     assert!(report.loss(Capability::SubtitleExtract).is_none());
+    assert!(report.loss(Capability::Extract).is_none());
+    assert!(report.loss(Capability::Repair).is_none());
 }
 
 #[test]
@@ -320,7 +330,12 @@ fn a_missing_ffmpeg_costs_transcode_and_subtitle_extraction() {
     let names: Vec<_> = report.lost.iter().map(|loss| loss.capability).collect();
     assert_eq!(
         names,
-        vec![Capability::Transcode, Capability::SubtitleExtract]
+        vec![
+            Capability::Transcode,
+            Capability::SubtitleExtract,
+            Capability::Extract,
+            Capability::Repair,
+        ]
     );
     assert!(report.loss(Capability::Playback).is_none());
     assert!(report.loss(Capability::Probe).is_none());
@@ -337,7 +352,7 @@ fn a_component_that_was_never_installed_is_named_rather_than_omitted() {
     )];
     let report = CapabilityReport::from_outcomes(&outcomes);
 
-    assert_eq!(report.lost.len(), 4, "every capability is accounted for");
+    assert_eq!(report.lost.len(), 6, "every capability is accounted for");
     assert!(report.granted.is_empty());
     let probe = report.loss(Capability::Probe).expect("probe is lost");
     assert_eq!(probe.components(), vec!["ffprobe"]);
@@ -383,6 +398,14 @@ fn a_full_installation_grants_every_capability_once() {
             Component::Ffmpeg,
             Ok(verified_token(root.path(), b"ffmpeg-fixture")),
         ),
+        (
+            Component::SevenZip,
+            Ok(verified_token(root.path(), b"7zz-fixture")),
+        ),
+        (
+            Component::Par2,
+            Ok(verified_token(root.path(), b"par2-fixture")),
+        ),
     ];
     let report = CapabilityReport::from_outcomes(&outcomes);
 
@@ -404,7 +427,7 @@ fn a_full_installation_grants_every_capability_once() {
         ffmpeg_grant.sidecar.path().ends_with("staged-fixture"),
         "the grant carries the verified component's path"
     );
-    // Each grant borrows the one token, so all four point at the three
+    // Each grant borrows the one token, so all six point at the five
     // verifications rather than at copies of them.
     assert_eq!(report.granted.len(), Capability::ALL.len());
 }

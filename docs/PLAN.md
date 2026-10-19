@@ -75,7 +75,7 @@ Effort is in ideal engineering days for one experienced Rust + React developer, 
 | Deliverable | Detail |
 | --- | --- |
 | Torrent engine | `TorrentEngine` trait, librqbit adapter, session lifecycle, restart reattachment, limits and caps |
-| Safety gate | `TorrentInspector` with the full hostile fixture suite, persisted `SafetyReport`, blocked and warned UI paths |
+| Safety gate | `PayloadInspector` with the full hostile fixture suite, persisted `SafetyReport`, blocked and warned UI paths |
 | Indexers | `Indexer` trait, Prowlarr and Jackett adapters, local `.torrent` and magnet ingest, built-in providers present but disabled with no bundled default domain list |
 | Ranking | Pure `ReleaseRanker`, quality profiles, `release_decision` audit trail, auto-selection rules |
 | Queue | Downloads screen: active, queued, seeding, completed, failed; per-card progress ring; global and per-job limits; bandwidth policy |
@@ -337,6 +337,7 @@ These are planning figures, not commitments. The risk register below is the hone
 | Cloud library sync | Contradicts local-first; accounts and Trakt cover the real need | — |
 | Skip-intro detection | Requires an external intro database or audio fingerprinting | Sponsor or a maintained public intro dataset |
 | Subtitle OCR for PGS and VobSub | Niche, heavy dependency, slow | An acceptable on-device OCR story |
+| Usenet posting, seeding, and streaming from an archive set | Posting needs an account and a provider's abuse policy; seeding has no Usenet analogue; streaming a RAR set needs a random-access extractor. The v1 boundary is download, repair, extract, import ([adr/0030](./adr/0030-usenet-acquisition.md)) | A provider story and a random-access RAR reader |
 | Built-in VPN management | OS-level leak safety is the user's to guarantee; a half-solution implies safety we cannot provide | — |
 | Android TV or mobile clients | Different product surface entirely | Extracting the core into a headless service |
 | A browser console for a homelab server, and the umbrelOS App Store listing that needs one | The deployment artifacts do not depend on it, and shipping a store listing whose page requires a terminal would fail the standard the store publishes. Scoped as E37 in [adr/0020](./adr/0020-homelab-deployment.md) §3 | E36, then its own record for the API and session model |

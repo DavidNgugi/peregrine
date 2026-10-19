@@ -49,7 +49,7 @@ use crate::release::{EpisodeSpan, ReleaseName};
 ///
 /// The list exists only to tell a file name from a folder name, because a folder's name may
 /// contain dots (`The.Matrix.1999.1080p.BluRay`). It is not a safety allowlist: that is
-/// `TorrentInspector`'s (PG-E11-01).
+/// `PayloadInspector`'s (PG-E11-01).
 const MEDIA_EXTENSIONS: &[&str] = &[
     "3gp", "avi", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "ogm", "ogv",
     "rmvb", "ts", "vob", "webm", "wmv",

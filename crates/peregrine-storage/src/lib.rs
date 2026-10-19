@@ -39,6 +39,7 @@ mod schedule;
 #[cfg(test)]
 mod test_support;
 mod usage;
+mod usenet;
 mod watch;
 mod watch_options;
 mod web_audit;
@@ -80,6 +81,7 @@ pub use retention::{
 };
 pub use schedule::{DownloadScheduleRow, NewSchedule};
 pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
+pub use usenet::{NewUsenetServer, UsenetServer, UsenetSetting};
 pub use watch::{EpisodeProgressRow, WatchDayRow, WatchProgressRow, WatchlistRow};
 pub use web_audit::{NewWebAudit, WebAuditAction};
 pub use writer::NewEvent;

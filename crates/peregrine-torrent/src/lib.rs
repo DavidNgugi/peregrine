@@ -29,7 +29,7 @@
 //! (PG-E10-11).
 //!
 //! The safety inspection itself is also not here: it is
-//! [`peregrine_domain::inspect::TorrentInspector`], which judges a torrent's description on
+//! [`peregrine_domain::inspect::PayloadInspector`], which judges a torrent's description on
 //! metadata alone. This crate's [`AddRequest`] is where that verdict becomes structural — there is
 //! no spelling of an add that does not carry one — which is SECURITY T12 and `FLOWS` F6 as a type
 //! rather than as a rule for every caller to remember.

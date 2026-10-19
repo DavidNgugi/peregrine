@@ -1,0 +1,28 @@
+[package]
+name = "peregrine-usenet-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+peregrine-usenet = { path = ".." }
+
+[[bin]]
+name = "parse_nzb"
+path = "fuzz_targets/parse_nzb.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_yenc"
+path = "fuzz_targets/decode_yenc.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

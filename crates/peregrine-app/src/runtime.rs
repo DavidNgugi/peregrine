@@ -1239,7 +1239,7 @@ impl Runtime {
                             let engine = Arc::new(engine);
                             let torrent: Arc<dyn TorrentEngine> = engine.clone();
                             let fetch: Arc<dyn TorrentMetadataFetch> = engine;
-                            let service = AcquisitionService::new(
+                            let mut service = AcquisitionService::new(
                                 Arc::clone(&database),
                                 Arc::clone(&torrent),
                                 Arc::clone(&clock),
@@ -1249,10 +1249,31 @@ impl Runtime {
                                 Arc::clone(&bus),
                                 Arc::new(SystemTrash),
                             )
-                            .with_notices(Arc::clone(&download_notices));
+                            .with_notices(Arc::clone(&download_notices))
+                            .with_usenet(Arc::new(peregrine_usenet::NntpEngine::new()));
+                            if let Some(tools) = crate::usenet_post::PostTools::resolve() {
+                                service = service.with_postprocess(tools);
+                            }
+                            let service = Arc::new(service);
+                            if let Ok(servers) =
+                                crate::usenet::server_configs(&database, Arc::clone(&secrets)).await
+                            {
+                                match service.reattach_usenet(servers).await {
+                                    Ok(0) => {}
+                                    Ok(count) => info!(count, "Usenet jobs reattached"),
+                                    Err(error) => {
+                                        warn!(%error, "Usenet jobs could not be reattached");
+                                    }
+                                }
+                            }
+                            match service.sweep_orphan_nzbs().await {
+                                Ok(0) => {}
+                                Ok(count) => info!(count, "orphan NZBs swept"),
+                                Err(error) => warn!(%error, "orphan NZBs could not be swept"),
+                            }
                             torrent_engine = Some(torrent);
                             metadata_fetch = Some(fetch);
-                            acquisition = Some(Arc::new(service));
+                            acquisition = Some(service);
                         }
                     }
                 }
@@ -2032,12 +2053,16 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::InvalidRequest {
                 detail: "that offer is gone or was already used".to_owned(),
             })?;
-        let source: peregrine_indexers::TorrentSource = serde_json::from_str(&chosen.source_json)
-            .map_err(|_| {
-            RuntimeError::InvalidRequest {
+        // New rows carry the tagged source. Rows written before the protocol existed carry a bare
+        // `TorrentSource`, which is still a usable answer.
+        let source: peregrine_indexers::ReleaseSource = serde_json::from_str(&chosen.source_json)
+            .or_else(|_| {
+                serde_json::from_str::<peregrine_indexers::TorrentSource>(&chosen.source_json)
+                    .map(peregrine_indexers::ReleaseSource::Torrent)
+            })
+            .map_err(|_| RuntimeError::InvalidRequest {
                 detail: "that offer's release is not usable".to_owned(),
-            }
-        })?;
+            })?;
         self.submit_acquire(
             account,
             crate::jobs::acquire::Target {
@@ -3436,7 +3461,7 @@ impl Runtime {
         else {
             return Ok(None);
         };
-        let index = usize::try_from(file.torrent_file_index).unwrap_or_default();
+        let index = usize::try_from(file.file_index).unwrap_or_default();
         Ok(Some(Arc::new(crate::media_source::EngineMedia::new(
             engine,
             handle,
@@ -4664,6 +4689,86 @@ impl Runtime {
     #[must_use]
     pub fn secret_store(&self) -> Arc<dyn SecretStore> {
         Arc::clone(&self.secrets)
+    }
+
+    /// The Usenet settings surface's read.
+    ///
+    /// # Errors
+    ///
+    /// The storage or keyring refusal the settings service reports.
+    pub async fn usenet_status(
+        &self,
+    ) -> Result<crate::usenet::UsenetStatus, crate::usenet::UsenetConfigError> {
+        crate::usenet::status(&self.database, Arc::clone(&self.secrets)).await
+    }
+
+    /// Inserts or updates one Usenet provider.
+    pub async fn save_usenet_server(
+        &self,
+        input: crate::usenet::UsenetServerInput,
+    ) -> Result<crate::usenet::UsenetStatus, crate::usenet::UsenetConfigError> {
+        crate::usenet::save(
+            &self.database,
+            Arc::clone(&self.secrets),
+            input,
+            self.clock.now(),
+        )
+        .await
+    }
+
+    /// Removes one Usenet provider and its keyring entry.
+    pub async fn remove_usenet_server(
+        &self,
+        id: i64,
+    ) -> Result<crate::usenet::UsenetStatus, crate::usenet::UsenetConfigError> {
+        crate::usenet::remove(&self.database, Arc::clone(&self.secrets), id).await
+    }
+
+    /// Tests one Usenet provider without storing it.
+    pub async fn test_usenet_server(
+        &self,
+        input: crate::usenet::UsenetServerInput,
+    ) -> Result<(), crate::usenet::UsenetConfigError> {
+        crate::usenet::test(
+            &self.database,
+            Arc::clone(&self.secrets),
+            input,
+            self.clock.now(),
+        )
+        .await
+    }
+
+    /// Re-inspects a blocked Usenet job with the archive opt-in.
+    pub async fn consent_usenet(
+        &self,
+        id: i64,
+    ) -> Result<peregrine_domain::DownloadState, RuntimeError> {
+        let servers = crate::usenet::server_configs(&self.database, Arc::clone(&self.secrets))
+            .await
+            .map_err(|error| RuntimeError::InvalidRequest {
+                detail: error.to_string(),
+            })?;
+        self.acquisition()?
+            .consent_usenet(id, servers)
+            .await
+            .map_err(|error| RuntimeError::InvalidRequest {
+                detail: error.to_string(),
+            })
+    }
+
+    /// Writes the Usenet archive policy.
+    pub async fn set_usenet_archives(
+        &self,
+        allow_archives: bool,
+        delete_archives_after_import: bool,
+    ) -> Result<peregrine_storage::UsenetSetting, crate::usenet::UsenetConfigError> {
+        crate::usenet::set_archives(
+            &self.database,
+            allow_archives,
+            delete_archives_after_import,
+            self.clock.now(),
+        )
+        .await
     }
 
     /// The state the tray's menu presents (PG-E1-09).

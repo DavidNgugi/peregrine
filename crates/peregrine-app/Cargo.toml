@@ -20,6 +20,7 @@ peregrine-storage = { workspace = true }
 peregrine-stream = { workspace = true }
 peregrine-sync = { workspace = true }
 peregrine-torrent = { workspace = true }
+peregrine-usenet = { workspace = true }
 # The LAN surface (ADR 0028): `axum` routes the read-only API and `tower-http` serves the built
 # client and the security headers; `ReaderStream` streams a film's bytes on a range request
 # instead of buffering it, which is why `tokio-util`'s io feature is on here.
@@ -40,6 +41,7 @@ ulid = { workspace = true }
 reqwest = { workspace = true }
 sha2 = { workspace = true }
 quick-xml = { workspace = true }
+secrecy = { workspace = true }
 
 # The archives are per-OS — macOS and Windows publish a zip, Linux a tar.gz — so neither reader is
 # compiled on the other's target.

@@ -690,6 +690,18 @@ export const commands = {
 	chooseReleaseOffer: (offer: OfferRef, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("choose_release_offer", { offer, minSeeders })),
 	/**  Dismisses one offer so a later search does not offer it again. */
 	dismissReleaseOffer: (offer: OfferRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_release_offer", { offer })),
+	/**  Reads the configured providers and the archive policy. */
+	usenetStatus: () => typedError<UsenetStatusDto, AppError_Serialize>(__TAURI_INVOKE("usenet_status")),
+	/**  Inserts or updates one provider. */
+	saveUsenetServer: (server: UsenetServerInputDto) => typedError<UsenetStatusDto, AppError_Serialize>(__TAURI_INVOKE("save_usenet_server", { server })),
+	/**  Removes one provider and its keyring entry. */
+	removeUsenetServer: (server: UsenetServerInputDto) => typedError<UsenetStatusDto, AppError_Serialize>(__TAURI_INVOKE("remove_usenet_server", { server })),
+	/**  Tests one provider without storing it. */
+	testUsenetServer: (server: UsenetServerInputDto) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("test_usenet_server", { server })),
+	/**  Writes the archive policy and answers the fresh status. */
+	setUsenetArchives: (allowArchives: boolean, deleteArchivesAfterImport: boolean) => typedError<UsenetStatusDto, AppError_Serialize>(__TAURI_INVOKE("set_usenet_archives", { allowArchives, deleteArchivesAfterImport })),
+	/**  Re-inspects a blocked Usenet job with the archive opt-in. */
+	consentUsenetDownload: (download: DownloadRef) => typedError<string, AppError_Serialize>(__TAURI_INVOKE("consent_usenet_download", { download })),
 	/**
 	 *  The most recent centre rows, newest first.
 	 * 
@@ -1033,6 +1045,10 @@ export type DownloadJobDto = {
 	releaseTitle: string,
 	/**  The state machine's current state, as its stored spelling. */
 	state: string,
+	/**  The transfer protocol, as its stored spelling: `torrent` or `usenet`. */
+	protocol: string,
+	/**  What the job is doing inside its transfer state. */
+	stage: string,
 	/**  Completion in permille, where 1000 is the whole payload. */
 	progressPermille: number,
 	/**  The size the indexer claimed, when it claimed one. */
@@ -1955,6 +1971,8 @@ export type ReleaseOfferDto = {
 	sizeBytes: number | null,
 	/**  The seeders the indexer stated. */
 	seeders: number | null,
+	/**  The protocol this offer transfers over: `torrent` or `usenet`. */
+	protocol: string,
 };
 
 /**  What a root is expected to hold, as the webview spells it. */
@@ -2294,6 +2312,70 @@ export type UnmatchedRef = {
 	asTitle: MatchAsDto,
 	/**  The chosen title's id, when `asTitle` is `chosen` and the answer names one. */
 	titleId: number | null,
+};
+
+/**  One configured provider, as the settings list renders it. */
+export type UsenetServerDto = {
+	/**  The row id. */
+	id: number,
+	/**  The display name. */
+	name: string,
+	/**  The host. */
+	host: string,
+	/**  The port. */
+	port: number,
+	/**  Whether the connection uses implicit TLS. */
+	tls: boolean,
+	/**  The account name. */
+	username: string,
+	/**  How many connections the engine may open. */
+	connections: number,
+	/**  Lower values are tried first. */
+	priority: number,
+	/**  Whether the engine may contact it. */
+	enabled: boolean,
+	/**  The last known health, as its stored spelling. */
+	health: string,
+};
+
+/**  The fields a save carries. */
+export type UsenetServerInputDto = {
+	/**  The row being edited, or null for a new provider. */
+	id: number | null,
+	/**  The display name. */
+	name: string,
+	/**  The host. */
+	host: string,
+	/**  The port. */
+	port: number,
+	/**  Whether to use implicit TLS. */
+	tls: boolean,
+	/**  The account name. */
+	username: string,
+	/**  A new password, when the user typed one. Never read back. */
+	password: string | null,
+	/**  The connection count. */
+	connections: number,
+	/**  Lower is tried first. */
+	priority: number,
+	/**  Whether the engine may contact it. */
+	enabled: boolean,
+};
+
+/**  What the settings screen reads. */
+export type UsenetStatusDto = {
+	/**  Whether at least one enabled provider exists. */
+	configured: boolean,
+	/**  The providers, primary first. */
+	servers: UsenetServerDto[],
+	/**  Whether Usenet archives may be extracted. */
+	allowArchives: boolean,
+	/**  Whether the archives are removed after a successful import. */
+	deleteArchivesAfterImport: boolean,
+	/**  Whether the archive extractor was found. */
+	extractAvailable: boolean,
+	/**  Whether the repair tool was found. */
+	repairAvailable: boolean,
 };
 
 /**  Where one title can be watched in one region. */

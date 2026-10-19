@@ -770,6 +770,7 @@ fn cases() -> Vec<ContractCase> {
     all.extend(credential_cases());
     all.extend(download_cases());
     all.extend(indexer_cases());
+    all.extend(usenet_cases());
     all.extend(notification_cases());
     all.extend(watch_cases());
     all.extend(prowlarr_cases());
@@ -1134,6 +1135,83 @@ fn dismiss_release_offer_dead(harness: &Harness) -> Invocation<'_> {
 }
 
 /// The indexers namespace. Every command reaches the secret store through the runtime.
+fn usenet_cases() -> Vec<ContractCase> {
+    vec![
+        fails_internal("usenet_status", usenet_status_dead),
+        fails_internal("save_usenet_server", save_usenet_server_dead),
+        fails_internal("remove_usenet_server", remove_usenet_server_dead),
+        fails_internal("test_usenet_server", test_usenet_server_dead),
+        fails_internal("set_usenet_archives", set_usenet_archives_dead),
+        fails_internal("consent_usenet_download", consent_usenet_download_dead),
+    ]
+}
+
+fn usenet_server_input() -> crate::usenet::UsenetServerInputDto {
+    crate::usenet::UsenetServerInputDto {
+        id: Some(1),
+        name: "Primary".to_owned(),
+        host: "news.example.test".to_owned(),
+        port: 563,
+        tls: true,
+        username: "reader".to_owned(),
+        password: None,
+        connections: 8,
+        priority: 100,
+        enabled: true,
+    }
+}
+
+fn usenet_status_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::usenet::usenet_status(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn save_usenet_server_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::usenet::save_usenet_server(harness.dead_state(), usenet_server_input())
+            .await
+            .map(drop)
+    })
+}
+
+fn remove_usenet_server_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::usenet::remove_usenet_server(harness.dead_state(), usenet_server_input())
+            .await
+            .map(drop)
+    })
+}
+
+fn test_usenet_server_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::usenet::test_usenet_server(harness.dead_state(), usenet_server_input())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_usenet_archives_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::usenet::set_usenet_archives(harness.dead_state(), true, true)
+            .await
+            .map(drop)
+    })
+}
+
+fn consent_usenet_download_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::usenet::consent_usenet_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
 fn indexer_cases() -> Vec<ContractCase> {
     vec![
         fails_internal("indexer_status", indexer_status_dead),

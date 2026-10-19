@@ -44,9 +44,27 @@ These are separate programs invoked as subprocesses and never linked into the ap
 - **Why it is a separate executable:** GPL-3.0-or-later, so it runs out of process as a managed sidecar (docs/adr/0009, R25). It is an indexer manager, not part of the media path.
 - **Build configuration:** Upstream release build, unpatched. Installed on demand as a component pack (docs/adr/0024): osx-app-core-arm64.zip on macOS, linux-core-x64.tar.gz on Linux, windows-core-x64.zip on Windows, each pinned by size and SHA-256 per docs/DEPENDENCIES.md §1.
 
+### 7zz
+
+- **Licence:** LGPL-2.1-or-later
+- **Version pin:** pinned per OS; the exact version and SHA-256 for each platform are recorded by the release bundling work (`docs/DEPENDENCIES.md` §1)
+- **Upstream source:** https://github.com/ip7z/7zip
+- **Written offer of corresponding source:** Written offer: the complete corresponding source for the exact 7-Zip release we ship is published by the 7-Zip project at https://www.7-zip.org/download.html; the upstream archive is republished unpatched beside our binary.
+- **Why it is a separate executable:** LGPL-2.1-or-later with 7-Zip's unRAR restriction, so it runs as a separate executable (docs/adr/0009). It is the archive reader for a Usenet RAR/7z set (docs/adr/0030).
+- **Build configuration:** Upstream release build, unpatched, pinned by asset and SHA-256 in the release manifest. The macOS and Linux archives carry the 7zz binary; Windows uses the console build from the upstream extra package.
+
+### par2
+
+- **Licence:** GPL-2.0-or-later
+- **Version pin:** pinned per OS; the exact version and SHA-256 for each platform are recorded by the release bundling work (`docs/DEPENDENCIES.md` §1)
+- **Upstream source:** https://github.com/Parchive/par2cmdline
+- **Written offer of corresponding source:** Written offer: the complete corresponding source for the exact par2cmdline release is published at https://github.com/Parchive/par2cmdline/releases/tag/v1.4.0; the upstream binary is republished unpatched beside our binary.
+- **Why it is a separate executable:** GPL-2.0-or-later, so it runs as a separate executable (docs/adr/0009). It verifies and repairs a Usenet par2 set (docs/adr/0030).
+- **Build configuration:** Upstream release binary, unpatched, pinned by asset and SHA-256 in the release manifest for each supported platform.
+
 ## Rust dependencies
 
-The application binary (`peregrine-desktop`) resolves to the 706 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
+The application binary (`peregrine-desktop`) resolves to the 707 crates below: the non-development dependency closure read from `Cargo.lock`, so test runners, mocks, and benchmark harnesses are excluded. Cargo does not record dependency kinds in `Cargo.lock`, so a crate that only a third-party build script uses can remain in the list; over-attributing is safe, and every crate linked at runtime is present.
 
 Licence expressions and texts are not repeated here: `cargo deny check` enforces them against the allowlist in `deny.toml`, and the release's bundled-licence manifest and SBOM must carry the texts. The special obligations in `docs/DEPENDENCIES.md` §6 apply to this list.
 
@@ -673,6 +691,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `webkit2gtk` | 2.0.2 |
 | `webkit2gtk-sys` | 2.0.2 |
 | `webpki-root-certs` | 1.0.9 |
+| `webpki-roots` | 1.0.9 |
 | `webview2-com` | 0.39.1 |
 | `webview2-com-macros` | 0.8.1 |
 | `webview2-com-sys` | 0.39.1 |

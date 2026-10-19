@@ -31,6 +31,7 @@ pub mod prowlarr;
 pub mod runtime;
 pub mod shortcuts;
 pub mod system;
+pub mod usenet;
 pub mod watch;
 pub mod web;
 
@@ -143,6 +144,12 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::list_release_offers,
             downloads::choose_release_offer,
             downloads::dismiss_release_offer,
+            usenet::usenet_status,
+            usenet::save_usenet_server,
+            usenet::remove_usenet_server,
+            usenet::test_usenet_server,
+            usenet::set_usenet_archives,
+            usenet::consent_usenet_download,
             notifications::list_notifications,
             notifications::mark_notification_read,
             notifications::mark_all_notifications_read,

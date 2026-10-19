@@ -71,6 +71,9 @@ export type {
   ShortcutBinding,
   WatchAvailabilityDto,
   WatchOfferDto,
+  UsenetServerDto,
+  UsenetServerInputDto,
+  UsenetStatusDto,
 } from "./generated/bindings.js";
 
 export {

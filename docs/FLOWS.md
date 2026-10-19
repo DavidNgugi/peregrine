@@ -251,7 +251,7 @@ sequenceDiagram
     participant UI
     participant Acq as AcquisitionService
     participant Eng as TorrentEngine
-    participant Gate as domain::TorrentInspector
+    participant Gate as domain::PayloadInspector
     participant Perm as PathGuard
     participant DB as storage
     participant Stream as StreamServer
@@ -343,6 +343,28 @@ overlaps another cannot start the same download twice. A failure is written on t
 dropped, so the Scheduled list can say why nothing arrived. And a row already `started` is history,
 not a retry: cancelling its job is the Transfer queue's Cancel, which is a different act from
 deleting the request.
+
+## F6.2 — Usenet acquisition and post-processing
+
+A Usenet release follows F6 until metadata: Prowlarr reports `protocol: usenet` and a
+`downloadUrl`, the acquire job fetches the NZB, bounds and parses it, and writes it as
+`source.nzb` inside the job directory. The same `PayloadInspector` judges the NZB's entry list,
+with `OptIn::Granted` only when the standing archive setting allows it. A clean post is handed to
+`UsenetEngine::add`; a post with no media is blocked until the person picks **Allow archives** on
+the Downloads row, which re-reads the stored NZB, re-inspects it, writes the setting, and resumes.
+
+When the engine reports the post whole, the service runs post-processing: `par2 verify` (then
+`repair` on a non-zero answer) for a par2 set, `7zz l -slt` for an archive, that listing through
+the gate before extraction, `7zz x` under `extracted/`, and a walk that rejects links, escapes,
+and a total above free space minus the floor. Extracted entries become `download_file` rows and
+are imported with `MediaOrigin::Usenet`; the selected archives and par2 files go to the trash when
+the setting asks. A payload that still has no media fails with a named message rather than a
+silent `completed`.
+
+On restart the job is reattached by re-reading its NZB and its persisted `SafetyReport`; the
+engine fetches the post again, so post-processing is repeatable even if the previous process died
+mid-extraction. A paused job is re-paused. The archive tools are resolved without `PATH`: an
+explicit development variable, then the managed and beside-app sidecar locations.
 
 ## F7 — Streaming playback
 
