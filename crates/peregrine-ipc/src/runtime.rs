@@ -139,7 +139,13 @@ pub fn serve<R: tauri::Runtime>(
             unavailable: Some(reason(error)),
         },
     };
+    // The listener follows the machine: a Wi-Fi switch assigns a new address while the old socket
+    // stays bound to the one it was opened on, so the surface must be moved rather than restarted.
+    let watched = state.web.clone();
     app.manage(state);
+    if let Some(web) = watched {
+        watch_lan_address(app.clone(), web);
+    }
     // The two periodic pieces of core work: schedules whose date has arrived, and scanned titles
     // waiting to be matched to a provider. One thread, a minute apart, and one pass immediately so
     // work that came due while the app was closed is taken on the next start rather than later.
@@ -160,6 +166,41 @@ pub fn serve<R: tauri::Runtime>(
         });
     }
     outcome.map(|_| ())
+}
+
+/// Moves the LAN surface when the address it is bound to is no longer the machine's.
+///
+/// Five seconds is short enough that a Wi-Fi switch is not something a person has to notice, and
+/// the probe is a route lookup plus a bind attempt rather than a packet. A listener that is not
+/// running, or that is still bound to an address this machine still owns, is left alone: the
+/// watcher exists for the address that vanished, not to second-guess an interface the person chose.
+fn watch_lan_address<R: tauri::Runtime>(app: AppHandle<R>, web: Arc<peregrine_app::WebService>) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let status = tauri::async_runtime::block_on(web.status());
+            let Some(bound) = status.address else {
+                continue;
+            };
+            if crate::web::address_is_local(bound.ip()) {
+                continue;
+            }
+            let Some(detected) = crate::web::detected_lan_address() else {
+                continue;
+            };
+            match tauri::async_runtime::block_on(web.rebind(detected)) {
+                Ok(status) => {
+                    let payload = crate::web::status_dto(&status);
+                    if let Err(error) = app.emit(crate::web::WEB_STATUS_EVENT, payload) {
+                        tracing::warn!(%error, "the moved LAN address could not reach the window");
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "the LAN surface could not move to the new address");
+                }
+            }
+        }
+    });
 }
 
 /// The mpv binary shipped inside the bundle, when this build has one.

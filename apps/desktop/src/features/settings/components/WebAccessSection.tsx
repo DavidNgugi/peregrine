@@ -1,9 +1,11 @@
-import { Button, SettingsSection, Switch } from "@peregrine/ui";
+import { Button, IconButton, SettingsSection, Switch } from "@peregrine/ui";
 import { commands, unwrap } from "@peregrine/ipc-client";
-import { WEB_AUTO_KEY, startWebAccess } from "../../../lib/webAccess.js";
+import { copyText } from "../../../lib/clipboard.js";
+import { WEB_AUTO_KEY, WEB_STATUS_EVENT, startWebAccess } from "../../../lib/webAccess.js";
 import type { PairedDeviceDto, PendingPairDto, WebStatusDto } from "@peregrine/ipc-client";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import QRCode from "qrcode";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
 /** A QR code drawn from the encoder matrix, with no HTML injection. */
@@ -51,6 +53,10 @@ export function WebAccessSection(): ReactElement {
     () => typeof localStorage !== "undefined" && localStorage.getItem(WEB_AUTO_KEY) === "1",
   );
   const [failed, setFailed] = useState(false);
+  const [renaming, setRenaming] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const copyTimer = useRef<number | null>(null);
 
   const read = useCallback(async (): Promise<void> => {
     try {
@@ -80,6 +86,40 @@ export function WebAccessSection(): ReactElement {
     };
   }, [read, status?.running]);
 
+  // A Wi-Fi switch moves the listener; the shell pushes the new address so the code and the
+  // address redraw without a person stopping and starting it. The poll above stays for the
+  // pairing list, which changes without an event of its own.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | null = null;
+    void listen<WebStatusDto>(WEB_STATUS_EVENT, (event) => {
+      setStatus(event.payload);
+    }).then((stop) => {
+      if (cancelled) {
+        stop();
+      } else {
+        unlisten = stop;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const saveName = useCallback(
+    async (id: number): Promise<void> => {
+      try {
+        await unwrap(commands.webRename({ id }, draft.trim()));
+        setRenaming(null);
+        await read();
+      } catch {
+        setFailed(true);
+      }
+    },
+    [draft, read],
+  );
+
   const start = useCallback(async (): Promise<void> => {
     try {
       await startWebAccess();
@@ -104,10 +144,40 @@ export function WebAccessSection(): ReactElement {
     if (on) void start();
   };
 
+  // The address is what every browser on the network can open; a Bonjour name is only as good
+  // as the client's resolver, and a television's browser usually has none. The name is offered
+  // beside it, because a device that does resolve it keeps its pairing across an address change.
   const url =
     status?.running === true && status.address !== null && status.port !== null
       ? "http://" + status.address + ":" + String(status.port) + "/"
       : null;
+  const nameUrl =
+    status?.running === true && status.hostname !== null && status.port !== null
+      ? "http://" + status.hostname + ":" + String(status.port) + "/"
+      : null;
+
+  const copyLabel = copyState === "copied" ? t("settings.web.copied") : t("settings.web.copyLink");
+
+  const copy = useCallback(async (): Promise<void> => {
+    if (url === null) return;
+    try {
+      await copyText(url);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => {
+      setCopyState("idle");
+    }, 2000);
+  }, [url]);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    },
+    [],
+  );
 
   return (
     <SettingsSection description={t("settings.web.description")} title={t("settings.web.title")}>
@@ -150,7 +220,41 @@ export function WebAccessSection(): ReactElement {
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="text-caption text-text-tertiary">{t("settings.web.open")}</span>
-              <code className="select-all break-all text-body text-text-primary">{url}</code>
+              <span className="flex items-start gap-2">
+                <code className="min-w-0 select-all break-all text-body text-text-primary">
+                  {url}
+                </code>
+                <IconButton
+                  icon={copyState === "copied" ? "check" : "copy"}
+                  label={copyLabel}
+                  onClick={() => {
+                    void copy();
+                  }}
+                  size="sm"
+                  title={copyLabel}
+                  variant="ghost"
+                />
+              </span>
+              <span
+                aria-live="polite"
+                className={
+                  copyState === "failed"
+                    ? "min-h-4 text-caption text-state-danger"
+                    : "min-h-4 text-caption text-state-ok"
+                }
+                role="status"
+              >
+                {copyState === "copied"
+                  ? t("settings.web.copied")
+                  : copyState === "failed"
+                    ? t("settings.web.copyFailed")
+                    : ""}
+              </span>
+              {nameUrl === null ? null : (
+                <span className="break-all text-caption text-text-tertiary">
+                  {t("settings.web.bonjourName", { url: nameUrl })}
+                </span>
+              )}
               <span className="text-caption text-text-secondary">{t("settings.web.code")}</span>
             </div>
           </div>
@@ -233,30 +337,89 @@ export function WebAccessSection(): ReactElement {
                   className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-2"
                   key={device.id}
                 >
-                  <span className="flex flex-col">
-                    <span className="text-body text-text-primary">{device.name}</span>
-                    <span className="text-caption text-text-tertiary">
-                      {device.platform ?? device.scopes}
-                    </span>
-                    {device.scopes.split(",").includes("acquire") ? (
-                      <span className="text-caption text-state-ok">
-                        {t("settings.web.downloadsAllowed")}
+                  {renaming === device.id ? (
+                    <input
+                      aria-label={t("settings.web.rename")}
+                      autoFocus
+                      className="min-w-0 flex-1 rounded-sm border border-border-subtle bg-surface-1 px-2 py-1 text-body text-text-primary"
+                      maxLength={64}
+                      onChange={(event) => {
+                        setDraft(event.currentTarget.value);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void saveName(device.id);
+                        if (event.key === "Escape") setRenaming(null);
+                      }}
+                      value={draft}
+                    />
+                  ) : (
+                    <span className="flex flex-col">
+                      <span className="text-body text-text-primary">{device.name}</span>
+                      <span className="text-caption text-text-tertiary">
+                        {device.platform ?? device.scopes}
                       </span>
-                    ) : null}
+                      <span className="text-caption text-text-tertiary">
+                        {t("settings.web.added", {
+                          date: new Date(device.createdAt).toLocaleDateString(),
+                        })}
+                      </span>
+                      {device.scopes.split(",").includes("acquire") ? (
+                        <span className="text-caption text-state-ok">
+                          {t("settings.web.downloadsAllowed")}
+                        </span>
+                      ) : null}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-2">
+                    {renaming === device.id ? (
+                      <>
+                        <Button
+                          disabled={draft.trim() === ""}
+                          onClick={() => {
+                            void saveName(device.id);
+                          }}
+                          size="sm"
+                        >
+                          {t("settings.web.save")}
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setRenaming(null);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t("settings.web.cancel")}
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={() => {
+                            setDraft(device.name);
+                            setRenaming(device.id);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t("settings.web.rename")}
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            void unwrap(commands.webRevoke({ id: device.id }))
+                              .then(read)
+                              .catch(() => {
+                                setFailed(true);
+                              });
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t("settings.web.revoke")}
+                        </Button>
+                      </>
+                    )}
                   </span>
-                  <Button
-                    onClick={() => {
-                      void unwrap(commands.webRevoke({ id: device.id }))
-                        .then(read)
-                        .catch(() => {
-                          setFailed(true);
-                        });
-                    }}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    {t("settings.web.revoke")}
-                  </Button>
                 </div>
               ))}
           </div>

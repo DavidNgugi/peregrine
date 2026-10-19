@@ -474,14 +474,15 @@ export const commands = {
 	/**  Removes one rule, reporting whether it was there. */
 	forgetMatchRule: (rule: MatchRuleRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("forget_match_rule", { rule })),
 	/**
-	 *  Starts the listener on one address and port.
+	 *  Starts the listener on one address and port, answering to `hostname` when it has one.
 	 * 
 	 *  # Errors
 	 * 
-	 *  [`ErrorCode::InvalidInput`] for an address that is not one, or the unspecified address;
-	 *  [`ErrorCode::Conflict`] when it is already listening or the port is taken.
+	 *  [`ErrorCode::InvalidInput`] for an address that is not one, the unspecified address, or a
+	 *  hostname that is not one; [`ErrorCode::Conflict`] when it is already listening or the port is
+	 *  taken.
 	 */
-	webStart: (address: string, port: number) => typedError<WebStatusDto, AppError_Serialize>(__TAURI_INVOKE("web_start", { address, port })),
+	webStart: (address: string, port: number, hostname: string | null) => typedError<WebStatusDto, AppError_Serialize>(__TAURI_INVOKE("web_start", { address, port, hostname })),
 	/**
 	 *  Stops the listener, if it is running.
 	 * 
@@ -500,6 +501,13 @@ export const commands = {
 	webStatus: () => typedError<WebStatusDto, AppError_Serialize>(__TAURI_INVOKE("web_status")),
 	/**  The address this machine would be reached at on the local network, when it has one. */
 	webLanAddress: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("web_lan_address")),
+	/**
+	 *  The Bonjour name this machine answers to, when the platform advertises one.
+	 * 
+	 *  A name is what survives a network switch: the address changes with the SSID, the name does
+	 *  not, and a browser's pairing cookie is scoped to the origin rather than to the socket.
+	 */
+	webLanHostname: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("web_lan_hostname")),
 	/**
 	 *  The pairing requests waiting for a person.
 	 * 
@@ -541,6 +549,15 @@ export const commands = {
 	 *  [`ErrorCode::Internal`] when the read fails.
 	 */
 	webDevices: () => typedError<PairedDeviceDto[], AppError_Serialize>(__TAURI_INVOKE("web_devices")),
+	/**
+	 *  One device's label, changed by the person who paired it.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`ErrorCode::InvalidInput`] for a blank, oversized, or control-character name;
+	 *  [`ErrorCode::NotFound`] for an id no active row holds.
+	 */
+	webRename: (device: DeviceRef, name: string) => typedError<PairedDeviceDto, AppError_Serialize>(__TAURI_INVOKE("web_rename", { device, name })),
 	/**
 	 *  Revokes one device, refusing its next request and dropping its playback sessions.
 	 * 
@@ -2452,6 +2469,8 @@ export type WebStatusDto = {
 	running: boolean,
 	/**  The bound address, when it is running. */
 	address: string | null,
+	/**  The hostname it also answers to, when one was configured. */
+	hostname: string | null,
 	/**  The bound port, when it is running. */
 	port: number | null,
 	/**  How many pairing requests are waiting for a person. */

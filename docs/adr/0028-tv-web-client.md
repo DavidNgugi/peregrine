@@ -89,6 +89,17 @@ The URL carries a **short-lived playback token**, not the device token: the devi
 | Audit | Pair requested, approved, denied, revoked, and authentication refused are structured log lines carrying the device id or address and the action, never the token or code. They are **not yet `event_log` rows**: the typed event vocabulary has no web variant, and writing a string outside it would break the vocabulary's one invariant. A typed web audit vocabulary is a named follow-up |
 | Logs | Tokens and codes are never logged; an authentication failure logs the device name when it is known and the address otherwise |
 
+The address is a property of the machine's current network, so it is followed rather than frozen. When the
+bound address stops belonging to a local interface — a Wi-Fi switch assigning a new lease — the listener
+opens the same port on the address the default route now names, closes the old socket, and pushes the new
+status to the window. A listener still bound to an address the machine owns is left alone, so an explicitly
+chosen interface is never second-guessed. The QR and the Settings row show the bound address, because it is
+the one origin every browser on the network can open; a television's browser generally cannot resolve an
+mDNS name. The platform's Bonjour name is offered beside it and accepted by the Host gate, and a device that
+does resolve it keeps its pairing cookie across an address change, because the cookie is scoped to the
+origin and the name outlives the address. That hostname is the machine's own Bonjour name, not an in-app
+responder.
+
 ### 6. What is deliberately not in this slice
 
 - **Subtitle tracks in the transcode.** Sidecars are not yet mapped into the HLS playlist; the desktop player still offers them. That is `PG-E17`'s and E19's subtitle delivery task.
@@ -96,7 +107,7 @@ The URL carries a **short-lived playback token**, not the device token: the devi
 - **Settings, acquisition, deletion, library mutation.** None of them exist on this surface by construction.
 - **Accounts.** The listener reads under the installation scope ([ADR 0019](./0019-local-accounts-and-parental-gating.md), R34). Per-device account binding is E35's.
 - **Serving the built client from the desktop bundle.** The first slice serves the client from a configured directory (and the Vite dev server on the LAN for development). Bundling the assets into the app is a packaging task, not a security one.
-- **mDNS and QR.** Pairing uses the typed address and the code; discovery and QR are [PG-E32-09](../TASKS.md)'s.
+- **mDNS advertisement, short URLs, and the isolation probe.** QR pairing has landed, and the surface accepts one configured hostname with the desktop offering the machine's own Bonjour name. An in-app responder, short URLs, and the probe that names access-point isolation are [PG-E32-09](../TASKS.md)'s.
 
 ## Consequences
 

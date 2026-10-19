@@ -113,6 +113,11 @@ pub struct WebStatus {
     pub running: bool,
     /// Where it is bound, when it is.
     pub address: Option<SocketAddr>,
+    /// The hostname the listener also answers to, when one was configured.
+    ///
+    /// A name is what keeps a browser's pairing cookie valid across an address change: the cookie
+    /// belongs to the origin, and a name is one origin where two addresses are two.
+    pub hostname: Option<String>,
     /// How many pairing requests are waiting for a person.
     pub pending: usize,
 }
@@ -186,6 +191,12 @@ pub enum WebError {
     /// The request named an episode incompletely or an impossible season.
     #[error("the download request is not valid")]
     InvalidRequest,
+    /// A device name was blank, too long, or carried a control character.
+    #[error("the device name is not valid")]
+    InvalidName,
+    /// The configured hostname is not one a browser can put in a Host header.
+    #[error("the hostname is not valid")]
+    InvalidHostname,
     /// A row the insert just wrote could not be read back.
     #[error("the paired device could not be read back")]
     DeviceMissing,
@@ -362,6 +373,8 @@ struct Grant {
 
 struct Running {
     address: SocketAddr,
+    hostname: Option<String>,
+    app_dir: Option<PathBuf>,
     shutdown: CancellationToken,
     task: tokio::task::JoinHandle<()>,
 }
@@ -440,6 +453,73 @@ impl WebService {
         // addressable by this instance, and those directories are the largest thing the surface
         // writes, so a start clears them instead of accumulating gigabytes across launches.
         self.clear_transcode_root().await;
+        let next = self.listen(&config).await?;
+        *self
+            .hosts
+            .lock()
+            .expect("the host list lock is not poisoned") =
+            allowed_hosts(next.address, next.hostname.as_deref());
+        let address = next.address;
+        *running = Some(next);
+        drop(running);
+        info!(%address, "the LAN surface is listening");
+        Ok(self.status().await)
+    }
+
+    /// Moves the listener to another address on the same port.
+    ///
+    /// The new socket is bound before the old one closes, so a failed bind — an address the OS has
+    /// not finished assigning, or a port another process took in the meantime — leaves the surface
+    /// where it was instead of taking it down. A listener that is not running is left alone.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::UnspecifiedBind`] for the address every interface shares, or [`WebError::Bind`]
+    /// when the new socket cannot be opened.
+    pub async fn rebind(self: &Arc<Self>, bind: IpAddr) -> Result<WebStatus, WebError> {
+        if bind.is_unspecified() {
+            return Err(WebError::UnspecifiedBind);
+        }
+        let mut running = self.running.lock().await;
+        let Some(current) = running.as_ref() else {
+            drop(running);
+            return Ok(self.status().await);
+        };
+        if current.address.ip() == bind {
+            drop(running);
+            return Ok(self.status().await);
+        }
+        let config = WebConfig {
+            bind,
+            port: current.address.port(),
+            app_dir: current.app_dir.clone(),
+            hostname: current.hostname.clone(),
+        };
+        let next = self.listen(&config).await?;
+        *self
+            .hosts
+            .lock()
+            .expect("the host list lock is not poisoned") =
+            allowed_hosts(next.address, next.hostname.as_deref());
+        let previous = running
+            .replace(next)
+            .expect("the listener was checked above");
+        let address = previous.address;
+        let moved_to = running.as_ref().map(|running| running.address);
+        drop(running);
+        previous.shutdown.cancel();
+        let _ = previous.task.await;
+        info!(from = %address, to = ?moved_to, "the LAN surface moved to the machine's new address");
+        Ok(self.status().await)
+    }
+
+    /// Opens one listener and hands back the handle that owns it.
+    async fn listen(self: &Arc<Self>, config: &WebConfig) -> Result<Running, WebError> {
+        if let Some(hostname) = config.hostname.as_deref()
+            && !is_hostname(hostname)
+        {
+            return Err(WebError::InvalidHostname);
+        }
         let wanted = SocketAddr::new(config.bind, config.port);
         let listener = TcpListener::bind(wanted)
             .await
@@ -451,11 +531,6 @@ impl WebService {
             address: wanted,
             source,
         })?;
-        *self
-            .hosts
-            .lock()
-            .expect("the host list lock is not poisoned") =
-            allowed_hosts(address, config.hostname.as_deref());
         let router = routes::router(Arc::clone(self), config.app_dir.clone());
         let shutdown = CancellationToken::new();
         let token = shutdown.clone();
@@ -470,14 +545,13 @@ impl WebService {
                 warn!(%error, "the LAN listener stopped with an error");
             }
         });
-        *running = Some(Running {
+        Ok(Running {
             address,
+            hostname: config.hostname.clone(),
+            app_dir: config.app_dir.clone(),
             shutdown,
             task,
-        });
-        drop(running);
-        info!(%address, "the LAN surface is listening");
-        Ok(self.status().await)
+        })
     }
 
     async fn clear_transcode_root(&self) {
@@ -522,6 +596,9 @@ impl WebService {
         WebStatus {
             running: running.is_some(),
             address: running.as_ref().map(|running| running.address),
+            hostname: running
+                .as_ref()
+                .and_then(|running| running.hostname.clone()),
             pending,
         }
     }
@@ -840,6 +917,23 @@ impl WebService {
             info!(device = id, "a paired device was revoked");
         }
         Ok(changed)
+    }
+
+    /// Renames one device, changing the label the list draws and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::InvalidName`] for a blank, oversized, or control-character name;
+    /// [`WebError::DeviceMissing`] for an id no active row holds; or [`WebError::Storage`].
+    pub async fn rename_device(&self, id: i64, name: &str) -> Result<PairedDevice, WebError> {
+        let name = device_name(name)?;
+        if !self.database.rename_paired_device(id, &name).await? {
+            return Err(WebError::DeviceMissing);
+        }
+        self.database
+            .paired_device(id)
+            .await?
+            .ok_or(WebError::DeviceMissing)
     }
 
     /// Authenticates a token and records the device as seen.
@@ -2152,6 +2246,33 @@ fn mime_for(path: &Path) -> &'static str {
     }
 }
 
+/// Whether a hostname could arrive in a Host header: an ASCII DNS name and nothing else.
+fn is_hostname(hostname: &str) -> bool {
+    !hostname.is_empty()
+        && hostname.len() <= 253
+        && !hostname.starts_with('.')
+        && !hostname.ends_with('.')
+        && !hostname.contains("..")
+        && hostname
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+}
+
+/// The longest label a person may give a device.
+const DEVICE_NAME_MAX: usize = 64;
+
+/// A display label a person typed: trimmed, non-empty, bounded, and free of control characters.
+fn device_name(raw: &str) -> Result<String, WebError> {
+    let name = raw.trim();
+    if name.is_empty()
+        || name.chars().count() > DEVICE_NAME_MAX
+        || name.chars().any(char::is_control)
+    {
+        return Err(WebError::InvalidName);
+    }
+    Ok(name.to_owned())
+}
+
 fn allowed_hosts(address: SocketAddr, hostname: Option<&str>) -> Vec<String> {
     let mut hosts = vec![address.to_string()];
     if address.ip().is_loopback() {
@@ -2169,10 +2290,17 @@ fn allowed_hosts(address: SocketAddr, hostname: Option<&str>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use peregrine_domain::SessionToken;
+    use peregrine_testkit::MemorySecretStore;
+    use tempfile::TempDir;
 
-    use super::{code_for, hash_token, mime_for, scope_allows};
+    use super::{WebConfig, WebError, code_for, hash_token, mime_for, scope_allows};
+    use crate::events::EventSink;
+    use crate::testing::RecordingSink;
+    use crate::{Observability, Runtime, RuntimeConfig};
 
     #[test]
     fn a_token_hash_is_sha256_lowercase_hex_and_never_the_token() {
@@ -2222,5 +2350,107 @@ mod tests {
             None,
         );
         assert_eq!(hosts, vec!["192.168.1.10:8787".to_owned()]);
+    }
+
+    #[test]
+    fn a_configured_hostname_is_accepted_besides_the_bound_address() {
+        let hosts = super::allowed_hosts(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 8787),
+            Some("studio-mac.local"),
+        );
+        assert!(hosts.contains(&"studio-mac.local:8787".to_owned()));
+        assert!(hosts.contains(&"studio-mac.local".to_owned()));
+    }
+
+    /// A listener over a temporary runtime, for the tests that need a real socket.
+    async fn listening(directory: &TempDir) -> (Arc<super::WebService>, Arc<Runtime>, u16) {
+        let config = RuntimeConfig::new(
+            directory.path(),
+            directory.path().join("cache/images"),
+            Arc::new(RecordingSink::default()) as Arc<dyn EventSink>,
+        )
+        .with_secrets(Arc::new(MemorySecretStore::new()));
+        let (subscriber, logging) = Observability::build(&config.log_config()).unwrap();
+        drop(subscriber);
+        let runtime = Arc::new(Runtime::start(config, logging).await.unwrap());
+        let web = Arc::new(runtime.web_service());
+        let started = web
+            .start(WebConfig::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .unwrap();
+        let port = started.address.expect("a bound socket").port();
+        (web, runtime, port)
+    }
+
+    #[tokio::test]
+    async fn a_rebind_that_cannot_bind_leaves_the_listener_where_it_was() {
+        let directory = TempDir::new().unwrap();
+        let (web, runtime, port) = listening(&directory).await;
+        let first = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        // TEST-NET-1 is documented and never assigned, so this is the "address the machine does not
+        // own" path: the new socket cannot be opened, and the old one must keep serving.
+        let failed = web.rebind(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).await;
+        assert!(matches!(failed, Err(WebError::Bind { .. })));
+        assert_eq!(
+            web.status().await.address,
+            Some(SocketAddr::new(first, port)),
+            "a failed move is not a stop"
+        );
+        let still_serving = std::net::TcpStream::connect_timeout(
+            &SocketAddr::new(first, port),
+            Duration::from_millis(500),
+        );
+        assert!(still_serving.is_ok(), "the old socket kept serving");
+
+        web.stop().await;
+        runtime.shutdown().await;
+    }
+
+    // Linux assigns the whole 127/8 block to loopback, so this is the one platform where a second
+    // local address exists without root and without touching a real interface.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_listener_moves_to_another_loopback_address_on_the_same_port() {
+        let directory = TempDir::new().unwrap();
+        let (web, runtime, port) = listening(&directory).await;
+        let first = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+        let second_ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+        let second = SocketAddr::new(second_ip, port);
+
+        let moved = web.rebind(second_ip).await.unwrap();
+        assert_eq!(moved.address, Some(second));
+        assert!(
+            std::net::TcpStream::connect_timeout(&first, Duration::from_millis(500)).is_err(),
+            "the address it left no longer answers"
+        );
+        assert!(
+            std::net::TcpStream::connect_timeout(&second, Duration::from_millis(500)).is_ok(),
+            "the address it moved to answers"
+        );
+
+        web.stop().await;
+        runtime.shutdown().await;
+    }
+
+    #[test]
+    fn a_device_name_is_trimmed_and_refused_when_it_is_blank_long_or_control() {
+        assert_eq!(
+            super::device_name("  Living room  ").unwrap(),
+            "Living room"
+        );
+        assert!(matches!(
+            super::device_name("   "),
+            Err(WebError::InvalidName)
+        ));
+        assert!(matches!(
+            super::device_name("TV"),
+            Err(WebError::InvalidName)
+        ));
+        assert!(matches!(
+            super::device_name(&"a".repeat(65)),
+            Err(WebError::InvalidName)
+        ));
+        assert!(super::device_name(&"a".repeat(64)).is_ok());
     }
 }

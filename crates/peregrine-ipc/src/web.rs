@@ -23,6 +23,8 @@ pub struct WebStatusDto {
     pub running: bool,
     /// The bound address, when it is running.
     pub address: Option<String>,
+    /// The hostname it also answers to, when one was configured.
+    pub hostname: Option<String>,
     /// The bound port, when it is running.
     pub port: Option<u16>,
     /// How many pairing requests are waiting for a person.
@@ -86,12 +88,13 @@ pub struct PairedDeviceDto {
     pub revoked: bool,
 }
 
-/// Starts the listener on one address and port.
+/// Starts the listener on one address and port, answering to `hostname` when it has one.
 ///
 /// # Errors
 ///
-/// [`ErrorCode::InvalidInput`] for an address that is not one, or the unspecified address;
-/// [`ErrorCode::Conflict`] when it is already listening or the port is taken.
+/// [`ErrorCode::InvalidInput`] for an address that is not one, the unspecified address, or a
+/// hostname that is not one; [`ErrorCode::Conflict`] when it is already listening or the port is
+/// taken.
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::needless_pass_by_value)]
@@ -99,17 +102,36 @@ pub async fn web_start(
     state: State<'_, RuntimeState>,
     address: String,
     port: u16,
+    hostname: Option<String>,
 ) -> Result<WebStatusDto, AppError> {
     let bind: IpAddr = address.parse().map_err(|_| {
         AppError::new(ErrorCode::InvalidInput).with_detail("That is not an address to bind.")
     })?;
-    let web = state.web()?;
+    let status = state
+        .web()?
+        .start(web_config(&state, bind, port, hostname))
+        .await
+        .map_err(web_error)?;
+    Ok(status_dto(&status))
+}
+
+/// The listener's configuration, from the command's arguments and the installed client.
+fn web_config(
+    state: &RuntimeState,
+    bind: IpAddr,
+    port: u16,
+    hostname: Option<String>,
+) -> WebConfig {
     let mut config = WebConfig::new(bind, port);
     if let Some(directory) = state.web_app_dir() {
         config = config.with_app_dir(directory.clone());
     }
-    let status = web.start(config).await.map_err(web_error)?;
-    Ok(status_dto(&status))
+    if let Some(hostname) = hostname.map(|hostname| hostname.trim().to_owned())
+        && !hostname.is_empty()
+    {
+        config = config.with_hostname(hostname);
+    }
+    config
 }
 
 /// Stops the listener, if it is running.
@@ -141,6 +163,38 @@ pub async fn web_status(state: State<'_, RuntimeState>) -> Result<WebStatusDto, 
 #[specta::specta]
 pub fn web_lan_address() -> Result<Option<String>, AppError> {
     Ok(detected_lan_address().map(|address| address.to_string()))
+}
+
+/// The Bonjour name this machine answers to, when the platform advertises one.
+///
+/// A name is what survives a network switch: the address changes with the SSID, the name does
+/// not, and a browser's pairing cookie is scoped to the origin rather than to the socket.
+#[tauri::command]
+#[specta::specta]
+pub fn web_lan_hostname() -> Result<Option<String>, AppError> {
+    Ok(local_hostname())
+}
+
+/// One device's label, changed by the person who paired it.
+///
+/// # Errors
+///
+/// [`ErrorCode::InvalidInput`] for a blank, oversized, or control-character name;
+/// [`ErrorCode::NotFound`] for an id no active row holds.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::needless_pass_by_value)]
+pub async fn web_rename(
+    state: State<'_, RuntimeState>,
+    device: DeviceRef,
+    name: String,
+) -> Result<PairedDeviceDto, AppError> {
+    let device = state
+        .web()?
+        .rename_device(device.id, &name)
+        .await
+        .map_err(web_error)?;
+    Ok(device_dto(device))
 }
 
 /// The pairing requests waiting for a person.
@@ -250,10 +304,11 @@ pub async fn web_revoke(
     state.web()?.revoke(device.id).await.map_err(web_error)
 }
 
-fn status_dto(status: &WebStatus) -> WebStatusDto {
+pub(crate) fn status_dto(status: &WebStatus) -> WebStatusDto {
     WebStatusDto {
         running: status.running,
         address: status.address.map(|address| address.ip().to_string()),
+        hostname: status.hostname.clone(),
         port: status.address.map(|address| address.port()),
         pending: u32::try_from(status.pending).unwrap_or(u32::MAX),
     }
@@ -276,6 +331,13 @@ fn web_error(error: WebError) -> AppError {
     match error {
         WebError::UnspecifiedBind => AppError::new(ErrorCode::InvalidInput)
             .with_detail("Choose one address to bind; every interface at once is not offered."),
+        WebError::InvalidHostname => AppError::new(ErrorCode::InvalidInput)
+            .with_detail("That is not a hostname a browser can ask for."),
+        WebError::InvalidName => AppError::new(ErrorCode::InvalidInput)
+            .with_detail("Give the device a name of one to 64 characters."),
+        WebError::DeviceMissing => {
+            AppError::new(ErrorCode::NotFound).with_detail("That device is no longer paired.")
+        }
         WebError::AlreadyRunning => {
             AppError::new(ErrorCode::Conflict).with_detail("The LAN surface is already listening.")
         }
@@ -308,14 +370,55 @@ fn web_error(error: WebError) -> AppError {
     }
 }
 
+/// The event the shell emits when the listener moves to another address.
+pub const WEB_STATUS_EVENT: &str = "web://status";
+
+/// Whether an address is still assigned to one of this machine's interfaces.
+///
+/// Binding a socket is the check: the kernel refuses an address the machine no longer owns, with
+/// no packet sent and no platform-specific interface enumeration.
+pub(crate) fn address_is_local(address: IpAddr) -> bool {
+    std::net::TcpListener::bind((address, 0)).is_ok()
+}
+
 /// The local address the default route would use, without sending a packet.
 ///
 /// `UdpSocket::connect` only selects a route; it does not put anything on the wire. The address is
 /// offered as a default in the Settings field and is never bound without the person confirming it.
-fn detected_lan_address() -> Option<IpAddr> {
+pub(crate) fn detected_lan_address() -> Option<IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("192.0.2.1:9").ok()?;
     socket.local_addr().ok().map(|address| address.ip())
+}
+
+/// The name the operating system advertises over Bonjour, when it advertises one.
+///
+/// macOS's mDNS responder publishes `<LocalHostName>.local` for every interface, so this is the
+/// one stable name a browser on the same network already resolves without new infrastructure.
+/// Other platforms have no equivalent this build can assume: Linux needs avahi running, and
+/// Windows resolves names through LLMNR rather than mDNS, so neither gets a default.
+#[cfg(target_os = "macos")]
+fn local_hostname() -> Option<String> {
+    let output = std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "LocalHostName"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8(output.stdout).ok()?;
+    let name = name.trim();
+    // A name this build cannot put in a Host header is no better than no name: Settings then
+    // draws the address, as it did before this existed.
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(format!("{name}.local"))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn local_hostname() -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -323,6 +426,27 @@ mod tests {
     use super::web_error;
     use crate::error::ErrorCode;
     use peregrine_app::WebError;
+
+    #[test]
+    fn this_machine_owns_loopback_and_not_a_documentation_address() {
+        assert!(super::address_is_local(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::LOCALHOST
+        )));
+        assert!(!super::address_is_local(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(192, 0, 2, 1)
+        )));
+    }
+
+    #[test]
+    fn an_advertised_name_is_a_bare_mdns_label_when_the_platform_has_one() {
+        if let Some(name) = super::local_hostname() {
+            assert!(name.ends_with(".local"));
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            );
+        }
+    }
 
     #[test]
     fn a_bad_bind_is_an_input_error_and_a_taken_port_is_a_conflict() {

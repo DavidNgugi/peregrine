@@ -644,7 +644,7 @@ struct ContractCase {
 /// address probe, which is a route lookup rather than a read of the core.
 fn web_start_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        crate::web::web_start(harness.dead_state(), "127.0.0.1".to_owned(), 8787)
+        crate::web::web_start(harness.dead_state(), "127.0.0.1".to_owned(), 8787, None)
             .await
             .map(drop)
     })
@@ -660,6 +660,10 @@ fn web_status_without_a_runtime(harness: &Harness) -> Invocation<'_> {
 
 fn web_lan_address_without_a_runtime(_harness: &Harness) -> Invocation<'_> {
     Box::pin(async move { crate::web::web_lan_address().map(drop) })
+}
+
+fn web_lan_hostname_without_a_runtime(_harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move { crate::web::web_lan_hostname().map(drop) })
 }
 
 fn web_pairings_without_a_runtime(harness: &Harness) -> Invocation<'_> {
@@ -691,6 +695,18 @@ fn web_devices_without_a_runtime(harness: &Harness) -> Invocation<'_> {
         crate::web::web_devices(harness.dead_state())
             .await
             .map(drop)
+    })
+}
+
+fn web_rename_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::web::web_rename(
+            harness.dead_state(),
+            crate::web::DeviceRef { id: 1 },
+            "Living room".to_owned(),
+        )
+        .await
+        .map(drop)
     })
 }
 
@@ -732,6 +748,13 @@ fn web_cases() -> Vec<ContractCase> {
             drive: web_lan_address_without_a_runtime,
         },
         ContractCase {
+            command: "web_lan_hostname",
+            expected: Expected::CannotFail {
+                reason: "the name is read from the platform, not from the core",
+            },
+            drive: web_lan_hostname_without_a_runtime,
+        },
+        ContractCase {
             command: "web_pairings",
             expected: fails(),
             drive: web_pairings_without_a_runtime,
@@ -755,6 +778,11 @@ fn web_cases() -> Vec<ContractCase> {
             command: "web_devices",
             expected: fails(),
             drive: web_devices_without_a_runtime,
+        },
+        ContractCase {
+            command: "web_rename",
+            expected: fails(),
+            drive: web_rename_without_a_runtime,
         },
         ContractCase {
             command: "web_revoke",

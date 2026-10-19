@@ -17,6 +17,7 @@ import {
   type Tile,
 } from "./api.js";
 import { BrowseScreen } from "./Browse.js";
+import { describeDevice } from "./device.js";
 import { DownloadsScreen } from "./Downloads.js";
 import { useAutoFocus, useSpatialFocus } from "./focus.js";
 import { HomeScreen } from "./Home.js";
@@ -664,8 +665,13 @@ function PairScreen({ onPaired }: { readonly onPaired: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
+    const device = describeDevice({
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      maxTouchPoints: navigator.maxTouchPoints,
+    });
     void api
-      .pair("Peregrine TV", navigator.userAgent.slice(0, 32))
+      .pair(device.name, device.platform)
       .then((created) => {
         if (!cancelled) setOffer(created);
       })

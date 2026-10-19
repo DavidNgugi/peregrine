@@ -155,6 +155,11 @@ tauri-plugin-notification = { version = "2.6.0" }
 # registry `Run` key on Windows, an XDG autostart entry on Linux — and registering it
 # creates nothing by itself, which is what keeps autostart off until the user asks.
 tauri-plugin-autostart = { version = "2.7.0" }
+# Writing one value to the system clipboard. The webview's `navigator.clipboard` is not
+# available on the custom scheme the packaged app loads, and the Edit menu copies a text
+# selection rather than a value the page holds; the plugin is the native clipboard behind
+# a single write-only capability.
+tauri-plugin-clipboard-manager = { version = "2.5.0" }
 # Menu accelerators for the shortcut registry (PG-E1-08). `muda`'s `CMD_OR_CTRL` is the
 # one definition of "Cmd on macOS, Ctrl elsewhere", and `tauri` already carries `muda`
 # on every desktop platform; naming it directly is what lets the registry hold the same

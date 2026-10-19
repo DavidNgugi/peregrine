@@ -203,6 +203,12 @@ runtime = [
   # docs/ARCHITECTURE.md §6 puts "window geometry" in its row and lists
   # "Reimplemented" in the Never column.
   "tauri-plugin-window-state",
+  # The LAN address's copy control. The webview's own `navigator.clipboard` does not exist on
+  # the custom scheme the packaged app loads, and the Edit menu copies a text selection rather
+  # than a value the page holds; this is the native clipboard behind one write-only ACL grant
+  # (reading it is not granted). The alternative is a per-platform binding of our own in the
+  # one place the architecture wants least of it — the shell.
+  "tauri-plugin-clipboard-manager",
   # The tray's counters are re-read from the core on an interval (PG-E1-09), so the shell
   # needs the timer the rest of the workspace already uses rather than a thread that
   # sleeps beside the runtime.

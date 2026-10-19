@@ -55,6 +55,9 @@ tauri-plugin-notification = { workspace = true }
 # The login item the settings toggle drives (PG-E1-13). Registering the plugin creates no
 # login item: autostart stays off until the user asks for it.
 tauri-plugin-autostart = { workspace = true }
+# The copy control writes the LAN address to the system clipboard. The ACL grants only
+# `write-text`, so nothing in the renderer can read the clipboard back.
+tauri-plugin-clipboard-manager = { workspace = true }
 # The main window's size, position, and maximized state survive a restart because
 # this plugin owns them (docs/ARCHITECTURE.md §6), not because this crate writes a
 # geometry file of its own.

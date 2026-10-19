@@ -2181,6 +2181,21 @@ impl Database {
         }
     }
 
+    /// Renames one paired device, answering whether an active row took the name.
+    pub async fn rename_paired_device(&self, id: i64, name: &str) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RenamePairedDevice {
+                id,
+                name: name.to_owned(),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("rename_paired_device", &other)),
+        }
+    }
+
     /// Revokes one paired device, answering whether this call was the one that revoked it.
     pub async fn revoke_paired_device(&self, id: i64, at: i64) -> Result<bool, StorageError> {
         match self

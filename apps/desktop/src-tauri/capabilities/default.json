@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window, granted one at a time. `core:window:default` is the read-only window set plus the internal maximize toggle that the chrome's double-click uses, so `core:window:allow-start-dragging` is the only window command it lacks (PG-E1-03). `core:event:allow-listen` and `core:event:allow-unlisten` are what the jobs bridge's `listen` and its cleanup invoke, because the core plugin commands are gated by this ACL and the bridge registered nothing before them (PG-E0-19, PG-E1-04). `dialog:allow-open` is the file and folder picker the typed wrapper calls (PG-E1-12); the plugin's `message`, `save`, and `confirm` commands, and the whole `core:default` set with the menu, tray, app, and image commands on it, are deliberately absent. `notification:allow-is-permission-granted` and `notification:allow-request-permission` are the two probes the consent step calls (PG-E1-14, PG-E1-20); `notification:default` would also grant `allow-notify`, which would let the renderer show a toast directly and bypass the core service that writes the centre row before any OS call, so it is withheld along with every other notification command.",
+  "description": "Permissions for the main window, granted one at a time. `core:window:default` is the read-only window set plus the internal maximize toggle that the chrome's double-click uses, so `core:window:allow-start-dragging` is the only window command it lacks (PG-E1-03). `core:event:allow-listen` and `core:event:allow-unlisten` are what the jobs bridge's `listen` and its cleanup invoke, because the core plugin commands are gated by this ACL and the bridge registered nothing before them (PG-E0-19, PG-E1-04). `dialog:allow-open` is the file and folder picker the typed wrapper calls (PG-E1-12); the plugin's `message`, `save`, and `confirm` commands, and the whole `core:default` set with the menu, tray, app, and image commands on it, are deliberately absent. `notification:allow-is-permission-granted` and `notification:allow-request-permission` are the two probes the consent step calls (PG-E1-14, PG-E1-20); `notification:default` would also grant `allow-notify`, which would let the renderer show a toast directly and bypass the core service that writes the centre row before any OS call, so it is withheld along with every other notification command. `clipboard-manager:allow-write-text` is the LAN address's copy control; reading the clipboard is not granted, so a page cannot inspect what the person copied elsewhere.",
   "windows": ["main"],
   "permissions": [
     "core:window:default",
@@ -10,6 +10,7 @@
     "core:event:allow-unlisten",
     "dialog:allow-open",
     "notification:allow-is-permission-granted",
-    "notification:allow-request-permission"
+    "notification:allow-request-permission",
+    "clipboard-manager:allow-write-text"
   ]
 }

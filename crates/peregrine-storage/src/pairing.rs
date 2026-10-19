@@ -92,6 +92,22 @@ pub(crate) async fn touch(
     Ok(result.rows_affected() > 0)
 }
 
+/// Renames a device, answering whether an active row took the name.
+pub(crate) async fn rename(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    name: &str,
+) -> Result<bool, StorageError> {
+    let result =
+        sqlx::query("UPDATE paired_device SET name = ?2 WHERE id = ?1 AND revoked_at IS NULL")
+            .bind(id)
+            .bind(name)
+            .execute(connection)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Revokes a device, answering whether this call was the one that revoked it.
 pub(crate) async fn revoke(
     connection: &mut sqlx::SqliteConnection,
@@ -248,6 +264,48 @@ mod tests {
         assert!(
             !database.touch_paired_device(999, NOW, None).await.unwrap(),
             "an id no row holds is not a successful touch"
+        );
+    }
+
+    #[tokio::test]
+    async fn renaming_changes_the_label_and_leaves_a_revoked_row_alone() {
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+        let id = database
+            .insert_paired_device(new_device('f', NOW))
+            .await
+            .unwrap();
+
+        assert!(
+            database
+                .rename_paired_device(id, "Living room")
+                .await
+                .unwrap()
+        );
+        let found = database.paired_device(id).await.unwrap().unwrap();
+        assert_eq!(found.name, "Living room");
+        assert_eq!(
+            found.platform.as_deref(),
+            Some("Tizen"),
+            "a rename touches the label and nothing else"
+        );
+
+        assert!(
+            !database.rename_paired_device(999, "Nowhere").await.unwrap(),
+            "an id no row holds is not a successful rename"
+        );
+
+        database.revoke_paired_device(id, NOW + 5).await.unwrap();
+        assert!(
+            !database
+                .rename_paired_device(id, "Games room")
+                .await
+                .unwrap(),
+            "a revoked row is history, not a device to relabel"
+        );
+        assert_eq!(
+            database.paired_device(id).await.unwrap().unwrap().name,
+            "Living room"
         );
     }
 

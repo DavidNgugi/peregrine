@@ -107,6 +107,13 @@ pub(crate) enum WriteRequest {
         /// The journal row.
         job_id: i64,
     },
+    /// Rename a paired device, which changes only the label the list draws.
+    RenamePairedDevice {
+        /// The device row.
+        id: i64,
+        /// The new display name, already trimmed and bounded by the caller.
+        name: String,
+    },
     /// Revoke a paired device, which refuses its next request.
     RevokePairedDevice {
         /// The device row.
@@ -1034,6 +1041,7 @@ async fn apply(
         | WriteRequest::RecordWebAudit(_)
         | WriteRequest::SetWebAuditJob { .. }
         | WriteRequest::TouchPairedDevice { .. }
+        | WriteRequest::RenamePairedDevice { .. }
         | WriteRequest::RevokePairedDevice { .. }) => apply_pairing(connection, other).await,
         other => apply_download_write(connection, other).await,
     }
@@ -1058,6 +1066,11 @@ async fn apply_pairing(
             .map(|id| WriteResponse::RowInserted { id }),
         WriteRequest::SetWebAuditJob { id, job_id } => {
             crate::web_audit::set_job(connection, id, job_id)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
+        WriteRequest::RenamePairedDevice { id, name } => {
+            crate::pairing::rename(connection, id, &name)
                 .await
                 .map(|changed| WriteResponse::RowChanged { changed })
         }

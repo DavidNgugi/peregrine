@@ -68,6 +68,10 @@ pub fn run() -> Result<(), ShellError> {
         // core's notification service decides, the shell's `OsNotifier` adapter calls it,
         // and the click handler is registered in `setup` before any toast can exist.
         .plugin(tauri_plugin_notification::init())
+        // The copy control writes the LAN address to the clipboard. The renderer's own
+        // `navigator.clipboard` does not exist on the packaged custom scheme, and the ACL
+        // grants only `write-text`, so this is a one-way channel.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(ipc.invoke_handler())
         // The document loads after `setup` has run, and an event emitted into a webview
         // with no listener is gone. This is where a link that arrived on a cold start is

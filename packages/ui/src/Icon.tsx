@@ -133,6 +133,15 @@ const PATHS = {
       <path d="M9 4v16" />
     </>
   ),
+  /** Copy: one sheet behind another, which is what duplication looks like at 16 px. */
+  copy: (
+    <>
+      <rect height="11" rx="2" width="11" x="8.5" y="8.5" />
+      <path d="M5.5 15V5.5a2 2 0 0 1 2-2H15" />
+    </>
+  ),
+  /** Copied: a tick, kept in the same stroke so it pairs with the mark it replaces. */
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
 } as const;
 
 /** The geometry of one icon, as elements inside the shared `svg`. */
