@@ -1,5 +1,21 @@
 /* Home, rails, cards, and the hover preview; loaded after the shell's styles.css. */
 
+/* ---- A score is always a star and a number, in the hero and on a tile ---- */
+
+.hero-rating {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin-left: 10px;
+  color: var(--state-warn);
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-rating svg {
+  width: 14px;
+  height: 14px;
+}
+
 .rail-track {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

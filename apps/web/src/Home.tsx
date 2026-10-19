@@ -30,13 +30,6 @@ function tileFacts(tile: Tile): string {
     .join("  ·  ");
 }
 
-/** The line a hero and its panel share: the facts and the score. */
-function tileMeta(tile: Tile): string {
-  return [tileFacts(tile), tile.rating === null ? null : tile.rating.toFixed(1)]
-    .filter((part): part is string => part !== null && part !== "")
-    .join("  ·  ");
-}
-
 /** The synopsis as the panel draws it: provider prose, whitespace-collapsed, or nothing. */
 function panelOverview(tile: Tile): string | null {
   if (tile.overview === null) return null;
@@ -263,7 +256,7 @@ function Hero({
   readonly onOpen: (tile: Tile) => void;
   readonly onPlay: (tile: Tile) => void;
 }) {
-  const meta = tileMeta(tile);
+  const facts = tileFacts(tile);
   const art = tile.backdrop ?? tile.poster;
 
   return (
@@ -279,7 +272,15 @@ function Hero({
         />
       )}
       <div className="hero-copy">
-        <p className="hero-meta">{meta}</p>
+        <p className="hero-meta">
+          {facts}
+          {tile.rating === null ? null : (
+            <span className="hero-rating">
+              <StarIcon />
+              {tile.rating.toFixed(1)}
+            </span>
+          )}
+        </p>
         <h1>{tile.name}</h1>
         {tile.overview === null ? null : <p className="hero-overview">{tile.overview}</p>}
         <div className="actions">

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Episode, type PlaybackTicket, type Tile, type Title } from "./api.js";
 import { downloadTone } from "./download-state.js";
 import { TitleFeed } from "./Feed.js";
-import { BookmarkIcon } from "./icons.js";
+import { BookmarkIcon, StarIcon } from "./icons.js";
 import {
   downloadAction,
   seasonAcquireMessage,
@@ -403,11 +403,7 @@ export function TitleScreen({
     }
   };
 
-  const meta = [
-    movie ? "Film" : "Series",
-    released === null ? null : released.slice(0, 4),
-    rating === null ? null : rating.toFixed(1),
-  ]
+  const meta = [movie ? "Film" : "Series", released === null ? null : released.slice(0, 4)]
     .filter((part): part is string => part !== null)
     .join("  ·  ");
 
@@ -425,7 +421,15 @@ export function TitleScreen({
           />
         )}
         <div className="title-hero-copy">
-          <p className="hero-meta">{meta}</p>
+          <p className="hero-meta">
+            {meta}
+            {rating === null ? null : (
+              <span className="hero-rating">
+                <StarIcon />
+                {rating.toFixed(1)}
+              </span>
+            )}
+          </p>
           <h1>{name}</h1>
           {overview === null ? null : <p className="hero-overview">{overview}</p>}
           {title === null ? (
