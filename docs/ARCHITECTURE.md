@@ -289,7 +289,7 @@ graph TB
     UIState --> Cmd
 ```
 
-`apps/web` is a second client of the same core, not a second UI of the desktop app: a Vite/React SPA served as static assets by the LAN surface, talking the HTTP API rather than Tauri IPC. It has no TanStack Router or Query, no Tauri-bound hooks, and its own spatial-focus module; it shares `packages/theme`'s tokens, and its copy is local until it is consolidated with the console's catalogue. Its screens are the hero-and-rails home, the library grid, the title page with seasons, episodes, and More Like This, and the player ([adr/0028](./adr/0028-tv-web-client.md)).
+`apps/web` is a second client of the same core, not a second UI of the desktop app: a Vite/React SPA served as static assets by the LAN surface, talking the HTTP API rather than Tauri IPC. It has no TanStack Router or Query, no Tauri-bound hooks, and its own spatial-focus module; it shares `packages/theme`'s tokens, and its copy is local until it is consolidated with the console's catalogue. Its screens are the rotating hero-and-rails home, Browse with search and kind/sort/genre filters, My List, the library grid, the title page with seasons, episodes, and More Like This, and the player ([adr/0028](./adr/0028-tv-web-client.md)).
 
 ### State ownership
 

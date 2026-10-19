@@ -16,8 +16,11 @@ import {
   type PlaybackTicket,
   type Tile,
 } from "./api.js";
+import { BrowseScreen } from "./Browse.js";
 import { useAutoFocus, useSpatialFocus } from "./focus.js";
 import { HomeScreen } from "./Home.js";
+import { BookmarkIcon, CompassIcon, HomeIcon, LibraryIcon, SearchIcon } from "./icons.js";
+import { MyListScreen } from "./MyList.js";
 import { Player } from "./Player.js";
 import { TitleScreen } from "./Title.js";
 
@@ -25,6 +28,8 @@ type Screen =
   | { readonly name: "loading" }
   | { readonly name: "pair" }
   | { readonly name: "home" }
+  | { readonly name: "browse" }
+  | { readonly name: "myList" }
   | { readonly name: "library" }
   | { readonly name: "title"; readonly id: number; readonly preview?: Tile }
   | {
@@ -40,6 +45,7 @@ export function App() {
   const [homeLoading, setHomeLoading] = useState(true);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [rows, setRows] = useState<readonly LibraryRow[]>([]);
+  const [returnTo, setReturnTo] = useState<"home" | "browse" | "myList" | "library">("home");
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +97,34 @@ export function App() {
     void loadLibrary();
   }, [loadLibrary]);
 
+  const goBrowse = useCallback((focusSearch = false): void => {
+    setScreen({ name: "browse" });
+    if (focusSearch) {
+      window.setTimeout(() => document.getElementById("browse-search")?.focus(), 60);
+    }
+  }, []);
+
+  const goMyList = useCallback((): void => {
+    setScreen({ name: "myList" });
+  }, []);
+
+  const goBack = useCallback((): void => {
+    switch (returnTo) {
+      case "browse":
+        setScreen({ name: "browse" });
+        break;
+      case "myList":
+        setScreen({ name: "myList" });
+        break;
+      case "library":
+        void loadLibrary();
+        break;
+      case "home":
+        goHome();
+        break;
+    }
+  }, [returnTo, goHome, loadLibrary]);
+
   useSpatialFocus(screen.name !== "loading");
 
   useEffect(() => {
@@ -101,18 +135,23 @@ export function App() {
         setScreen({ name: "title", id: screen.titleId });
       } else if (screen.name === "title") {
         event.preventDefault();
-        goHome();
+        goBack();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, goHome]);
+  }, [screen, goBack]);
 
-  const openTile = useCallback((tile: Tile): void => {
-    setScreen({ name: "title", id: tile.id, preview: tile });
-  }, []);
+  const openTile = useCallback(
+    (tile: Tile, from: "home" | "browse" | "myList" | "library" = "home"): void => {
+      setReturnTo(from);
+      setScreen({ name: "title", id: tile.id, preview: tile });
+    },
+    [],
+  );
 
   const openId = useCallback((id: number): void => {
+    setReturnTo("library");
     setScreen({ name: "title", id });
   }, []);
 
@@ -171,67 +210,151 @@ export function App() {
         <TitleScreen
           id={screen.id}
           key={screen.id}
-          onBack={goHome}
-          onOpen={openTile}
+          onBack={goBack}
+          onOpen={(tile) => openTile(tile, returnTo)}
           onPlay={(ticket, name) => startPlayback(ticket, name, screen.id)}
           preview={screen.preview}
         />
-        <TabBar active={null} onHome={goHome} onLibrary={goLibrary} />
+        <TabBar
+          active={null}
+          onBrowse={() => goBrowse()}
+          onHome={goHome}
+          onLibrary={goLibrary}
+          onMyList={goMyList}
+        />
+      </>
+    );
+  }
+
+  if (screen.name === "browse") {
+    return (
+      <>
+        <TopBar
+          active="browse"
+          onBrowse={() => goBrowse()}
+          onHome={goHome}
+          onLibrary={goLibrary}
+          onMyList={goMyList}
+          onSearch={() => goBrowse(true)}
+        />
+        <BrowseScreen onOpen={(tile) => openTile(tile, "browse")} />
+        <TabBar
+          active="browse"
+          onBrowse={() => goBrowse()}
+          onHome={goHome}
+          onLibrary={goLibrary}
+          onMyList={goMyList}
+        />
+      </>
+    );
+  }
+
+  if (screen.name === "myList") {
+    return (
+      <>
+        <TopBar
+          active="myList"
+          onBrowse={() => goBrowse()}
+          onHome={goHome}
+          onLibrary={goLibrary}
+          onMyList={goMyList}
+          onSearch={() => goBrowse(true)}
+        />
+        <MyListScreen onOpen={(tile) => openTile(tile, "myList")} />
+        <TabBar
+          active="myList"
+          onBrowse={() => goBrowse()}
+          onHome={goHome}
+          onLibrary={goLibrary}
+          onMyList={goMyList}
+        />
       </>
     );
   }
 
   return (
     <>
-      <TopBar active={screen.name} onHome={goHome} onLibrary={goLibrary} />
+      <TopBar
+        active={screen.name}
+        onBrowse={() => goBrowse()}
+        onHome={goHome}
+        onLibrary={goLibrary}
+        onMyList={goMyList}
+        onSearch={() => goBrowse(true)}
+      />
       {error === null ? null : <p className="error">{error}</p>}
       {screen.name === "home" ? (
         <HomeScreen
           data={home}
           error={homeError}
           loading={homeLoading}
-          onOpen={openTile}
+          onOpen={(tile) => openTile(tile, "home")}
           onPlay={(tile) => void playTile(tile)}
           onRetry={() => void loadHome()}
         />
       ) : (
         <LibraryScreen error={libraryError} onOpen={openId} rows={rows} />
       )}
-      <TabBar active={screen.name} onHome={goHome} onLibrary={goLibrary} />
+      <TabBar
+        active={screen.name}
+        onBrowse={() => goBrowse()}
+        onHome={goHome}
+        onLibrary={goLibrary}
+        onMyList={goMyList}
+      />
     </>
   );
 }
 
+type Tab = "home" | "browse" | "myList" | "library";
+
 function TopBar({
   active,
   onHome,
+  onBrowse,
+  onMyList,
   onLibrary,
+  onSearch,
 }: {
-  readonly active: "home" | "library";
+  readonly active: Tab;
   readonly onHome: () => void;
+  readonly onBrowse: () => void;
+  readonly onMyList: () => void;
   readonly onLibrary: () => void;
+  readonly onSearch: () => void;
 }) {
   return (
     <header className="topbar">
       <span className="brand">Peregrine</span>
       <nav className="topbar-nav">
-        <button
-          className={active === "home" ? "nav current" : "nav"}
-          data-focus="true"
-          onClick={onHome}
-          type="button"
-        >
-          Home
-        </button>
-        <button
-          className={active === "library" ? "nav current" : "nav"}
-          data-focus="true"
-          onClick={onLibrary}
-          type="button"
-        >
-          Library
-        </button>
+        {(
+          [
+            ["home", "Home", onHome],
+            ["browse", "Browse", onBrowse],
+            ["myList", "My List", onMyList],
+            ["library", "Library", onLibrary],
+          ] as const
+        ).map(([id, label, action]) => (
+          <button
+            className={active === id ? "nav current" : "nav"}
+            data-focus="true"
+            key={id}
+            onClick={action}
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
       </nav>
+      <button
+        aria-label="Search"
+        className="nav search-toggle"
+        data-focus="true"
+        onClick={onSearch}
+        type="button"
+      >
+        <SearchIcon />
+      </button>
     </header>
   );
 }
@@ -239,10 +362,14 @@ function TopBar({
 function TabBar({
   active,
   onHome,
+  onBrowse,
+  onMyList,
   onLibrary,
 }: {
-  readonly active: "home" | "library" | null;
+  readonly active: Tab | null;
   readonly onHome: () => void;
+  readonly onBrowse: () => void;
+  readonly onMyList: () => void;
   readonly onLibrary: () => void;
 }) {
   return (
@@ -257,6 +384,24 @@ function TabBar({
         <span>Home</span>
       </button>
       <button
+        className={active === "browse" ? "tab current" : "tab"}
+        data-focus="true"
+        onClick={onBrowse}
+        type="button"
+      >
+        <CompassIcon />
+        <span>Browse</span>
+      </button>
+      <button
+        className={active === "myList" ? "tab current" : "tab"}
+        data-focus="true"
+        onClick={onMyList}
+        type="button"
+      >
+        <BookmarkIcon />
+        <span>My List</span>
+      </button>
+      <button
         className={active === "library" ? "tab current" : "tab"}
         data-focus="true"
         onClick={onLibrary}
@@ -266,41 +411,6 @@ function TabBar({
         <span>Library</span>
       </button>
     </nav>
-  );
-}
-
-function HomeIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-    >
-      <path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" />
-    </svg>
-  );
-}
-
-function LibraryIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-    >
-      <rect height="7" rx="1" width="7" x="3" y="3" />
-      <rect height="7" rx="1" width="7" x="14" y="3" />
-      <rect height="7" rx="1" width="7" x="3" y="14" />
-      <rect height="7" rx="1" width="7" x="14" y="14" />
-    </svg>
   );
 }
 

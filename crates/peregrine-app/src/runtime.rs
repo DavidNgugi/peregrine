@@ -8016,11 +8016,58 @@ mod tests {
             rails.iter().any(|rail| rail["id"] == "library"),
             "the library rail is always drawn: {rails:?}"
         );
+        assert!(
+            home["heroes"]
+                .as_array()
+                .is_some_and(|heroes| !heroes.is_empty()),
+            "the hero rotation is never empty when a hero is drawn"
+        );
 
         assert!(
             rows.as_array().expect("an array").len() >= 2,
             "the two seeded titles are listed: {rows}"
         );
+
+        // My List, search, browse, and genres are the four reads the discovery tabs need.
+        let list = client
+            .get(format!("{base}/api/watchlist"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(list.status(), 200);
+        let search = client
+            .get(format!("{base}/api/search?q=Interstellar"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(search.status(), 200);
+        let browse: serde_json::Value = client
+            .get(format!("{base}/api/browse?kind=movie"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            browse["source"], "library",
+            "no provider falls back locally"
+        );
+        assert!(
+            browse["items"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
+        let genres = client
+            .get(format!("{base}/api/genres?kind=movie"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(genres.status(), 200);
 
         // A title nobody has played has no Resume control; after one report it has the position
         // the desktop would also read from the same row.

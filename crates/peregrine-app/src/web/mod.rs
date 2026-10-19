@@ -22,10 +22,13 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use peregrine_domain::catalogue::TitleKind;
 use peregrine_domain::{Clock, LocalPlayback, SessionToken, TokenSource};
+use peregrine_providers::{BrowseRequest, BrowseSort};
 use peregrine_storage::{Database, NewPairedDevice, PairedDevice, StorageError};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -903,6 +906,10 @@ impl WebService {
             });
         }
 
+        if let Some(rail) = self.my_list_rail().await? {
+            rails.push(rail);
+        }
+
         let library: Vec<TileDto> = self
             .runtime
             .library_titles(None, 40)
@@ -947,13 +954,141 @@ impl WebService {
             hero = Some(tile_from_detail(detail, None, 0));
         }
 
+        // The desktop's hero rotates through several titles; collect one candidate per title that
+        // has a backdrop, keeping the rails' order so the rotation starts on the same film the
+        // rest of the screen leads with.
+        let heroes = hero_candidates(&rails, hero.as_ref());
+        if hero.is_none() {
+            hero = heroes.first().cloned();
+        }
+
         Ok(HomeDto {
             hero,
             rails,
+            heroes,
             state: state.to_owned(),
         })
     }
 
+    /// The account's My List as tiles, newest first.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the watchlist or a title read fails.
+    pub async fn watchlist_page(&self) -> Result<Vec<TileDto>, WebError> {
+        let mut items = Vec::new();
+        for row in self.runtime.watchlist().await? {
+            let Some(detail) = self.runtime.library_title(row.entry.title_id).await? else {
+                continue;
+            };
+            items.push(tile_from_detail(detail, None, 0));
+        }
+        Ok(items)
+    }
+
+    /// A search over the provider and the local index.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when both the provider and the local index fail.
+    pub async fn search_page(
+        &self,
+        query: &str,
+        kind: Option<TitleKind>,
+    ) -> Result<Vec<TileDto>, WebError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query: String = query.chars().take(120).collect();
+        Ok(self
+            .runtime
+            .search_tiles(&query, 60, kind)
+            .await?
+            .into_iter()
+            .map(tile_from_rail)
+            .collect())
+    }
+
+    /// One page of the provider's browse list, or the library when the provider is absent.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when a local read fails while assembling the fallback.
+    pub async fn browse_page(
+        &self,
+        kind: TitleKind,
+        page: u32,
+        sort: BrowseSort,
+        genre: Option<u32>,
+    ) -> Result<BrowseDto, WebError> {
+        let request = BrowseRequest::new(
+            kind,
+            NonZeroU32::new(page).unwrap_or(NonZeroU32::MIN),
+            sort,
+            genre,
+            None,
+        );
+        if let Ok(answer) = self.runtime.browse(&request).await {
+            return Ok(BrowseDto {
+                items: answer.items.into_iter().map(tile_from_rail).collect(),
+                has_more: answer.has_more,
+                source: "provider".to_owned(),
+            });
+        }
+        // No provider, or a provider having a bad minute: the library is still a browse screen.
+        let items = self
+            .runtime
+            .library_titles(None, 100)
+            .await?
+            .into_iter()
+            .filter(|entry| entry.row.title.kind == kind)
+            .map(|entry| tile_from_entry(&entry))
+            .collect();
+        Ok(BrowseDto {
+            items,
+            has_more: false,
+            source: "library".to_owned(),
+        })
+    }
+
+    /// The provider's genres for one kind; empty when no provider is configured.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] is not reported: a filter control without genres is still a filter.
+    pub async fn genres_page(&self, kind: TitleKind) -> Vec<GenreDto> {
+        self.runtime
+            .genres(kind)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|genre| GenreDto {
+                id: genre.id(),
+                name: genre.name().as_str().to_owned(),
+            })
+            .collect()
+    }
+
+    /// My List as a rail, when the watchlist has a title the library still holds.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the watchlist or a title read fails.
+    async fn my_list_rail(&self) -> Result<Option<RailDto>, WebError> {
+        let mut items = Vec::new();
+        for row in self.runtime.watchlist().await? {
+            let Some(detail) = self.runtime.library_title(row.entry.title_id).await? else {
+                continue;
+            };
+            items.push(tile_from_detail(detail, None, 0));
+        }
+        Ok((!items.is_empty()).then(|| RailDto {
+            id: "watchlist".to_owned(),
+            title: "My list".to_owned(),
+            items,
+        }))
+    }
     /// One title as the client's page draws it.
     ///
     /// # Errors
@@ -1435,8 +1570,32 @@ pub struct HomeDto {
     pub hero: Option<TileDto>,
     /// The rails below it, in drawing order.
     pub rails: Vec<RailDto>,
+    /// The titles the desktop hero rotates through, when there are several.
+    pub heroes: Vec<TileDto>,
     /// What the provider rails are doing: `no_provider`, `fetching`, or `ready`.
     pub state: String,
+}
+
+/// One page of a browse or search answer.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseDto {
+    /// The tiles on this page.
+    pub items: Vec<TileDto>,
+    /// Whether asking for the next page would find anything.
+    pub has_more: bool,
+    /// Where the answer came from: `provider` or `library`.
+    pub source: String,
+}
+
+/// One genre a browse filter offers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreDto {
+    /// The provider's identifier.
+    pub id: u32,
+    /// The name the filter draws.
+    pub name: String,
 }
 
 /// One season a switcher offers.
@@ -1521,6 +1680,24 @@ fn code_for(token: &SessionToken) -> String {
 
 fn scope_allows(scopes: &str, wanted: &str) -> bool {
     scopes.split(',').any(|scope| scope.trim() == wanted)
+}
+
+fn hero_candidates(rails: &[RailDto], hero: Option<&TileDto>) -> Vec<TileDto> {
+    let mut heroes: Vec<TileDto> = Vec::new();
+    for rail in rails {
+        for tile in &rail.items {
+            if tile.backdrop.is_some() && !heroes.iter().any(|held| held.id == tile.id) {
+                heroes.push(tile.clone());
+            }
+        }
+    }
+    heroes.truncate(6);
+    if heroes.is_empty()
+        && let Some(first) = hero
+    {
+        heroes.push(first.clone());
+    }
+    heroes
 }
 
 fn missing_title(id: i64, identity: crate::TitleIdentity) -> TitleDto {

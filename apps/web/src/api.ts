@@ -62,7 +62,19 @@ export interface Rail {
 export interface HomeData {
   readonly hero: Tile | null;
   readonly rails: Rail[];
+  readonly heroes: Tile[];
   readonly state: string;
+}
+
+export interface BrowseData {
+  readonly items: Tile[];
+  readonly hasMore: boolean;
+  readonly source: "provider" | "library";
+}
+
+export interface Genre {
+  readonly id: number;
+  readonly name: string;
 }
 
 export interface Season {
@@ -165,6 +177,26 @@ async function request<T>(
 /** The three reads and the two writes this client needs. */
 export const api = {
   home: (): Promise<HomeData> => request<HomeData>("/api/home"),
+  browse: (
+    kind: "movie" | "show",
+    page: number,
+    sort: string,
+    genre?: number,
+  ): Promise<BrowseData> =>
+    request<BrowseData>(
+      "/api/browse?kind=" +
+        kind +
+        "&page=" +
+        String(page) +
+        "&sort=" +
+        encodeURIComponent(sort) +
+        (genre === undefined ? "" : "&genre=" + String(genre)),
+    ),
+  search: (query: string, kind: "movie" | "show"): Promise<Tile[]> =>
+    request<Tile[]>("/api/search?q=" + encodeURIComponent(query) + "&kind=" + kind),
+  genres: (kind: "movie" | "show"): Promise<Genre[]> =>
+    request<Genre[]>("/api/genres?kind=" + kind),
+  watchlist: (): Promise<Tile[]> => request<Tile[]>("/api/watchlist"),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),
   title: (id: number, season?: number): Promise<Title> =>
     request<Title>(

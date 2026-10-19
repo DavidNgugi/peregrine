@@ -13,6 +13,7 @@ import type Hls from "hls.js";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { api, type PlaybackTicket } from "./api.js";
+import { ChevronLeftIcon } from "./icons.js";
 
 export interface PlayerProps {
   readonly titleId: number;
@@ -239,18 +240,19 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
 
   return (
     <main className="player">
+      <button
+        aria-label="Back"
+        className="back-icon player-back"
+        data-autofocus="true"
+        data-focus="true"
+        onClick={close}
+        type="button"
+      >
+        <ChevronLeftIcon />
+      </button>
       <video autoPlay playsInline ref={video} />
       {message === null ? null : <p className="player-message">{message}</p>}
       <div className="player-controls">
-        <button
-          className="back"
-          data-autofocus="true"
-          data-focus="true"
-          onClick={close}
-          type="button"
-        >
-          Back
-        </button>
         <button className="control" data-focus="true" onClick={toggle} type="button">
           {playing ? "Pause" : "Play"}
         </button>

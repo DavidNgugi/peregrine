@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import type { HomeData, Rail, Tile } from "./api.js";
-import { useAutoFocus } from "./focus.js";
 import { useIsMobile } from "./useIsMobile.js";
 
 /** One poster card in a rail or grid. */
@@ -151,7 +150,23 @@ export function HomeScreen({
   readonly onPlay: (tile: Tile) => void;
   readonly onRetry: () => void;
 }) {
-  useAutoFocus(data?.hero?.id ?? data?.rails[0]?.items[0]?.id);
+  const heroes = data?.heroes?.length ? data.heroes : data?.hero ? [data.hero] : [];
+  const [slide, setSlide] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const current = heroes[slide] ?? heroes[0];
+
+  useEffect(() => {
+    setSlide(0);
+  }, [data?.hero?.id]);
+
+  useEffect(() => {
+    if (heroes.length < 2 || paused) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setInterval(() => {
+      setSlide((held) => (held + 1) % heroes.length);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [heroes.length, paused]);
 
   // The provider rails are filled by a job the first read starts. One quiet retry closes the gap
   // between "fetching" and the rails appearing, without a spinner over the local ones.
@@ -178,7 +193,36 @@ export function HomeScreen({
 
   return (
     <main className="screen home">
-      {data.hero === null ? null : <Hero onOpen={onOpen} onPlay={onPlay} tile={data.hero} />}
+      {current === undefined ? null : (
+        <div
+          className="hero-carousel"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
+          }}
+          onFocus={() => setPaused(true)}
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
+        >
+          <div className="hero-stage" key={current.id}>
+            <Hero onOpen={onOpen} onPlay={onPlay} tile={current} />
+          </div>
+          {heroes.length > 1 ? (
+            <div className="hero-dots" role="group" aria-label="Featured titles">
+              {heroes.map((tile, index) => (
+                <button
+                  aria-label={"Show " + tile.name}
+                  aria-pressed={index === slide}
+                  className={index === slide ? "hero-dot current" : "hero-dot"}
+                  data-focus="true"
+                  key={tile.id}
+                  onClick={() => setSlide(index)}
+                  type="button"
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
       {data.rails.length === 0 ? (
         <p className="dim center-text">
           Scan a folder in the desktop app and its titles appear here.

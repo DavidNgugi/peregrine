@@ -20,6 +20,15 @@ export function useSpatialFocus(active: boolean): void {
       ) {
         return;
       }
+      // Text editing and a select's own menu own their arrows; the remote should not steal a
+      // cursor or a choice from a field the person is already using.
+      if (
+        focused instanceof HTMLTextAreaElement ||
+        focused instanceof HTMLSelectElement ||
+        (focused instanceof HTMLInputElement && focused.type !== "range")
+      ) {
+        return;
+      }
       const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-focus]")).filter(
         (element) => element.offsetParent !== null && !element.hasAttribute("disabled"),
       );

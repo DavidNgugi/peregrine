@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Episode, type PlaybackTicket, type Tile, type Title } from "./api.js";
 import { RailRow } from "./Home.js";
+import { ChevronLeftIcon } from "./icons.js";
 import { useIsMobile } from "./useIsMobile.js";
 
 /** One title's page: a hero, the episodes of a series, and More Like This. */
@@ -134,10 +135,16 @@ export function TitleScreen({
         {backdrop === null ? null : (
           <img alt="" className="hero-art" decoding="async" src={backdrop} />
         )}
+        <button
+          aria-label="Back"
+          className="back-icon"
+          data-focus="true"
+          onClick={onBack}
+          type="button"
+        >
+          <ChevronLeftIcon />
+        </button>
         <div className="title-hero-copy">
-          <button className="back" data-focus="true" onClick={onBack} type="button">
-            Back
-          </button>
           <p className="hero-meta">{meta}</p>
           <h1>{name}</h1>
           {overview === null ? null : <p className="hero-overview">{overview}</p>}

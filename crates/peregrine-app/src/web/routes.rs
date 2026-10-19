@@ -20,6 +20,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use peregrine_domain::catalogue::TitleKind;
+use peregrine_providers::BrowseSort;
 use peregrine_storage::PairedDevice;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
@@ -29,8 +31,8 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::warn;
 
 use super::{
-    LibraryRowDto, MediaGrant, PairOffer, PairStatus, PlaybackTicket, TOKEN_COOKIE, TitleDto,
-    WebError, WebService,
+    BrowseDto, GenreDto, LibraryRowDto, MediaGrant, PairOffer, PairStatus, PlaybackTicket,
+    TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -43,6 +45,10 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/pair/{pair_id}", get(pair_status))
         .route("/api/home", get(home))
         .route("/api/library", get(library))
+        .route("/api/watchlist", get(watchlist))
+        .route("/api/search", get(search))
+        .route("/api/browse", get(browse))
+        .route("/api/genres", get(genres))
         .route("/api/title/{id}", get(title))
         .route("/api/playback/{id}", post(playback))
         .route("/api/progress", post(progress))
@@ -409,6 +415,93 @@ async fn library(
     Ok(Json(service.library_page(query.after, limit).await?))
 }
 
+async fn watchlist(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+) -> Result<Json<Vec<TileDto>>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.watchlist_page().await?))
+}
+
+async fn search(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Vec<TileDto>>, ApiError> {
+    require_read(&device)?;
+    let kind = parsed_kind(query.kind.as_deref())?;
+    Ok(Json(
+        service
+            .search_page(query.q.as_deref().unwrap_or_default(), kind)
+            .await?,
+    ))
+}
+
+async fn browse(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Query(query): Query<BrowseQuery>,
+) -> Result<Json<BrowseDto>, ApiError> {
+    require_read(&device)?;
+    let kind = parsed_kind(query.kind.as_deref())?.unwrap_or(TitleKind::Movie);
+    Ok(Json(
+        service
+            .browse_page(
+                kind,
+                query.page.unwrap_or(1).clamp(1, 50),
+                parsed_sort(query.sort.as_deref()),
+                query.genre,
+            )
+            .await?,
+    ))
+}
+
+async fn genres(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Query(query): Query<KindQuery>,
+) -> Result<Json<Vec<GenreDto>>, ApiError> {
+    require_read(&device)?;
+    let kind = parsed_kind(query.kind.as_deref())?.unwrap_or(TitleKind::Movie);
+    Ok(Json(service.genres_page(kind).await))
+}
+
+fn parsed_kind(value: Option<&str>) -> Result<Option<TitleKind>, ApiError> {
+    match value {
+        None | Some("") => Ok(None),
+        Some("movie") => Ok(Some(TitleKind::Movie)),
+        Some("show") => Ok(Some(TitleKind::Show)),
+        Some(_) => Err(ApiError::bad_request("query")),
+    }
+}
+
+fn parsed_sort(value: Option<&str>) -> BrowseSort {
+    match value {
+        Some("rating") => BrowseSort::Rating,
+        Some("newest") => BrowseSort::Newest,
+        Some("oldest") => BrowseSort::Oldest,
+        _ => BrowseSort::Popularity,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchQuery {
+    q: Option<String>,
+    kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowseQuery {
+    kind: Option<String>,
+    page: Option<u32>,
+    sort: Option<String>,
+    genre: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KindQuery {
+    kind: Option<String>,
+}
 async fn title(
     State(service): State<Arc<WebService>>,
     Device(device): Device,
