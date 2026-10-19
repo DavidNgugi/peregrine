@@ -50,7 +50,7 @@ The playback ticket carries the subtitle track metadata and URLs, and marks exac
 
 ### 5. The title read carries the state the screen must draw
 
-`GET /api/title/{id}` answers `watchlisted`, `watched`, and each title's and episode's current download lifecycle state and percentage. The client re-reads the title while a download is queued or running, so a Download button becomes Queued, Downloading n%, or Downloaded without a refresh. The state is the core's; the client maps the lifecycle to a label and never invents one.
+`GET /api/title/{id}` answers `watchlisted`, `watched`, and each title's and episode's current download lifecycle state and percentage. A playback ticket carries the title's full duration: when the library row has none, the mint asks ffprobe once and stores the answer on the ticket for that session. The client must not replace a known duration with an HLS event playlist's growing length — that length is only what the encoder has produced so far, and using it made the seek bar shrink to the encoded edge. The client re-reads the title while a download is queued or running, so a Download button becomes Queued, Downloading n%, or Downloaded without a refresh. The state is the core's; the client maps the lifecycle to a label and never invents one.
 
 ### 6. The client is a first-class screen, not a television afterthought
 

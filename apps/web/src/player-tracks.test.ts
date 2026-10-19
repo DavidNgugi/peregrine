@@ -6,6 +6,7 @@ import {
   initialSubtitleIndex,
   nextEpisodeRequest,
   subtitleLabel,
+  totalDurationMs,
 } from "./player-tracks.js";
 
 function subtitle(overrides: Partial<SubtitleTrack> = {}): SubtitleTrack {
@@ -47,6 +48,24 @@ describe("subtitleLabel", () => {
     expect(subtitleLabel(subtitle({ forced: true }))).toBe("English (forced)");
     expect(subtitleLabel(subtitle({ sdh: true }))).toBe("English (SDH)");
     expect(subtitleLabel(subtitle({ forced: true, sdh: true }))).toBe("English (forced, SDH)");
+  });
+});
+
+describe("totalDurationMs", () => {
+  it("keeps the ticket's full duration instead of the HLS playlist's encoded length", () => {
+    expect(totalDurationMs(8_891_077, 0, 11)).toBe(8_891_077);
+    expect(totalDurationMs(8_891_077, 3_600_000, 11)).toBe(8_891_077);
+  });
+
+  it("falls back to the element only when the ticket has no duration", () => {
+    expect(totalDurationMs(null, 0, 11)).toBe(11_000);
+    expect(totalDurationMs(null, 3_600_000, 11)).toBe(3_611_000);
+  });
+
+  it("has no total when neither source knows one", () => {
+    expect(totalDurationMs(null, 0, Number.NaN)).toBeNull();
+    expect(totalDurationMs(null, 0, Infinity)).toBeNull();
+    expect(totalDurationMs(null, 0, 0)).toBeNull();
   });
 });
 

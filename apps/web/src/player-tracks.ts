@@ -1,6 +1,7 @@
 /**
- * The two decisions the player makes from a ticket, kept pure so they have tests without a DOM:
- * which subtitle the menu starts on, and what the next-episode request is.
+ * The decisions the player makes from a ticket, kept pure so they have tests without a DOM:
+ * which subtitle the menu starts on, what the timeline's total is, and what the next-episode
+ * request is.
  *
  * The core has already chosen the default track and the audio language; this module only reads
  * those answers. "Always this language" is a preference the desktop owns, not a rule here.
@@ -21,6 +22,24 @@ export function subtitleLabel(track: SubtitleTrack): string {
     (marker): marker is string => marker !== null,
   );
   return markers.length === 0 ? name : name + " (" + markers.join(", ") + ")";
+}
+
+/**
+ * The timeline's total in milliseconds.
+ *
+ * The ticket's duration wins whenever the core has one. An HLS event playlist's element duration
+ * is only the length encoded so far, so using it for a known film makes the seek bar shrink to the
+ * encoder's current edge. Only a ticket with no duration falls back to the element, and then the
+ * caller may let that fallback grow as the playlist does.
+ */
+export function totalDurationMs(
+  ticketDurationMs: number | null,
+  startPositionMs: number,
+  elementDurationSeconds: number,
+): number | null {
+  if (ticketDurationMs !== null) return ticketDurationMs;
+  if (!Number.isFinite(elementDurationSeconds) || elementDurationSeconds <= 0) return null;
+  return startPositionMs + elementDurationSeconds * 1000;
 }
 
 /** The request that starts the follow-up episode. */

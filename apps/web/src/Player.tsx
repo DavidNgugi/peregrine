@@ -27,6 +27,7 @@ import {
   initialSubtitleIndex,
   nextEpisodeRequest,
   subtitleLabel,
+  totalDurationMs,
 } from "./player-tracks.js";
 
 export interface PlayerProps {
@@ -347,9 +348,13 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       }
     };
     const onMetadata = (): void => {
-      if (Number.isFinite(element.duration) && element.duration > 0) {
-        setTotalMs(ticket.startPositionMs + element.duration * 1000);
-      }
+      // An HLS event playlist reports the length encoded so far, not the title. The ticket's
+      // probed duration wins; only a ticket without one lets the timeline grow with the encoder.
+      const observed = totalDurationMs(ticket.durationMs, ticket.startPositionMs, element.duration);
+      if (observed === null) return;
+      setTotalMs((current) =>
+        ticket.durationMs !== null ? observed : Math.max(current ?? 0, observed),
+      );
     };
     const onPlay = (): void => {
       setPlaying(true);

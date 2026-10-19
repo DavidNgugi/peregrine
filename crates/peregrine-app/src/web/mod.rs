@@ -2100,9 +2100,15 @@ impl WebService {
                 crate::RuntimeError::UnknownTitle => WebError::UnknownTitle,
                 other => WebError::Runtime(other),
             })?;
-        let Some(target) = target else {
+        let Some(mut target) = target else {
             return Err(WebError::NoFile);
         };
+        // A library row can predate the probe. Without a duration the client would treat a growing
+        // HLS playlist's current length as the whole film, so the mint asks ffprobe once and the
+        // ticket carries the real length from then on.
+        if target.duration_ms.is_none() {
+            target.duration_ms = transcode::duration_ms(&target.path).await;
+        }
         let start = target.duration_ms.map_or(position_ms.max(0), |duration| {
             position_ms.clamp(0, duration)
         });

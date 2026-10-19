@@ -319,6 +319,44 @@ async fn probe_stream(ffprobe: &Path, path: &Path, stream: &str) -> Option<Strin
     (!codec.is_empty()).then_some(codec)
 }
 
+/// The file's duration in milliseconds, as ffprobe reports it, or `None` when it could not.
+///
+/// A library row can lack `duration_ms` — an import that predates the probe, or a probe that
+/// failed — and a playback mint with a null duration leaves the browser to treat a growing HLS
+/// playlist's current length as the whole title. The mint asks this once in that case.
+pub async fn duration_ms(path: &Path) -> Option<i64> {
+    let output = Command::new(locate_probe())
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+        ])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_duration_ms(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Parses ffprobe's seconds value into whole milliseconds.
+///
+/// `N/A`, an empty line, a non-finite value, and a zero all answer `None`, so a probe that ran but
+/// could not name a duration is not mistaken for a zero-length title.
+#[must_use]
+pub fn parse_duration_ms(text: &str) -> Option<i64> {
+    let seconds: f64 = text.lines().next()?.trim().parse().ok()?;
+    (seconds.is_finite() && seconds > 0.0).then(|| (seconds * 1000.0).round() as i64)
+}
+
 /// The audio streams' indices and language tags, as ffprobe's JSON, or `None` when it failed.
 async fn probe_audio(path: &Path) -> Option<String> {
     let output = Command::new(locate_probe())
@@ -466,8 +504,18 @@ pub fn valid_hls_file(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioStreamChoice, Transcoder, choose_audio_stream, valid_hls_file, video_arguments,
+        AudioStreamChoice, Transcoder, choose_audio_stream, parse_duration_ms, valid_hls_file,
+        video_arguments,
     };
+
+    #[test]
+    fn a_probed_duration_is_whole_milliseconds_and_junk_is_none() {
+        assert_eq!(parse_duration_ms("8891.077000\n"), Some(8_891_077));
+        assert_eq!(parse_duration_ms("0.500\n"), Some(500));
+        for junk in ["", "\n", "N/A\n", "NaN\n", "inf\n", "0\n", "-1\n"] {
+            assert_eq!(parse_duration_ms(junk), None, "{junk:?}");
+        }
+    }
 
     #[test]
     fn only_the_three_shapes_of_a_session_file_are_served() {
