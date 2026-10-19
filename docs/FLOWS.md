@@ -918,7 +918,7 @@ sequenceDiagram
     Note over Desktop,TV: Continue Watching and Resume read one row in both directions
 ```
 
-A denial, an expiry, or a consumed request is terminal: the client starts a new request and gets a new prompt. The token is shown once and stored only as its hash; a revoke refuses the device's next request, including a segment of a film already playing, and kills its HLS session. Reads require the `read` scope and playback requires `stream`, so a stream-only credential cannot walk the catalogue.
+A denial, an expiry, or a consumed request is terminal: the client starts a new request and gets a new prompt. The token is shown once and stored only as its hash; a revoke refuses the device's next request, including a segment of a film already playing, and kills its HLS session. Leaving the player posts the ticket URL to `/api/playback/stop`, which kills the child and removes its directory; a start also clears directories a previous process left behind. Reads require the `read` scope and playback requires `stream`, so a stream-only credential cannot walk the catalogue.
 
 Invariants: the surface is off until a person starts it and binds one explicit address, never the unspecified one; the pairing code is single use and valid for five minutes; no plaintext token or code is stored or logged; a read is scoped to `AccountScope`; no response contains an absolute path; progress goes through `Runtime::record_progress`, so a manual watch mark outranks a report; and one device holds one HLS session while the host holds at most four.
 

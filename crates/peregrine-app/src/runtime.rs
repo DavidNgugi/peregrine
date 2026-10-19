@@ -3711,10 +3711,18 @@ impl Runtime {
     ///
     /// `RuntimeError::Storage` when the read fails.
     pub async fn continue_watching(&self) -> Result<Vec<WatchProgressRow>, RuntimeError> {
-        Ok(self
+        let rows = self
             .database
             .list_continue_watching(installation_scope(), PageRequest::first(20))
-            .await?)
+            .await?;
+        // Continue Watching is one card per title: a show with two episodes in progress is one
+        // thing the reader is watching, and the list is already most-recent first, so the first
+        // row for a title is the episode to resume.
+        let mut seen = std::collections::HashSet::new();
+        Ok(rows
+            .into_iter()
+            .filter(|row| seen.insert(row.progress.title_id()))
+            .collect())
     }
 
     /// The address the internet sees, read only when the reader asks for it.
@@ -8166,6 +8174,22 @@ mod tests {
             .unwrap();
         assert_eq!(ranged.status(), 206);
         assert!(ranged.headers().get("content-range").is_some());
+        let stopped = client
+            .post(format!("{base}/api/playback/stop"))
+            .header("cookie", &cookie)
+            .json(&serde_json::json!({ "url": media_url }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(stopped.status(), 204);
+        let gone = client
+            .get(format!("{base}{media_url}"))
+            .header("cookie", &cookie)
+            .header("range", "bytes=0-15")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(gone.status(), 404, "a stopped grant is gone");
 
         // A container the webview does not demux goes to the transcoder; a fixture whose bytes are
         // not a film is refused with a named failure rather than served as a broken element.

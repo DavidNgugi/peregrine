@@ -424,6 +424,10 @@ impl WebService {
         if running.is_some() {
             return Err(WebError::AlreadyRunning);
         }
+        // A previous process can leave a transcode directory behind. Nothing from it is
+        // addressable by this instance, and those directories are the largest thing the surface
+        // writes, so a start clears them instead of accumulating gigabytes across launches.
+        self.clear_transcode_root().await;
         let wanted = SocketAddr::new(config.bind, config.port);
         let listener = TcpListener::bind(wanted)
             .await
@@ -462,6 +466,18 @@ impl WebService {
         drop(running);
         info!(%address, "the LAN surface is listening");
         Ok(self.status().await)
+    }
+
+    async fn clear_transcode_root(&self) {
+        let Ok(mut entries) = tokio::fs::read_dir(&self.transcode_root).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_dir() {
+                let _ = tokio::fs::remove_dir_all(&path).await;
+            }
+        }
     }
 
     /// Stops the listener and drops every playback grant.
@@ -1145,12 +1161,22 @@ impl WebService {
         };
         // A title page is useful without the network: the provider's similar list is a bonus, so
         // a slow or unreachable provider gets three seconds and then an empty rail, not a spinner.
-        let similar: Vec<TileDto> =
+        let (similar, similar_genres): (Vec<TileDto>, Vec<GenreDto>) =
             match tokio::time::timeout(std::time::Duration::from_secs(3), self.runtime.similar(id))
                 .await
             {
-                Ok(Ok(found)) => found.items.into_iter().map(tile_from_rail).collect(),
-                _ => Vec::new(),
+                Ok(Ok(found)) => (
+                    found.items.into_iter().map(tile_from_rail).collect(),
+                    found
+                        .genres
+                        .into_iter()
+                        .map(|genre| GenreDto {
+                            id: genre.id(),
+                            name: genre.name().as_str().to_owned(),
+                        })
+                        .collect(),
+                ),
+                _ => (Vec::new(), Vec::new()),
             };
         // A provider with nothing to say should not leave the page without a rail. The library's
         // other titles are a truthful "more like this" and cost one local read.
@@ -1186,6 +1212,7 @@ impl WebService {
             seasons,
             episodes,
             similar,
+            similar_genres,
         }))
     }
 
@@ -1201,19 +1228,24 @@ impl WebService {
         title_id: i64,
         season_number: Option<u32>,
         episode_number: Option<u32>,
+        episode_id: Option<i64>,
         position_ms: i64,
     ) -> Result<PlaybackTicket, WebError> {
         if !scope_allows(&device.scopes, "stream") {
             return Err(WebError::Unauthorized);
         }
-        let episode_id = match (season_number, episode_number) {
-            (Some(season), Some(episode)) => Some(
-                self.runtime
-                    .episode_id(title_id, season, episode)
-                    .await?
-                    .ok_or(WebError::NoFile)?,
-            ),
-            _ => None,
+        // A seek restarts from the ticket's episode id; a fresh play names the season and number.
+        let episode_id = match episode_id {
+            Some(id) => Some(id),
+            None => match (season_number, episode_number) {
+                (Some(season), Some(episode)) => Some(
+                    self.runtime
+                        .episode_id(title_id, season, episode)
+                        .await?
+                        .ok_or(WebError::NoFile)?,
+                ),
+                _ => None,
+            },
         };
         let target = self
             .runtime
@@ -1316,6 +1348,48 @@ impl WebService {
             let _ = session.child.kill().await;
             let _ = tokio::fs::remove_dir_all(&session.dir).await;
         }
+    }
+
+    /// Stops a playback session the device owns, whether it was direct bytes or a transcode.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Unauthorized`] when the session belongs to another device.
+    pub async fn stop_playback(&self, device: &PairedDevice, url: &str) -> Result<(), WebError> {
+        if !scope_allows(&device.scopes, "stream") {
+            return Err(WebError::Unauthorized);
+        }
+        let token = url
+            .trim_start_matches('/')
+            .split('/')
+            .nth(1)
+            .unwrap_or_default();
+        if token.is_empty() {
+            return Ok(());
+        }
+        let direct = {
+            let mut grants = self
+                .sessions
+                .lock()
+                .expect("the session lock is not poisoned");
+            match grants.get(token) {
+                Some(grant) if grant.device_id == device.id => grants.remove(token),
+                _ => None,
+            }
+        };
+        drop(direct);
+        let session = {
+            let mut sessions = self.hls.lock().await;
+            match sessions.get(token) {
+                Some(held) if held.device_id == device.id => sessions.remove(token),
+                _ => None,
+            }
+        };
+        if let Some(mut session) = session {
+            let _ = session.child.kill().await;
+            let _ = tokio::fs::remove_dir_all(&session.dir).await;
+        }
+        Ok(())
     }
 
     /// Starts a transcode at `start_ms` and answers the HLS playlist URL.
@@ -1518,8 +1592,10 @@ pub struct TitleDto {
     pub seasons: Vec<SeasonDto>,
     /// The episodes of the requested season, empty for a film.
     pub episodes: Vec<EpisodeDto>,
-    /// The titles a provider considers like this one, for the More Like This rail.
+    /// The titles a provider considers like this one, for the More Like This feed.
     pub similar: Vec<TileDto>,
+    /// The genres those recommendations share, which the feed pages through after them.
+    pub similar_genres: Vec<GenreDto>,
 }
 
 /// One tile a rail or a grid draws.
@@ -1718,6 +1794,7 @@ fn missing_title(id: i64, identity: crate::TitleIdentity) -> TitleDto {
         seasons: Vec::new(),
         episodes: Vec::new(),
         similar: Vec::new(),
+        similar_genres: Vec::new(),
     }
 }
 

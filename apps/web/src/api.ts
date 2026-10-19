@@ -117,6 +117,7 @@ export interface Title {
   readonly seasons: Season[];
   readonly episodes: Episode[];
   readonly similar: Tile[];
+  readonly similarGenres: Genre[];
 }
 
 /** A pairing request as the TV creates it. */
@@ -197,6 +198,8 @@ export const api = {
   genres: (kind: "movie" | "show"): Promise<Genre[]> =>
     request<Genre[]>("/api/genres?kind=" + kind),
   watchlist: (): Promise<Tile[]> => request<Tile[]>("/api/watchlist"),
+  stopPlayback: (url: string): Promise<void> =>
+    request<void>("/api/playback/stop", "POST", { url }, true),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),
   title: (id: number, season?: number): Promise<Title> =>
     request<Title>(
@@ -211,11 +214,13 @@ export const api = {
     positionMs = 0,
     seasonNumber?: number,
     episodeNumber?: number,
+    episodeId?: number,
   ): Promise<PlaybackTicket> =>
     request<PlaybackTicket>("/api/playback/" + String(id), "POST", {
       positionMs,
       seasonNumber: seasonNumber ?? null,
       episodeNumber: episodeNumber ?? null,
+      episodeId: episodeId ?? null,
     }),
   progress: (
     titleId: number,

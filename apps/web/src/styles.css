@@ -206,16 +206,24 @@ video:focus-visible {
 
 .player {
   position: relative;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   padding: 0;
   background: #000;
 }
 
 .player video {
-  flex: 1;
+  flex: 1 1 auto;
   width: 100%;
   min-height: 0;
+  height: auto;
   background: #000;
+  object-fit: contain;
+}
+
+.player-controls {
+  flex: 0 0 auto;
 }
 
 .player-controls {
@@ -760,6 +768,13 @@ button {
   padding: 0 48px;
 }
 
+.episodes-grid {
+  display: grid;
+  grid-auto-rows: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 12px;
+}
+
 .episodes h2 {
   margin: 0 0 4px;
   font-size: 24px;
@@ -770,10 +785,11 @@ button {
 }
 
 .episode {
-  display: grid;
-  grid-template-columns: 196px minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  height: 100%;
   padding: 10px;
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
@@ -790,6 +806,7 @@ button {
 .episode-still {
   position: relative;
   display: block;
+  width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: 8px;
@@ -838,7 +855,8 @@ button {
 }
 
 .episode-action {
-  padding: 0 14px;
+  margin-top: auto;
+  padding: 4px 2px 0;
   color: var(--accent);
   font-weight: 650;
   white-space: nowrap;
@@ -1384,5 +1402,54 @@ button {
 
   .browse-grid .card-art {
     border-radius: 10px;
+  }
+}
+
+.title-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 48px;
+}
+
+.title-feed .section-head h2 {
+  font-size: 24px;
+}
+
+.feed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 24px 18px;
+}
+
+.feed-grid .card {
+  width: 100%;
+  flex: none;
+}
+
+.feed-sentinel {
+  height: 1px;
+}
+
+.feed-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 18px 0 0;
+}
+
+@media (max-width: 720px) {
+  .title-feed {
+    padding: 0 18px;
+  }
+
+  .title-feed .section-head h2 {
+    font-size: 20px;
+  }
+
+  .feed-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 16px 12px;
   }
 }

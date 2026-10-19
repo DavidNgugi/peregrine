@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Episode, type PlaybackTicket, type Tile, type Title } from "./api.js";
-import { RailRow } from "./Home.js";
+import { TitleFeed } from "./Feed.js";
 import { ChevronLeftIcon } from "./icons.js";
 import { useIsMobile } from "./useIsMobile.js";
 
@@ -228,9 +228,9 @@ export function TitleScreen({
                 </button>
               ) : null}
             </div>
-            {mobile && !episodesOpen
-              ? null
-              : episodes.map((episode) => (
+            {mobile && !episodesOpen ? null : (
+              <div className="episodes-grid">
+                {episodes.map((episode) => (
                   <button
                     className="episode"
                     data-focus="true"
@@ -281,6 +281,8 @@ export function TitleScreen({
                     </span>
                   </button>
                 ))}
+              </div>
+            )}
           </section>
         )}
 
@@ -288,10 +290,13 @@ export function TitleScreen({
           <p className="dim episodes-empty">No episodes for this season yet.</p>
         ) : null}
 
-        {title?.similar.length ? (
-          <RailRow
+        {title !== null && (title.similar.length > 0 || title.similarGenres.length > 0) ? (
+          <TitleFeed
+            genres={title.similarGenres}
+            kind={kind === "show" ? "show" : "movie"}
             onOpen={onOpen}
-            rail={{ id: "similar", title: "More like this", items: title.similar }}
+            seed={title.similar}
+            titleId={id}
           />
         ) : null}
 

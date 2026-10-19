@@ -60,11 +60,24 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
             const instance = new HlsPlayer({ enableWorker: true });
             hls.current = instance;
             instance.on(HlsPlayer.Events.ERROR, (_event, data) => {
-              if (data.fatal) setMessage("The transcode stopped. Choose a position to try again.");
+              if (!data.fatal) return;
+              // A segment that was not on disk yet and a decoder hiccup are both recoverable; a
+              // message is for the case that is not, not for every retry on the way there.
+              if (data.type === HlsPlayer.ErrorTypes.NETWORK_ERROR) {
+                instance.startLoad();
+                return;
+              }
+              if (data.type === HlsPlayer.ErrorTypes.MEDIA_ERROR) {
+                instance.recoverMediaError();
+                return;
+              }
+              setMessage("The transcode stopped. Choose a position to try again.");
             });
-            instance.loadSource(ticket.url);
+            instance.on(HlsPlayer.Events.FRAG_BUFFERED, () => setMessage(null));
             instance.attachMedia(element);
+            instance.loadSource(ticket.url);
             instance.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
+              setMessage(null);
               void element.play().catch(() => {
                 setPlaying(false);
               });
@@ -165,17 +178,21 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
   }, []);
 
   useEffect(() => {
-    const flush = (): void => {
+    const hidden = (): void => {
       if (document.visibilityState === "hidden") reportRef.current(true);
     };
-    window.addEventListener("pagehide", flush);
-    document.addEventListener("visibilitychange", flush);
+    const leave = (): void => {
+      reportRef.current(true);
+      void api.stopPlayback(ticket.url).catch(() => {});
+    };
+    window.addEventListener("pagehide", leave);
+    document.addEventListener("visibilitychange", hidden);
     return () => {
-      window.removeEventListener("pagehide", flush);
-      document.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", leave);
+      document.removeEventListener("visibilitychange", hidden);
       reportRef.current(true);
     };
-  }, []);
+  }, [ticket.url]);
 
   const restart = useCallback(
     async (target: number): Promise<void> => {
@@ -184,7 +201,13 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       setMessage("Starting at " + format(target) + "...");
       video.current?.pause();
       try {
-        const next = await api.playback(titleId, Math.round(target));
+        const next = await api.playback(
+          titleId,
+          Math.round(target),
+          undefined,
+          undefined,
+          ticket.episodeId ?? undefined,
+        );
         setTicket(next);
       } catch (caught) {
         setMessage(
@@ -220,6 +243,7 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
 
   const close = (): void => {
     reportRef.current(true);
+    void api.stopPlayback(ticket.url).catch(() => {});
     onClose();
   };
 

@@ -36,7 +36,7 @@ use super::{
 };
 
 /// The policy the client's own page runs under.
-const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 /// Builds the router the listener serves.
 pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> Router {
@@ -50,6 +50,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/browse", get(browse))
         .route("/api/genres", get(genres))
         .route("/api/title/{id}", get(title))
+        .route("/api/playback/stop", post(stop_playback))
         .route("/api/playback/{id}", post(playback))
         .route("/api/progress", post(progress))
         .route("/img/{key}", get(image))
@@ -521,6 +522,15 @@ struct TitleQuery {
     season: Option<u32>,
 }
 
+async fn stop_playback(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<StopBody>,
+) -> Result<StatusCode, ApiError> {
+    service.stop_playback(&device, &body.url).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn playback(
     State(service): State<Arc<WebService>>,
     Device(device): Device,
@@ -534,10 +544,16 @@ async fn playback(
                 id,
                 body.season_number,
                 body.episode_number,
+                body.episode_id,
                 body.position_ms.unwrap_or(0),
             )
             .await?,
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct StopBody {
+    url: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -546,6 +562,7 @@ struct PlaybackBody {
     position_ms: Option<i64>,
     season_number: Option<u32>,
     episode_number: Option<u32>,
+    episode_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
