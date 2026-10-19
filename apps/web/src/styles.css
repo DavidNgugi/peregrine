@@ -1179,6 +1179,15 @@ button {
   flex: none;
 }
 
+.browse-sentinel {
+  height: 1px;
+}
+
+.browse-loading-more {
+  padding: 18px 48px;
+  text-align: center;
+}
+
 .browse-more {
   display: block;
   margin: 26px auto 0;
@@ -1393,6 +1402,10 @@ button {
 
   .browse-more {
     margin: 20px auto 0;
+  }
+
+  .browse-loading-more {
+    padding: 16px 18px;
   }
 
   .hero-dots {

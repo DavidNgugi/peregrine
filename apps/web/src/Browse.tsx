@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, type Genre, type Tile } from "./api.js";
 import { TileCard } from "./Home.js";
@@ -32,7 +32,10 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
   const [hasMore, setHasMore] = useState(false);
   const [source, setSource] = useState<"provider" | "library">("provider");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreFailed, setMoreFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sentinel = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -61,6 +64,8 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setMoreFailed(false);
+    setLoadingMore(false);
     const run = async (): Promise<void> => {
       try {
         if (search !== "") {
@@ -91,17 +96,41 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
     };
   }, [kind, sort, genre, search]);
 
-  const loadMore = async (): Promise<void> => {
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (loadingMore || !hasMore || search !== "") return;
     const next = page + 1;
+    setLoadingMore(true);
+    setMoreFailed(false);
     try {
       const answer = await api.browse(kind, next, sort, genre);
-      setItems((held) => [...held, ...answer.items]);
-      setHasMore(answer.hasMore);
+      setItems((held) => {
+        const seen = new Set(held.map((tile) => tile.id));
+        const fresh = answer.items.filter((tile) => !seen.has(tile.id));
+        return [...held, ...fresh];
+      });
+      setHasMore(answer.hasMore && answer.items.length > 0);
       setPage(next);
     } catch (caught) {
+      setMoreFailed(true);
       setError(caught instanceof Error ? caught.message : "More titles could not be read.");
+    } finally {
+      setLoadingMore(false);
     }
-  };
+  }, [kind, page, sort, genre, hasMore, loadingMore, search]);
+
+  useEffect(() => {
+    if (!hasMore || search !== "" || loading || loadingMore || moreFailed) return;
+    const element = sentinel.current;
+    if (element === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasMore, search, loading, loadingMore, moreFailed, loadMore]);
 
   return (
     <main className="screen browse-screen">
@@ -219,13 +248,17 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
       )}
 
       {hasMore && search === "" ? (
+        <div aria-hidden="true" className="browse-sentinel" ref={sentinel} />
+      ) : null}
+      {loadingMore ? <p className="dim browse-loading-more">Loading more...</p> : null}
+      {moreFailed ? (
         <button
           className="secondary browse-more"
           data-focus="true"
           onClick={() => void loadMore()}
           type="button"
         >
-          Load more
+          Try again
         </button>
       ) : null}
     </main>
