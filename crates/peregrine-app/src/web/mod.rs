@@ -1281,7 +1281,12 @@ impl WebService {
         };
         let is_show = identity.kind == TitleKind::Show;
         let (seasons, episodes) = self.title_seasons_page(id, is_show, season).await?;
-        let refreshing = is_show && seasons.is_empty() && !identity.metadata_state.has_details();
+        // A provider fill that never cached its poster (or a series the catalogue only listed)
+        // is a page with no main image. The same refresh fills both, and the client already polls
+        // while `refreshing` is true.
+        let artwork_due = detail.as_ref().is_some_and(|detail| detail.refresh_due);
+        let refreshing = artwork_due
+            || (is_show && seasons.is_empty() && !identity.metadata_state.has_details());
         if refreshing {
             let start_now = self
                 .refresh_started
@@ -1289,10 +1294,7 @@ impl WebService {
                 .expect("the refresh lock is not poisoned")
                 .insert(id);
             if start_now
-                && let Err(error) = self
-                    .runtime
-                    .start_provider_refresh(id, TitleKind::Show)
-                    .await
+                && let Err(error) = self.runtime.start_provider_refresh(id, identity.kind).await
             {
                 warn!(%error, "a title refresh could not be started");
                 self.refresh_started

@@ -97,11 +97,19 @@ function Hero({
   ]
     .filter((part): part is string => part !== null)
     .join("  ·  ");
+  const art = tile.backdrop ?? tile.poster;
 
   return (
-    <section className="hero">
-      {tile.backdrop === null ? null : (
-        <img alt="" className="hero-art" decoding="async" src={tile.backdrop} />
+    <section
+      className={tile.backdrop === null && tile.poster !== null ? "hero poster-hero" : "hero"}
+    >
+      {art === null ? null : (
+        <img
+          alt=""
+          className={tile.backdrop === null ? "hero-art hero-art-poster" : "hero-art"}
+          decoding="async"
+          src={art}
+        />
       )}
       <div className="hero-copy">
         <p className="hero-meta">{meta}</p>

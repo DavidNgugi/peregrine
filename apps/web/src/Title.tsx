@@ -81,7 +81,9 @@ export function TitleScreen({
 
   const name = title?.name ?? preview?.name ?? "...";
   const kind = title?.kind ?? preview?.kind ?? "movie";
+  const poster = title?.poster ?? preview?.poster ?? null;
   const backdrop = title?.backdrop ?? preview?.backdrop ?? null;
+  const heroArt = backdrop ?? poster;
   const overview = title?.overview ?? preview?.overview ?? null;
   const rating = title?.rating ?? preview?.rating ?? null;
   const released = title?.released ?? null;
@@ -188,9 +190,16 @@ export function TitleScreen({
 
   return (
     <main className="screen title-screen">
-      <section className="title-hero">
-        {backdrop === null ? null : (
-          <img alt="" className="hero-art" decoding="async" src={backdrop} />
+      <section
+        className={backdrop === null && poster !== null ? "title-hero poster-hero" : "title-hero"}
+      >
+        {heroArt === null ? null : (
+          <img
+            alt=""
+            className={backdrop === null ? "hero-art hero-art-poster" : "hero-art"}
+            decoding="async"
+            src={heroArt}
+          />
         )}
         <button
           aria-label="Back"
