@@ -21,6 +21,7 @@ import { describeDevice } from "./device.js";
 import { DownloadsScreen } from "./Downloads.js";
 import { useAutoFocus, useSpatialFocus } from "./focus.js";
 import { HomeScreen } from "./Home.js";
+import { byRecentlyAdded } from "./library-order.js";
 import {
   BookmarkIcon,
   ChevronLeftIcon,
@@ -84,7 +85,7 @@ export function App() {
   const loadLibrary = useCallback(async (): Promise<void> => {
     try {
       const library = await api.library();
-      setRows(library);
+      setRows(byRecentlyAdded(library));
       setLibraryError(null);
       setScreen({ name: "library" });
     } catch (caught) {

@@ -16,6 +16,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 import { eventPayload, jobPhase } from "../../../lib/job-events.js";
+import { byRecentlyAdded } from "./library-order.js";
 
 /** What the library holds, and what the screen needs to know about the read. */
 export interface LibraryTitles {
@@ -68,7 +69,7 @@ export function useLibraryTitles(): LibraryTitles {
 
   const read = useCallback(async (): Promise<void> => {
     try {
-      const titles = await listLibraryTitles();
+      const titles = byRecentlyAdded(await listLibraryTitles());
       setState({ titles, loading: false, failed: false });
     } catch (caught: unknown) {
       logUiError("listLibraryTitles", normalizeIpcError(caught));
