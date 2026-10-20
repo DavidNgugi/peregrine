@@ -1270,6 +1270,16 @@ impl Runtime {
                                 service = service.with_postprocess(tools);
                             }
                             let service = Arc::new(service);
+                            // The engine is in-process, so a restart loses every live handle. The
+                            // rows and their selected files are enough to re-add each torrent with
+                            // reattach semantics; the engine verifies the bytes already on disk.
+                            match service.reattach_torrents().await {
+                                Ok(0) => {}
+                                Ok(count) => info!(count, "torrent jobs reattached"),
+                                Err(error) => {
+                                    warn!(%error, "torrent jobs could not be reattached");
+                                }
+                            }
                             if let Ok(servers) =
                                 crate::usenet::server_configs(&database, Arc::clone(&secrets)).await
                             {

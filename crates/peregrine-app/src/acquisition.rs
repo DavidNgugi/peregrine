@@ -103,8 +103,8 @@ use peregrine_storage::{
     DownloadTransitionError, NewDownloadJob, PageRequest, StorageError,
 };
 use peregrine_torrent::{
-    AddIntent, AddRefused, AddRequest, EngineError, FileSelection, TorrentEngine, TorrentHandle,
-    TorrentSource,
+    AddIntent, AddRefused, AddRequest, EngineError, EngineState, FileSelection, TorrentEngine,
+    TorrentHandle, TorrentSource,
 };
 use peregrine_usenet::{AddNzbRequest, NzbDocument, ServerConfig, UsenetEngine, UsenetHandle};
 use thiserror::Error;
@@ -1225,6 +1225,114 @@ impl AcquisitionService {
             .select_download_files(id, description, &selection)
             .await?;
         Ok(self.reload(id).await?.state)
+    }
+
+    /// Reattaches the torrent jobs a previous process left live.
+    ///
+    /// The row's magnet or torrent file, safety report, selected files, and save path are enough
+    /// to add it again with `AddIntent::Reattach`: the engine verifies the payload already on disk
+    /// and transfers only what fails, so a job interrupted at 62 percent resumes rather than
+    /// starting over. A job whose source, report, or selection is gone is left alone; the next
+    /// statistics tick will not invent progress for it.
+    ///
+    /// # Errors
+    ///
+    /// Storage refusals while listing the jobs. One engine add failure is logged and does not
+    /// prevent the remaining rows from being reattached.
+    pub async fn reattach_torrents(&self) -> Result<usize, AcquisitionError> {
+        let jobs = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                &[DownloadState::Downloading, DownloadState::Paused],
+                PageRequest::first(1_000),
+            )
+            .await?;
+        let mut reattached = 0;
+        for row in jobs {
+            if row.protocol != Protocol::Torrent {
+                continue;
+            }
+            let Some(info_hash) = row.info_hash else {
+                continue;
+            };
+            let Some(report) = row.safety_report.clone() else {
+                continue;
+            };
+            let source = match row.source.as_ref() {
+                Some(DownloadSource::Magnet(uri)) => {
+                    let Ok(uri) = NonEmptyText::new(uri.as_str()) else {
+                        continue;
+                    };
+                    TorrentSource::Magnet(uri)
+                }
+                Some(DownloadSource::TorrentFile(path)) => {
+                    let Ok(bytes) = tokio::fs::read(path.as_str()).await else {
+                        continue;
+                    };
+                    TorrentSource::TorrentFile(bytes)
+                }
+                Some(DownloadSource::NzbFile(_)) | None => continue,
+            };
+            let Ok(save_path) = self
+                .destination
+                .resolve(std::path::Path::new(row.save_path.as_str()))
+            else {
+                continue;
+            };
+            let Ok(files) = self.database.download_files(unrestricted(), row.id).await else {
+                continue;
+            };
+            let selection: Vec<usize> = files
+                .iter()
+                .filter(|file| file.selected)
+                .filter_map(|file| usize::try_from(file.file_index).ok())
+                .collect();
+            if selection.is_empty() {
+                continue;
+            }
+            let state = self
+                .database
+                .download_engine_state(unrestricted(), row.id)
+                .await
+                .ok()
+                .flatten()
+                .filter(|bytes| !bytes.is_empty())
+                .map(EngineState::new);
+            let Ok(request) = AddRequest::new(
+                info_hash,
+                source,
+                save_path,
+                FileSelection::new(selection),
+                true,
+                AddIntent::Reattach { state },
+                &report,
+            ) else {
+                continue;
+            };
+            match self.engine.add(&request).await {
+                Ok(handle) => {
+                    if row.state == DownloadState::Paused {
+                        let _ = self.engine.pause(handle).await;
+                    }
+                    self.handles
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(row.id, handle);
+                    if let Ok(engine_state) = self.engine.state(handle).await {
+                        let _ = self
+                            .database
+                            .record_download_engine_state(row.id, engine_state.as_bytes())
+                            .await;
+                    }
+                    reattached += 1;
+                }
+                Err(error) => {
+                    warn!(job = row.id, %error, "a torrent job could not be reattached");
+                }
+            }
+        }
+        Ok(reattached)
     }
 
     /// Reattaches the Usenet jobs a previous process left live.
@@ -2422,6 +2530,32 @@ mod tests {
                 .await
                 .unwrap()
                 .allow_archives
+        );
+    }
+
+    #[tokio::test]
+    async fn a_live_torrent_job_is_reattached_with_reattach_semantics() {
+        let harness = harness().await;
+        harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+        let before = harness.add_calls().len();
+
+        let count = harness
+            .service
+            .reattach_torrents()
+            .await
+            .expect("the live torrent is reattached");
+        assert_eq!(count, 1);
+        let calls = harness.add_calls();
+        assert_eq!(calls.len(), before + 1, "reattach adds once, not twice");
+        let Some(EngineCall::Add { intent, .. }) = calls.last() else {
+            panic!("the reattach is an add");
+        };
+        assert!(
+            matches!(intent, AddIntent::Reattach { .. }),
+            "the engine must verify the bytes already on disk"
         );
     }
 
