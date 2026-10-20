@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactElement } from "react";
 
 import { api, type Profile } from "./api.js";
-import { avatarSrc, hueFor, initialsFor } from "./profiles.js";
+import { avatarSrc, clearLegacyProfiles, hueFor, initialsFor, legacyProfiles } from "./profiles.js";
 
 /** The avatar: the picture the profile stores, else its initials over its hue. */
 function Avatar({
@@ -46,6 +46,21 @@ export function ProfileMenu(): ReactElement {
   const load = useCallback(async (): Promise<void> => {
     try {
       const rows = await api.profiles();
+      if (rows.length === 1 && rows[0]?.name === "You") {
+        const legacy = legacyProfiles().filter((profile) => profile.name !== "You");
+        if (legacy.length > 0) {
+          let chosen = rows[0].id;
+          for (const old of legacy) {
+            const created = await api.createProfile(old.name, "adult");
+            if (old.active) chosen = created.id;
+          }
+          await api.selectProfile(chosen);
+          clearLegacyProfiles();
+          window.location.reload();
+          return;
+        }
+        clearLegacyProfiles();
+      }
       const next = rows.find((profile) => profile.active) ?? rows[0] ?? null;
       if (activeId.current !== null && next !== null && next.id !== activeId.current) {
         // Another client switched the installation; this page's data is stale under the old

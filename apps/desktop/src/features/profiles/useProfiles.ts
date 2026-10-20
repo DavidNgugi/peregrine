@@ -69,6 +69,22 @@ export function useProfiles(): ProfilesState {
   const load = useCallback(async (): Promise<void> => {
     try {
       const rows = await listProfiles();
+      if (rows.length === 1 && rows[0]?.name === "You") {
+        const local = loadProfileBook();
+        const extra = local.profiles.filter((profile) => profile.name !== "You");
+        if (extra.length > 0) {
+          let chosen = rows[0].id;
+          for (const old of extra) {
+            const created = await createProfile(old.name, "adult", avatarUri(old.avatar, 128));
+            if (old.id === local.activeId) chosen = created.id;
+          }
+          await selectProfile({ id: chosen });
+          globalThis.localStorage?.removeItem("peregrine.profiles");
+          globalThis.localStorage?.removeItem("peregrine.profile");
+          globalThis.location?.reload();
+          return;
+        }
+      }
       const next = asBook(rows);
       if (next !== null) {
         setBook(next);

@@ -24,3 +24,36 @@ export function initialsFor(name: string): string {
 export function avatarSrc(avatarRef: string | null): string | null {
   return avatarRef !== null && avatarRef.startsWith("data:image/") ? avatarRef : null;
 }
+
+/** One profile from the device-local book the earlier web picker wrote. */
+export interface LegacyProfile {
+  readonly name: string;
+  readonly active: boolean;
+}
+
+/** The old browser-local book, when one is still in storage. */
+export function legacyProfiles(): LegacyProfile[] {
+  try {
+    const raw = globalThis.localStorage?.getItem("peregrine.profiles");
+    if (raw === null || raw === undefined) return [];
+    const value = JSON.parse(raw) as {
+      profiles?: unknown;
+      activeId?: unknown;
+    };
+    if (!Array.isArray(value.profiles)) return [];
+    return value.profiles.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) return [];
+      const { id, name } = entry as { id?: unknown; name?: unknown };
+      if (typeof id !== "string" || typeof name !== "string" || name.trim() === "") return [];
+      return [{ name: name.trim(), active: id === value.activeId }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Drops the old book once its profiles have been written to the server. */
+export function clearLegacyProfiles(): void {
+  globalThis.localStorage?.removeItem("peregrine.profiles");
+  globalThis.localStorage?.removeItem("peregrine.profile");
+}
