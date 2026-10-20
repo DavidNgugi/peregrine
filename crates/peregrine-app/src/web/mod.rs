@@ -1317,10 +1317,17 @@ impl WebService {
             rails.push(rail);
         }
 
-        let library: Vec<TileDto> = self
-            .runtime
-            .library_titles(None, 40)
-            .await?
+        // The Home rail opens on the newest addition, matching the Library screen; the core's
+        // page is id-ordered for its cursor, so the display order is taken here.
+        let mut entries = self.runtime.library_titles(None, 40).await?;
+        entries.sort_by(|left, right| {
+            right
+                .row
+                .added_at
+                .cmp(&left.row.added_at)
+                .then_with(|| right.row.title.id.cmp(&left.row.title.id))
+        });
+        let library: Vec<TileDto> = entries
             .into_iter()
             .map(|entry| tile_from_entry(&entry))
             .collect();
