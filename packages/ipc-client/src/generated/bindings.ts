@@ -1114,6 +1114,14 @@ export type DownloadJobDto = {
 	 *  gate parked as `blocked`, which is the only way a screen can explain the refusal.
 	 */
 	findings: SafetyFindingDto[],
+	/**
+	 *  Whether the payload has named a selected media entry a player could open.
+	 * 
+	 *  `false` before metadata arrives and for a payload with no playable entry; the control is drawn
+	 *  disabled with a reason in that state rather than promising playback of nothing. It says the
+	 *  payload *has* the file, not that any of it has arrived — that is the point of streaming.
+	 */
+	hasMediaFile: boolean,
 };
 
 /**  A download job's id, as a listing returned it. */

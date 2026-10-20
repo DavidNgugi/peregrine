@@ -1185,3 +1185,91 @@ fn a_sidecar_outside_its_root_has_no_safe_path_to_register() {
 
     assert_ne!(refused.to_string(), "");
 }
+
+/// A torrent source whose engine cannot open any offset, which is a job whose handle has gone away.
+struct Unopenable;
+
+impl crate::TorrentMedia for Unopenable {
+    fn len(&self) -> u64 {
+        10
+    }
+
+    fn content_type(&self) -> &'static str {
+        "video/mp4"
+    }
+
+    fn open(
+        &self,
+        _offset: u64,
+    ) -> super::BoxFuture<'_, std::io::Result<Box<dyn crate::MediaReader>>> {
+        Box::pin(async { Err(std::io::Error::other("the engine is gone")) })
+    }
+}
+
+#[tokio::test]
+async fn a_torrent_whose_reader_will_not_open_is_a_503_rather_than_an_empty_file() {
+    // A 200 with no bytes means "the file ended here" to a player; a 503 means "try this range
+    // again", which is the only answer that can recover from a handle that went away.
+    let server = MediaServer::start_torrent(Arc::new(Unopenable), token('t'), None)
+        .await
+        .expect("the listener binds");
+    let answer = ok(&server, &[("Range", "bytes=0-3")]).await;
+
+    assert_eq!(answer.status, 503);
+    assert!(answer.body.is_empty(), "a refusal carries no bytes");
+}
+
+/// An in-memory torrent source, which is enough to test the range and body path without an engine.
+struct Memory(Vec<u8>);
+
+/// One reader over the rest of a memory source, yielding what a real engine would.
+struct Window {
+    remaining: Vec<u8>,
+}
+
+impl crate::MediaReader for Window {
+    fn read(&mut self, max: usize) -> super::BoxFuture<'_, std::io::Result<Option<Vec<u8>>>> {
+        Box::pin(async move {
+            if self.remaining.is_empty() {
+                return Ok(None);
+            }
+            let take = max.min(self.remaining.len());
+            Ok(Some(self.remaining.drain(..take).collect()))
+        })
+    }
+}
+
+impl crate::TorrentMedia for Memory {
+    fn len(&self) -> u64 {
+        u64::try_from(self.0.len()).unwrap_or(0)
+    }
+
+    fn content_type(&self) -> &'static str {
+        "video/mp4"
+    }
+
+    fn open(
+        &self,
+        offset: u64,
+    ) -> super::BoxFuture<'_, std::io::Result<Box<dyn crate::MediaReader>>> {
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(self.0.len());
+        let remaining = self.0[start..].to_vec();
+        Box::pin(async move { Ok(Box::new(Window { remaining }) as Box<dyn crate::MediaReader>) })
+    }
+}
+
+#[tokio::test]
+async fn a_torrent_range_serves_exactly_the_bytes_it_was_asked_for() {
+    let source = Memory(body_of(16));
+    let server = MediaServer::start_torrent(Arc::new(source), token('u'), None)
+        .await
+        .expect("the listener binds");
+    let answer = ok(&server, &[("Range", "bytes=4-7")]).await;
+
+    assert_eq!(answer.status, 206);
+    assert_eq!(answer.body, body_of(16)[4..=7].to_vec());
+    assert_eq!(answer.header("content-range"), Some("bytes 4-7/16"));
+    assert_eq!(answer.header("accept-ranges"), Some("bytes"));
+}

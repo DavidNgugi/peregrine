@@ -377,12 +377,22 @@ describe("TitleScreen", () => {
     expect(gone).not.toContain("Download");
   });
 
-  it("says a transfer is running rather than offering a second one", () => {
-    const arriving = markup(detail({ offer: "arriving" }), "show");
+  it("waits for a running transfer that has not named its file yet", () => {
+    // A show's hero has no title-level file to name: support is null until the episode a person
+    // picked is the thing being played.
+    const arriving = markup(detail({ offer: "arriving", playSupport: null }), "show");
 
     expect(arriving).toContain("in flight");
     expect(arriving).not.toContain("Download");
     expect(arriving.match(/<button[^>]*disabled/gu)?.length).toBe(1);
+  });
+
+  it("plays a film whose download has named its file", () => {
+    const arriving = markup(detail({ offer: "arriving", playSupport: "webview" }), "movie");
+
+    expect(arriving).toContain("Playing while it downloads.");
+    expect(arriving).not.toContain("in flight");
+    expect(arriving).not.toContain("Download");
   });
 
   it("draws one card per episode of the chosen season, each with its number and name", () => {

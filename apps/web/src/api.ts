@@ -177,6 +177,8 @@ export interface Episode {
   readonly positionMs: number;
   readonly watched: boolean;
   readonly playable: boolean;
+  /** Whether a live transfer has named a file this host can stream for it. */
+  readonly streamable: boolean;
   /** The download job's lifecycle state for this episode, or null when nobody asked. */
   readonly downloadState: DownloadState;
   /** The job's completion, 0 to 100, when one is running. */

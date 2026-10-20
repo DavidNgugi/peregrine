@@ -33,9 +33,9 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::warn;
 
 use super::{
-    AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MeDto, MediaGrant, PairOffer,
-    PairStatus, PlaybackTicket, PreferencesDto, ProfileDto, SeasonAcquireDto, TOKEN_COOKIE,
-    TileDto, TitleDto, WebError, WebService,
+    AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MeDto, MediaGrant,
+    MediaGrantSource, PairOffer, PairStatus, PlaybackTicket, PreferencesDto, ProfileDto,
+    SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -950,11 +950,35 @@ async fn media(
     if !service.device_active(grant.device_id).await? {
         return Err(ApiError::unauthorized());
     }
-    serve_range(grant, &headers).await
+    serve_range(&service, grant, &headers).await
 }
 
-async fn serve_range(grant: MediaGrant, headers: &HeaderMap) -> Result<Response, ApiError> {
-    let total = grant.size_bytes;
+async fn serve_range(
+    service: &WebService,
+    grant: MediaGrant,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    match grant.source {
+        MediaGrantSource::File {
+            path,
+            size_bytes,
+            mime,
+        } => serve_file_range(&path, size_bytes, mime, headers).await,
+        MediaGrantSource::Session {
+            url,
+            size_bytes,
+            mime,
+        } => serve_session_range(service, &url, size_bytes, &mime, headers).await,
+    }
+}
+
+/// A library file's range, read from disk.
+async fn serve_file_range(
+    path: &Path,
+    total: u64,
+    mime: &'static str,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
     if total == 0 {
         return Err(ApiError::not_found());
     }
@@ -971,7 +995,7 @@ async fn serve_range(grant: MediaGrant, headers: &HeaderMap) -> Result<Response,
         Some(Ok((start, end))) => (StatusCode::PARTIAL_CONTENT, start, end),
     };
     let length = end - start + 1;
-    let mut file = tokio::fs::File::open(&grant.path)
+    let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|_| ApiError::not_found())?;
     file.seek(SeekFrom::Start(start))
@@ -981,7 +1005,7 @@ async fn serve_range(grant: MediaGrant, headers: &HeaderMap) -> Result<Response,
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = status;
     let outgoing = response.headers_mut();
-    outgoing.insert(header::CONTENT_TYPE, HeaderValue::from_static(grant.mime));
+    outgoing.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     outgoing.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     outgoing.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Ok(value) = HeaderValue::from_str(&length.to_string()) {
@@ -991,6 +1015,62 @@ async fn serve_range(grant: MediaGrant, headers: &HeaderMap) -> Result<Response,
         && let Ok(value) = HeaderValue::from_str(&format!("bytes {start}-{end}/{total}"))
     {
         outgoing.insert(header::CONTENT_RANGE, value);
+    }
+    Ok(response)
+}
+
+/// A torrent grant's range, proxied to the loopback listener the engine serves.
+///
+/// A proxy rather than a second range reader. The loopback server already parses the Range header,
+/// answers 206 and 416, and blocks a read until the engine has the pieces; duplicating that here
+/// would be a second implementation free to disagree with the one the desktop player uses. The
+/// device never sees the loopback URL or its token: it sees this origin and this grant's route.
+async fn serve_session_range(
+    service: &WebService,
+    url: &str,
+    total: u64,
+    mime: &str,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    if total == 0 {
+        return Err(ApiError::not_found());
+    }
+    let mut request = service.http.get(url);
+    if let Some(range) = headers.get(header::RANGE) {
+        request = request.header(header::RANGE, range.clone());
+    }
+    let upstream = request.send().await.map_err(|_| ApiError::not_found())?;
+    let status = upstream.status();
+    if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        let mut response = ApiError::range().into_response();
+        if let Some(value) = upstream.headers().get(header::CONTENT_RANGE) {
+            response
+                .headers_mut()
+                .insert(header::CONTENT_RANGE, value.clone());
+        }
+        return Ok(response);
+    }
+    if !status.is_success() {
+        return Err(ApiError::not_found());
+    }
+    // The headers are read before the body takes ownership of the response.
+    let upstream_headers = upstream.headers().clone();
+    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
+    if let Ok(code) = StatusCode::from_u16(status.as_u16()) {
+        *response.status_mut() = code;
+    }
+    let outgoing = response.headers_mut();
+    if let Some(value) = upstream_headers.get(header::CONTENT_TYPE) {
+        outgoing.insert(header::CONTENT_TYPE, value.clone());
+    } else if let Ok(value) = HeaderValue::from_str(mime) {
+        outgoing.insert(header::CONTENT_TYPE, value);
+    }
+    outgoing.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    outgoing.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    for name in [header::CONTENT_LENGTH, header::CONTENT_RANGE] {
+        if let Some(value) = upstream_headers.get(&name) {
+            outgoing.insert(name, value.clone());
+        }
     }
     Ok(response)
 }

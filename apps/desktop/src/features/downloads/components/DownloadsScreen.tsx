@@ -27,6 +27,7 @@ import type { ReactElement } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { routePath, type Route } from "../../../app/routes.js";
+import { downloadPercentOf } from "../../../lib/download-status.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import { imageUrl } from "../../../lib/media.js";
 import { useDownloadActions } from "../hooks/useDownloadActions.js";
@@ -35,9 +36,6 @@ import type { Downloads } from "../hooks/useDownloads.js";
 
 /** What `useTranslation` hands a component. */
 type Translate = ReturnType<typeof useTranslation>["t"];
-
-/** A state from which no move is left to make. */
-const FINISHED_STATES: ReadonlySet<string> = new Set(["completed", "failed", "blocked", "removed"]);
 
 /** A state nothing may leave, so the row offers no move at all.
  *
@@ -224,15 +222,18 @@ export function DownloadsScreen({
     {
       id: "progress",
       header: t("downloads.column.progress"),
-      cell: (row) => (
-        <div className="flex items-center gap-2">
-          <Progress
-            label={t("downloads.progress.label", { title: row.title ?? row.releaseTitle })}
-            value={Math.min(100, Math.max(0, row.progressPermille / 10))}
-          />
-          <span className="text-text-tertiary">{Math.round(row.progressPermille / 10)}%</span>
-        </div>
-      ),
+      cell: (row) => {
+        const percent = downloadPercentOf(row.progressPermille);
+        return (
+          <div className="flex items-center gap-2">
+            <Progress
+              label={t("downloads.progress.label", { title: row.title ?? row.releaseTitle })}
+              value={percent}
+            />
+            <span className="text-text-tertiary">{percent}%</span>
+          </div>
+        );
+      },
     },
     {
       id: "size",
@@ -270,8 +271,32 @@ export function DownloadsScreen({
       cell: (row) => {
         const busy = actions.busyId === row.id;
         const paused = row.state === "paused";
+        // **A metadata row is a handoff that has not finished, not a transfer to pause.** After a
+        // restart it may hold no engine handle at all; Resume is what completes the handoff, and
+        // Pause has no meaning there (the state machine refuses it).
+        const resumable = paused || row.state === "metadata";
+        const pausable = row.state === "downloading" || row.state === "seeding";
+        const play: Route =
+          row.seasonNumber !== null && row.episodeNumber !== null
+            ? {
+                kind: "player",
+                id: row.titleId,
+                season: row.seasonNumber,
+                episode: row.episodeNumber,
+                ...(row.titleKind === null ? {} : { titleKind: row.titleKind }),
+              }
+            : {
+                kind: "player",
+                id: row.titleId,
+                ...(row.titleKind === null ? {} : { titleKind: row.titleKind }),
+              };
         return (
           <div className="flex items-center gap-2">
+            {/* A job whose payload has named a media file is playable now, not when it completes:
+                the engine serves the bytes the transfer already has. */}
+            {row.hasMediaFile && row.state !== "failed" && row.state !== "removed" ? (
+              <Link href={routePath(play)}>{t("downloads.action.play")}</Link>
+            ) : null}
             {row.protocol === "usenet" &&
             row.state === "blocked" &&
             row.findings.some((finding) => finding.reason === "nested_archive") ? (
@@ -286,7 +311,7 @@ export function DownloadsScreen({
                 {t("downloads.action.allowArchives")}
               </Button>
             ) : null}
-            {!paused && !FINISHED_STATES.has(row.state) ? (
+            {pausable ? (
               <Button
                 disabled={busy}
                 onClick={() => {
@@ -298,7 +323,7 @@ export function DownloadsScreen({
                 {t("downloads.action.pause")}
               </Button>
             ) : null}
-            {paused ? (
+            {resumable ? (
               <Button
                 disabled={busy}
                 onClick={() => {

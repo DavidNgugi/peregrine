@@ -24,6 +24,7 @@ function episode(overrides: Partial<Episode> = {}): Episode {
     positionMs: 0,
     watched: false,
     playable: false,
+    streamable: false,
     downloadState: null,
     downloadPercent: null,
     ...overrides,

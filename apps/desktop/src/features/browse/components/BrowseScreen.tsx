@@ -298,7 +298,12 @@ export function BrowseView({
       year: null,
       poster: row.poster,
       backdrop: null,
-      playable: row.state === "seeding" || row.state === "completed",
+      // A transfer with a named media file is playable now: the title page opens and its Play is
+      // live while the rest arrives. A job before metadata is not, because there is no file yet.
+      playable:
+        (row.hasMediaFile && row.state !== "failed" && row.state !== "removed") ||
+        row.state === "seeding" ||
+        row.state === "completed",
       rating: null,
       overview: null,
       votes: null,

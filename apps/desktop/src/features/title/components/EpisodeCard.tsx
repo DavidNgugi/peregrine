@@ -53,6 +53,14 @@ export interface EpisodeCardProps {
   readonly onPlay?: ((episode: EpisodeDto) => void) | undefined;
   /** This episode's own transfer is in flight, so the button says so rather than offering it again. */
   readonly downloading?: boolean | undefined;
+  /**
+   * This episode's payload has named a media file the engine can serve.
+   *
+   * It is what lets Play be offered while `downloading` is true: the transfer is running, but the
+   * file is known, and the player reads it from the engine. `false` keeps the Download control and
+   * its progress, because a payload with no media entry yet has nothing to play.
+   */
+  readonly streamable?: boolean | undefined;
   /** How far that transfer has got, 0-100. */
   readonly downloadPercent?: number | undefined;
   /** Whether the account finished this episode; the bar under the still fills when it did. */
@@ -78,6 +86,7 @@ export function EpisodeCard({
   onPlay,
   downloading = false,
   downloadPercent,
+  streamable = false,
   watched = false,
   progress = 0,
   nextUp = false,
@@ -201,7 +210,9 @@ export function EpisodeCard({
           (onDownload === undefined || (availability !== "wanted" && !downloading)) ? null : (
           <div className="mt-auto flex flex-wrap gap-2 pt-1">
             {onPlay !== undefined &&
-            (availability === "available" || availability === "partial") ? (
+            (availability === "available" ||
+              availability === "partial" ||
+              (downloading && streamable)) ? (
               <Button
                 aria-label={t("title.episode.playLabel", {
                   number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,

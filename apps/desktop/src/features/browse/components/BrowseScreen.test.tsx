@@ -307,6 +307,7 @@ describe("BrowseView", () => {
           titleKind: "movie",
           poster: null,
           state: "completed",
+          hasMediaFile: false,
         },
       ],
     );

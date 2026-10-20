@@ -33,6 +33,7 @@ use peregrine_domain::{
     SubtitleFormat, SubtitleMode, TokenSource,
 };
 use peregrine_platform::{Inhibitor, PowerSave};
+use peregrine_playback::PlaybackSession;
 use peregrine_providers::{BrowseRequest, BrowseSort};
 use peregrine_storage::{Database, NewPairedDevice, PairedDevice, StorageError};
 use serde::Serialize;
@@ -212,12 +213,12 @@ pub enum WebError {
     DeviceMissing,
 }
 
-/// One file a browser may be handed directly.
+/// One thing a browser may be handed.
 #[derive(Debug, Clone)]
 pub struct WebPlaybackTarget {
-    /// The guarded path the core resolved.
-    pub path: PathBuf,
-    /// The file size, for the range answer.
+    /// Where the bytes come from: a guarded file, or the engine for a download in flight.
+    pub source: WebSource,
+    /// The length, for the range answer.
     pub size_bytes: u64,
     /// What this build would do with the container.
     pub playback: LocalPlayback,
@@ -225,6 +226,25 @@ pub struct WebPlaybackTarget {
     pub episode_id: Option<i64>,
     /// The runtime the probe recorded, when it recorded one.
     pub duration_ms: Option<i64>,
+}
+
+/// The bytes behind one web playback.
+#[derive(Clone)]
+pub enum WebSource {
+    /// A guarded library file.
+    File(PathBuf),
+    /// A file a live download holds, served by the engine through a loopback listener.
+    Torrent(Arc<dyn peregrine_stream::TorrentMedia>),
+}
+
+impl std::fmt::Debug for WebSource {
+    /// Names which source it is and never the path or the container's bytes.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(_) => formatter.write_str("File(..)"),
+            Self::Torrent(_) => formatter.write_str("Torrent(..)"),
+        }
+    }
 }
 
 /// A pairing request as the desktop lists it.
@@ -399,6 +419,20 @@ struct TitleDownloads {
 struct JobDownload {
     state: String,
     percent: f64,
+    /// Whether the payload has named a selected media entry a player could open.
+    has_media: bool,
+}
+
+impl JobDownload {
+    /// Whether this job's episode can be started while the transfer is still running.
+    ///
+    /// The payload must have named a media entry, and the job must not be in a state that has stopped
+    /// what it was doing. A paused job is included: its bytes are there and resuming is the move a
+    /// person makes, so the action is offered rather than hidden behind a state they cannot see.
+    fn streamable(&self) -> bool {
+        self.has_media
+            && DownloadState::parse(&self.state).is_some_and(|state| !state.is_terminal())
+    }
 }
 
 impl TitleDownloads {
@@ -447,16 +481,42 @@ impl TitleDownloads {
 type SubtitleSource = (SafePath, SubtitleFormat);
 
 /// A media request the server will answer, resolved from its playback token.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MediaGrant {
     /// The device that minted it.
     pub device_id: i64,
-    /// The guarded path.
-    pub path: PathBuf,
-    /// The file size.
-    pub size_bytes: u64,
-    /// The content type.
-    pub mime: &'static str,
+    /// What the request is answered from.
+    pub source: MediaGrantSource,
+}
+
+/// The source a LAN media request is answered from.
+///
+/// No `Debug`: the session variant holds a URL whose path is the playback token, and a derived line
+/// would put a bearer credential in whatever log printed it (SECURITY.md T13).
+#[derive(Clone)]
+pub enum MediaGrantSource {
+    /// A guarded library file, read from disk.
+    File {
+        /// The guarded path.
+        path: PathBuf,
+        /// The file size.
+        size_bytes: u64,
+        /// The content type.
+        mime: &'static str,
+    },
+    /// A loopback stream this process serves, proxied to the paired device.
+    ///
+    /// The URL carries the session token and never leaves this host: the client sees the LAN route,
+    /// and the proxy makes the loopback request. The listener itself is held by the service's grant
+    /// map, so it outlives this value and dies with the grant.
+    Session {
+        /// The loopback URL, with its token.
+        url: String,
+        /// The length the loopback server reports.
+        size_bytes: u64,
+        /// The content type the loopback server sends.
+        mime: String,
+    },
 }
 
 #[derive(Debug)]
@@ -509,6 +569,12 @@ struct HlsSession {
     child: tokio::process::Child,
     device_id: i64,
     expires_at_ms: i64,
+    /// The loopback stream ffmpeg is reading, when the transcode is of a download in flight.
+    ///
+    /// Kept here rather than in the grant because the playlist, not the media route, is what a
+    /// transcode client follows; dropping the session with the HLS session closes the listener.
+    /// Underscored because it is a lifetime guard: ffmpeg, not this module, reads the field.
+    _session: Option<Arc<PlaybackSession>>,
 }
 
 /// What a started transcode hands the ticket it was minted for.
@@ -526,13 +592,32 @@ pub struct HlsGrant {
     pub dir: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Grant {
     device_id: i64,
-    path: PathBuf,
-    size_bytes: u64,
-    mime: &'static str,
+    source: GrantSource,
     expires_at_ms: i64,
+}
+
+/// Where a playback grant's bytes come from.
+///
+/// Deliberately not `Debug` for the reason [`MediaGrantSource`] is not.
+#[derive(Clone)]
+enum GrantSource {
+    /// A library file, read from disk.
+    File {
+        path: PathBuf,
+        size_bytes: u64,
+        mime: &'static str,
+    },
+    /// A loopback stream this process serves, for a download still in flight.
+    Session {
+        url: String,
+        size_bytes: u64,
+        mime: String,
+        /// The listener, held for the grant's lifetime; the proxy reads the URL, not this.
+        _session: Arc<PlaybackSession>,
+    },
 }
 
 struct Running {
@@ -574,6 +659,8 @@ pub struct WebService {
     artwork: Arc<peregrine_sync::ImageCache>,
     clock: Arc<dyn Clock + Send + Sync>,
     tokens: Arc<dyn TokenSource + Send + Sync>,
+    /// The client that proxies a torrent grant's ranges to its loopback listener.
+    http: reqwest::Client,
     pairing: Mutex<Pairing>,
     sessions: Mutex<HashMap<String, Grant>>,
     hls: tokio::sync::Mutex<HashMap<String, HlsSession>>,
@@ -607,6 +694,7 @@ impl WebService {
             artwork,
             clock,
             tokens,
+            http: reqwest::Client::new(),
             pairing: Mutex::new(Pairing::default()),
             sessions: Mutex::new(HashMap::new()),
             hls: tokio::sync::Mutex::new(HashMap::new()),
@@ -2120,6 +2208,11 @@ impl WebService {
             let download = JobDownload {
                 state: job.state.as_str().to_owned(),
                 percent: job.progress_permille as f64 / 10.0,
+                has_media: self
+                    .runtime
+                    .download_has_media(job.id)
+                    .await
+                    .unwrap_or(false),
             };
             match job.episode_id {
                 None => {
@@ -2227,9 +2320,13 @@ impl WebService {
         };
         // A library row can predate the probe. Without a duration the client would treat a growing
         // HLS playlist's current length as the whole film, so the mint asks ffprobe once and the
-        // ticket carries the real length from then on.
-        if target.duration_ms.is_none() {
-            target.duration_ms = transcode::duration_ms(&target.path).await;
+        // ticket carries the real length from then on. A live torrent stream is not probed: reading
+        // enough of it to demux would wait on pieces the player has not asked for, and a growing
+        // playlist is a length the client already knows how to follow.
+        if target.duration_ms.is_none()
+            && let WebSource::File(path) = &target.source
+        {
+            target.duration_ms = transcode::duration_ms(path).await;
         }
         let start = target.duration_ms.map_or(position_ms.max(0), |duration| {
             position_ms.clamp(0, duration)
@@ -2249,44 +2346,125 @@ impl WebService {
         // The container is the first question; the streams inside it are the second. An MP4
         // carrying HEVC or AC3 demuxes and still fails, so a probe that names another codec goes
         // to the transcoder just as an MKV does.
-        let (kind, url, mime, audio_language, subtitle_offset) = if target.playback
-            != LocalPlayback::Webview
-            || !transcode::browser_safe(&target.path).await
-        {
-            let started = self
-                .start_hls(device, &target, start, preference.audio_language())
-                .await?;
-            (
-                "hls",
-                started.url,
-                "application/vnd.apple.mpegurl".to_owned(),
-                started.audio_language,
-                start,
-            )
-        } else {
-            let mime = mime_for(&target.path);
-            let token = self.tokens.next_token();
-            let now_ms = self.now();
-            self.sessions
-                .lock()
-                .expect("the session lock is not poisoned")
-                .insert(
-                    token.as_str().to_owned(),
-                    Grant {
-                        device_id: device.id,
-                        path: target.path,
-                        size_bytes: target.size_bytes,
-                        mime,
-                        expires_at_ms: now_ms + PLAYBACK_TTL_MS,
-                    },
+        let (kind, url, mime, audio_language, subtitle_offset) = match &target.source {
+            WebSource::File(path) => {
+                if target.playback != LocalPlayback::Webview || !transcode::browser_safe(path).await
+                {
+                    let started = self
+                        .start_hls(
+                            device,
+                            transcode::TranscodeSource::File(path),
+                            start,
+                            preference.audio_language(),
+                            None,
+                        )
+                        .await?;
+                    (
+                        "hls",
+                        started.url,
+                        "application/vnd.apple.mpegurl".to_owned(),
+                        started.audio_language,
+                        start,
+                    )
+                } else {
+                    let mime = mime_for(path);
+                    let token = self.tokens.next_token();
+                    let now_ms = self.now();
+                    self.sessions
+                        .lock()
+                        .expect("the session lock is not poisoned")
+                        .insert(
+                            token.as_str().to_owned(),
+                            Grant {
+                                device_id: device.id,
+                                source: GrantSource::File {
+                                    path: path.clone(),
+                                    size_bytes: target.size_bytes,
+                                    mime,
+                                },
+                                expires_at_ms: now_ms + PLAYBACK_TTL_MS,
+                            },
+                        );
+                    (
+                        "direct",
+                        format!("/media/{}", token.as_str()),
+                        mime.to_owned(),
+                        None,
+                        0,
+                    )
+                }
+            }
+            WebSource::Torrent(media) => {
+                // The listener the bytes come from, opened once and held by whichever delivery is
+                // chosen below: a direct grant holds it, and an HLS session holds it for ffmpeg.
+                let session = Arc::new(
+                    PlaybackSession::open_torrent(
+                        title_id,
+                        Arc::clone(media),
+                        self.tokens.next_token(),
+                        None,
+                    )
+                    .await
+                    .map_err(|error| {
+                        warn!(%error, "a torrent playback session could not be opened");
+                        WebError::Runtime(crate::RuntimeError::Playback(error))
+                    })?,
                 );
-            (
-                "direct",
-                format!("/media/{}", token.as_str()),
-                mime.to_owned(),
-                None,
-                0,
-            )
+                let mime = media.content_type().to_owned();
+                // The same container rule the file path uses: a webview-safe container goes to the
+                // element as bytes, and anything else is transcoded. A torrent is not probed for its
+                // inner codecs first — the probe would have to read a stream that is not all here.
+                if target.playback == LocalPlayback::Webview {
+                    let token = self.tokens.next_token();
+                    let now_ms = self.now();
+                    self.sessions
+                        .lock()
+                        .expect("the session lock is not poisoned")
+                        .insert(
+                            token.as_str().to_owned(),
+                            Grant {
+                                device_id: device.id,
+                                source: GrantSource::Session {
+                                    url: session.url().to_owned(),
+                                    size_bytes: target.size_bytes,
+                                    mime: mime.clone(),
+                                    _session: session,
+                                },
+                                expires_at_ms: now_ms + PLAYBACK_TTL_MS,
+                            },
+                        );
+                    (
+                        "direct",
+                        format!("/media/{}", token.as_str()),
+                        mime,
+                        None,
+                        0,
+                    )
+                } else {
+                    // The URL borrows the session; the session itself is moved into the HLS session
+                    // that keeps the listener alive for as long as ffmpeg is reading it.
+                    let url = session.url().to_owned();
+                    // No audio-language probe on a live stream: ffprobe would read a URL whose
+                    // bytes are still arriving before ffmpeg has started, and the first audio stream
+                    // is the correct fallback the probe would answer with anyway.
+                    let started = self
+                        .start_hls(
+                            device,
+                            transcode::TranscodeSource::Url(&url),
+                            start,
+                            "",
+                            Some(session),
+                        )
+                        .await?;
+                    (
+                        "hls",
+                        started.url,
+                        "application/vnd.apple.mpegurl".to_owned(),
+                        started.audio_language,
+                        start,
+                    )
+                }
+            }
         };
         // The sidecar timeline is the film's own. A transcode's playlist starts at zero, so the
         // URL carries the start offset and the route retimes the cues onto that timeline.
@@ -2418,9 +2596,10 @@ impl WebService {
     async fn start_hls(
         &self,
         device: &PairedDevice,
-        target: &WebPlaybackTarget,
+        source: transcode::TranscodeSource<'_>,
         start_ms: i64,
         audio_language: &str,
+        session: Option<Arc<PlaybackSession>>,
     ) -> Result<StartedHls, WebError> {
         let transcoder = self.transcoder().await?;
         // One session per device: a resume or a seek replaces the previous transcode rather than
@@ -2429,7 +2608,7 @@ impl WebService {
         let token = self.tokens.next_token();
         let directory = self.transcode_root.join(token.as_str());
         let mut started = transcoder
-            .start(&directory, &target.path, start_ms, Some(audio_language))
+            .start(&directory, source, start_ms, Some(audio_language))
             .await
             .map_err(|error| {
                 warn!(%error, "the transcode could not be started");
@@ -2450,6 +2629,7 @@ impl WebService {
                     child: started.child,
                     device_id: device.id,
                     expires_at_ms: self.now() + PLAYBACK_TTL_MS,
+                    _session: session,
                 },
             );
         }
@@ -2532,9 +2712,27 @@ impl WebService {
         sessions.retain(|_, grant| grant.expires_at_ms > now_ms);
         let grant = sessions.get(token).map(|grant| MediaGrant {
             device_id: grant.device_id,
-            path: grant.path.clone(),
-            size_bytes: grant.size_bytes,
-            mime: grant.mime,
+            source: match &grant.source {
+                GrantSource::File {
+                    path,
+                    size_bytes,
+                    mime,
+                } => MediaGrantSource::File {
+                    path: path.clone(),
+                    size_bytes: *size_bytes,
+                    mime,
+                },
+                GrantSource::Session {
+                    url,
+                    size_bytes,
+                    mime,
+                    _session: _,
+                } => MediaGrantSource::Session {
+                    url: url.clone(),
+                    size_bytes: *size_bytes,
+                    mime: mime.clone(),
+                },
+            },
         });
         drop(sessions);
         if grant.is_some() {
@@ -2858,6 +3056,11 @@ pub struct EpisodeDto {
     pub watched: bool,
     /// Whether a file is on disk for it.
     pub playable: bool,
+    /// Whether a live transfer has named a file this host can stream for it.
+    ///
+    /// Separate from `playable` because the season control counts what is on disk: an episode that
+    /// can be watched while it downloads is not an episode that has finished downloading.
+    pub streamable: bool,
     /// The download job's lifecycle state for this episode, or null when nobody asked.
     pub download_state: Option<String>,
     /// The job's completion, 0 to 100, when one is running.
@@ -2950,6 +3153,7 @@ fn episode_dtos(
                 position_ms: found.map_or(0, |held| held.position_ms),
                 watched: found.is_some_and(|held| held.watched),
                 playable: row.files > 0,
+                streamable: download.is_some_and(JobDownload::streamable),
                 download_state: download.map(|job| job.state.clone()),
                 download_percent: download.map(|job| job.percent),
             }
@@ -3553,6 +3757,7 @@ mod tests {
             position_ms: 0,
             watched: false,
             playable: false,
+            streamable: false,
             download_state: None,
             download_percent: None,
         }
@@ -3569,6 +3774,7 @@ mod tests {
             JobDownload {
                 state: "completed".to_owned(),
                 percent: 100.0,
+                has_media: false,
             },
         );
         downloads.episodes.insert(
@@ -3576,6 +3782,7 @@ mod tests {
             JobDownload {
                 state: "downloading".to_owned(),
                 percent: 42.0,
+                has_media: false,
             },
         );
         assert_eq!(
@@ -3589,6 +3796,7 @@ mod tests {
             JobDownload {
                 state: "completed".to_owned(),
                 percent: 100.0,
+                has_media: false,
             },
         );
         assert_eq!(
@@ -3612,6 +3820,7 @@ mod tests {
         downloads.title = Some(JobDownload {
             state: "paused".to_owned(),
             percent: 12.5,
+            has_media: false,
         });
         assert_eq!(
             downloads.summary(true, &episodes),

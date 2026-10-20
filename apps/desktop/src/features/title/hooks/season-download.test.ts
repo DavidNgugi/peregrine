@@ -47,6 +47,7 @@ function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
     errorCode: null,
     errorMessage: null,
     findings: [],
+    hasMediaFile: false,
     ...overrides,
   };
 }
@@ -99,7 +100,19 @@ describe("seasonDownloadPlan", () => {
       [job({ episodeNumber: 2, state: "downloading", progressPermille: 400 })],
     );
     expect(result.status).toBe("active");
-    expect(result.percent).toBe(47);
+    expect(result.percent).toBe(46);
+  });
+
+  it("does not round a season to 100 while an episode is short", () => {
+    const result = plan(
+      [
+        episode({ episodeNumber: 1, items: 1, files: 1, missingFiles: 0 }),
+        episode({ episodeNumber: 2 }),
+      ],
+      [job({ episodeNumber: 2, state: "downloading", progressPermille: 999 })],
+    );
+    expect(result.status).toBe("active");
+    expect(result.percent).toBe(99);
   });
 
   it("says done only when every episode is on disk", () => {

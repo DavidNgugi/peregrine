@@ -26,9 +26,9 @@ use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _
 use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::{
-    AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback,
-    PlaybackPosition, PlaybackPreference, PreferredQuality, ProgressSource, SafePath, ScanMode,
-    SubtitleFormat, SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
+    AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, LoopbackUrl,
+    PlaybackPosition, PlaybackPreference, PlayerInput, PreferredQuality, ProgressSource, SafePath,
+    ScanMode, SubtitleFormat, SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
 };
 use peregrine_platform::{SystemClock, SystemTrash, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
@@ -489,6 +489,23 @@ pub struct StartedPlayback {
     pub resume_position_ms: Option<i64>,
 }
 
+/// A live job's media, ready to be served from the engine.
+struct TorrentSource {
+    /// The engine reader the server opens per range request.
+    media: Arc<dyn peregrine_stream::TorrentMedia>,
+    /// The entry's own name, which is what classifies the container for the page and the player.
+    support: LocalPlayback,
+}
+
+/// Why a job's payload did not name exactly one playable file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileChoice {
+    /// The metadata is not here yet, or no selected entry is a media file.
+    NotReady,
+    /// Several media entries, and none or several match the episode asked for.
+    Ambiguous,
+}
+
 /// One title as the library screen lists it: what the library holds, and where the cached poster is.
 ///
 /// The list's own unit, and the pair both surfaces built on it need — the table of counts and the grid
@@ -866,6 +883,61 @@ fn playable_file(
             .flat_map(|item| item.files.iter())
             .find(|file| file.missing_since.is_none())
     })
+}
+
+/// The one selected media entry a job's payload supplies for the play asked for.
+///
+/// **A single media entry needs no matching at all**, which is the common episode release and every
+/// film: the job is scoped to the title or the episode by its own row, so the only file is the answer.
+///
+/// **Several need a name.** A pack, or a film with extras, cannot be resolved from the job row: the
+/// requested season and number are matched against each entry's own file name with the release parser,
+/// and exactly one match wins. None or several is a refusal rather than a pick by size — playing the
+/// wrong episode is a worse failure than admitting the file could not be identified.
+fn choose_download_file(
+    files: &[peregrine_storage::DownloadFileRow],
+    episode: Option<(u32, u32)>,
+) -> Result<usize, FileChoice> {
+    let media: Vec<usize> = files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| file.selected && file.is_media)
+        .map(|(index, _)| index)
+        .collect();
+    match media.as_slice() {
+        [] => Err(FileChoice::NotReady),
+        [only] => Ok(*only),
+        many => match episode {
+            // A film's payload with several media entries is feature-plus-extras; the largest is the
+            // feature and is what the read before this change already chose.
+            None => many
+                .iter()
+                .copied()
+                .max_by_key(|index| files[*index].size_bytes)
+                .ok_or(FileChoice::NotReady),
+            Some((season, number)) => {
+                let matching: Vec<usize> = many
+                    .iter()
+                    .copied()
+                    .filter(|index| {
+                        let path = files[*index].path.as_str();
+                        // The entry's own name, not the release folder's: a pack folder states the
+                        // season but only the file states which episode inside it.
+                        let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+                        let parsed = peregrine_domain::ReleaseName::parse(name);
+                        parsed.season() == Some(season)
+                            && parsed
+                                .episodes()
+                                .is_some_and(|span| span.first() <= number && number <= span.last())
+                    })
+                    .collect();
+                match matching.as_slice() {
+                    [only] => Ok(*only),
+                    _ => Err(FileChoice::Ambiguous),
+                }
+            }
+        },
+    }
 }
 
 /// Hands a player's position to the task that writes it.
@@ -1285,7 +1357,8 @@ impl Runtime {
                                 Arc::new(SystemTrash),
                             )
                             .with_notices(Arc::clone(&download_notices))
-                            .with_usenet(Arc::new(peregrine_usenet::NntpEngine::new()));
+                            .with_usenet(Arc::new(peregrine_usenet::NntpEngine::new()))
+                            .with_metadata_fetch(Arc::clone(&fetch));
                             if let Some(tools) = crate::usenet_post::PostTools::resolve() {
                                 service = service.with_postprocess(tools);
                             }
@@ -1316,6 +1389,20 @@ impl Runtime {
                                 Ok(count) => info!(count, "orphan NZBs swept"),
                                 Err(error) => warn!(%error, "orphan NZBs could not be swept"),
                             }
+                            // **A job interrupted between its report and the engine's acceptance
+                            // is left `metadata`, and nothing else moves it.** Its recovery may have
+                            // to wait for a magnet's metadata, so it runs after startup rather than
+                            // in front of it; the queue polls the row and draws the state change.
+                            let recovery = Arc::clone(&service);
+                            tokio::spawn(async move {
+                                match recovery.recover_metadata_jobs().await {
+                                    Ok(0) => {}
+                                    Ok(count) => info!(count, "metadata downloads resumed"),
+                                    Err(error) => {
+                                        warn!(%error, "metadata downloads could not be resumed");
+                                    }
+                                }
+                            });
                             torrent_engine = Some(torrent);
                             metadata_fetch = Some(fetch);
                             acquisition = Some(service);
@@ -2262,6 +2349,24 @@ impl Runtime {
         Ok(self.database.download_job(installation_scope(), id).await?)
     }
 
+    /// Whether a job's payload has named a selected media file the player could stream.
+    ///
+    /// The question a Play control asks before it is drawn: metadata that has not arrived names no
+    /// entries, and a payload whose every entry is refused or unselected names no media. It is the
+    /// same predicate `choose_download_file` reads — a file the payload has, not one on disk — which
+    /// is why a downloading title and a downloaded one can offer the same action.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the file rows cannot be read.
+    pub async fn download_has_media(&self, id: i64) -> Result<bool, RuntimeError> {
+        let files = self
+            .database
+            .download_files(installation_scope(), id)
+            .await?;
+        Ok(files.iter().any(|file| file.selected && file.is_media))
+    }
+
     /// The account's playback language preference.
     ///
     /// # Errors
@@ -3026,7 +3131,7 @@ impl Runtime {
                     .find(|item| item.files.iter().any(|held| held.id == file.id))
                     .and_then(|item| item.item.episode_id);
                 Ok(Some(crate::web::WebPlaybackTarget {
-                    path: path.as_path().to_path_buf(),
+                    source: crate::web::WebSource::File(path.as_path().to_path_buf()),
                     size_bytes: file.size_bytes,
                     playback: peregrine_domain::LocalPlayback::of_name(file.path.as_str()),
                     episode_id,
@@ -3035,7 +3140,23 @@ impl Runtime {
                         .and_then(|duration| i64::try_from(duration).ok()),
                 }))
             }
-            Err(RuntimeError::NoPlayableFile) => Ok(None),
+            // A title with nothing on disk but a job in flight is served from the engine, exactly as
+            // the desktop is. An episode is selected by its job's identity, so a show's season pack
+            // does not answer for the wrong episode.
+            Err(RuntimeError::NoPlayableFile) => {
+                match self.torrent_media(title_id, episode_id).await? {
+                    Some(source) => Ok(Some(crate::web::WebPlaybackTarget {
+                        size_bytes: source.media.len(),
+                        source: crate::web::WebSource::Torrent(source.media),
+                        playback: source.support,
+                        episode_id,
+                        // The metadata names no duration; a probe over a live stream would have to
+                        // read enough of it to demux, and the client tolerates a growing playlist.
+                        duration_ms: None,
+                    })),
+                    None => Ok(None),
+                }
+            }
             Err(error) => Err(error),
         }
     }
@@ -3280,11 +3401,20 @@ impl Runtime {
                 )
             })
             .collect();
-        Ok(TitlePlayback {
-            offer: peregrine_domain::TitleOffer::of(&items, &evidence.jobs),
-            support: playable_file(&evidence, None)
-                .map(|file| LocalPlayback::of_name(file.path.as_str())),
-        })
+        let offer = peregrine_domain::TitleOffer::of(&items, &evidence.jobs);
+        let support = match playable_file(&evidence, None) {
+            Some(file) => Some(LocalPlayback::of_name(file.path.as_str())),
+            // A film whose transfer is running has no file on disk yet, and the page still has to
+            // know which reader the Play will use before it is pressed. The job's own media entry
+            // answers it. An episode of a show has no title-level entry, so this stays `None` and the
+            // hero keeps its disabled Play: the episode card is where that episode is started.
+            None if offer == peregrine_domain::TitleOffer::Arriving => self
+                .torrent_media(title_id, None)
+                .await?
+                .map(|source| source.support),
+            None => None,
+        };
+        Ok(TitlePlayback { offer, support })
     }
 
     /// Whether a configured provider owns an identifier `title_id` carries.
@@ -3779,19 +3909,41 @@ impl Runtime {
         }
     }
 
-    /// The engine-backed source for a title whose download is still running, when there is one.
+    /// The engine-backed source for a title or one of its episodes, when a live job holds it.
+    ///
+    /// **The job is the selector, and the episode is part of its identity.** `download_job.episode_id`
+    /// is written by the acquire job for the episode the person asked for, so a show with two
+    /// episodes in flight has two rows rather than one ambiguous set. A film asks for the row with no
+    /// episode, which is what keeps a title-level Play from serving an episode of a show.
     ///
     /// `None` covers every reason there is nothing to stream — no engine, no live handle for the job
-    /// (a job another process started has none here), no selected media file, or no job for the title
-    /// at all. The caller turns `None` into the same refusal a title with nothing on disk gets.
+    /// (a job another process started has none here), metadata that has not named a media entry yet,
+    /// or no job for this title and episode. The caller turns `None` into the same refusal a title
+    /// with nothing on disk gets.
     async fn torrent_media(
         &self,
         title_id: i64,
-    ) -> Result<Option<Arc<dyn peregrine_stream::TorrentMedia>>, RuntimeError> {
+        episode_id: Option<i64>,
+    ) -> Result<Option<TorrentSource>, RuntimeError> {
         let (Ok(engine), Ok(acquisition)) = (self.torrent_engine(), self.acquisition()) else {
             return Ok(None);
         };
         let scope = installation_scope();
+        // **A show has no title-level stream.** Its files are episodes, and playing one without an
+        // episode identity would pick an arbitrary entry, record progress against the show, and give
+        // the reader no way to say which episode they meant. The episode card is that surface; the
+        // hero's Play stays refused until the core is asked for an episode.
+        if episode_id.is_none()
+            && self
+                .database
+                .library_title(scope, title_id)
+                .await?
+                .is_some_and(|row| {
+                    row.library.title.kind == peregrine_domain::catalogue::TitleKind::Show
+                })
+        {
+            return Ok(None);
+        }
         let jobs = self
             .database
             .list_download_jobs(
@@ -3800,28 +3952,36 @@ impl Runtime {
                 peregrine_storage::PageRequest::first(50),
             )
             .await?;
-        let Some(job) = jobs.into_iter().find(|job| job.title_id == title_id) else {
+        let Some(job) = jobs
+            .into_iter()
+            .find(|job| job.title_id == title_id && job.episode_id == episode_id)
+        else {
             return Ok(None);
         };
         let Some(handle) = acquisition.handle_for(job.id) else {
             return Ok(None);
         };
         let files = self.database.download_files(scope, job.id).await?;
-        let Some(file) = files
-            .into_iter()
-            .filter(|file| file.selected && file.is_media)
-            .max_by_key(|file| file.size_bytes)
-        else {
-            return Ok(None);
+        let episode = match episode_id {
+            Some(id) => self.database.episode_numbers(id).await?,
+            None => None,
         };
-        let index = usize::try_from(file.file_index).unwrap_or_default();
-        Ok(Some(Arc::new(crate::media_source::EngineMedia::new(
-            engine,
-            handle,
-            index,
-            file.size_bytes,
-            file.path.as_str(),
-        ))))
+        let index = choose_download_file(&files, episode).map_err(|reason| match reason {
+            FileChoice::NotReady => RuntimeError::NoPlayableFile,
+            FileChoice::Ambiguous => RuntimeError::MediaUnidentified,
+        })?;
+        let file = files.get(index).ok_or(RuntimeError::NoPlayableFile)?;
+        let torrent_index = usize::try_from(file.file_index).unwrap_or_default();
+        Ok(Some(TorrentSource {
+            media: Arc::new(crate::media_source::EngineMedia::new(
+                engine,
+                handle,
+                torrent_index,
+                file.size_bytes,
+                file.path.as_str(),
+            )),
+            support: LocalPlayback::of_name(file.path.as_str()),
+        }))
     }
 
     /// Starts playing one of a title's files, replacing whatever was playing.
@@ -3834,7 +3994,7 @@ impl Runtime {
     /// competing with it, which is what makes the listener's lifetime the session's (SECURITY.md T10).
     ///
     /// A title with nothing on disk but an active download is served from the engine instead, which is
-    /// what lets a film be watched before its last pieces arrive.
+    /// what lets a film or a named episode be watched before its last pieces arrive.
     ///
     /// # Errors
     ///
@@ -3883,28 +4043,26 @@ impl Runtime {
                         .await?;
                     (media_file_id, support, needs_poster, session, subtitles)
                 }
-                // A title with nothing on disk may still be downloading: serve it from the engine so a film
-                // can be watched while its last pieces arrive.
-                Err(RuntimeError::NoPlayableFile) if episode_id.is_none() => {
-                    match self.torrent_media(title_id).await? {
-                        Some(media) => {
+                // A title with nothing on disk may still be downloading: serve it from the engine. The
+                // same arm answers an episode, because the job row names the episode and the payload's
+                // file is chosen by that identity (see `torrent_media`).
+                Err(RuntimeError::NoPlayableFile) => {
+                    match self.torrent_media(title_id, episode_id).await? {
+                        Some(source) => {
                             let session = peregrine_playback::PlaybackSession::open_torrent(
                                 title_id,
-                                media,
+                                source.media,
                                 self.tokens.next_token(),
                                 Some(Arc::clone(&self.posters)
                                     as Arc<dyn peregrine_stream::ThumbnailSink>),
                             )
                             .await
                             .map_err(playback_error)?;
-                            (0, LocalPlayback::Unknown, false, session, Vec::new())
+                            (0, source.support, false, session, Vec::new())
                         }
                         None => return Err(RuntimeError::NoPlayableFile),
                     }
                 }
-                // A torrent holds one media stream for the title and no episode identity, so serving it
-                // for a chosen episode would play whatever the torrent happens to contain first.
-                Err(RuntimeError::NoPlayableFile) => return Err(RuntimeError::NoPlayableFile),
                 Err(other) => return Err(other),
             };
         let url = session.url().to_owned();
@@ -3925,7 +4083,7 @@ impl Runtime {
         // not pay for a progress read, and the answer is the same either way.
         let resume_position_ms = self
             .database
-            .watch_progress(installation_scope(), title_id, None)
+            .watch_progress(installation_scope(), title_id, episode_id)
             .await?
             .map(|progress| progress.position_ms());
 
@@ -3943,16 +4101,19 @@ impl Runtime {
         })
     }
 
-    /// Plays one of a title's files in mpv, for a container the webview cannot demux.
+    /// Plays one of a title's files — or its download — in mpv, for a container the webview cannot
+    /// demux.
     ///
-    /// The title and path resolution is [`Runtime::start_playback`]'s, but the bytes never cross
-    /// this process: mpv opens the file itself. Whatever the webview was serving is stopped first,
-    /// because two players for one press is one too many.
+    /// The title, episode, and source resolution is [`Runtime::start_playback`]'s. A library file is
+    /// opened by mpv itself; a title whose copy is still downloading is served by this process over
+    /// loopback, and mpv is handed that session's URL. Whatever the webview was serving is stopped
+    /// first, because two players for one press is one too many.
     ///
     /// # Errors
     ///
     /// The same refusals as [`Runtime::start_playback`], plus [`RuntimeError::Player`] when mpv is
     /// not installed or the operating system would not start it.
+    #[allow(clippy::too_many_lines)] // One launch: resolve, open, report, and spawn, in that order.
     pub async fn start_external_playback(
         &self,
         title_id: i64,
@@ -3976,19 +4137,60 @@ impl Runtime {
             }
             None => None,
         };
-        let (file, safe) = self.playable(title_id, episode_id).await?;
-        // The sidecar the webview would have offered, chosen by the same default flag. A sidecar
-        // that cannot be read is not allowed to take the film down with it.
-        let subtitle = match self.playable_subtitles(file.id).await {
-            Ok(tracks) => tracks
-                .iter()
-                .find(|(track, _)| track.is_default)
-                .or_else(|| tracks.first())
-                .map(|(_, path)| path.clone()),
-            Err(error) => {
-                warn!(%error, title = title_id, "the selected subtitle could not be offered to mpv");
-                None
+        // A file the library holds, or the engine when it holds none and the title is downloading.
+        // The stream case opens the loopback listener *before* mpv starts: mpv is handed the URL, not
+        // a path, and the listener must already be answering when it connects.
+        let (file, subtitle, stream) = match self.playable(title_id, episode_id).await {
+            Ok((file, safe)) => {
+                // The sidecar the webview would have offered, chosen by the same default flag. A
+                // sidecar that cannot be read is not allowed to take the film down with it.
+                let subtitle = match self.playable_subtitles(file.id).await {
+                    Ok(tracks) => tracks
+                        .iter()
+                        .find(|(track, _)| track.is_default)
+                        .or_else(|| tracks.first())
+                        .map(|(_, path)| path.clone()),
+                    Err(error) => {
+                        warn!(%error, title = title_id, "the selected subtitle could not be offered to mpv");
+                        None
+                    }
+                };
+                (Some(safe), subtitle, None)
             }
+            Err(RuntimeError::NoPlayableFile) => {
+                let Some(source) = self.torrent_media(title_id, episode_id).await? else {
+                    return Err(RuntimeError::NoPlayableFile);
+                };
+                let session = peregrine_playback::PlaybackSession::open_torrent(
+                    title_id,
+                    source.media,
+                    self.tokens.next_token(),
+                    // No poster capture: mpv owns the surface, and the renderer that posts a frame
+                    // is the webview's.
+                    None,
+                )
+                .await
+                .map_err(playback_error)?;
+                let url = LoopbackUrl::parse(session.url()).ok_or_else(|| {
+                    RuntimeError::InvalidRequest {
+                        detail: "the playback listener did not answer with a loopback URL"
+                            .to_owned(),
+                    }
+                })?;
+                // The session lives in the runtime for as long as the player may ask for bytes. The
+                // next play, a stop, or the process ending closes it.
+                let session_id = self.mint_session();
+                *self
+                    .session
+                    .lock()
+                    .expect("the session lock is not poisoned") = Some(session);
+                *self
+                    .session_id
+                    .lock()
+                    .expect("the session id lock is not poisoned") = Some(session_id);
+                (None, None, Some((url, session_id)))
+            }
+            Err(error) => return Err(error),
         };
         // The app's own watch progress is the resume rule; mpv's watch_later is disabled.
         let resume_ms = self
@@ -4021,13 +4223,33 @@ impl Runtime {
             }
         });
 
+        let (stream_url, stored) = match stream {
+            Some((url, id)) => (Some(url), Some(id)),
+            None => (None, None),
+        };
         let player = Arc::clone(&self.external_player);
         let positions: Arc<dyn peregrine_domain::PositionSink> = Arc::new(ChannelSink(sender));
-        tokio::task::spawn_blocking(move || {
-            player.play(&safe, resume_ms, subtitle.as_ref(), positions)
+        let launch = tokio::task::spawn_blocking(move || {
+            let input = match (&file, &stream_url) {
+                (Some(path), _) => PlayerInput::File(path),
+                (_, Some(url)) => PlayerInput::Stream(url),
+                // The match above guarantees one of the two; a caller that broke it gets a spawn
+                // refusal rather than a panic in a player thread.
+                (None, None) => return Err(peregrine_domain::PlayerError::Spawn),
+            };
+            player.play(input, resume_ms, subtitle.as_ref(), positions)
         })
-        .await
-        .map_err(|_| peregrine_domain::PlayerError::Spawn)??;
+        .await;
+        let launch = match launch {
+            Ok(result) => result,
+            Err(_) => Err(peregrine_domain::PlayerError::Spawn),
+        };
+        if let (Err(_), Some(session_id)) = (&launch, stored) {
+            // A player that never started must not leave a listener behind for the next press to
+            // replace: close the one this attempt opened.
+            self.stop_playback(session_id).await;
+        }
+        launch.map_err(RuntimeError::from)?;
         Ok(())
     }
     /// A page of what the installation account is part-way through, most recently updated first.
@@ -5223,6 +5445,15 @@ impl Runtime {
     pub async fn shutdown(&self) {
         info!("the runtime is stopping");
         self.external_player.stop();
+        // An external play of a torrent holds a loopback listener for mpv. The child is gone at this
+        // point, so the listener has no reader left and is closed here rather than left to the drop.
+        let held = *self
+            .session_id
+            .lock()
+            .expect("the session id lock is not poisoned");
+        if let Some(session_id) = held {
+            self.stop_playback(session_id).await;
+        }
         self.prowlarr.stop();
         self.scheduler.shutdown().await;
         // Before the bus: a last tick published into a stopped bus is a delivery nobody hears.
@@ -5437,6 +5668,14 @@ pub enum RuntimeError {
     #[error("the library holds no copy of that title that is on disk")]
     NoPlayableFile,
 
+    /// A download holds several episodes and none of them is the one asked about.
+    ///
+    /// Its own variant rather than `NoPlayableFile`, because the sentence a person needs is not "there
+    /// is nothing" but "there is something and it could not be told which episode it is" — and the
+    /// action differs: wait for the import, or remove the pack.
+    #[error("that download holds more than one episode and none matches the one asked for")]
+    MediaUnidentified,
+
     /// A media file is outside every folder Peregrine is allowed to scan.
     #[error("that file is outside every folder Peregrine is allowed to scan")]
     FileOutsideRoots,
@@ -5492,10 +5731,88 @@ pub enum RuntimeError {
 mod tests {
     use super::*;
     use crate::testing::{CountingSecretStore, RecordingSink};
+    use peregrine_domain::PlayerBackend as _;
     use peregrine_secrets::{SecretKey, SecretStore};
     use peregrine_testkit::MemorySecretStore;
     use std::fmt::Write as _;
     use tempfile::TempDir;
+
+    /// One `download_file` row, as metadata named it.
+    fn download_entry(name: &str, size: u64, is_media: bool) -> peregrine_storage::DownloadFileRow {
+        peregrine_storage::DownloadFileRow {
+            id: 1,
+            download_job_id: 1,
+            file_index: 0,
+            path: NonEmptyText::new(name).expect("a file name"),
+            size_bytes: size,
+            selected: true,
+            is_media,
+        }
+    }
+
+    #[test]
+    fn one_media_entry_is_the_answer_and_needs_no_episode_match() {
+        let files = vec![download_entry("Film.2025.1080p.mkv", 900, true)];
+        assert_eq!(choose_download_file(&files, None), Ok(0));
+        assert_eq!(
+            choose_download_file(&files, Some((1, 2))),
+            Ok(0),
+            "a single-entry episode release is the episode"
+        );
+    }
+
+    #[test]
+    fn a_film_with_extras_takes_the_largest_media_entry() {
+        let files = vec![
+            download_entry("Film.2025.1080p.mkv", 900, true),
+            download_entry("sample.mkv", 10, true),
+            download_entry("Film.2025.srt", 1, false),
+        ];
+        assert_eq!(choose_download_file(&files, None), Ok(0));
+    }
+
+    #[test]
+    fn a_season_pack_is_resolved_by_the_episode_its_file_names() {
+        let files = vec![
+            download_entry("Show.S01.1080p/Show.S01E01.mkv", 10, true),
+            download_entry("Show.S01.1080p/Show.S01E02.mkv", 10, true),
+            download_entry("Show.S01.1080p/Show.S01E03E04.mkv", 10, true),
+            download_entry("Show.S01.1080p/Show.S01E02.srt", 1, false),
+        ];
+        // The folder states S01 for every entry; only the file states which episode it is.
+        assert_eq!(choose_download_file(&files, Some((1, 2))), Ok(1));
+        assert_eq!(choose_download_file(&files, Some((1, 4))), Ok(2));
+        assert_eq!(
+            choose_download_file(&files, Some((1, 9))),
+            Err(FileChoice::Ambiguous),
+            "an unmatched episode is refused rather than guessed by size"
+        );
+    }
+
+    #[test]
+    fn a_payload_with_no_media_entry_is_not_ready() {
+        let files = vec![download_entry("Show.S01E02.srt", 1, false)];
+        assert_eq!(
+            choose_download_file(&files, Some((1, 2))),
+            Err(FileChoice::NotReady)
+        );
+    }
+
+    struct NoPositions;
+
+    impl peregrine_domain::PositionSink for NoPositions {
+        fn position(&self, _position_ms: i64, _duration_ms: Option<i64>) {}
+    }
+
+    #[test]
+    fn the_recording_player_keeps_a_stream_url() {
+        let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/token").expect("a loopback URL");
+        let player = RecordingPlayer::default();
+        player
+            .play(PlayerInput::Stream(&url), None, None, Arc::new(NoPositions))
+            .expect("the double records it");
+        assert_eq!(player.streams(), vec![url.as_str().to_owned()]);
+    }
 
     #[test]
     fn a_public_ip_answer_is_read_as_an_address() {
@@ -5559,6 +5876,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingPlayer {
         opened: Mutex<Vec<PathBuf>>,
+        streams: Mutex<Vec<String>>,
         start: Mutex<Option<i64>>,
         subtitle: Mutex<Option<PathBuf>>,
     }
@@ -5568,6 +5886,13 @@ mod tests {
             self.opened
                 .lock()
                 .expect("the player log is not poisoned")
+                .clone()
+        }
+
+        fn streams(&self) -> Vec<String> {
+            self.streams
+                .lock()
+                .expect("the player stream log is not poisoned")
                 .clone()
         }
 
@@ -5586,15 +5911,23 @@ mod tests {
     impl peregrine_domain::PlayerBackend for RecordingPlayer {
         fn play(
             &self,
-            file: &SafePath,
+            input: peregrine_domain::PlayerInput<'_>,
             start_ms: Option<i64>,
             subtitle: Option<&SafePath>,
             positions: Arc<dyn peregrine_domain::PositionSink>,
         ) -> Result<(), peregrine_domain::PlayerError> {
-            self.opened
-                .lock()
-                .expect("the player log is not poisoned")
-                .push(file.as_path().to_path_buf());
+            match input {
+                peregrine_domain::PlayerInput::File(file) => self
+                    .opened
+                    .lock()
+                    .expect("the player log is not poisoned")
+                    .push(file.as_path().to_path_buf()),
+                peregrine_domain::PlayerInput::Stream(url) => self
+                    .streams
+                    .lock()
+                    .expect("the player stream log is not poisoned")
+                    .push(url.as_str().to_owned()),
+            }
             *self.start.lock().expect("the player start is not poisoned") = start_ms;
             *self
                 .subtitle

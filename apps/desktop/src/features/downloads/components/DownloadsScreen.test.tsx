@@ -40,6 +40,7 @@ function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
     errorCode: null,
     errorMessage: null,
     findings: [],
+    hasMediaFile: true,
     ...overrides,
   };
 }
@@ -69,5 +70,11 @@ describe("DownloadsScreen", () => {
     const html = markup([job({ title: null, titleKind: null })]);
     expect(html).toContain("The.Matrix.1999.1080p");
     expect(html).not.toContain('href="/title/');
+  });
+
+  it("says 99 percent for a payload one piece short of whole", () => {
+    const html = markup([job({ progressPermille: 999 })]);
+    expect(html).toContain("99%");
+    expect(html).not.toContain("100%");
   });
 });

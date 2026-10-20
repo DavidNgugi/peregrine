@@ -5,6 +5,7 @@
 //! argument vector and passed to a child process; the file path is a guarded path the core resolved,
 //! so nothing here assembles a path or a shell word.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -55,6 +56,37 @@ pub enum TranscodeError {
 pub struct Transcoder {
     ffmpeg: PathBuf,
     encoder: &'static str,
+}
+
+/// What a transcode reads: a library file, or a loopback stream this process serves.
+///
+/// The URL variant is a download in flight (`PG-E13-09`): ffmpeg reads it over HTTP the same way it
+/// reads a file, and the listener behind it opens a fresh engine reader per range. It is a URL this
+/// process minted, never one a client supplied.
+#[derive(Clone, Copy)]
+pub enum TranscodeSource<'a> {
+    /// A guarded library file.
+    File(&'a Path),
+    /// A loopback URL served by `peregrine-stream`, which carries a per-session token.
+    Url(&'a str),
+}
+
+impl TranscodeSource<'_> {
+    /// The argument ffmpeg and ffprobe receive.
+    fn arg(&self) -> &OsStr {
+        match self {
+            Self::File(path) => path.as_os_str(),
+            Self::Url(url) => OsStr::new(url),
+        }
+    }
+
+    /// The text to redact from an ffmpeg failure, when it has one.
+    fn label(&self) -> Option<&str> {
+        match self {
+            Self::File(path) => path.to_str(),
+            Self::Url(url) => Some(url),
+        }
+    }
 }
 
 /// A started transcode and the audio stream it mapped.
@@ -126,7 +158,7 @@ impl Transcoder {
     pub async fn start(
         &self,
         directory: &Path,
-        source: &Path,
+        source: TranscodeSource<'_>,
         start_ms: i64,
         audio_language: Option<&str>,
     ) -> Result<StartedTranscode, TranscodeError> {
@@ -135,7 +167,7 @@ impl Transcoder {
             .filter(|preferred| !preferred.is_empty())
         {
             Some(preferred) => {
-                let probe = probe_audio(source).await.unwrap_or_default();
+                let probe = probe_audio(source.arg()).await.unwrap_or_default();
                 choose_audio_stream(&probe, Some(preferred))
             }
             None => AudioStreamChoice::default(),
@@ -151,6 +183,15 @@ impl Transcoder {
             .arg("-loglevel")
             .arg("error")
             .arg("-y");
+        // **A torrent whose tail is missing still has the bytes at the front, and libavformat does
+        // not know that.** Its probe seeks to the Matroska Cues at the end — exactly the range a
+        // stalled swarm cannot answer — so the read blocks and no playlist appears. An input told
+        // it cannot seek reads from the beginning and discards to an `-ss` offset, which reaches
+        // the same frame without touching the tail; a complete torrent pays a linear read up to
+        // the resume point, and the alternative is no playback at all.
+        if matches!(source, TranscodeSource::Url(_)) {
+            command.arg("-seekable").arg("0");
+        }
         if start_ms > 0 {
             command
                 .arg("-ss")
@@ -158,7 +199,7 @@ impl Transcoder {
         }
         command
             .arg("-i")
-            .arg(source)
+            .arg(source.arg())
             .arg("-map")
             .arg("0:v:0")
             .arg("-map")
@@ -208,7 +249,7 @@ impl Transcoder {
                 });
             }
             if let Some(status) = child.try_wait()? {
-                let reason = tail(&log_path, source).await;
+                let reason = tail(&log_path, source.label()).await;
                 return Err(TranscodeError::Exited {
                     reason: format!("{status}: {reason}"),
                 });
@@ -254,11 +295,11 @@ fn video_arguments(encoder: &str) -> &'static [&'static str] {
 }
 
 /// The last lines of ffmpeg's log, with the source path replaced by a marker.
-async fn tail(path: &Path, source: &Path) -> String {
+async fn tail(path: &Path, source: Option<&str>) -> String {
     let text = tokio::fs::read_to_string(path).await.unwrap_or_default();
     let last: Vec<&str> = text.lines().rev().take(3).collect();
     let mut reason = last.into_iter().rev().collect::<Vec<_>>().join(" / ");
-    if let Some(source) = source.to_str() {
+    if let Some(source) = source {
         reason = reason.replace(source, "[file]");
     }
     if reason.len() > 300 {
@@ -358,7 +399,7 @@ pub fn parse_duration_ms(text: &str) -> Option<i64> {
 }
 
 /// The audio streams' indices and language tags, as ffprobe's JSON, or `None` when it failed.
-async fn probe_audio(path: &Path) -> Option<String> {
+async fn probe_audio(path: &OsStr) -> Option<String> {
     let output = Command::new(locate_probe())
         .args([
             "-v",
@@ -504,8 +545,8 @@ pub fn valid_hls_file(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioStreamChoice, Transcoder, choose_audio_stream, parse_duration_ms, valid_hls_file,
-        video_arguments,
+        AudioStreamChoice, TranscodeSource, Transcoder, choose_audio_stream, parse_duration_ms,
+        valid_hls_file, video_arguments,
     };
 
     #[test]
@@ -630,7 +671,7 @@ mod tests {
         let transcoder = Transcoder::detect().await.expect("an encoder");
         let output = directory.path().join("hls");
         let mut started = transcoder
-            .start(&output, &source, 0, Some("en"))
+            .start(&output, TranscodeSource::File(&source), 0, Some("en"))
             .await
             .expect("the transcode starts");
         let playlist = tokio::fs::read_to_string(output.join("index.m3u8"))

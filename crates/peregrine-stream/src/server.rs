@@ -45,6 +45,7 @@ use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::time::Duration;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -146,6 +147,13 @@ const MAX_SUBTITLE_BYTES: u64 = 8 * 1024 * 1024;
 /// page can be made to fill this process's memory through. `axum`'s own default is 2 MB; naming it
 /// here is what makes the number the build's decision rather than the framework's.
 const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
+
+/// How long one engine read may block before the response is aborted.
+///
+/// A torrent whose peers have gone silent would otherwise hold the HTTP body open forever, and a
+/// player cannot retry what looks like a slow read. Thirty seconds is longer than one piece takes on a
+/// healthy swarm and short enough that a dead one becomes a network error the player can act on.
+const TORRENT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A JPEG's own first bytes: the start-of-image marker and the first segment marker.
 const JPEG_START: [u8; 3] = [0xff, 0xd8, 0xff];
@@ -798,29 +806,43 @@ async fn serve_torrent(State(guard): State<Guard>, method: Method, headers: Head
     let body = if method == Method::HEAD || length == 0 {
         Body::empty()
     } else {
-        match media.open(start).await {
-            Ok(reader) => Body::from_stream(stream::unfold(
-                (reader, length),
-                |(mut reader, remaining)| async move {
-                    if remaining == 0 {
-                        return None;
+        let Ok(reader) = media.open(start).await else {
+            // The engine would not open the file at this offset: a handle that went away, or a piece
+            // the swarm cannot supply. A 503 says "try this range again" where a 200 with an empty
+            // body would say "the file ended here".
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        };
+        Body::from_stream(stream::unfold(
+            (reader, length),
+            |(mut reader, remaining)| async move {
+                if remaining == 0 {
+                    return None;
+                }
+                let want = usize::try_from(remaining.min(64 * 1024)).unwrap_or(64 * 1024);
+                match tokio::time::timeout(TORRENT_READ_TIMEOUT, reader.read(want)).await {
+                    Ok(Ok(Some(bytes))) if !bytes.is_empty() => {
+                        let chunk = Bytes::from(bytes);
+                        let served = u64::try_from(chunk.len()).unwrap_or(0);
+                        Some((
+                            Ok::<_, io::Error>(chunk),
+                            (reader, remaining.saturating_sub(served)),
+                        ))
                     }
-                    let want = usize::try_from(remaining.min(64 * 1024)).unwrap_or(64 * 1024);
-                    match reader.read(want).await {
-                        Ok(Some(bytes)) if !bytes.is_empty() => {
-                            let chunk = Bytes::from(bytes);
-                            let served = u64::try_from(chunk.len()).unwrap_or(0);
-                            Some((
-                                Ok::<_, io::Error>(chunk),
-                                (reader, remaining.saturating_sub(served)),
-                            ))
-                        }
-                        _ => None,
-                    }
-                },
-            )),
-            Err(_) => Body::empty(),
-        }
+                    // A clean end is the file's end. A read error or a stall is not: yielding it
+                    // aborts the body, so the player sees a network failure it can retry instead of a
+                    // short file it will treat as complete.
+                    Ok(Ok(_)) => None,
+                    Ok(Err(error)) => Some((Err(error), (reader, 0))),
+                    Err(_) => Some((
+                        Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "the torrent did not supply bytes in time",
+                        )),
+                        (reader, 0),
+                    )),
+                }
+            },
+        ))
     };
 
     builder

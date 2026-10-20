@@ -99,7 +99,26 @@ export function titlePageActions(
     return { play: { kind: "unavailable", reason: "fileMissing" }, acquire: false };
   }
   if (offer === "arriving") {
-    return { play: { kind: "unavailable", reason: "arriving" }, acquire: false };
+    // **A running transfer is playable once its payload has named a file.** `arriving` with a
+    // support is a film whose job has metadata: the core already knows which reader the file needs,
+    // and the engine serves it while the rest arrives. `null` is the earlier state — no metadata
+    // yet, so nothing is known to play — and the reason stays the same sentence.
+    if (!player) {
+      return { play: { kind: "unavailable", reason: "noPlayer" }, acquire: false };
+    }
+    if (support === null) {
+      return { play: { kind: "unavailable", reason: "arriving" }, acquire: false };
+    }
+    if (support === "externalPlayer") {
+      return {
+        play: { kind: "play", containerUnknown: false, reader: "external" },
+        acquire: false,
+      };
+    }
+    return {
+      play: { kind: "play", containerUnknown: support === "unknown", reader: "webview" },
+      acquire: false,
+    };
   }
   if (!player) {
     return { play: { kind: "unavailable", reason: "noPlayer" }, acquire: false };

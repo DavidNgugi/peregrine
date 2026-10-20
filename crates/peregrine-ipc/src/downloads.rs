@@ -125,6 +125,12 @@ pub struct DownloadJobDto {
     /// The safety gate's findings, read from the report the row persists. Non-empty for a row the
     /// gate parked as `blocked`, which is the only way a screen can explain the refusal.
     pub findings: Vec<SafetyFindingDto>,
+    /// Whether the payload has named a selected media entry a player could open.
+    ///
+    /// `false` before metadata arrives and for a payload with no playable entry; the control is drawn
+    /// disabled with a reason in that state rather than promising playback of nothing. It says the
+    /// payload *has* the file, not that any of it has arrived — that is the point of streaming.
+    pub has_media_file: bool,
 }
 
 impl DownloadJobDto {
@@ -171,8 +177,30 @@ impl DownloadJobDto {
                         .collect()
                 })
                 .unwrap_or_default(),
+            has_media_file: false,
         }
     }
+}
+
+/// One row with every fact a screen needs, from the reads those facts live in.
+///
+/// The title name and kind, the episode's numbers, and whether the payload has named a selected media
+/// file. One function rather than four copies in the command bodies: a list row and a row returned by
+/// pause must not disagree about whether Play is offered.
+async fn row_dto(
+    runtime: &peregrine_app::runtime::Runtime,
+    row: &DownloadJobRow,
+) -> DownloadJobDto {
+    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
+    let mut dto = DownloadJobDto::of(row, title, title_kind, poster);
+    if let Some(id) = row.episode_id
+        && let Ok(Some((season, episode))) = runtime.episode_numbers(id).await
+    {
+        dto.season_number = Some(season);
+        dto.episode_number = Some(episode);
+    }
+    dto.has_media_file = runtime.download_has_media(row.id).await.unwrap_or(false);
+    dto
 }
 
 /// One file a deletion would remove, as the confirmation screen lists it.
@@ -254,7 +282,7 @@ fn acquisition_error(error: &AcquisitionError) -> AppError {
         AcquisitionError::TitleUnavailable | AcquisitionError::NotFound => {
             AppError::new(ErrorCode::NotFound).with_detail(error.to_string())
         }
-        AcquisitionError::Duplicate | AcquisitionError::NotFinished => {
+        AcquisitionError::Duplicate | AcquisitionError::NotFinished | AcquisitionError::NotLive => {
             AppError::new(ErrorCode::Conflict).with_detail(error.to_string())
         }
         AcquisitionError::OptInStillRequired | AcquisitionError::NoOverride => {
@@ -352,17 +380,7 @@ pub async fn list_downloads(
     let rows = runtime.download_jobs().await?;
     let mut downloads = Vec::with_capacity(rows.len());
     for row in &rows {
-        let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
-        let mut dto = DownloadJobDto::of(row, title, title_kind, poster);
-        let episode = match row.episode_id {
-            Some(id) => runtime.episode_numbers(id).await.ok().flatten(),
-            None => None,
-        };
-        if let Some((season, episode)) = episode {
-            dto.season_number = Some(season);
-            dto.episode_number = Some(episode);
-        }
-        downloads.push(dto);
+        downloads.push(row_dto(runtime, row).await);
     }
     Ok(guard_response("downloads::list", downloads))
 }
@@ -498,10 +516,9 @@ pub async fn pause_download(
         .await
         .map_err(|error| acquisition_error(&error))?;
     let row = row_after(runtime, download.id).await?;
-    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::pause",
-        DownloadJobDto::of(&row, title, title_kind, poster),
+        row_dto(runtime, &row).await,
     ))
 }
 
@@ -519,10 +536,9 @@ pub async fn resume_download(
         .await
         .map_err(|error| acquisition_error(&error))?;
     let row = row_after(runtime, download.id).await?;
-    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::resume",
-        DownloadJobDto::of(&row, title, title_kind, poster),
+        row_dto(runtime, &row).await,
     ))
 }
 
@@ -540,10 +556,9 @@ pub async fn remove_download(
         .await
         .map_err(|error| acquisition_error(&error))?;
     let row = row_after(runtime, download.id).await?;
-    let (title, title_kind, poster) = title_ref(runtime, row.title_id).await;
     Ok(guard_response(
         "downloads::remove",
-        DownloadJobDto::of(&row, title, title_kind, poster),
+        row_dto(runtime, &row).await,
     ))
 }
 

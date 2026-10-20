@@ -265,6 +265,11 @@ export function TitleHero({
                 and it is not limited to the formats Peregrine can name — so the control stays live and
                 the doubt is said beside it. Withholding playback that works and promising playback that
                 fails are both worse than a sentence. */}
+            {offer === "arriving" && actions.play.kind === "play" ? (
+              <p className="text-caption text-text-secondary" role="status">
+                {t("title.hero.streaming")}
+              </p>
+            ) : null}
             {actions.play.kind === "play" ? (
               actions.play.reader === "external" ? (
                 <p className="text-caption text-text-secondary" role="status">

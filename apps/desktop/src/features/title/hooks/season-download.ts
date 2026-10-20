@@ -9,7 +9,7 @@
 
 import type { DownloadJobDto, EpisodeDto } from "@peregrine/ipc-client";
 
-import { downloadStatusOf } from "../../../lib/download-status.js";
+import { downloadPercentOf, downloadStatusOf } from "../../../lib/download-status.js";
 import { episodeAvailability } from "./seasons.js";
 
 /** What the season control should say. */
@@ -75,7 +75,7 @@ export function seasonDownloadPlan({
       percent += 100;
     } else if (status === "active" && job?.state !== "queued") {
       active += 1;
-      percent += Math.max(0, Math.min(100, Math.round((job?.progressPermille ?? 0) / 10)));
+      percent += downloadPercentOf(job?.progressPermille ?? 0);
     } else if (job?.state === "queued" || (job === undefined && requested.has(key))) {
       queued += 1;
       missing.push(episode);
@@ -84,7 +84,10 @@ export function seasonDownloadPlan({
       missing.push(episode);
     }
   }
-  const whole = Math.round(percent / held.length);
+  // Floored for the same reason a single transfer is: the control says 100 only when every
+  // episode is done, and an average that rounded up would claim a finished season with one
+  // episode still missing bytes.
+  const whole = Math.floor(percent / held.length);
   if (active > 0) return { status: "active", percent: whole, missing };
   if (queued > 0) return { status: "queued", percent: whole, missing };
   if (done === held.length) return { status: "done", percent: 100, missing: [] };

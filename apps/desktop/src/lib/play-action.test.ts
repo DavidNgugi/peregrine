@@ -69,9 +69,20 @@ describe("titlePageActions", () => {
     });
   });
 
-  it("says a transfer is running rather than offering a second one", () => {
+  it("plays a transfer that has named its file and waits for one that has not", () => {
+    // No metadata yet: there is no file to name, so the control waits and says why.
     expect(titlePageActions("arriving", true, null)).toEqual({
       play: { kind: "unavailable", reason: "arriving" },
+      acquire: false,
+    });
+    // The payload named an MP4: the engine serves it now, and the action is the page's own element.
+    expect(titlePageActions("arriving", true, "webview")).toEqual({
+      play: { kind: "play", containerUnknown: false, reader: "webview" },
+      acquire: false,
+    });
+    // The payload named an MKV: the same stream, read by mpv.
+    expect(titlePageActions("arriving", true, "externalPlayer")).toEqual({
+      play: { kind: "play", containerUnknown: false, reader: "external" },
       acquire: false,
     });
   });
@@ -119,7 +130,9 @@ describe("titlePageActions", () => {
       for (const player of [true, false]) {
         for (const support of ["webview", "externalPlayer", "unknown", null] as const) {
           const actions = titlePageActions(offer, player, support);
-          const playable = offer === "play" && player;
+          const playable =
+            player &&
+            (offer === "play" || (offer === "arriving" && support !== null));
           expect(
             actions.play.kind === "play",
             `${offer}/${String(player)}/${String(support)}`,

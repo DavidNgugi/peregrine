@@ -46,7 +46,11 @@ import { TitleFeedList } from "./TitleFeedList.js";
 import { WatchProviders } from "./WatchProviders.js";
 import { useWatchAvailability } from "../hooks/useWatchAvailability.js";
 import type { Route, TitleKind } from "../../../app/routes.js";
-import { downloadStatusOf, type DownloadMarks } from "../../../lib/download-status.js";
+import {
+  downloadPercentOf,
+  downloadStatusOf,
+  type DownloadMarks,
+} from "../../../lib/download-status.js";
 
 interface TitleScreenProps {
   /** Which of the two the route says this is, which is what the page can say immediately. */
@@ -217,6 +221,20 @@ export function TitleScreen({
       return kept.length === previous.size ? previous : new Set(kept);
     });
   }, [downloadRows, title?.id]);
+  // **The offer is a read, so a download that changes has to be read again.** The hero's Play needs
+  // the core's `offer` and `playSupport`, and neither is in the queue row: a job that has just named
+  // its media file is the moment Play becomes live, and a job that finished is the moment it stops
+  // being a stream. The signature changes only on a lifecycle move or the file list, not on progress.
+  const downloadSignal = (downloadRows ?? [])
+    .filter((row) => row.titleId === title?.id)
+    .map((row) => `${row.state}:${String(row.hasMediaFile)}`)
+    .join("|");
+  useEffect(() => {
+    if (downloadSignal === "") {
+      return;
+    }
+    void detail.refresh();
+  }, [downloadSignal, detail.refresh]);
   useEffect(() => {
     if (acquire?.episode == null || acquire.outcome === null || acquire.outcome === "queued") {
       return;
@@ -573,8 +591,9 @@ export function TitleScreen({
                       <EpisodeCard
                         {...(job === undefined
                           ? {}
-                          : { downloadPercent: Math.round(job.progressPermille / 10) })}
+                          : { downloadPercent: downloadPercentOf(job.progressPermille) })}
                         downloading={job !== undefined || requested.has(key)}
+                        streamable={job?.hasMediaFile ?? false}
                         episode={episode}
                         onSchedule={
                           episode.airDate === null

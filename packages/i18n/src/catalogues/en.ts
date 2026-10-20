@@ -109,6 +109,7 @@ export const en = {
       },
       action: {
         pause: "Pause",
+        play: "Play",
         resume: "Resume",
         allowArchives: "Allow archives",
         remove: "Remove",
@@ -496,7 +497,8 @@ export const en = {
         downloading: "Downloading… {{percent}}%",
         noFile: "The library holds no file for this title yet.",
         fileMissing: "The library recorded a file for this title, and it is not on disk right now.",
-        arriving: "A download for this title is in flight.",
+        arriving: "A download for this title is in flight. Play appears once it names a file.",
+        streaming: "Playing while it downloads.",
         noPlayer: "This build has no player yet, so there is nothing to play it with.",
         // The container, said before the press rather than after the black rectangle. It names what is
         // missing — an external player — rather than what failed, because nothing has failed yet and a

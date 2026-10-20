@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   downloadMarks,
+  downloadPercentOf,
+  downloadProgressMarks,
   downloadStatusLabelKey,
   downloadStatusOf,
   downloadsFirst,
@@ -37,6 +39,37 @@ describe("downloadStatusOf", () => {
     expect(downloadStatusLabelKey("active")).toBe("downloads.status.active");
     expect(downloadStatusLabelKey("done")).toBe("downloads.status.done");
     expect(downloadStatusLabelKey("failed")).toBe("downloads.status.failed");
+  });
+});
+
+describe("downloadPercentOf", () => {
+  it("stays below 100 until the whole payload has arrived", () => {
+    // 999 permille is a piece short of a complete torrent; a rounded-up 100 would claim a
+    // download the queue is still waiting on.
+    expect(downloadPercentOf(999)).toBe(99);
+    expect(downloadPercentOf(1_000)).toBe(100);
+  });
+
+  it("clamps to the range the core documents", () => {
+    expect(downloadPercentOf(0)).toBe(0);
+    expect(downloadPercentOf(-5)).toBe(0);
+    expect(downloadPercentOf(1_200)).toBe(100);
+  });
+});
+
+describe("downloadProgressMarks", () => {
+  it("keeps a nearly finished transfer at 99", () => {
+    const marks = downloadProgressMarks([
+      { titleId: 7, state: "downloading", progressPermille: 999 },
+    ]);
+    expect(marks.get(7)).toBe(99);
+  });
+
+  it("draws nothing for a job that is no longer active", () => {
+    const marks = downloadProgressMarks([
+      { titleId: 7, state: "completed", progressPermille: 1_000 },
+    ]);
+    expect(marks.size).toBe(0);
   });
 });
 
@@ -143,6 +176,7 @@ describe("downloadsFirst", () => {
           titleKind: "movie",
           poster: null,
           state: "completed",
+          hasMediaFile: false,
         },
       ],
       "movie",
@@ -155,8 +189,8 @@ describe("downloadsFirst", () => {
     const merged = downloadsFirst(
       items,
       [
-        { titleId: 9, title: "nine", titleKind: "movie", poster: null, state: "completed" },
-        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "downloading" },
+        { titleId: 9, title: "nine", titleKind: "movie", poster: null, state: "completed", hasMediaFile: false },
+        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "downloading", hasMediaFile: true },
       ],
       "movie",
       make,
@@ -167,7 +201,7 @@ describe("downloadsFirst", () => {
   it("keeps the provider row for a title that is both and does not draw it twice", () => {
     const merged = downloadsFirst(
       items,
-      [{ titleId: 2, title: "two", titleKind: "movie", poster: null, state: "downloading" }],
+      [{ titleId: 2, title: "two", titleKind: "movie", poster: null, state: "downloading", hasMediaFile: true }],
       "movie",
       make,
     );
@@ -179,8 +213,8 @@ describe("downloadsFirst", () => {
     const merged = downloadsFirst(
       items,
       [
-        { titleId: 9, title: "nine", titleKind: "show", poster: null, state: "completed" },
-        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "failed" },
+        { titleId: 9, title: "nine", titleKind: "show", poster: null, state: "completed", hasMediaFile: false },
+        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "failed", hasMediaFile: false },
       ],
       "movie",
       make,

@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use peregrine_domain::{PlayerBackend, PlayerError, PositionSink, SafePath};
+use peregrine_domain::{PlayerBackend, PlayerError, PlayerInput, PositionSink, SafePath};
 
 /// How much media time must pass between two position reports.
 const REPORT_EVERY_SECONDS: f64 = 5.0;
@@ -142,7 +142,7 @@ impl Default for MpvPlayer {
 impl PlayerBackend for MpvPlayer {
     fn play(
         &self,
-        file: &SafePath,
+        input: PlayerInput<'_>,
         start_ms: Option<i64>,
         subtitle: Option<&SafePath>,
         positions: Arc<dyn PositionSink>,
@@ -159,7 +159,7 @@ impl PlayerBackend for MpvPlayer {
         let stop = Arc::new(AtomicBool::new(false));
         let mut command = command_for(
             &binary,
-            file.as_path(),
+            input,
             subtitle.map(SafePath::as_path),
             &socket,
             start_ms,
@@ -217,7 +217,7 @@ impl Drop for MpvPlayer {
 /// went through: `--sub-auto=no` is what stops mpv loading a neighbour nobody chose.
 fn command_for(
     binary: &Path,
-    file: &Path,
+    input: PlayerInput<'_>,
     subtitle: Option<&Path>,
     socket: &Path,
     start_ms: Option<i64>,
@@ -228,16 +228,35 @@ fn command_for(
     if let Some(milliseconds) = start_ms.filter(|value| *value > 0) {
         command.arg(format!("--start={:.3}", milliseconds as f64 / 1000.0));
     }
-    if let Some(subtitle) = subtitle {
+    if matches!(input, PlayerInput::Stream(_)) {
+        // **A torrent in flight may not have its last pieces, and libavformat's probe seeks to the
+        // Matroska Cues at the end for them.** An unseekable stream is read forward instead, which
+        // is the only read a stalled tail can answer. `--start` still lands on the requested frame:
+        // the reader discards forward to it rather than seeking. Seeking during playback is the
+        // cost, and it is the right trade for a stream that is still arriving.
+        command.arg("--stream-lavf-o=seekable=0");
+    }
+    // A sidecar belongs to a library file. A stream has no `subtitle_track` row to hang one from,
+    // and the caller passes none; ignoring one here rather than failing keeps a file-shaped option
+    // from becoming a reason a film will not start.
+    if let (PlayerInput::File(_), Some(subtitle)) = (input, subtitle) {
         // An OsString rather than a formatted string: a path need not be UTF-8.
         let mut flag = std::ffi::OsString::from("--sub-file=");
         flag.push(subtitle.as_os_str());
         command.arg(flag);
     }
     // The end of option parsing. A canonical path begins with a separator on every platform this
-    // build runs on, so this is belt and braces; it is also the rule SECURITY.md T5 states.
+    // build runs on, so this is belt and braces; it is also the rule SECURITY.md T5 states. It
+    // applies to the URL too: mpv's own option parser must see it as the item, not as a flag.
     command.arg("--");
-    command.arg(file);
+    match input {
+        PlayerInput::File(file) => {
+            command.arg(file.as_path());
+        }
+        PlayerInput::Stream(url) => {
+            command.arg(url.as_str());
+        }
+    }
     command.stdin(Stdio::null());
     command.stdout(Stdio::null());
     command.stderr(Stdio::null());
@@ -378,7 +397,7 @@ fn resolve_mpv() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use peregrine_domain::PathGuard;
+    use peregrine_domain::{LoopbackUrl, PathGuard};
 
     struct Noop;
 
@@ -398,9 +417,10 @@ mod tests {
     #[test]
     fn the_flags_disable_config_scripts_ytdl_and_subtitle_autoload() {
         let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
         let command = command_for(
             Path::new("/usr/bin/true"),
-            file(&directory).as_path(),
+            PlayerInput::File(&media),
             None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
@@ -436,15 +456,22 @@ mod tests {
             .position(|arg| arg.to_string_lossy() == "--")
             .expect("the terminator is there");
         assert_eq!(args.len(), terminator + 2, "exactly the file follows --");
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.to_string_lossy() == "--stream-lavf-o=seekable=0"),
+            "a file on disk stays seekable"
+        );
     }
 
     #[test]
     fn a_selected_sidecar_is_passed_while_autoload_stays_off() {
         let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
         let sidecar = directory.path().join("film.en.srt");
         let command = command_for(
             Path::new("/usr/bin/true"),
-            file(&directory).as_path(),
+            PlayerInput::File(&media),
             Some(&sidecar),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
@@ -471,9 +498,10 @@ mod tests {
     #[test]
     fn a_resume_position_is_passed_as_whole_and_millisecond_seconds() {
         let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
         let command = command_for(
             Path::new("/usr/bin/true"),
-            file(&directory).as_path(),
+            PlayerInput::File(&media),
             None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(90_500),
@@ -488,9 +516,10 @@ mod tests {
     #[test]
     fn a_zero_start_is_not_passed_at_all() {
         let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
         let command = command_for(
             Path::new("/usr/bin/true"),
-            file(&directory).as_path(),
+            PlayerInput::File(&media),
             None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(0),
@@ -504,6 +533,44 @@ mod tests {
     }
 
     #[test]
+    fn a_loopback_stream_follows_the_terminator_and_takes_no_sidecar() {
+        let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/token").expect("a loopback URL");
+        let command = command_for(
+            Path::new("/usr/bin/true"),
+            PlayerInput::Stream(&url),
+            Some(Path::new("/tmp/film.en.srt")),
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            Some(15_000),
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let terminator = args.iter().position(|arg| arg == "--").expect("terminator");
+        assert_eq!(args.len(), terminator + 2, "exactly the stream follows --");
+        assert_eq!(args.last().map(String::as_str), Some(url.as_str()));
+        assert!(
+            !args.iter().any(|arg| arg.starts_with("--sub-file=")),
+            "a stream has no sidecar row"
+        );
+        assert!(args.iter().any(|arg| arg == "--start=15.000"));
+        assert!(
+            args.iter().any(|arg| arg == "--stream-lavf-o=seekable=0"),
+            "a torrent stream must not make libavformat seek to a missing tail"
+        );
+    }
+
+    #[test]
+    fn a_stream_is_spawned_through_the_same_hardened_path() {
+        let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/token").expect("a loopback URL");
+        let player = MpvPlayer::with_binary("/usr/bin/true");
+        player
+            .play(PlayerInput::Stream(&url), None, None, Arc::new(Noop))
+            .expect("the binary spawns");
+        player.stop();
+    }
+
+    #[test]
     fn a_file_is_spawned_and_the_previous_child_is_replaced() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let safe = file(&directory);
@@ -511,10 +578,10 @@ mod tests {
         // the replacement without a player installed.
         let player = MpvPlayer::with_binary("/usr/bin/true");
         player
-            .play(&safe, None, None, Arc::new(Noop))
+            .play(PlayerInput::File(&safe), None, None, Arc::new(Noop))
             .expect("the binary spawns");
         player
-            .play(&safe, None, None, Arc::new(Noop))
+            .play(PlayerInput::File(&safe), None, None, Arc::new(Noop))
             .expect("a second press replaces the first");
         player.stop();
     }
@@ -522,9 +589,10 @@ mod tests {
     #[test]
     fn a_missing_binary_is_reported_rather_than_silently_doing_nothing() {
         let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
         let player = MpvPlayer::with_binary("/nonexistent/peregrine-mpv");
         let error = player
-            .play(&file(&directory), None, None, Arc::new(Noop))
+            .play(PlayerInput::File(&media), None, None, Arc::new(Noop))
             .expect_err("no such binary");
         assert_eq!(error, PlayerError::Spawn);
     }

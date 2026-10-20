@@ -121,6 +121,8 @@ export interface DownloadTitleSource extends DownloadMarkSource {
   readonly title: string | null;
   readonly titleKind: "movie" | "show" | null;
   readonly poster: string | null;
+  /** Whether the payload has named a media file, so the tile can offer Play while it arrives. */
+  readonly hasMediaFile: boolean;
 }
 
 /**
@@ -203,6 +205,17 @@ export function downloadCardProps(
 /** One percent per title whose transfer is in flight, from the queue's own progress. */
 export type DownloadProgress = ReadonlyMap<number, number>;
 
+/**
+ * A transfer's progress as whole percent, rounded down.
+ *
+ * Floored, not rounded, because only a whole payload may read 100: a job stalled on its final
+ * piece sits at 999 permille, and rounding that to 100 claims a completion the queue has not
+ * reached. The clamp is the core's documented range, not a rule invented here.
+ */
+export function downloadPercentOf(progressPermille: number): number {
+  return Math.min(100, Math.max(0, Math.floor(progressPermille / 10)));
+}
+
 /** The subset of a download row the progress map reads. */
 export interface DownloadProgressSource extends DownloadMarkSource {
   readonly progressPermille: number;
@@ -221,7 +234,7 @@ export function downloadProgressMarks(
   const marks = new Map<number, number>();
   for (const job of downloads) {
     if (downloadStatusOf(job.state) !== "active") continue;
-    const percent = Math.min(100, Math.max(0, Math.round(job.progressPermille / 10)));
+    const percent = downloadPercentOf(job.progressPermille);
     const held = marks.get(job.titleId);
     if (held === undefined || percent > held) {
       marks.set(job.titleId, percent);

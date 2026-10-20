@@ -19,6 +19,7 @@
 //! still carry a video stream the platform's decoder refuses, and no name distinguishes those. That
 //! is the `Webview` answer's honest caveat: it means "this build will try", not "this will play".
 
+use std::fmt;
 use std::sync::Arc;
 
 use crate::path::SafePath;
@@ -121,6 +122,73 @@ pub enum PlayerError {
     Spawn,
 }
 
+/// A URL this process serves on its own loopback listener.
+///
+/// **The only kind of stream a player may be pointed at.** A player is handed a URL instead of a path
+/// when the bytes come from the torrent engine (`PG-E13-09`), and the safety of that is the address:
+/// the listener is bound to `127.0.0.1`, the port is ephemeral, and the path segment is a per-session
+/// credential. Parsing it here stops a future caller handing mpv a provider URL, a `file:` path, or a
+/// host on the network; the constructor refuses all three.
+///
+/// The `Debug` implementation prints none of the value, because the path segment is the session token
+/// and a log line carrying it would be a bearer credential in a log (`SECURITY.md` T13).
+#[derive(Clone, PartialEq, Eq)]
+pub struct LoopbackUrl(String);
+
+impl LoopbackUrl {
+    /// Parses a loopback stream URL, or answers `None` when it is anything else.
+    ///
+    /// Only `http`, only `127.0.0.1`, only a non-zero port, and only a non-empty path. A userinfo
+    /// section, a query, a fragment, whitespace, a control character, or a backslash is refused rather
+    /// than normalised: this is the address of a socket this process bound, not a value to repair.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        let rest = value.strip_prefix("http://")?;
+        if value.chars().any(char::is_control)
+            || rest
+                .chars()
+                .any(|character| matches!(character, '@' | '#' | '?' | ' ' | '\\'))
+        {
+            return None;
+        }
+        let (authority, path) = rest.split_once('/')?;
+        if path.is_empty() {
+            return None;
+        }
+        let port = authority.strip_prefix("127.0.0.1:")?;
+        if !port.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        let port: u16 = port.parse().ok()?;
+        if port == 0 {
+            return None;
+        }
+        Some(Self(value.to_owned()))
+    }
+
+    /// The URL, as the player receives it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for LoopbackUrl {
+    /// Says what the value is and nothing it contains: the token is in the path.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("LoopbackUrl(<redacted>)")
+    }
+}
+
+/// What a player is asked to open: a file this process may read, or a stream it serves itself.
+#[derive(Clone, Copy, Debug)]
+pub enum PlayerInput<'a> {
+    /// A guarded file path.
+    File(&'a SafePath),
+    /// A URL this process serves on loopback, which only [`LoopbackUrl`] can construct.
+    Stream(&'a LoopbackUrl),
+}
+
 /// Where a player reports how far it has got.
 ///
 /// The same pair the in-page player sends the progress write: a position in milliseconds and the
@@ -135,12 +203,12 @@ pub trait PositionSink: Send + Sync {
 /// A port rather than a direct spawn because launching an external process is an adapter concern
 /// (AGENTS R8), and because a test can then assert the action without a player on the machine.
 pub trait PlayerBackend: Send + Sync {
-    /// Starts a file in the shared external player, replacing whatever it was showing.
+    /// Opens a file or a stream in the shared external player, replacing whatever it was showing.
     ///
     /// `start_ms` is where the app's own watch progress says to resume, or `None` for the
-    /// beginning. `subtitle` is the sidecar the session selected, or `None` for no subtitle;
-    /// it is a guarded path for the same reason the media is, because it is handed to another
-    /// process. `positions` is where the player reports its position as it advances.
+    /// beginning. `subtitle` is the sidecar the session selected, or `None` for no subtitle; it is a
+    /// guarded path for the same reason the media is, because it is handed to another process, and a
+    /// stream has no sidecar row to offer. `positions` is where the player reports its position.
     ///
     /// # Errors
     ///
@@ -148,7 +216,7 @@ pub trait PlayerBackend: Send + Sync {
     /// operating system refused to start one.
     fn play(
         &self,
-        file: &SafePath,
+        input: PlayerInput<'_>,
         start_ms: Option<i64>,
         subtitle: Option<&SafePath>,
         positions: Arc<dyn PositionSink>,
@@ -161,6 +229,39 @@ pub trait PlayerBackend: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_loopback_url_is_the_only_stream_a_player_may_open() {
+        assert!(LoopbackUrl::parse("http://127.0.0.1:43123/media/abc").is_some());
+        let refused = [
+            "https://127.0.0.1:43123/media/abc",
+            "http://127.0.0.1:0/media/abc",
+            "http://127.0.0.1/media/abc",
+            "http://127.0.0.1:99999/media/abc",
+            "http://127.0.0.1:8O/media/abc",
+            "http://example.com:80/media/abc",
+            "http://127.0.0.1.evil.com:80/media/abc",
+            "http://user@127.0.0.1:80/media/abc",
+            "http://127.0.0.1:80/",
+            "http://127.0.0.1:80/media/abc?x=1",
+            "http://127.0.0.1:80/media/abc#frag",
+            "file:///etc/passwd",
+            " http://127.0.0.1:80/media/abc",
+            "http://127.0.0.1:80/media/abc\\def",
+        ];
+        for value in refused {
+            assert!(LoopbackUrl::parse(value).is_none(), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_loopback_url_s_debug_prints_no_part_of_itself() {
+        let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/secret-token")
+            .expect("a loopback URL");
+        let line = format!("{url:?}");
+        assert!(!line.contains("secret-token"), "{line}");
+        assert!(!line.contains("43123"), "{line}");
+    }
 
     #[test]
     fn the_containers_the_webview_reads_are_answered_as_the_webview_s() {

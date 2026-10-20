@@ -101,9 +101,10 @@ export function TitleScreen({
 
   const nextEpisode = useMemo(() => {
     const started = episodes.find(
-      (episode) => episode.playable && episode.percent > 0 && episode.percent < 95,
+      (episode) =>
+        (episode.playable || episode.streamable) && episode.percent > 0 && episode.percent < 95,
     );
-    return started ?? episodes.find((episode) => episode.playable);
+    return started ?? episodes.find((episode) => episode.playable || episode.streamable);
   }, [episodes]);
   const canPlay = movie ? title?.playable === true : nextEpisode !== undefined;
 
@@ -315,7 +316,11 @@ export function TitleScreen({
           const tone = downloadTone(episode.downloadState);
           // A failed episode is exactly the one a retry is for; only a playable, queued, active,
           // or finished row already has a state a retry would not change.
-          return episode.playable || tone === "queued" || tone === "active" || tone === "done"
+          return episode.playable ||
+            episode.streamable ||
+            tone === "queued" ||
+            tone === "active" ||
+            tone === "done"
             ? episode
             : { ...episode, downloadState: "queued", downloadPercent: 0 };
         }),
@@ -619,12 +624,13 @@ export function TitleScreen({
                 {episodes.map((episode) => {
                   const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
                   const action = downloadAction(episode.downloadState, episode.downloadPercent);
+                  const playable = episode.playable || episode.streamable;
                   return (
                     <div className="episode" key={key}>
                       <button
                         className="episode-play"
                         data-focus="true"
-                        disabled={!episode.playable}
+                        disabled={!playable}
                         onClick={() => void playEpisode(episode, episode.watched)}
                         type="button"
                       >
@@ -663,7 +669,7 @@ export function TitleScreen({
                           )}
                         </span>
                         <span className="episode-action">
-                          {!episode.playable
+                          {!playable
                             ? "Not downloaded"
                             : episode.watched
                               ? "Play again"
@@ -673,7 +679,7 @@ export function TitleScreen({
                         </span>
                       </button>
                       <div className="episode-controls">
-                        {canAcquire && !episode.playable ? (
+                        {canAcquire && !playable ? (
                           <button
                             className="episode-download"
                             data-focus="true"

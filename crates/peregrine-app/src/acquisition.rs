@@ -104,7 +104,7 @@ use peregrine_storage::{
 };
 use peregrine_torrent::{
     AddIntent, AddRefused, AddRequest, EngineError, EngineState, FileSelection, TorrentEngine,
-    TorrentHandle, TorrentSource,
+    TorrentHandle, TorrentMetadataFetch, TorrentSource,
 };
 use peregrine_usenet::{AddNzbRequest, NzbDocument, ServerConfig, UsenetEngine, UsenetHandle};
 use thiserror::Error;
@@ -128,6 +128,13 @@ const TICK_INTERVAL_MILLIS: i64 = 1_000;
 /// discarded by [`AcquisitionService::statistics`] without even reading the engine, and a
 /// slower one would leave the queue behind the transfer it is describing.
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(TICK_INTERVAL_MILLIS as u64);
+
+/// How long recovery may wait for a magnet's file list before leaving the row for the next start.
+///
+/// A magnet with no peers would otherwise hold startup or a Resume press for as long as the swarm
+/// takes, which is a wait the queue cannot report. The timeout turns it into a refusal the person
+/// can see; the row is left as it was, so trying again later is the same action.
+const METADATA_RECOVERY_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Why an acquisition operation could not be carried out.
 ///
@@ -214,6 +221,13 @@ pub enum AcquisitionError {
     /// No job holds that id, so there was nothing to move.
     #[error("that download job no longer exists")]
     NotFound,
+
+    /// The row exists, but this process holds no engine handle for it.
+    ///
+    /// A restart loses every in-process handle, so a live-looking row may need its handoff completed
+    /// before it can be paused or streamed. The sentence names the action that does that.
+    #[error("that download is not running in this session; resume it to continue")]
+    NotLive,
 
     /// A queue entry that has not finished cannot be cleared: it is still transferring, waiting in
     /// line, or blocked with a report the user has not answered.
@@ -356,6 +370,11 @@ pub struct AcquisitionService {
     usenet: Option<Arc<dyn UsenetEngine>>,
     /// The Usenet jobs this process started, keyed by row id.
     usenet_handles: Mutex<HashMap<i64, UsenetHandle>>,
+    /// The metadata-only fetch, when this session has one.
+    ///
+    /// Used only by recovery: a job interrupted before the engine accepted it has no file list, and
+    /// the stored magnet is the one source that can produce it again (PG-E10-03's read, reused).
+    metadata: Option<Arc<dyn TorrentMetadataFetch>>,
     /// The archive tools, when this build found them. None means an archive-only payload fails
     /// with a named refusal rather than reporting a completion with nothing imported.
     post: Option<crate::usenet_post::PostTools>,
@@ -443,6 +462,7 @@ impl AcquisitionService {
             handles: Mutex::new(HashMap::new()),
             usenet: None,
             usenet_handles: Mutex::new(HashMap::new()),
+            metadata: None,
             post: None,
             written_at: Mutex::new(HashMap::new()),
             pump: Mutex::new(None),
@@ -462,6 +482,16 @@ impl AcquisitionService {
     #[must_use]
     pub fn with_usenet(mut self, engine: Arc<dyn UsenetEngine>) -> Self {
         self.usenet = Some(engine);
+        self
+    }
+
+    /// Gives the service the metadata-only fetch a restart recovery needs.
+    ///
+    /// Without one, a job interrupted before its file list was written stays where it is rather
+    /// than being guessed at; a download that never wrote its selection has nothing to add.
+    #[must_use]
+    pub fn with_metadata_fetch(mut self, metadata: Arc<dyn TorrentMetadataFetch>) -> Self {
+        self.metadata = Some(metadata);
         self
     }
 
@@ -613,6 +643,14 @@ impl AcquisitionService {
             Err(StorageError::Conflict { .. }) => return Err(AcquisitionError::Duplicate),
             Err(error) => return Err(AcquisitionError::Storage(error)),
         };
+
+        // **The file list is written before the handoff, not after it.** A process killed between
+        // the engine's add and the selection write would leave a `metadata` row with nothing to
+        // reattach; writing it here means every metadata row already carries the list its recovery
+        // needs. The handoff writes it again, which is the same upsert.
+        self.database
+            .select_download_files(row.id, request.description.clone(), &selection)
+            .await?;
 
         // 5. Admission's free-space floor, for a job that could actually run. A job the volume
         //    cannot hold stays `queued`, which is what SM1 makes of it: it was admitted to the
@@ -985,8 +1023,8 @@ impl AcquisitionService {
     ///
     /// # Errors
     ///
-    /// [`AcquisitionError::NotFound`] when this process holds no handle for the job — a job started
-    /// before a restart is `PG-E10-08`'s to reattach — and the engine and domain refusals.
+    /// [`AcquisitionError::NotLive`] when this process holds no handle for the job — a job started
+    /// before a restart is resumed, not paused — and the engine and domain refusals.
     pub async fn pause(&self, id: i64) -> Result<DownloadState, AcquisitionError> {
         if let Some(handle) = self.usenet_handle(id) {
             let engine = self
@@ -997,7 +1035,7 @@ impl AcquisitionService {
             engine.pause(handle).await?;
             return Ok(state);
         }
-        let handle = self.handle(id)?;
+        let handle = self.handle(id).map_err(|_| AcquisitionError::NotLive)?;
         let state = self.apply(id, DownloadEvent::Paused).await?;
         self.engine.pause(handle).await?;
         Ok(state)
@@ -1007,7 +1045,9 @@ impl AcquisitionService {
     ///
     /// The engine call comes first here, so a resume the engine cannot carry out cannot leave a row
     /// that says `downloading` while nothing transfers — which is the failure a user cannot
-    /// diagnose. A resume of a job that never paused is [`AcquisitionError::TransitionRefused`].
+    /// diagnose. A job with no handle is reattached from its row first: a `metadata` row completes
+    /// its handoff, and a `paused` one resumes in place. A resume of a running job is still
+    /// [`AcquisitionError::TransitionRefused`].
     pub async fn resume(&self, id: i64) -> Result<DownloadState, AcquisitionError> {
         if let Some(handle) = self.usenet_handle(id) {
             let engine = self
@@ -1017,7 +1057,27 @@ impl AcquisitionService {
             engine.resume(handle).await?;
             return self.apply(id, DownloadEvent::Resumed).await;
         }
-        let handle = self.handle(id)?;
+        // **A restart loses every handle, and Resume is the action that completes the handoff.**
+        // The row is the state: its magnet, report, and file list (or the metadata fetched again
+        // from that magnet) are enough to add it with reattach semantics. A row that is still
+        // `metadata` is accepted by the engine and moves to `downloading`; a row that was
+        // `paused` resumes from the bytes already on disk.
+        let Ok(handle) = self.handle(id) else {
+            let row = self
+                .database
+                .download_job(unrestricted(), id)
+                .await?
+                .ok_or(AcquisitionError::NotFound)?;
+            let _ = self.reattach_row(&row).await?;
+            return match row.state {
+                DownloadState::Metadata => self.apply(id, DownloadEvent::EngineAccepted).await,
+                DownloadState::Paused => self.apply(id, DownloadEvent::Resumed).await,
+                // A downloading row's handle was lost; the add above restarts it, and the state
+                // already says what it is.
+                DownloadState::Downloading => Ok(DownloadState::Downloading),
+                _ => Err(AcquisitionError::NotLive),
+            };
+        };
         self.engine.resume(handle).await?;
         self.apply(id, DownloadEvent::Resumed).await
     }
@@ -1225,6 +1285,144 @@ impl AcquisitionService {
             .select_download_files(id, description, &selection)
             .await?;
         Ok(self.reload(id).await?.state)
+    }
+
+    /// Completes a handoff this session did not witness.
+    ///
+    /// **The row is the state.** A job interrupted between its safety report and the engine's
+    /// acceptance is left `metadata` with a magnet and a persisted report; one that lost its handle
+    /// with a restart is `downloading` or `paused`. Both are added again with reattach semantics, so
+    /// the bytes already on disk are verified rather than fetched twice.
+    ///
+    /// **A file list is not optional.** The engine's add names a selection, and a job that died before
+    /// its rows were written has none. The stored magnet is then read through the metadata-only fetch
+    /// this session was given, the hash is checked against the row, and every entry is selected —
+    /// the same list the gate judged, because the report is the row's own. A session without that
+    /// fetch leaves the row for the next start rather than guessing at a selection.
+    async fn reattach_row(&self, row: &DownloadJobRow) -> Result<TorrentHandle, AcquisitionError> {
+        let Some(info_hash) = row.info_hash else {
+            return Err(AcquisitionError::NotFound);
+        };
+        let Some(report) = row.safety_report.clone() else {
+            return Err(AcquisitionError::NotFound);
+        };
+        let source = match row.source.as_ref() {
+            Some(DownloadSource::Magnet(uri)) => TorrentSource::Magnet(
+                NonEmptyText::new(uri.as_str()).map_err(|_| AcquisitionError::UnsupportedSource)?,
+            ),
+            Some(DownloadSource::TorrentFile(path)) => {
+                TorrentSource::TorrentFile(tokio::fs::read(path.as_str()).await?)
+            }
+            Some(DownloadSource::NzbFile(_)) | None => {
+                return Err(AcquisitionError::UnsupportedSource);
+            }
+        };
+        let save_path = self
+            .destination
+            .resolve(std::path::Path::new(row.save_path.as_str()))
+            .map_err(|source| AcquisitionError::SavePath { source })?;
+        let mut files = self.database.download_files(unrestricted(), row.id).await?;
+        if !files.iter().any(|file| file.selected) {
+            let Some(metadata) = self.metadata.as_ref() else {
+                return Err(AcquisitionError::NotLive);
+            };
+            let fetched =
+                tokio::time::timeout(METADATA_RECOVERY_TIMEOUT, metadata.fetch_metadata(&source))
+                    .await
+                    .map_err(|_| AcquisitionError::Engine(EngineError::Failed))??;
+            if fetched.info_hash() != info_hash {
+                // The magnet no longer names the torrent the report judged. Adding it would be a
+                // different download, so it is refused rather than re-inspected here.
+                return Err(AcquisitionError::Engine(EngineError::Failed));
+            }
+            let description = fetched.description().clone();
+            let selection: Vec<usize> = (0..description.entries().len()).collect();
+            if selection.is_empty() {
+                return Err(AcquisitionError::UnsupportedSource);
+            }
+            self.database
+                .select_download_files(row.id, description, &selection)
+                .await?;
+            files = self.database.download_files(unrestricted(), row.id).await?;
+        }
+        let selection: Vec<usize> = files
+            .iter()
+            .filter(|file| file.selected)
+            .filter_map(|file| usize::try_from(file.file_index).ok())
+            .collect();
+        if selection.is_empty() {
+            return Err(AcquisitionError::UnsupportedSource);
+        }
+        let engine_state = self
+            .database
+            .download_engine_state(unrestricted(), row.id)
+            .await
+            .ok()
+            .flatten()
+            .filter(|bytes| !bytes.is_empty())
+            .map(EngineState::new);
+        let request = AddRequest::new(
+            info_hash,
+            source,
+            save_path,
+            FileSelection::new(selection),
+            true,
+            AddIntent::Reattach {
+                state: engine_state,
+            },
+            &report,
+        )?;
+        let handle = self.engine.add(&request).await?;
+        self.handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(row.id, handle);
+        if let Ok(state) = self.engine.state(handle).await {
+            let _ = self
+                .database
+                .record_download_engine_state(row.id, state.as_bytes())
+                .await;
+        }
+        Ok(handle)
+    }
+
+    /// Completes every `metadata` job a previous process left behind.
+    ///
+    /// The one state that is neither terminal nor live: SM1's only ordinary edge out of it is the
+    /// engine's acceptance, so a row found there after a restart is a handoff that never finished.
+    /// One row's failure is logged and does not stop the rest, and a successful one is moved to
+    /// `downloading` so the pump starts reporting it.
+    ///
+    /// # Errors
+    ///
+    /// Storage refusals while listing the rows.
+    pub async fn recover_metadata_jobs(&self) -> Result<usize, AcquisitionError> {
+        let jobs = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                &[DownloadState::Metadata],
+                PageRequest::first(200),
+            )
+            .await?;
+        let mut recovered = 0;
+        for row in jobs {
+            if row.protocol != Protocol::Torrent {
+                continue;
+            }
+            match self.reattach_row(&row).await {
+                Ok(_) => match self.apply(row.id, DownloadEvent::EngineAccepted).await {
+                    Ok(_) => recovered += 1,
+                    Err(error) => {
+                        warn!(job = row.id, %error, "a recovered download could not be marked downloading");
+                    }
+                },
+                Err(error) => {
+                    warn!(job = row.id, %error, "a metadata download could not be resumed");
+                }
+            }
+        }
+        Ok(recovered)
     }
 
     /// Reattaches the torrent jobs a previous process left live.
@@ -2011,7 +2209,9 @@ mod tests {
         DEFAULT_EPOCH_MILLISECONDS, EngineCall, EngineOperation, FakeClock, FakeTorrentEngine,
         FakeUsenetEngine,
     };
-    use peregrine_torrent::{Bytes, EngineError};
+    use peregrine_torrent::{
+        Bytes, EngineError, EngineFuture, FetchedMetadata, TorrentMetadataFetch, TorrentSource,
+    };
     use tempfile::TempDir;
 
     use super::*;
@@ -2100,6 +2300,15 @@ mod tests {
                     .expect("the notice log is not poisoned")
                     .push((download_id, failed));
             })
+        }
+    }
+
+    /// The metadata fetch a recovery test needs: the fixture's own torrent, whatever the magnet.
+    struct FixedMetadata;
+
+    impl TorrentMetadataFetch for FixedMetadata {
+        fn fetch_metadata(&self, _source: &TorrentSource) -> EngineFuture<'_, FetchedMetadata> {
+            Box::pin(async { Ok(FetchedMetadata::new(hash(42), description())) })
         }
     }
 
@@ -2237,6 +2446,7 @@ mod tests {
             Arc::clone(&bus),
             Arc::clone(&trash) as Arc<dyn Trash>,
         );
+        let service = service.with_metadata_fetch(Arc::new(FixedMetadata));
         let service = if usenet {
             service.with_usenet(Arc::new(FakeUsenetEngine::new()))
         } else {
@@ -2531,6 +2741,85 @@ mod tests {
                 .unwrap()
                 .allow_archives
         );
+    }
+
+    /// A row interrupted before its file list was written is completed from the stored magnet: the
+    /// fetch rebuilds the description, every entry is selected, the gate's own report is reused, and
+    /// the row reaches `downloading` with its files recorded.
+    #[tokio::test]
+    async fn a_metadata_row_is_recovered_from_its_magnet() {
+        let harness = harness().await;
+        let description = description();
+        let mut job = new_job(harness.title_id);
+        job.info_hash = Some(hash(42));
+        let save_path = harness
+            .directory
+            .path()
+            .join("downloads")
+            .join("Movies")
+            .to_string_lossy()
+            .into_owned();
+        job.save_path = text(&save_path);
+        let row = harness
+            .database
+            .create_download_job(job)
+            .await
+            .expect("the row inserts");
+        let report = PayloadInspector::new(InspectionLimits::new(1_000_000, u64::MAX)).inspect(
+            &description,
+            &PathGuard::new(harness.directory.path().join("downloads"))
+                .expect("the fixture root is absolute"),
+            OptIn::NotGranted,
+        );
+        harness
+            .service
+            .apply(row.id, DownloadEvent::Admitted)
+            .await
+            .expect("admitted");
+        harness
+            .service
+            .apply(row.id, DownloadEvent::Inspected(report))
+            .await
+            .expect("inspected");
+
+        let before = harness
+            .database
+            .download_job(unrestricted(), row.id)
+            .await
+            .expect("the row reads")
+            .expect("the row exists");
+        assert_eq!(before.state, DownloadState::Metadata);
+        assert!(
+            harness
+                .database
+                .download_files(unrestricted(), row.id)
+                .await
+                .expect("the files read")
+                .is_empty(),
+            "the interrupted handoff wrote no file list"
+        );
+
+        let recovered = harness
+            .service
+            .recover_metadata_jobs()
+            .await
+            .expect("recovery runs");
+        assert_eq!(recovered, 1);
+
+        let after = harness
+            .database
+            .download_job(unrestricted(), row.id)
+            .await
+            .expect("the row reads")
+            .expect("the row exists");
+        assert_eq!(after.state, DownloadState::Downloading);
+        let files = harness
+            .database
+            .download_files(unrestricted(), row.id)
+            .await
+            .expect("the files read");
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|file| file.selected));
     }
 
     #[tokio::test]
@@ -3376,12 +3665,12 @@ mod tests {
     }
 
     /// A job this process does not hold has no handle, which is a different answer from a state
-    /// refusal: reattaching one is PG-E10-08's.
+    /// refusal: reattaching one is PG-E10-08's, and Resume is the action that does it.
     #[tokio::test]
-    async fn operations_on_a_job_this_process_does_not_hold_are_not_found() {
+    async fn operations_on_a_job_this_process_does_not_hold_are_not_live() {
         let harness = harness().await;
         let error = harness.service.pause(404).await.expect_err("no such job");
-        assert!(matches!(error, AcquisitionError::NotFound));
+        assert!(matches!(error, AcquisitionError::NotLive));
 
         let blocked = harness
             .start(
@@ -3395,7 +3684,7 @@ mod tests {
             .pause(blocked.job.id)
             .await
             .expect_err("a blocked job has no engine handle");
-        assert!(matches!(error, AcquisitionError::NotFound));
+        assert!(matches!(error, AcquisitionError::NotLive));
     }
 
     /// The report the engine rejects can never be built: a `.torrent`-file row needs the bytes, and

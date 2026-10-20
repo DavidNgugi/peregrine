@@ -302,6 +302,11 @@ impl From<RuntimeError> for AppError {
             RuntimeError::NoPlayableFile => AppError::new(ErrorCode::NotFound)
                 .with_detail("Your library has no copy of that title that is on this machine.")
                 .with_cause("the title holds no file whose scan says it is present"),
+            RuntimeError::MediaUnidentified => AppError::new(ErrorCode::Conflict)
+                .with_detail(
+                    "That download holds more than one episode, and none matches the one you asked for.",
+                )
+                .with_cause("no selected media entry's name matches the requested episode"),
             RuntimeError::FileOutsideRoots => AppError::new(ErrorCode::PermissionDenied)
                 .with_detail("That file is outside the folders Peregrine is allowed to read.")
                 .with_cause("no configured library root contains the media file's path"),

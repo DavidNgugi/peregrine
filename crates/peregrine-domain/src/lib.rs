@@ -101,7 +101,9 @@ pub use ordering::{
     DEFAULT_SCHEME, EpisodeOrderingStrategy, OrderedEpisodes, Unplaced, UnplacedReason,
 };
 pub use path::{MAX_COMPONENT_BYTES, PathGuard, PathGuardError, SafePath};
-pub use playback::{LocalPlayback, PlayerBackend, PlayerError, PositionSink};
+pub use playback::{
+    LocalPlayback, LoopbackUrl, PlayerBackend, PlayerError, PlayerInput, PositionSink,
+};
 pub use ports::{Clock, IdGenerator, SessionToken, SessionTokenError, TokenSource};
 pub use preferences::{PlaybackPreference, PlaybackPreferenceError, SubtitleMode};
 pub use quality::{
