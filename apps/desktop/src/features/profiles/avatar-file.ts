@@ -4,7 +4,7 @@ import type { Avatar } from "./profile.js";
 const MAX_BYTES = 12 * 1024 * 1024;
 
 /**
- * Turns a chosen file into a square 256 px JPEG data URL.
+ * Turns a chosen file into a square 128 px JPEG data URL.
  *
  * The value is stored in the profile book on this device, not sent over IPC: an avatar is a few tens
  * of kilobytes, and a command that copied it into the app's data directory would be a second place
@@ -18,8 +18,8 @@ export async function fileToAvatar(file: File): Promise<Avatar> {
   try {
     const side = Math.min(bitmap.width, bitmap.height);
     const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 256;
+    canvas.width = 128;
+    canvas.height = 128;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("canvas is unavailable");
     context.drawImage(
@@ -30,8 +30,8 @@ export async function fileToAvatar(file: File): Promise<Avatar> {
       side,
       0,
       0,
-      256,
-      256,
+      128,
+      128,
     );
     return { kind: "upload", dataUrl: canvas.toDataURL("image/jpeg", 0.85) };
   } finally {

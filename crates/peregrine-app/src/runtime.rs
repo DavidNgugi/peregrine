@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
@@ -58,24 +59,37 @@ use crate::jobs::hello::{self, HelloJob};
 use crate::jobs::{CANCELLED_CODE, INTERNAL_CODE};
 use crate::observability::{LogConfig, Observability};
 
+/// The account the installation is watching as.
+///
+/// The picker changes this once, on the process, and every scoped read and write resolves it
+/// through [`installation_scope`]. The value starts at the seeded default and is replaced at
+/// startup from the persisted choice. A web request deliberately does not override it: one
+/// household profile is active at a time across the desktop and every paired browser.
+static ACTIVE_ACCOUNT: AtomicI64 = AtomicI64::new(1);
+static ACTIVE_RESTRICTED: AtomicBool = AtomicBool::new(false);
+static ACTIVE_CAN_ACQUIRE: AtomicBool = AtomicBool::new(true);
+
 /// The scope every user-facing read in this build runs under.
 ///
-/// Accounts are `PG-E35`'s epic, and the migrations seed no account row: a fresh installation has
-/// nothing to select between, so there is no account to resolve. What a scope *carries* is a
-/// ceiling and a curation flag, and this build has neither — so the scope is unrestricted, and the
-/// account id it names is inert for both predicates an unrestricted scope applies (`hidden_by_scope`
-/// is zero, which turns the predicate into a no-op; `peregrine-storage`'s own tests have relied on
-/// exactly that since the first scoped read).
-///
-/// **When the accounts epic lands, this becomes a resolution rather than a constant:** the runtime
-/// reads the default account and builds the scope from its `rating_ceiling` and `curated_only`, and
-/// every call site that passes this keeps passing a scope — which is why the constant lives here
-/// with the reason rather than at each call site with none.
+/// The id and the restricted flag are the active profile's; a child profile, a rating ceiling,
+/// or a curated-only account sets the flag, which is what makes the storage predicates hide
+/// adult and unrated content. The full rating map and the capability gates are E35's.
 #[must_use]
 pub fn installation_scope() -> peregrine_domain::AccountScope {
-    peregrine_domain::AccountScope::unrestricted(
-        peregrine_domain::AccountId::new(1).expect("account one is a positive id"),
-    )
+    let account = peregrine_domain::AccountId::new(ACTIVE_ACCOUNT.load(Ordering::Relaxed))
+        .unwrap_or_else(|_| peregrine_domain::AccountId::new(1).expect("account one is positive"));
+    if ACTIVE_RESTRICTED.load(Ordering::Relaxed) {
+        peregrine_domain::AccountScope::restricted(account)
+    } else {
+        peregrine_domain::AccountScope::unrestricted(account)
+    }
+}
+
+/// Makes `account` the scope every later read and write uses.
+fn activate(account: &peregrine_storage::AccountRow) {
+    ACTIVE_ACCOUNT.store(account.id, Ordering::Relaxed);
+    ACTIVE_RESTRICTED.store(account.is_restricted(), Ordering::Relaxed);
+    ACTIVE_CAN_ACQUIRE.store(account.can_acquire, Ordering::Relaxed);
 }
 
 /// Writes a position a player reported, preserving a flag the user set by hand.
@@ -1120,6 +1134,12 @@ impl Runtime {
         // A recovery is logged where it happens, in `Database::open`; the runtime carries
         // the signal on to health.
         let database = Arc::new(Database::open(config.database_path()).await?);
+        // The last profile the household chose applies before the first read of this process.
+        match database.active_profile().await {
+            Ok(Some(account)) => activate(&account),
+            Ok(None) => {}
+            Err(error) => warn!(%error, "the active profile could not be read"),
+        }
         // The composition root is the one place the production adapters are chosen
         // (AGENTS R8); the scheduler is handed both ports rather than reaching for them.
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
@@ -3359,6 +3379,163 @@ impl Runtime {
                 TitleSeasonDetail { row, poster }
             })
             .collect())
+    }
+
+    /// Whether the active profile may start a download.
+    ///
+    /// A child profile's row says no, and the command and the web route refuse before the queue
+    /// is touched. The UI hides the button too, but this is the gate that makes the refusal true.
+    #[must_use]
+    pub fn can_acquire(&self) -> bool {
+        ACTIVE_CAN_ACQUIRE.load(Ordering::Relaxed)
+    }
+
+    /// Every profile, with the default first.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the database refuses.
+    pub async fn profiles(&self) -> Result<Vec<peregrine_storage::AccountRow>, RuntimeError> {
+        Ok(self.database.profiles().await?)
+    }
+
+    /// The profile the installation is watching as.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the database refuses.
+    pub async fn active_profile(
+        &self,
+    ) -> Result<Option<peregrine_storage::AccountRow>, RuntimeError> {
+        Ok(self.database.active_profile().await?)
+    }
+
+    /// Creates a profile and makes it the active one.
+    ///
+    /// The child kind carries the two fields the schema requires of it: a ceiling and no
+    /// acquisition. The full rating map and the OS gate are E35's; the restricted scope already
+    /// hides adult and unrated content.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] for a blank or overlong name and an unknown kind, and
+    /// [`RuntimeError::Storage`] when the row cannot be written.
+    pub async fn create_profile(
+        &self,
+        name: &str,
+        kind: &str,
+        avatar_ref: Option<&str>,
+    ) -> Result<peregrine_storage::AccountRow, RuntimeError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 40 {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "a profile name is between 1 and 40 characters".to_owned(),
+            });
+        }
+        let child = match kind {
+            "child" => true,
+            "adult" | "guest" => false,
+            _ => {
+                return Err(RuntimeError::InvalidRequest {
+                    detail: "a profile is adult, child, or guest".to_owned(),
+                });
+            }
+        };
+        let id = self
+            .database
+            .create_profile(peregrine_storage::NewAccount {
+                name: name.to_owned(),
+                kind: kind.to_owned(),
+                avatar_kind: if avatar_ref.is_some() {
+                    "custom"
+                } else {
+                    "initials"
+                }
+                .to_owned(),
+                avatar_ref: avatar_ref.map(ToOwned::to_owned),
+                rating_ceiling: child.then(|| "PG-13".to_owned()),
+                curated_only: false,
+                can_acquire: !child && kind != "guest",
+                created_at: self.clock.now().as_millisecond(),
+            })
+            .await?;
+        self.select_profile(id).await
+    }
+
+    /// Writes one profile's name and avatar.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] for a blank or overlong name, and
+    /// [`RuntimeError::Storage`] when the row cannot be written.
+    pub async fn update_profile(
+        &self,
+        id: i64,
+        name: &str,
+        avatar_ref: Option<&str>,
+    ) -> Result<peregrine_storage::AccountRow, RuntimeError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 40 {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "a profile name is between 1 and 40 characters".to_owned(),
+            });
+        }
+        if !self
+            .database
+            .update_profile(
+                id,
+                peregrine_storage::AccountEdit {
+                    name: name.to_owned(),
+                    avatar_kind: if avatar_ref.is_some() {
+                        "custom"
+                    } else {
+                        "initials"
+                    }
+                    .to_owned(),
+                    avatar_ref: avatar_ref.map(ToOwned::to_owned),
+                },
+            )
+            .await?
+        {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "that profile does not exist".to_owned(),
+            });
+        }
+        let Some(account) = self.database.profile(id).await? else {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "that profile does not exist".to_owned(),
+            });
+        };
+        if self
+            .active_profile()
+            .await?
+            .is_some_and(|active| active.id == id)
+        {
+            activate(&account);
+        }
+        Ok(account)
+    }
+
+    /// Makes one profile the active scope and persists the choice.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] when no such profile exists, and
+    /// [`RuntimeError::Storage`] when the setting cannot be written.
+    pub async fn select_profile(
+        &self,
+        id: i64,
+    ) -> Result<peregrine_storage::AccountRow, RuntimeError> {
+        let Some(account) = self.database.profile(id).await? else {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "that profile does not exist".to_owned(),
+            });
+        };
+        self.database
+            .set_active_profile(account.id, self.clock.now().as_millisecond())
+            .await?;
+        activate(&account);
+        Ok(account)
     }
 
     /// A page of the titles the library holds, newest first.

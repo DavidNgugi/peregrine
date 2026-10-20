@@ -115,7 +115,7 @@ CREATE TABLE secret_ref (
 );
 ```
 
-`settings` holds only user preferences. Anything derivable, cached, or provider-owned lives elsewhere so the database can be reconstructed.
+`settings` holds only user preferences. Anything derivable, cached, or provider-owned lives elsewhere so the database can be reconstructed. The shared profile picker stores its choice under `active_account` as a JSON account id ([ADR 0032](./adr/0032-shared-profiles.md)); the account's own row carries the name, avatar, kind, and capability columns. The library is shared, while watch progress, the watchlist, continue-watching, history, and notifications are keyed by that account id.
 
 ### 2.2 Catalogue
 
@@ -1073,7 +1073,7 @@ CREATE INDEX approval_pending_idx ON approval_request (created_at) WHERE state =
 
 ### 2.13 Accounts, curation, and requests
 
-Accounts and their gating are specified in [adr/0019](../docs/adr/0019-local-accounts-and-parental-gating.md). Everything here is local: no email, no password reset over a network, no remote identity.
+Accounts are the household's shared profiles ([ADR 0032](./adr/0032-shared-profiles.md)); their gating is specified in [ADR 0019](./adr/0019-local-accounts-and-parental-gating.md). Everything here is local: no email, no password reset over a network, no remote identity.
 
 ```sql
 -- Curation and restriction rules. One row per rule; a title is visible when it satisfies

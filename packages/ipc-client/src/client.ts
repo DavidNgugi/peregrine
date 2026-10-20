@@ -46,6 +46,8 @@ import type {
   LibraryTitleDto,
   MatchAsDto,
   PlaybackSessionDto,
+  ProfileDto,
+  ProfileRef,
   ProwlarrStatusDto,
   MatchRuleDto,
   TitleDetailDto,
@@ -406,6 +408,34 @@ export async function addLibraryRoot(
  */
 export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto[]> {
   return unwrap(commands.listTitles(limit ?? null));
+}
+
+/** Every household profile, with the active one marked. */
+export async function listProfiles(): Promise<ProfileDto[]> {
+  return unwrap(commands.listProfiles());
+}
+
+/** Creates a profile and makes it active. */
+export async function createProfile(
+  name: string,
+  kind: string,
+  avatarRef: string | null,
+): Promise<ProfileDto> {
+  return unwrap(commands.createProfile(name, kind, avatarRef));
+}
+
+/** Makes one profile active. */
+export async function selectProfile(profile: ProfileRef): Promise<ProfileDto> {
+  return unwrap(commands.selectProfile(profile));
+}
+
+/** Writes one profile's name and avatar. */
+export async function updateProfile(
+  profile: ProfileRef,
+  name: string,
+  avatarRef: string | null,
+): Promise<ProfileDto> {
+  return unwrap(commands.updateProfile(profile, name, avatarRef));
 }
 
 /**

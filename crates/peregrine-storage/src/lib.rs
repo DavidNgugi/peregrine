@@ -14,6 +14,7 @@
 //! in this crate's public surface, so the driver stays an implementation detail of the
 //! adapter.
 
+mod account;
 mod backup;
 mod catalogue;
 mod database;
@@ -49,6 +50,7 @@ mod writer;
 pub use offers::{ChosenOfferRow, NewOffer, OfferRow};
 pub use watch_options::{WatchOfferRow, WatchRegionRow};
 
+pub use account::{AccountEdit, AccountRow, NewAccount};
 pub use catalogue::{CastRow, CastWrite, PersonRow};
 pub use catalogue::{
     MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StubEpisode, StubSeason, StubTitle,

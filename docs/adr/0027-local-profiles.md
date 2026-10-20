@@ -1,6 +1,6 @@
 # ADR 0027 — Local profiles before accounts
 
-- **Status:** Accepted. Provisional until [0019](./0019-local-accounts-and-parental-gating.md) lands.
+- **Status:** Superseded by [0032](./0032-shared-profiles.md). Preserved for the local-label slice.
 - **Date:** 2026-10-18
 
 ## Context

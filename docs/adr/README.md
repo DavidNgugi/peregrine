@@ -30,10 +30,11 @@ One file per decision that constrains the architecture. Each records the context
 | [0024](./0024-managed-local-indexer.md) | A managed local indexer manager (Prowlarr) as a component pack | Accepted; decision 6 seeds public indexers, crossing 0009 §9 deliberately |
 | [0025](./0025-prebuilt-sidecars.md) | Prebuilt sidecars: GPL-3 mpv and LGPL-3 ffmpeg on Windows and Linux | Accepted; refines 0009 and supersedes 0014's ban on `--enable-version3` |
 | [0026](./0026-scheduled-downloads.md) | Scheduled downloads: one table, one in-app ticker | Accepted |
-| [0027](./0027-local-profiles.md) | Local profiles before accounts | Accepted, provisional until 0019 |
+| [0027](./0027-local-profiles.md) | Local profiles before accounts | Superseded by 0032 |
 | [0028](./0028-tv-web-client.md) | TV web client: a paired LAN surface, read-only by default | Accepted; first slice of E37, refined into the desktop app ahead of the E36 daemon |
 | [0029](./0029-device-scoped-acquisition.md) | Device-scoped acquisition from the LAN client | Accepted; adds the opt-in `acquire` scope, the approval checkbox, and the audit rows |
 | [0030](./0030-usenet-acquisition.md) | Usenet acquisition: a native engine, a quarantined archive, and an import boundary | Accepted, post-1.0 (E38) |
 | [0031](./0031-browser-client-parity.md) | Browser client parity: viewer writes, subtitles, and language defaults | Accepted; refines 0028 §3 and §6 and 0029 |
+| [0032](./0032-shared-profiles.md) | Shared profiles on the account table | Accepted; supersedes 0027 |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.

@@ -1387,6 +1387,69 @@ impl Database {
         }
     }
 
+    /// Every profile on this installation, oldest first with the default before the rest.
+    ///
+    /// No scope applies: this is the picker itself, and it deliberately lists every profile.
+    pub async fn profiles(&self) -> Result<Vec<crate::AccountRow>, StorageError> {
+        crate::account::list(&self.readers).await
+    }
+
+    /// One profile by id, or none.
+    pub async fn profile(&self, id: i64) -> Result<Option<crate::AccountRow>, StorageError> {
+        crate::account::get(&self.readers, id).await
+    }
+
+    /// The profile the installation last chose, when it still exists.
+    pub async fn active_profile(&self) -> Result<Option<crate::AccountRow>, StorageError> {
+        crate::account::active(&self.readers).await
+    }
+
+    /// Inserts one profile and reports its id.
+    ///
+    /// The caller has already validated the name, kind, and capability columns; the schema's
+    /// CHECK constraints refuse a child that can acquire or has neither a ceiling nor curation.
+    pub async fn create_profile(&self, account: crate::NewAccount) -> Result<i64, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::InsertAccount(Box::new(account)))
+            .await?
+        {
+            WriteResponse::RowInserted { id } => Ok(id),
+            other => Err(unexpected_response("create_profile", &other)),
+        }
+    }
+
+    /// Writes one profile's name and avatar.
+    pub async fn update_profile(
+        &self,
+        id: i64,
+        edit: crate::AccountEdit,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::UpdateAccount {
+                id,
+                edit: Box::new(edit),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("update_profile", &other)),
+        }
+    }
+
+    /// Remembers the chosen profile and stamps its last-used instant.
+    pub async fn set_active_profile(&self, id: i64, at: i64) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetActiveAccount { id, at })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("set_active_profile", &other)),
+        }
+    }
+
     /// A page of the titles the library holds, newest first, with what it holds of each.
     ///
     /// The library screen's read, and a scoped one: this is a caller asking what *it* has, so the

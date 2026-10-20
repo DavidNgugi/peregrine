@@ -327,7 +327,7 @@ Rules that keep it fast:
 | `/settings/:section?` | Settings | `Cmd/Ctrl+,`; sections mirror the settings registry. |
 | `/diagnostics` | Diagnostics | Provider health, disk budget, log tail, endpoint list. |
 
-The profile selector is a full-window modal rather than a route: it is reachable from every screen, and choosing a profile returns to the screen underneath. It holds device-local names and avatars until the local-account work lands.
+The profile selector is a full-window modal rather than a route: it is reachable from every screen, and choosing a profile returns to the screen underneath. The profiles are `account` rows ([ADR 0032](./adr/0032-shared-profiles.md)): the desktop and every paired browser read the same list, the active choice is one installation-wide setting, and the runtime resolves every scoped read through it. The library is shared; watch progress, the watchlist, history, and notifications are keyed by the active account.
 
 ### Feature folder convention
 

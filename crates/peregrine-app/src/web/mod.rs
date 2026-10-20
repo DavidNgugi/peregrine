@@ -1447,13 +1447,86 @@ impl WebService {
         }
         Ok(downloads)
     }
+    /// Every profile, with the active one marked.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the profile read fails.
+    pub async fn profiles(&self) -> Result<Vec<ProfileDto>, WebError> {
+        let active = self
+            .runtime
+            .active_profile()
+            .await?
+            .map(|profile| profile.id);
+        let profiles = self.runtime.profiles().await?;
+        Ok(profiles
+            .into_iter()
+            .map(|profile| {
+                let restricted = profile.is_restricted();
+                ProfileDto {
+                    id: profile.id,
+                    name: profile.name,
+                    kind: profile.kind,
+                    avatar_kind: profile.avatar_kind,
+                    avatar_ref: profile.avatar_ref,
+                    restricted,
+                    can_acquire: profile.can_acquire,
+                    active: Some(profile.id) == active,
+                }
+            })
+            .collect())
+    }
+
+    /// Creates a profile and makes it active.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] for an invalid name or kind, or when the write fails.
+    pub async fn create_profile(
+        &self,
+        name: &str,
+        kind: &str,
+        avatar_ref: Option<&str>,
+    ) -> Result<ProfileDto, WebError> {
+        let account = self.runtime.create_profile(name, kind, avatar_ref).await?;
+        Ok(ProfileDto {
+            restricted: account.is_restricted(),
+            can_acquire: account.can_acquire,
+            id: account.id,
+            name: account.name,
+            kind: account.kind,
+            avatar_kind: account.avatar_kind,
+            avatar_ref: account.avatar_ref,
+            active: true,
+        })
+    }
+
+    /// Makes one profile active.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the profile does not exist or the setting cannot be written.
+    pub async fn select_profile(&self, id: i64) -> Result<ProfileDto, WebError> {
+        let account = self.runtime.select_profile(id).await?;
+        Ok(ProfileDto {
+            restricted: account.is_restricted(),
+            can_acquire: account.can_acquire,
+            id: account.id,
+            name: account.name,
+            kind: account.kind,
+            avatar_kind: account.avatar_kind,
+            avatar_ref: account.avatar_ref,
+            active: true,
+        })
+    }
+
     /// The device behind a request, with the one capability the client gates its buttons on.
     #[must_use]
     pub fn me(&self, device: &PairedDevice) -> MeDto {
         MeDto {
             name: device.name.clone(),
             scopes: device.scopes.clone(),
-            can_acquire: scope_allows(&device.scopes, ACQUIRE_SCOPE),
+            can_acquire: scope_allows(&device.scopes, ACQUIRE_SCOPE) && self.runtime.can_acquire(),
         }
     }
 
@@ -1474,7 +1547,7 @@ impl WebService {
         season: Option<u32>,
         episode: Option<u32>,
     ) -> Result<AcquireDto, WebError> {
-        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) {
+        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) || !self.runtime.can_acquire() {
             return Err(WebError::NotPermitted);
         }
         let pick = match (season, episode) {
@@ -1666,7 +1739,7 @@ impl WebService {
         title_id: i64,
         season: u32,
     ) -> Result<SeasonAcquireDto, WebError> {
-        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) {
+        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) || !self.runtime.can_acquire() {
             return Err(WebError::NotPermitted);
         }
         if season == 0 {
@@ -2661,7 +2734,29 @@ pub struct GenreDto {
     pub name: String,
 }
 
-/// The device behind the current request.
+/// One profile the picker offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileDto {
+    /// The account id every scoped row carries.
+    pub id: i64,
+    /// The display name.
+    pub name: String,
+    /// `adult`, `child`, or `guest`.
+    pub kind: String,
+    /// `initials`, `custom`, `builtin`, or `default`.
+    pub avatar_kind: String,
+    /// The avatar's seed/style or data URL.
+    pub avatar_ref: Option<String>,
+    /// Whether this profile's scope hides adult and unrated content.
+    pub restricted: bool,
+    /// Whether the profile may start a download.
+    pub can_acquire: bool,
+    /// Whether this is the one the installation is watching as.
+    pub active: bool,
+}
+
+/// The device behind a request, with the one capability the client gates its buttons on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeDto {

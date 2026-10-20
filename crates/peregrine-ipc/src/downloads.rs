@@ -323,8 +323,12 @@ pub async fn acquire(
     episode: Option<u32>,
 ) -> Result<JobStarted, AppError> {
     let episode = episode_pick(season, episode)?;
-    let started = state
-        .runtime()?
+    let runtime = state.runtime()?;
+    if !runtime.can_acquire() {
+        return Err(AppError::new(ErrorCode::PermissionDenied)
+            .with_detail("This profile may not start downloads."));
+    }
+    let started = runtime
         .start_acquire(
             peregrine_app::runtime::installation_scope(),
             title.id,

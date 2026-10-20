@@ -764,6 +764,14 @@ export const commands = {
 	 *  `INTERNAL` when the centre could not be written.
 	 */
 	dismissNotification: (notification: NotificationRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_notification", { notification })),
+	/**  Every profile, with the active one marked. */
+	listProfiles: () => typedError<ProfileDto[], AppError_Serialize>(__TAURI_INVOKE("list_profiles")),
+	/**  Creates a profile and makes it active. */
+	createProfile: (name: string, kind: string, avatarRef: string | null) => typedError<ProfileDto, AppError_Serialize>(__TAURI_INVOKE("create_profile", { name, kind, avatarRef })),
+	/**  Makes one profile active. */
+	selectProfile: (profile: ProfileRef) => typedError<ProfileDto, AppError_Serialize>(__TAURI_INVOKE("select_profile", { profile })),
+	/**  Writes one profile's name and avatar. */
+	updateProfile: (profile: ProfileRef, name: string, avatarRef: string | null) => typedError<ProfileDto, AppError_Serialize>(__TAURI_INVOKE("update_profile", { profile, name, avatarRef })),
 	/**  What the account is part-way through, most recently updated first. */
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
@@ -1785,6 +1793,32 @@ export type PlaybackSessionDto = {
 	 *  value's carrier, and a follow-up call would race the frame it is trying to position.
 	 */
 	resumePositionMs: number | null,
+};
+
+/**  One profile the picker draws. */
+export type ProfileDto = {
+	/**  The account id every scoped row carries. */
+	id: number,
+	/**  The display name. */
+	name: string,
+	/**  `adult`, `child`, or `guest`. */
+	kind: string,
+	/**  `initials` or `custom`. */
+	avatarKind: string,
+	/**  A `DiceBear` data URL or a 128 px upload. */
+	avatarRef: string | null,
+	/**  Whether this profile's scope hides adult and unrated content. */
+	restricted: boolean,
+	/**  Whether the profile may start a download. */
+	canAcquire: boolean,
+	/**  Whether this is the profile the installation is watching as. */
+	active: boolean,
+};
+
+/**  The profile a command names. */
+export type ProfileRef = {
+	/**  The account row. */
+	id: number,
 };
 
 /**

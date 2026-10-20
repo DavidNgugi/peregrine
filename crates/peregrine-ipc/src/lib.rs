@@ -27,6 +27,7 @@ pub mod library;
 pub mod network;
 pub mod notifications;
 pub mod playback;
+pub mod profiles;
 pub mod providers;
 pub mod prowlarr;
 pub mod runtime;
@@ -158,6 +159,10 @@ pub fn builder() -> Builder<tauri::Wry> {
             notifications::mark_notification_read,
             notifications::mark_all_notifications_read,
             notifications::dismiss_notification,
+            profiles::list_profiles,
+            profiles::create_profile,
+            profiles::select_profile,
+            profiles::update_profile,
             watch::continue_watching,
             watch::record_progress,
             watch::set_title_watched,

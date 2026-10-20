@@ -34,8 +34,8 @@ use tracing::warn;
 
 use super::{
     AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MeDto, MediaGrant, PairOffer,
-    PairStatus, PlaybackTicket, PreferencesDto, SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto,
-    WebError, WebService,
+    PairStatus, PlaybackTicket, PreferencesDto, ProfileDto, SeasonAcquireDto, TOKEN_COOKIE,
+    TileDto, TitleDto, WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -51,6 +51,8 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/watchlist", get(watchlist).post(watchlist_set))
         .route("/api/watched", post(watched_set))
         .route("/api/downloads", get(downloads))
+        .route("/api/profiles", get(profiles).post(create_profile))
+        .route("/api/profiles/select", post(select_profile))
         .route("/api/me", get(me))
         .route("/api/host", get(host))
         .route("/api/preferences", get(preferences))
@@ -538,6 +540,53 @@ async fn home(
 ) -> Result<Json<super::HomeDto>, ApiError> {
     require_read(&device)?;
     Ok(Json(service.home_page().await?))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProfileBody {
+    name: String,
+    kind: Option<String>,
+    avatar_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SelectProfileBody {
+    id: i64,
+}
+
+async fn profiles(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+) -> Result<Json<Vec<ProfileDto>>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.profiles().await?))
+}
+
+async fn create_profile(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<CreateProfileBody>,
+) -> Result<Json<ProfileDto>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(
+        service
+            .create_profile(
+                &body.name,
+                body.kind.as_deref().unwrap_or("adult"),
+                body.avatar_ref.as_deref(),
+            )
+            .await?,
+    ))
+}
+
+async fn select_profile(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<SelectProfileBody>,
+) -> Result<Json<ProfileDto>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.select_profile(body.id).await?))
 }
 
 async fn library(

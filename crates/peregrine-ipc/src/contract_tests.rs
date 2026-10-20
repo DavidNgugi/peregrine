@@ -805,6 +805,81 @@ fn web_cases() -> Vec<ContractCase> {
     ]
 }
 
+/// The profile commands' failure path: every one refuses without a running runtime.
+///
+/// Success is covered by the runtime and storage tests; this table exists so registering a
+/// profile command without a contract case fails the suite by name.
+fn profile_cases() -> Vec<ContractCase> {
+    let fails = || Expected::Fails {
+        code: ErrorCode::Internal,
+        retryable: false,
+    };
+    vec![
+        ContractCase {
+            command: "list_profiles",
+            expected: fails(),
+            drive: list_profiles_without_a_runtime,
+        },
+        ContractCase {
+            command: "create_profile",
+            expected: fails(),
+            drive: create_profile_without_a_runtime,
+        },
+        ContractCase {
+            command: "select_profile",
+            expected: fails(),
+            drive: select_profile_without_a_runtime,
+        },
+        ContractCase {
+            command: "update_profile",
+            expected: fails(),
+            drive: update_profile_without_a_runtime,
+        },
+    ]
+}
+
+fn list_profiles_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::profiles::list_profiles(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn create_profile_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::profiles::create_profile(
+            harness.dead_state(),
+            "Ada".to_owned(),
+            "adult".to_owned(),
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn select_profile_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::profiles::select_profile(harness.dead_state(), crate::profiles::ProfileRef { id: 1 })
+            .await
+            .map(drop)
+    })
+}
+
+fn update_profile_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::profiles::update_profile(
+            harness.dead_state(),
+            crate::profiles::ProfileRef { id: 1 },
+            "Ada".to_owned(),
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
 fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
     all.extend(provider_cases());
@@ -815,6 +890,7 @@ fn cases() -> Vec<ContractCase> {
     all.extend(notification_cases());
     all.extend(watch_cases());
     all.extend(playback_cases());
+    all.extend(profile_cases());
     all.extend(prowlarr_cases());
     all.extend(web_cases());
     all

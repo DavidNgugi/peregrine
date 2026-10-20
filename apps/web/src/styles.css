@@ -1742,6 +1742,12 @@ button {
   font-weight: 700;
 }
 
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .profile-avatar-large {
   width: 64px;
   height: 64px;
@@ -1853,6 +1859,31 @@ button {
   background: var(--surface-0);
   color: var(--text-primary);
   font: inherit;
+}
+
+.profile-kids {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.profile-kids input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.profile-error {
+  margin: 12px 0 0;
+  color: var(--state-error);
+  font-size: 13px;
+}
+
+.profile-choice small {
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .profile-note {

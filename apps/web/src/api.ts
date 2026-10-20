@@ -30,6 +30,18 @@ export interface LibraryRow {
   readonly addedAt: number;
 }
 
+/** One household profile, as the picker draws it. */
+export interface Profile {
+  readonly id: number;
+  readonly name: string;
+  readonly kind: string;
+  readonly avatarKind: string;
+  readonly avatarRef: string | null;
+  readonly restricted: boolean;
+  readonly canAcquire: boolean;
+  readonly active: boolean;
+}
+
 /** One title as its page draws it. */
 export interface Progress {
   readonly episodeId: number | null;
@@ -306,6 +318,11 @@ export const api = {
   watchlist: (): Promise<Tile[]> => request<Tile[]>("/api/watchlist"),
   downloads: (): Promise<Download[]> => request<Download[]>("/api/downloads"),
   me: (): Promise<Me> => request<Me>("/api/me"),
+  profiles: (): Promise<Profile[]> => request<Profile[]>("/api/profiles"),
+  createProfile: (name: string, kind: string): Promise<Profile> =>
+    request<Profile>("/api/profiles", "POST", { name, kind }),
+  selectProfile: (id: number): Promise<Profile> =>
+    request<Profile>("/api/profiles/select", "POST", { id }),
   host: (): Promise<HostData> => request<HostData>("/api/host"),
   acquire: (titleId: number, season?: number, episode?: number): Promise<AcquireResult> =>
     request<AcquireResult>("/api/acquire", "POST", {

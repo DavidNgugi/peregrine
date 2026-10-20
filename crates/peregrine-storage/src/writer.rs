@@ -206,6 +206,22 @@ pub(crate) enum WriteRequest {
         title_id: i64,
         ids: Vec<TitleExternalId>,
     },
+    /// Insert one profile into `account`.
+    InsertAccount(Box<crate::account::NewAccount>),
+    /// Write one profile's name and avatar.
+    UpdateAccount {
+        /// The account row.
+        id: i64,
+        /// The new name and avatar.
+        edit: Box<crate::account::AccountEdit>,
+    },
+    /// Remember which profile the installation is watching as.
+    SetActiveAccount {
+        /// The account row.
+        id: i64,
+        /// Unix milliseconds.
+        at: i64,
+    },
     /// Insert one row into `library_root`.
     InsertLibraryRoot(Box<peregrine_domain::LibraryRoot>),
     /// Insert one row into `media_item`.
@@ -604,6 +620,18 @@ async fn apply_library_write(
     request: WriteRequest,
 ) -> Result<WriteResponse, StorageError> {
     match request {
+        WriteRequest::InsertAccount(account) => crate::account::insert(connection, &account)
+            .await
+            .map(|id| WriteResponse::RowInserted { id })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::UpdateAccount { id, edit } => crate::account::update(connection, id, &edit)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed })
+            .map_err(StorageError::from_sqlx),
+        WriteRequest::SetActiveAccount { id, at } => crate::account::set_active(connection, id, at)
+            .await
+            .map(|()| WriteResponse::Applied)
+            .map_err(StorageError::from_sqlx),
         WriteRequest::InsertLibraryRoot(root) => crate::library::insert_root(connection, &root)
             .await
             .map(|id| WriteResponse::RowInserted { id })

@@ -101,7 +101,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const [history, setHistory] = useState(() => startHistory(initialRoute));
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileBackdrops, setProfileBackdrops] = useState<readonly string[]>([]);
-  const { active, add, book, rename, select } = useProfiles();
+  const { active, add, book, refresh, rename, select } = useProfiles();
   const reportBackdrops = useCallback((urls: readonly string[]) => {
     setProfileBackdrops((current) =>
       current.length === urls.length && current.every((url, index) => url === urls[index])
@@ -392,6 +392,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
               <ProfileAvatar
                 label={t("profile.switch")}
                 onClick={() => {
+                  refresh();
                   setProfileOpen(true);
                 }}
                 profile={active}
@@ -454,6 +455,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                     <ProfileAvatar
                       label={t("profile.switch")}
                       onClick={() => {
+                        refresh();
                         setProfileOpen(true);
                       }}
                       profile={active}
