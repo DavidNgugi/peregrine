@@ -19,6 +19,8 @@ import { twMerge } from "./merge.js";
 const PATHS = {
   /** Downloads: an arrow into a tray. */
   download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />,
+  /** Notifications: a bell with its clapper. */
+  bell: <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6m4 9a2 2 0 0 0 4 0" />,
 
   /** Discover: a compass rose. */
   compass: (
