@@ -1707,6 +1707,179 @@ button {
   z-index: 2;
 }
 
+/* ---- Profile selector (device-local, like the desktop's) ---- */
+
+.profile-button {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 12px 4px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.profile-button-name {
+  max-width: 120px;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profile-avatar-large {
+  width: 64px;
+  height: 64px;
+  font-size: 22px;
+}
+
+.profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: oklch(0 0 0 / 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.profile-dialog {
+  width: min(560px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--surface-1);
+  box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.8);
+}
+
+.profile-dialog-head {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.profile-dialog h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.profile-close,
+.profile-add button {
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.profile-close:disabled,
+.profile-add button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.profile-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.profile-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  min-width: 100px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.profile-choice.current {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.profile-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.profile-add label {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.profile-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.profile-note {
+  margin: 14px 0 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (max-width: 720px) {
+  .profile-button {
+    padding: 4px;
+  }
+
+  .profile-button-name {
+    display: none;
+  }
+
+  .profile-dialog {
+    padding: 18px;
+  }
+
+  .profile-dialog h2 {
+    font-size: 22px;
+  }
+}
+
 @media (max-width: 720px) {
   .hero-art-poster {
     top: 0;

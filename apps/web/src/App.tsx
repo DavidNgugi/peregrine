@@ -32,6 +32,7 @@ import {
 } from "./icons.js";
 import { MyListScreen } from "./MyList.js";
 import { Player } from "./Player.js";
+import { ProfileMenu } from "./ProfileMenu.js";
 import { parseRoute, routePath, type Route } from "./routing.js";
 import { TitleScreen } from "./Title.js";
 
@@ -506,6 +507,7 @@ function TopBar({
       >
         <SearchIcon />
       </button>
+      <ProfileMenu />
     </header>
   );
 }
