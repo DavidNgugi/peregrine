@@ -877,7 +877,7 @@ export const en = {
         copied: "Copied",
         copyFailed: "Could not copy",
         bonjourName:
-          "Also {{url}} — a device that resolves that name keeps its pairing when the address changes.",
+          "Bonjour name: {{url}}. Many TVs and phones cannot resolve .local at all; use the IP address above unless this device has already proven it works.",
         code: "The browser shows an 8-digit code. Approve the matching request below.",
         startForCode: "Start the listener to get a QR code and address.",
         approve: "Approve",
