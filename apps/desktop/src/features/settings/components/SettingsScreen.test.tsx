@@ -155,6 +155,18 @@ function markup(
 }
 
 describe("SettingsScreen", () => {
+  it("provides a compact map of the settings groups", () => {
+    const html = markup(registry([]));
+
+    expect(html).toContain('aria-label="Settings menu"');
+    expect(html).toContain('href="#settings-general"');
+    expect(html).toContain('href="#settings-library"');
+    expect(html).toContain('href="#settings-acquisition"');
+    expect(html).toContain('href="#settings-connection"');
+    expect(html).toContain('id="settings-about"');
+    expect(html).toContain('aria-current="location"');
+  });
+
   it("draws one row per registry entry, in the registry's order", () => {
     const html = markup(
       registry([

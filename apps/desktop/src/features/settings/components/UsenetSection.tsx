@@ -81,10 +81,11 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
           ) : (
             usenet.status?.servers.map((server) => (
               <SettingsRow
+                className="usenet-server-row"
                 key={server.id}
                 label={`${server.name} — ${server.host}:${String(server.port)}`}
               >
-                <div className="flex items-center gap-2">
+                <div className="usenet-server-actions">
                   <span className="text-caption text-text-tertiary">
                     {server.enabled ? server.health : t("settings.usenet.disabled")}
                   </span>
@@ -145,8 +146,17 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
             ))
           )}
 
-          <SettingsRow label={form.id === null ? t("settings.usenet.add") : t("settings.usenet.editTitle")}>
-            <div className="flex flex-wrap items-end justify-end gap-2">
+          <div className="usenet-editor">
+            <div className="usenet-editor-heading">
+              <div>
+                <h3>{form.id === null ? t("settings.usenet.add") : t("settings.usenet.editTitle")}</h3>
+                <p>{t("settings.usenet.formDescription")}</p>
+              </div>
+              <Button disabled={usenet.busy} onClick={submit} size="sm">
+                {t("settings.usenet.save")}
+              </Button>
+            </div>
+            <div className="usenet-form-grid">
               <TextInput
                 className="w-40"
                 label={t("settings.usenet.name")}
@@ -196,11 +206,8 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
                 }}
                 value={form.connections}
               />
-              <Button disabled={usenet.busy} onClick={submit} size="sm">
-                {t("settings.usenet.save")}
-              </Button>
             </div>
-          </SettingsRow>
+          </div>
 
           <SettingsRow label={t("settings.usenet.allowArchives")}>
             <Switch

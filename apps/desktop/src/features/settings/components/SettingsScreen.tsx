@@ -7,7 +7,7 @@ import {
   ShortcutKeys,
   Switch,
 } from "@peregrine/ui";
-import type { ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
 import {
@@ -105,86 +105,189 @@ export function SettingsScreen({
   const { t } = useTranslation();
   const autoStart = useAutoStart();
   const quality = usePreferredQuality();
+  const [activeGroup, setActiveGroup] = useState("settings-general");
+
+  useEffect(() => {
+    const groups = Array.from(document.querySelectorAll<HTMLElement>(".settings-group"));
+    if (groups.length === 0 || typeof IntersectionObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
+        const id = visible?.target.id;
+        if (id !== undefined) {
+          setActiveGroup(id);
+        }
+      },
+      { rootMargin: "-8% 0px -62% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] },
+    );
+
+    for (const group of groups) {
+      observer.observe(group);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <Screen backLabel={backLabel} onBack={onBack} title={t("settings.title")}>
-      <UsenetSection usenet={usenet} />
-      <SettingsSection
-        description={t("settings.shortcuts.description")}
-        title={t("settings.shortcuts.title")}
-      >
-        {shortcuts.loading ? null : shortcuts.failed ? (
-          <ErrorState
-            body={t("settings.shortcuts.unavailable.body")}
-            title={t("settings.shortcuts.unavailable.title")}
-          />
-        ) : shortcuts.bindings.length === 0 ? (
-          <EmptyState title={t("settings.shortcuts.empty")} />
-        ) : (
-          shortcuts.bindings.map((binding) => (
-            <SettingsRow key={binding.id} label={t(binding.labelKey)}>
-              <ShortcutKeys display={binding.display} />
-            </SettingsRow>
-          ))
-        )}
-      </SettingsSection>
+    <Screen
+      backLabel={backLabel}
+      className="settings-screen"
+      onBack={onBack}
+      title={t("settings.title")}
+    >
+      <div className="settings-workspace">
+        <aside aria-label={t("settings.navigation.label")} className="settings-nav">
+          <nav>
+            <a
+              aria-current={activeGroup === "settings-general" ? "location" : undefined}
+              className={activeGroup === "settings-general" ? "is-active" : undefined}
+              href="#settings-general"
+            >
+              {t("settings.navigation.general")}
+            </a>
+            <a
+              aria-current={activeGroup === "settings-library" ? "location" : undefined}
+              className={activeGroup === "settings-library" ? "is-active" : undefined}
+              href="#settings-library"
+            >
+              {t("settings.navigation.library")}
+            </a>
+            <a
+              aria-current={activeGroup === "settings-acquisition" ? "location" : undefined}
+              className={activeGroup === "settings-acquisition" ? "is-active" : undefined}
+              href="#settings-acquisition"
+            >
+              {t("settings.navigation.acquisition")}
+            </a>
+            <a
+              aria-current={activeGroup === "settings-connection" ? "location" : undefined}
+              className={activeGroup === "settings-connection" ? "is-active" : undefined}
+              href="#settings-connection"
+            >
+              {t("settings.navigation.connection")}
+            </a>
+            <a
+              aria-current={activeGroup === "settings-about" ? "location" : undefined}
+              className={activeGroup === "settings-about" ? "is-active" : undefined}
+              href="#settings-about"
+            >
+              {t("settings.navigation.about")}
+            </a>
+          </nav>
+        </aside>
 
-      <SettingsSection
-        description={t("settings.autostart.description")}
-        title={t("settings.autostart.title")}
-      >
-        <Switch
-          busy={autoStart.busy}
-          checked={autoStart.enabled}
-          label={t("settings.autostart.label")}
-          onChange={(next) => {
-            autoStart.toggle(next);
-          }}
-        />
-        {autoStart.failed ? <ErrorState title={t("settings.autostart.failed")} /> : null}
-      </SettingsSection>
+        <div className="settings-content">
+          <div className="settings-group" id="settings-general">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.general")}</h2>
+              <p>{t("settings.group.general")}</p>
+            </div>
+            <SettingsSection
+              description={t("settings.shortcuts.description")}
+              title={t("settings.shortcuts.title")}
+            >
+              {shortcuts.loading ? null : shortcuts.failed ? (
+                <ErrorState
+                  body={t("settings.shortcuts.unavailable.body")}
+                  title={t("settings.shortcuts.unavailable.title")}
+                />
+              ) : shortcuts.bindings.length === 0 ? (
+                <EmptyState title={t("settings.shortcuts.empty")} />
+              ) : (
+                shortcuts.bindings.map((binding) => (
+                  <SettingsRow key={binding.id} label={t(binding.labelKey)}>
+                    <ShortcutKeys display={binding.display} />
+                  </SettingsRow>
+                ))
+              )}
+            </SettingsSection>
 
-      <SettingsSection
-        description={t("settings.quality.description")}
-        title={t("settings.quality.title")}
-      >
-        <SettingsRow label={t("settings.quality.label")}>
-          <select
-            className="rounded-md border border-border bg-surface px-2 py-1 text-body text-text-primary"
-            disabled={quality.busy}
-            onChange={(event) => {
-              quality.choose(event.target.value as PreferredQuality);
-            }}
-            value={quality.quality ?? ""}
-          >
-            {quality.quality === null ? (
-              <option value="">{t("settings.quality.custom")}</option>
-            ) : null}
-            {PREFERRED_QUALITIES.map((choice) => (
-              <option key={choice} value={choice}>
-                {t("settings.quality.choice." + choice)}
-              </option>
-            ))}
-          </select>
-        </SettingsRow>
-        {quality.failed ? <ErrorState title={t("settings.quality.failed")} /> : null}
-      </SettingsSection>
+            <SettingsSection
+              description={t("settings.autostart.description")}
+              title={t("settings.autostart.title")}
+            >
+              <Switch
+                busy={autoStart.busy}
+                checked={autoStart.enabled}
+                label={t("settings.autostart.label")}
+                onChange={(next) => {
+                  autoStart.toggle(next);
+                }}
+              />
+              {autoStart.failed ? <ErrorState title={t("settings.autostart.failed")} /> : null}
+            </SettingsSection>
 
-      <PlaybackSection />
+            <SettingsSection
+              description={t("settings.quality.description")}
+              title={t("settings.quality.title")}
+            >
+              <SettingsRow label={t("settings.quality.label")}>
+                <select
+                  className="rounded-md border border-border bg-surface px-2 py-1 text-body text-text-primary"
+                  disabled={quality.busy}
+                  onChange={(event) => {
+                    quality.choose(event.target.value as PreferredQuality);
+                  }}
+                  value={quality.quality ?? ""}
+                >
+                  {quality.quality === null ? (
+                    <option value="">{t("settings.quality.custom")}</option>
+                  ) : null}
+                  {PREFERRED_QUALITIES.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {t("settings.quality.choice." + choice)}
+                    </option>
+                  ))}
+                </select>
+              </SettingsRow>
+              {quality.failed ? <ErrorState title={t("settings.quality.failed")} /> : null}
+            </SettingsSection>
 
-      <LibrariesSection libraries={libraries} />
+            <PlaybackSection />
+          </div>
 
-      <ProvidersSection providers={providers} />
+          <div className="settings-group" id="settings-library">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.library")}</h2>
+              <p>{t("settings.group.library")}</p>
+            </div>
+            <LibrariesSection libraries={libraries} />
+            <ProvidersSection providers={providers} />
+          </div>
 
-      <NetworkSection />
+          <div className="settings-group" id="settings-acquisition">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.acquisition")}</h2>
+              <p>{t("settings.group.acquisition")}</p>
+            </div>
+            <UsenetSection usenet={usenet} />
+            <ManagedProwlarrSection prowlarr={prowlarr} />
+            <IndexersSection indexers={indexers} />
+          </div>
 
-      <WebAccessSection />
+          <div className="settings-group" id="settings-connection">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.connection")}</h2>
+              <p>{t("settings.group.connection")}</p>
+            </div>
+            <NetworkSection />
+            <WebAccessSection />
+          </div>
 
-      <ManagedProwlarrSection prowlarr={prowlarr} />
-
-      <IndexersSection indexers={indexers} />
-
-      <AboutSection />
+          <div className="settings-group" id="settings-about">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.about")}</h2>
+              <p>{t("settings.group.about")}</p>
+            </div>
+            <AboutSection />
+          </div>
+        </div>
+      </div>
     </Screen>
   );
 }

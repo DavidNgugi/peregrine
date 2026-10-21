@@ -816,6 +816,21 @@ export const en = {
         less: "Show less",
       },
       title: "Settings",
+      navigation: {
+        label: "Settings menu",
+        general: "General",
+        library: "Library",
+        acquisition: "Acquisition",
+        connection: "Connection",
+        about: "About",
+      },
+      group: {
+        general: "Everyday behaviour and playback defaults.",
+        library: "Where your media comes from and how it is described.",
+        acquisition: "Sources Peregrine can use to find and fetch releases.",
+        connection: "Local network access and VPN guidance.",
+        about: "Build details and third-party notices.",
+      },
       quality: {
         title: "Downloads",
         description:
@@ -987,6 +1002,7 @@ export const en = {
         remove: "Remove",
         add: "Add a provider",
         editTitle: "Edit provider",
+        formDescription: "Connection details are kept local and the password stays in your keychain.",
         name: "Name",
         host: "Host",
         port: "Port",
