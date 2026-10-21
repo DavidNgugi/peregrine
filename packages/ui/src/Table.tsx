@@ -60,6 +60,7 @@ export function Table<Row>({ columns, rows, rowKey, className }: TableProps<Row>
                 clsx("py-1 pr-4 text-left", column.numeric === true && "text-right"),
               )}
               key={column.id}
+              data-column={column.id}
               scope="col"
             >
               {column.header}
@@ -76,6 +77,7 @@ export function Table<Row>({ columns, rows, rowKey, className }: TableProps<Row>
                   clsx("py-1 pr-4", column.numeric === true && "text-right tabular-nums"),
                 )}
                 key={column.id}
+                data-column={column.id}
               >
                 {column.cell(row)}
               </td>

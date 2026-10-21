@@ -146,7 +146,7 @@ export function DownloadsScreen({
         // so an alt here would make a screen reader say the title twice.
         const content = (
           <span className="flex items-center gap-2">
-            <span className="block h-12 w-8 shrink-0 overflow-hidden rounded-sm border border-border-subtle bg-surface-2">
+            <span className="block h-10 w-7 shrink-0 overflow-hidden rounded-sm border border-border-subtle bg-surface-2">
               {poster === null ? null : (
                 <img
                   alt=""
@@ -168,6 +168,9 @@ export function DownloadsScreen({
                   })}
                 </span>
               ) : null}
+              <span className="download-protocol">
+                {t(`downloads.protocol.${row.protocol}`, { defaultValue: row.protocol })}
+              </span>
             </span>
           </span>
         );
@@ -195,10 +198,22 @@ export function DownloadsScreen({
     {
       id: "state",
       header: t("downloads.column.state"),
-      cell: (row) =>
-        row.stage === "transfer"
-          ? t(`downloads.state.${row.state}`)
-          : t(`downloads.stage.${row.stage}`, { defaultValue: row.stage }),
+      cell: (row) => (
+        <div className="download-state-cell">
+          <span>
+            {row.stage === "transfer"
+              ? t(`downloads.state.${row.state}`)
+              : t(`downloads.stage.${row.stage}`, { defaultValue: row.stage })}
+          </span>
+          {row.state === "blocked" && row.findings.length > 0 ? (
+            <span className="download-blocked-reason">
+              {t(`downloads.finding.${row.findings[0]?.reason}`, {
+                defaultValue: row.findings[0]?.reason,
+              })}
+            </span>
+          ) : null}
+        </div>
+      ),
     },
     {
       id: "reason",
@@ -225,12 +240,24 @@ export function DownloadsScreen({
       cell: (row) => {
         const percent = downloadPercentOf(row.progressPermille);
         return (
-          <div className="flex items-center gap-2">
-            <Progress
-              label={t("downloads.progress.label", { title: row.title ?? row.releaseTitle })}
-              value={percent}
-            />
-            <span className="text-text-tertiary">{percent}%</span>
+          <div className="download-progress-cell">
+            <div className="flex items-center gap-2">
+              <Progress
+                label={t("downloads.progress.label", { title: row.title ?? row.releaseTitle })}
+                value={percent}
+              />
+              <span className="text-text-tertiary">{percent}%</span>
+            </div>
+            <span className="download-progress-meta">
+              {row.reportedSizeBytes === null
+                ? sizeLabel(row.downloadedBytes, t)
+                : `${sizeLabel(row.downloadedBytes, t)} / ${sizeLabel(row.reportedSizeBytes, t)}`}
+              {" · "}
+              {rateLabel(row.downloadRateBps, t)}
+              {" · "}
+              {etaLabel(row.etaSeconds, t)}
+              {row.protocol === "torrent" ? ` · ${String(row.peersConnected)}/${String(row.peersSwarm)} peers` : ""}
+            </span>
           </div>
         );
       },
@@ -291,90 +318,99 @@ export function DownloadsScreen({
                 ...(row.titleKind === null ? {} : { titleKind: row.titleKind }),
               };
         return (
-          <div className="flex items-center gap-2">
+          <div className="download-actions">
             {/* A job whose payload has named a media file is playable now, not when it completes:
                 the engine serves the bytes the transfer already has. */}
             {row.hasMediaFile && row.state !== "failed" && row.state !== "removed" ? (
-              <Link href={routePath(play)}>{t("downloads.action.play")}</Link>
+              <Link className="download-primary-action" href={routePath(play)}>
+                {t("downloads.action.play")}
+              </Link>
             ) : null}
-            {row.protocol === "usenet" &&
-            row.state === "blocked" &&
-            row.findings.some((finding) => finding.reason === "nested_archive") ? (
+            {row.hasMediaFile === false && resumable ? (
               <Button
-                disabled={busy}
-                onClick={() => {
-                  void actions.consent(row.id);
-                }}
-                size="sm"
-                variant="secondary"
-              >
-                {t("downloads.action.allowArchives")}
-              </Button>
-            ) : null}
-            {pausable ? (
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  void actions.pause(row.id);
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t("downloads.action.pause")}
-              </Button>
-            ) : null}
-            {resumable ? (
-              <Button
+                className="download-primary-action"
                 disabled={busy}
                 onClick={() => {
                   void actions.resume(row.id);
                 }}
                 size="sm"
-                variant="ghost"
+                variant="secondary"
               >
                 {t("downloads.action.resume")}
               </Button>
             ) : null}
-            {CLEARABLE_STATES.has(row.state) ? (
+            {row.hasMediaFile === false && pausable ? (
               <Button
-                disabled={busy || actions.clearing}
-                onClick={() => {
-                  setConfirming({ kind: "dismiss", row });
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t("downloads.action.dismiss")}
-              </Button>
-            ) : null}
-            {TERMINAL_STATES.has(row.state) ? null : (
-              <Button
+                className="download-primary-action"
                 disabled={busy}
                 onClick={() => {
-                  setConfirming({ kind: "remove", row });
+                  void actions.pause(row.id);
                 }}
                 size="sm"
-                variant="danger"
+                variant="secondary"
               >
-                {t("downloads.action.remove")}
-              </Button>
-            )}
-            {row.downloadedBytes > 0 && row.state !== "removed" ? (
-              <Button
-                disabled={busy || actions.planningId === row.id}
-                onClick={() => {
-                  void actions.planDeletion(row.id).then((plan) => {
-                    if (plan !== null) {
-                      setConfirming({ kind: "delete", row, plan });
-                    }
-                  });
-                }}
-                size="sm"
-                variant="danger"
-              >
-                {t("downloads.action.delete")}
+                {t("downloads.action.pause")}
               </Button>
             ) : null}
+            <details className="download-action-menu">
+              <summary>{t("downloads.action.more")}</summary>
+              <div className="download-action-popover">
+                {row.protocol === "usenet" &&
+                row.state === "blocked" &&
+                row.findings.some((finding) => finding.reason === "nested_archive") ? (
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      void actions.consent(row.id);
+                    }}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {t("downloads.action.allowArchives")}
+                  </Button>
+                ) : null}
+                {CLEARABLE_STATES.has(row.state) ? (
+                  <Button
+                    disabled={busy || actions.clearing}
+                    onClick={() => {
+                      setConfirming({ kind: "dismiss", row });
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t("downloads.action.dismiss")}
+                  </Button>
+                ) : null}
+                {TERMINAL_STATES.has(row.state) ? null : (
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirming({ kind: "remove", row });
+                    }}
+                    size="sm"
+                    variant="danger"
+                  >
+                    {t("downloads.action.remove")}
+                  </Button>
+                )}
+                {row.downloadedBytes > 0 && row.state !== "removed" ? (
+                  <Button
+                    disabled={busy || actions.planningId === row.id}
+                    onClick={() => {
+                      void actions.planDeletion(row.id).then((plan) => {
+                        if (plan !== null) {
+                          setConfirming({ kind: "delete", row, plan });
+                        }
+                      });
+                    }}
+                    size="sm"
+                    variant="danger"
+                  >
+                    {t("downloads.action.delete")}
+                  </Button>
+                ) : null}
+              </div>
+            </details>
           </div>
         );
       },
@@ -466,7 +502,12 @@ export function DownloadsScreen({
                 {t("downloads.clear.action")}
               </Button>
             </div>
-            <Table columns={columns} rowKey={(row) => row.id} rows={downloads.downloads} />
+            <Table
+              className="downloads-table"
+              columns={columns}
+              rowKey={(row) => row.id}
+              rows={downloads.downloads}
+            />
           </>
         )}
       </Section>

@@ -110,6 +110,7 @@ export const en = {
       action: {
         pause: "Pause",
         play: "Play",
+        more: "More actions",
         resume: "Resume",
         allowArchives: "Allow archives",
         remove: "Remove",
@@ -778,6 +779,10 @@ export const en = {
         from: "From date",
         to: "To date",
         chart: "Daily watch time",
+        hoverHint: "Hover or focus a day to inspect it",
+        activeDays: "{{count}} active days",
+        peak: "Peak · {{day}} · {{duration}}",
+        dailyAverage: "Average active day · {{duration}}",
         failed: "Watch time could not be read.",
         underMinute: "Under a minute",
         minutes: "{{count}} min",

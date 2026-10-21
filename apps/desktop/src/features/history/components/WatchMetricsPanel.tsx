@@ -30,6 +30,7 @@ export function WatchMetricsPanel(): ReactElement {
   const [from, setFrom] = useState(isoDaysAgo(30));
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
   const [days, setDays] = useState<readonly WatchDayDto[]>([]);
+  const [selectedDay, setSelectedDay] = useState<WatchDayDto | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export function WatchMetricsPanel(): ReactElement {
         );
         if (!cancelled) {
           setDays(answer);
+          setSelectedDay(null);
           setFailed(false);
         }
       } catch {
@@ -55,6 +57,12 @@ export function WatchMetricsPanel(): ReactElement {
 
   const total = days.reduce((sum, day) => sum + (day.totalMs ?? 0), 0);
   const peak = Math.max(1, ...days.map((day) => day.totalMs ?? 0));
+  const activeDays = days.filter((day) => (day.totalMs ?? 0) > 0).length;
+  const peakDay = days.reduce<WatchDayDto | null>(
+    (current, day) =>
+      current === null || (day.totalMs ?? 0) > (current.totalMs ?? 0) ? day : current,
+    null,
+  );
 
   const choose = (next: (typeof PRESETS)[number]): void => {
     setPreset(next);
@@ -66,13 +74,16 @@ export function WatchMetricsPanel(): ReactElement {
 
   return (
     <section
-      className="flex shrink-0 flex-col gap-3 rounded-md border border-border-subtle bg-surface-1 p-3"
+      className="watch-metrics-panel flex shrink-0 flex-col gap-3 rounded-md border border-border-subtle bg-surface-1 p-3"
       aria-label={t("history.metrics.title")}
     >
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col">
+        <div className="flex flex-col gap-1">
           <span className="text-caption text-text-tertiary">{t("history.metrics.title")}</span>
           <span className="text-title text-text-primary">{duration(total, translate)}</span>
+          <span className="text-caption text-text-tertiary">
+            {t("history.metrics.activeDays", { count: activeDays })}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {PRESETS.map((entry) => (
@@ -118,31 +129,102 @@ export function WatchMetricsPanel(): ReactElement {
         </p>
       ) : null}
       {days.length === 0 ? null : (
-        <svg
-          aria-label={t("history.metrics.chart")}
-          className="h-24 w-full text-accent"
-          role="img"
-          viewBox={`0 0 ${Math.max(1, days.length * 12)} 100`}
-          preserveAspectRatio="none"
-        >
-          {days.map((day, index) => {
-            const height = Math.max(1, ((day.totalMs ?? 0) / peak) * 96);
-            return (
-              <rect
-                key={day.day}
-                fill="currentColor"
-                height={height}
-                opacity={0.55 + (height / 100) * 0.45}
-                rx={2}
-                width={8}
-                x={index * 12 + 2}
-                y={100 - height}
-              >
-                <title>{`${day.day}: ${duration(day.totalMs ?? 0, translate)}`}</title>
-              </rect>
-            );
-          })}
-        </svg>
+        <div className="watch-metrics-chart-wrap">
+          <div aria-live="polite" className="watch-metrics-detail">
+            {selectedDay === null ? (
+              <span>{t("history.metrics.hoverHint")}</span>
+            ) : (
+              <>
+                <strong>{selectedDay.day}</strong>
+                <span>{duration(selectedDay.totalMs ?? 0, translate)}</span>
+              </>
+            )}
+          </div>
+          <svg
+            aria-label={t("history.metrics.chart")}
+            className="watch-metrics-chart"
+            role="img"
+            viewBox="0 0 720 220"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="watch-area" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.32" />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+            {[35, 88, 141, 194].map((y) => (
+              <line
+                className="watch-metrics-grid-line"
+                key={y}
+                x1="0"
+                x2="720"
+                y1={y}
+                y2={y}
+              />
+            ))}
+            {(() => {
+              const points = days.map((day, index) => {
+                const x = days.length === 1 ? 360 : (index / (days.length - 1)) * 720;
+                const y = 194 - ((day.totalMs ?? 0) / peak) * 159;
+                return { day, x, y };
+              });
+              const line = points.map(({ x, y }) => `${x},${y}`).join(" ");
+              const area = `0,194 ${line} 720,194`;
+              return (
+                <>
+                  <polygon className="watch-metrics-area" points={area} />
+                  <polyline className="watch-metrics-line" points={line} />
+                  {points.map(({ day, x, y }) => (
+                    <circle
+                      aria-label={`${day.day}: ${duration(day.totalMs ?? 0, translate)}`}
+                      className="watch-metrics-point"
+                      cx={x}
+                      cy={y}
+                      key={day.day}
+                      onBlur={() => {
+                        setSelectedDay(null);
+                      }}
+                      onFocus={() => {
+                        setSelectedDay(day);
+                      }}
+                      onMouseEnter={() => {
+                        setSelectedDay(day);
+                      }}
+                      onMouseLeave={() => {
+                        setSelectedDay(null);
+                      }}
+                      r="3.5"
+                      tabIndex={0}
+                    >
+                      <title>{`${day.day}: ${duration(day.totalMs ?? 0, translate)}`}</title>
+                    </circle>
+                  ))}
+                </>
+              );
+            })()}
+          </svg>
+          <div className="watch-metrics-labels" aria-hidden="true">
+            <span>{days[0]?.day}</span>
+            <span>{days[Math.floor(days.length / 2)]?.day}</span>
+            <span>{days[days.length - 1]?.day}</span>
+          </div>
+        </div>
+      )}
+      {peakDay === null ? null : (
+        <div className="watch-metrics-footer">
+          <span>
+            {t("history.metrics.peak", {
+              day: peakDay.day,
+              duration: duration(peakDay.totalMs ?? 0, translate),
+            })}
+          </span>
+          <span>
+            {t("history.metrics.dailyAverage", {
+              duration: duration(activeDays === 0 ? 0 : total / activeDays, translate),
+            })}
+          </span>
+        </div>
       )}
     </section>
   );

@@ -104,6 +104,168 @@ textarea,
   display: none;
 }
 
+.watch-metrics-panel {
+  overflow: hidden;
+}
+
+.watch-metrics-chart-wrap {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-top: 0.4rem;
+}
+
+.watch-metrics-chart {
+  display: block;
+  width: 100%;
+  height: 11rem;
+  overflow: visible;
+}
+
+.watch-metrics-detail {
+  display: flex;
+  min-height: 1.35rem;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+}
+
+.watch-metrics-detail strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.watch-metrics-grid-line {
+  stroke: var(--border-subtle);
+  stroke-dasharray: 2 7;
+  stroke-width: 1;
+}
+
+.watch-metrics-area {
+  fill: url("#watch-area");
+}
+
+.watch-metrics-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.watch-metrics-point {
+  fill: var(--surface-1);
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.watch-metrics-point:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.watch-metrics-labels,
+.watch-metrics-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  line-height: var(--text-micro--line-height);
+}
+
+.watch-metrics-footer {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.7rem;
+}
+
+.download-protocol,
+.download-progress-meta,
+.download-blocked-reason {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  line-height: var(--text-micro--line-height);
+}
+
+.download-state-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: var(--text-secondary);
+}
+
+.download-blocked-reason {
+  color: var(--state-warn);
+}
+
+.download-progress-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.download-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.download-primary-action {
+  white-space: nowrap;
+}
+
+.download-action-menu {
+  position: relative;
+}
+
+.download-action-menu summary {
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+
+.download-action-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.download-action-menu summary:hover,
+.download-action-menu summary:focus-visible {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.download-action-popover {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  display: flex;
+  min-width: 9rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.45rem;
+  background: var(--surface-1);
+  box-shadow: var(--elev-3);
+}
+
 /* Settings has enough surface area to need orientation. The rail is intentionally quiet: it
    gives the user a map without competing with the controls, and becomes a horizontal scroller
    before the content column gets cramped. */
