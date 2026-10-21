@@ -227,7 +227,9 @@ export function TitleHero({
                 {watchlisted ? t("title.hero.watchlisted") : t("title.hero.watchlist")}
               </Button>
             )}
-            {onToggleWatched === undefined ? null : (
+            {/* Nothing that has not come out can have been watched; the schedule control is the
+                action a future title has. The core refuses the mark too, for the web surface. */}
+            {onToggleWatched === undefined || upcoming ? null : (
               <Button disabled={watchMarkBusy} onClick={onToggleWatched} variant="ghost">
                 {watched ? t("title.hero.markUnwatched") : t("title.hero.markWatched")}
               </Button>

@@ -58,6 +58,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/preferences", get(preferences))
         .route("/api/acquire", post(acquire))
         .route("/api/acquire/season", post(acquire_season))
+        .route("/api/schedule", post(schedule))
         .route("/api/search", get(search))
         .route("/api/browse", get(browse))
         .route("/api/genres", get(genres))
@@ -402,6 +403,26 @@ async fn acquire_season(
             .acquire_season(&device, body.title_id, season)
             .await?,
     ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleBody {
+    title_id: i64,
+    season: Option<u32>,
+    episode: Option<u32>,
+}
+
+async fn schedule(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<ScheduleBody>,
+) -> Result<StatusCode, ApiError> {
+    require_read(&device)?;
+    service
+        .schedule(&device, body.title_id, body.season, body.episode)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The device a request authenticated as.

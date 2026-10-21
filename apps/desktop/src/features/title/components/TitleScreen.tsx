@@ -137,6 +137,12 @@ export function TitleScreen({
   // empty season is not "watched", which is why the length test comes first.
   const seasonWatched =
     seasons.episodes.length > 0 && seasons.episodes.every((episode) => episode.watched);
+  // A season that is still airing has episodes nobody could have watched. The bulk mark is hidden
+  // until it finishes; an already-marked season keeps the control so it can be cleared.
+  const today = new Date().toISOString().slice(0, 10);
+  const seasonUpcoming = seasons.episodes.some(
+    (episode) => episode.airDate !== null && episode.airDate > today,
+  );
   // Cache-only, and re-read after the refresh this screen already follows. The section hides until
   // a provider has answered, so a title nobody has refreshed does not claim there is nothing to watch.
   const watch = useWatchAvailability(title?.id ?? null, detail.updates + detail.refreshes);
@@ -521,18 +527,20 @@ export function TitleScreen({
                       : seasonLabel}
                   </Button>
                 )}
-                <Button
-                  disabled={seasons.marking}
-                  onClick={() => {
-                    void seasons.setSeasonWatched(!seasonWatched);
-                  }}
-                  size="sm"
-                  variant="secondary"
-                >
-                  {seasonWatched
-                    ? t("title.episodes.markSeasonUnwatched")
-                    : t("title.episodes.markSeasonWatched")}
-                </Button>
+                {seasonUpcoming && !seasonWatched ? null : (
+                  <Button
+                    disabled={seasons.marking}
+                    onClick={() => {
+                      void seasons.setSeasonWatched(!seasonWatched);
+                    }}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {seasonWatched
+                      ? t("title.episodes.markSeasonUnwatched")
+                      : t("title.episodes.markSeasonWatched")}
+                  </Button>
+                )}
               </div>
             )}
 

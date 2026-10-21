@@ -4842,6 +4842,18 @@ impl Runtime {
                 detail: "that episode is not in your library".to_owned(),
             });
         };
+        if watched
+            && self
+                .database
+                .list_title_episodes(installation_scope(), title_id, Some(season), 500)
+                .await?
+                .into_iter()
+                .find(|row| row.episode_number.get() == episode)
+                .and_then(|row| row.air_date)
+                .is_some_and(|air_date| air_date > self.today())
+        {
+            return Err(RuntimeError::NotReleased);
+        }
         self.set_watched(title_id, Some(episode_id), watched).await
     }
 
@@ -4863,8 +4875,15 @@ impl Runtime {
             .database
             .list_title_episodes(installation_scope(), title_id, Some(season), 500)
             .await?;
+        let today = self.today();
         let mut touched = 0;
         for row in episodes {
+            // A season that is still airing marks only the episodes that have aired. Refusing the
+            // whole season would make the control useless for the weeks in between; marking an
+            // unaired one would claim something nobody has seen.
+            if watched && row.air_date.is_some_and(|air_date| air_date > today) {
+                continue;
+            }
             let Some(episode_id) = self
                 .database
                 .episode_id_for(title_id, row.season_number.get(), row.episode_number.get())
@@ -4889,6 +4908,17 @@ impl Runtime {
         title_id: i64,
         watched: bool,
     ) -> Result<(), RuntimeError> {
+        if watched
+            && let Some(detail) = self
+                .database
+                .library_title(installation_scope(), title_id)
+                .await?
+            && detail
+                .released
+                .is_some_and(|released| released > self.today())
+        {
+            return Err(RuntimeError::NotReleased);
+        }
         self.set_watched(title_id, None, watched).await
     }
 
@@ -4903,6 +4933,14 @@ impl Runtime {
             .watch_progress(installation_scope(), title_id, None)
             .await?
             .is_some_and(|progress| progress.watched()))
+    }
+
+    /// Today in the calendar the stored release and air dates use (UTC).
+    ///
+    /// The screens compare against `toISOString().slice(0, 10)`, which is the same day, so the
+    /// sentence beside a control and this refusal cannot disagree about whether it has aired.
+    fn today(&self) -> jiff::civil::Date {
+        self.clock.now().to_zoned(jiff::tz::TimeZone::UTC).date()
     }
 
     /// The one write both marking surfaces share.
@@ -5675,6 +5713,14 @@ pub enum RuntimeError {
     /// action differs: wait for the import, or remove the pack.
     #[error("that download holds more than one episode and none matches the one asked for")]
     MediaUnidentified,
+
+    /// A watch mark named a title or episode that has not been released.
+    ///
+    /// A mark is a statement about what the account has seen, and nobody has seen a film that is not
+    /// out. The refusal lives here rather than in the two screens because both surfaces — the
+    /// desktop and the paired browser — write through this runtime.
+    #[error("that title has not been released yet, so it cannot be marked watched")]
+    NotReleased,
 
     /// A media file is outside every folder Peregrine is allowed to scan.
     #[error("that file is outside every folder Peregrine is allowed to scan")]
@@ -8264,6 +8310,51 @@ mod tests {
         assert_eq!(media.headers().get("content-type").unwrap(), "video/mp4");
         assert!(service.revoke(device.id).await.unwrap());
         service.stop().await;
+    }
+
+    /// A mark is a statement about what the account has seen, and a title that is not out has
+    /// nothing to have seen. The screen hides the control; the core refuses the write too, because
+    /// the paired browser can reach the same runtime.
+    #[tokio::test]
+    async fn a_watch_mark_on_a_future_release_is_refused() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let title_id = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "Dune: Part Three".to_owned(),
+                original_name: None,
+                sort_name: "dune part three".to_owned(),
+                at: 0,
+            })
+            .await
+            .expect("the title");
+        let mut future = details("Dune: Part Three", None);
+        future.released = Some(jiff::civil::date(2999, 1, 1));
+        runtime
+            .database
+            .update_title_metadata(
+                title_id,
+                future,
+                "dune part three".to_owned(),
+                peregrine_storage::MetadataState::Complete,
+                "tmdb".to_owned(),
+                0,
+            )
+            .await
+            .expect("the release date");
+
+        let error = runtime
+            .set_title_watched(title_id, true)
+            .await
+            .expect_err("a future release cannot be marked watched");
+        assert!(matches!(error, RuntimeError::NotReleased));
+        runtime
+            .set_title_watched(title_id, false)
+            .await
+            .expect("clearing a mark is always allowed");
     }
 
     /// A mark the user set outranks a playback report in both directions: watching a film someone

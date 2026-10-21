@@ -307,6 +307,9 @@ impl From<RuntimeError> for AppError {
                     "That download holds more than one episode, and none matches the one you asked for.",
                 )
                 .with_cause("no selected media entry's name matches the requested episode"),
+            RuntimeError::NotReleased => AppError::new(ErrorCode::Conflict)
+                .with_detail("That has not been released yet, so it cannot be marked watched.")
+                .with_cause("the release or air date is in the future"),
             RuntimeError::FileOutsideRoots => AppError::new(ErrorCode::PermissionDenied)
                 .with_detail("That file is outside the folders Peregrine is allowed to read.")
                 .with_cause("no configured library root contains the media file's path"),

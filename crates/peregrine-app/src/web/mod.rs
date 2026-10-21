@@ -414,6 +414,16 @@ struct TitleDownloads {
     episodes: HashMap<(u32, u32), JobDownload>,
 }
 
+/// What one title's future downloads say, keyed the way its page draws them.
+///
+/// Only rows still in `scheduled` are here: a date that has arrived has become a download (or a
+/// failure), and the button that offered Schedule is gone by then.
+#[derive(Debug, Default)]
+struct TitleSchedules {
+    title: bool,
+    episodes: HashSet<(u32, u32)>,
+}
+
 /// One job's lifecycle state and completion.
 #[derive(Debug, Clone)]
 struct JobDownload {
@@ -1807,6 +1817,67 @@ impl WebService {
         Ok(())
     }
 
+    /// Schedules a future release for acquisition.
+    ///
+    /// The date comes from the title or episode the core already holds, never from the client: a
+    /// browser that named its own date could make a download run before release. Only a date still
+    /// ahead of today is accepted, which is the same rule the desktop's Schedule control follows.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::NotPermitted`] when the device lacks the acquire scope,
+    /// [`WebError::UnknownTitle`] for a title no catalogue row holds,
+    /// [`WebError::InvalidRequest`] for a past date or a half-named episode, and
+    /// [`WebError::Runtime`] when the schedule cannot be written.
+    pub async fn schedule(
+        &self,
+        device: &PairedDevice,
+        title_id: i64,
+        season: Option<u32>,
+        episode: Option<u32>,
+    ) -> Result<(), WebError> {
+        if !scope_allows(&device.scopes, ACQUIRE_SCOPE) || !self.runtime.can_acquire() {
+            return Err(WebError::NotPermitted);
+        }
+        let detail = self
+            .runtime
+            .library_title(title_id)
+            .await?
+            .ok_or(WebError::UnknownTitle)?;
+        let (pick, release_on) = match (season, episode) {
+            (Some(season), Some(number)) => {
+                let row = self
+                    .runtime
+                    .title_episodes(title_id, Some(season), 500)
+                    .await?
+                    .into_iter()
+                    .find(|row| row.row.episode_number.get() == number)
+                    .ok_or(WebError::InvalidRequest)?;
+                let air_date = row.row.air_date.ok_or(WebError::InvalidRequest)?;
+                (
+                    Some(crate::jobs::acquire::EpisodePick {
+                        season,
+                        episode: number,
+                    }),
+                    air_date,
+                )
+            }
+            (None, None) => (None, detail.released.ok_or(WebError::InvalidRequest)?),
+            _ => return Err(WebError::InvalidRequest),
+        };
+        let today = jiff::Timestamp::from_millisecond(self.now())
+            .map_err(|_| WebError::InvalidRequest)?
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .date();
+        if release_on <= today {
+            return Err(WebError::InvalidRequest);
+        }
+        self.runtime
+            .schedule_download(title_id, pick, release_on.to_string())
+            .await?;
+        Ok(())
+    }
+
     /// Queues every episode of one season that has no file on disk.
     ///
     /// One episode's failure is counted rather than returned: a season is fifteen downloads, and
@@ -2091,8 +2162,9 @@ impl WebService {
         };
         let is_show = identity.kind == TitleKind::Show;
         let downloads = self.title_downloads(id).await?;
+        let schedules = self.title_schedules(id).await?;
         let (seasons, episodes) = self
-            .title_seasons_page(id, is_show, season, &downloads)
+            .title_seasons_page(id, is_show, season, &downloads, &schedules)
             .await?;
         // A provider fill that never cached its poster (or a series the catalogue only listed)
         // is a page with no main image. The same refresh fills both, and the client already polls
@@ -2151,6 +2223,7 @@ impl WebService {
             watched: self.runtime.title_watched(id).await?,
             download_state,
             download_percent,
+            scheduled: schedules.title,
             seasons,
             episodes,
             similar,
@@ -2165,6 +2238,7 @@ impl WebService {
         is_show: bool,
         season: Option<u32>,
         downloads: &TitleDownloads,
+        schedules: &TitleSchedules,
     ) -> Result<(Vec<SeasonDto>, Vec<EpisodeDto>), WebError> {
         if !is_show {
             return Ok((Vec::new(), Vec::new()));
@@ -2192,6 +2266,7 @@ impl WebService {
             self.runtime.title_episodes(id, chosen, 500).await?,
             &progress,
             downloads,
+            schedules,
         );
         Ok((seasons, episodes))
     }
@@ -2228,6 +2303,26 @@ impl WebService {
             }
         }
         Ok(downloads)
+    }
+
+    /// One read of the title's schedules, keyed the way a page draws them.
+    async fn title_schedules(&self, title_id: i64) -> Result<TitleSchedules, WebError> {
+        let rows = self.runtime.download_schedules().await?;
+        let mut schedules = TitleSchedules::default();
+        for row in rows
+            .into_iter()
+            .filter(|row| row.title_id == title_id && row.state == "scheduled")
+        {
+            match row.episode_id {
+                None => schedules.title = true,
+                Some(episode_id) => {
+                    if let Some(numbers) = self.runtime.episode_numbers(episode_id).await? {
+                        schedules.episodes.insert(numbers);
+                    }
+                }
+            }
+        }
+        Ok(schedules)
     }
 
     async fn title_similar_page(
@@ -2842,6 +2937,8 @@ pub struct TitleDto {
     pub download_state: Option<String>,
     /// The title-level job's completion, 0 to 100.
     pub download_percent: Option<f64>,
+    /// A title-level schedule is waiting for its release date.
+    pub scheduled: bool,
     /// The seasons a series offers, empty for a film.
     pub seasons: Vec<SeasonDto>,
     /// The episodes of the requested season, empty for a film.
@@ -3029,6 +3126,7 @@ pub struct SeasonDto {
 /// One episode row a series page draws.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)] // A wire projection: each flag is a different screen fact.
 pub struct EpisodeDto {
     /// The season number.
     pub season_number: u32,
@@ -3061,6 +3159,8 @@ pub struct EpisodeDto {
     /// Separate from `playable` because the season control counts what is on disk: an episode that
     /// can be watched while it downloads is not an episode that has finished downloading.
     pub streamable: bool,
+    /// A schedule is waiting for this episode's air date.
+    pub scheduled: bool,
     /// The download job's lifecycle state for this episode, or null when nobody asked.
     pub download_state: Option<String>,
     /// The job's completion, 0 to 100, when one is running.
@@ -3127,6 +3227,7 @@ fn episode_dtos(
     episodes: Vec<crate::TitleEpisodeDetail>,
     progress: &[peregrine_storage::EpisodeProgressRow],
     downloads: &TitleDownloads,
+    schedules: &TitleSchedules,
 ) -> Vec<EpisodeDto> {
     episodes
         .into_iter()
@@ -3136,9 +3237,8 @@ fn episode_dtos(
                 held.season_number == row.season_number.get()
                     && held.episode_number == row.episode_number.get()
             });
-            let download = downloads
-                .episodes
-                .get(&(row.season_number.get(), row.episode_number.get()));
+            let numbers = (row.season_number.get(), row.episode_number.get());
+            let download = downloads.episodes.get(&numbers);
             EpisodeDto {
                 season_number: row.season_number.get(),
                 episode_number: row.episode_number.get(),
@@ -3154,6 +3254,7 @@ fn episode_dtos(
                 watched: found.is_some_and(|held| held.watched),
                 playable: row.files > 0,
                 streamable: download.is_some_and(JobDownload::streamable),
+                scheduled: schedules.episodes.contains(&numbers),
                 download_state: download.map(|job| job.state.clone()),
                 download_percent: download.map(|job| job.percent),
             }
@@ -3758,6 +3859,7 @@ mod tests {
             watched: false,
             playable: false,
             streamable: false,
+            scheduled: false,
             download_state: None,
             download_percent: None,
         }

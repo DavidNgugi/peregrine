@@ -250,9 +250,10 @@ export function EpisodeCard({
           </div>
         )}
 
-        {/* Always offered, whatever the episode's availability: marking is a statement about what
-            the reader has seen, not about what is on disk. */}
-        {onToggleWatched === undefined ? null : (
+        {/* Offered for what has aired, whatever its availability: marking is a statement about what
+            the reader has seen, not about what is on disk. An unaired episode offers Schedule
+            instead, and the core refuses a future mark from the web surface too. */}
+        {onToggleWatched === undefined || unaired ? null : (
           <div className="flex justify-end pt-1">
             <Button
               aria-label={t(

@@ -57,4 +57,20 @@ describe("EpisodeCard", () => {
     expect(html).not.toContain("Play episode 1×02");
     expect(html).toContain("Downloading… 12%");
   });
+
+  it("offers Schedule and no watch mark before an episode airs", () => {
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <EpisodeCard
+          episode={episode({ airDate: "2999-01-01" })}
+          onSchedule={() => undefined}
+          onToggleWatched={() => undefined}
+          scheduled={false}
+        />
+      </I18nextProvider>,
+    );
+
+    expect(html).toContain("Schedule");
+    expect(html).not.toContain("Mark watched");
+  });
 });

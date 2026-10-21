@@ -89,6 +89,9 @@ export function TitleScreen({
   const rating = title?.rating ?? preview?.rating ?? null;
   const released = title?.released ?? null;
   const inLibrary = title?.inLibrary ?? false;
+  // The same UTC day the core compares against, so a control and a refusal cannot disagree.
+  const today = new Date().toISOString().slice(0, 10);
+  const upcomingTitle = released !== null && released > today;
   const episodes = title?.episodes ?? [];
   const seasons = title?.seasons ?? [];
   const resume = title?.progress?.positionMs ?? 0;
@@ -97,6 +100,9 @@ export function TitleScreen({
   const movie = kind !== "show";
   const selectedSeason = season ?? seasons[0]?.number ?? episodes[0]?.seasonNumber;
   const seasonWatched = episodes.length > 0 && episodes.every((episode) => episode.watched);
+  const seasonUpcoming = episodes.some(
+    (episode) => episode.airDate !== null && episode.airDate > today,
+  );
   const showSeasons = !movie && (seasons.length > 0 || episodes.length > 0);
 
   const nextEpisode = useMemo(() => {
@@ -335,6 +341,55 @@ export function TitleScreen({
     }
   };
 
+  const scheduleTitle = async (): Promise<void> => {
+    if (pending !== null) return;
+    setPending("schedule:title");
+    setMessage(null);
+    try {
+      await api.schedule(id);
+      patch((held) => ({ ...held, scheduled: true }));
+      setMessageError(false);
+      setMessage("Scheduled. It will download when it is released.");
+    } catch (caught) {
+      setMessageError(true);
+      setMessage(caught instanceof Error ? caught.message : "That release could not be scheduled.");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const scheduleEpisode = async (episode: Episode): Promise<void> => {
+    if (pending !== null) return;
+    const key = "schedule:" + episodeKey(episode.seasonNumber, episode.episodeNumber);
+    setPending(key);
+    setMessage(null);
+    try {
+      await api.schedule(id, episode.seasonNumber, episode.episodeNumber);
+      patch((held) => ({
+        ...held,
+        episodes: held.episodes.map((heldEpisode) =>
+          heldEpisode.seasonNumber === episode.seasonNumber &&
+          heldEpisode.episodeNumber === episode.episodeNumber
+            ? { ...heldEpisode, scheduled: true }
+            : heldEpisode,
+        ),
+      }));
+      setMessageError(false);
+      setMessage(
+        "Scheduled S" +
+          String(episode.seasonNumber) +
+          " E" +
+          String(episode.episodeNumber) +
+          ". It will download when it airs.",
+      );
+    } catch (caught) {
+      setMessageError(true);
+      setMessage(caught instanceof Error ? caught.message : "That episode could not be scheduled.");
+    } finally {
+      setPending(null);
+    }
+  };
+
   const downloadEpisode = async (episode: Episode): Promise<void> => {
     if (pending !== null) return;
     const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
@@ -488,7 +543,22 @@ export function TitleScreen({
                       ? "No downloaded file is on disk yet."
                       : "This title is not in your library yet."}
                   </p>
-                  {canAcquire && (movie || episodes.length === 0) && titleDownload !== null ? (
+                  {canAcquire && (movie || episodes.length === 0) && upcomingTitle ? (
+                    <button
+                      className="secondary"
+                      data-autofocus="true"
+                      data-focus="true"
+                      disabled={pending !== null || title.scheduled}
+                      onClick={() => void scheduleTitle()}
+                      type="button"
+                    >
+                      {pending === "schedule:title"
+                        ? "Scheduling..."
+                        : title.scheduled
+                          ? "Scheduled"
+                          : "Schedule"}
+                    </button>
+                  ) : canAcquire && (movie || episodes.length === 0) && titleDownload !== null ? (
                     <button
                       className="secondary"
                       data-autofocus="true"
@@ -515,7 +585,7 @@ export function TitleScreen({
                   <BookmarkIcon />
                   {title.watchlisted ? "In My List" : "My List"}
                 </button>
-                {movie ? (
+                {movie && !upcomingTitle ? (
                   <button
                     aria-pressed={title.watched}
                     className="watch-toggle"
@@ -547,7 +617,9 @@ export function TitleScreen({
             <div className="section-head seasons-head">
               <h2>Seasons</h2>
               <div className="section-head-actions">
-                {episodes.length > 0 && selectedSeason !== undefined ? (
+                {episodes.length > 0 &&
+                selectedSeason !== undefined &&
+                (!seasonUpcoming || seasonWatched) ? (
                   <button
                     aria-pressed={seasonWatched}
                     className="season-watch"
@@ -625,6 +697,9 @@ export function TitleScreen({
                   const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
                   const action = downloadAction(episode.downloadState, episode.downloadPercent);
                   const playable = episode.playable || episode.streamable;
+                  // A future episode has nothing to fetch yet; the same rule the desktop's episode
+                  // card applies, and the core refuses a future watch mark from either surface.
+                  const upcomingEpisode = episode.airDate !== null && episode.airDate > today;
                   return (
                     <div className="episode" key={key}>
                       <button
@@ -680,26 +755,44 @@ export function TitleScreen({
                       </button>
                       <div className="episode-controls">
                         {canAcquire && !playable ? (
+                          upcomingEpisode ? (
+                            <button
+                              className="episode-download"
+                              data-focus="true"
+                              disabled={pending !== null || episode.scheduled}
+                              onClick={() => void scheduleEpisode(episode)}
+                              type="button"
+                            >
+                              {pending === "schedule:" + key
+                                ? "Scheduling..."
+                                : episode.scheduled
+                                  ? "Scheduled"
+                                  : "Schedule"}
+                            </button>
+                          ) : (
+                            <button
+                              className="episode-download"
+                              data-focus="true"
+                              disabled={pending !== null || action.disabled}
+                              onClick={() => void downloadEpisode(episode)}
+                              type="button"
+                            >
+                              {pending === key ? "Queuing..." : action.label}
+                            </button>
+                          )
+                        ) : null}
+                        {upcomingEpisode ? null : (
                           <button
-                            className="episode-download"
+                            aria-pressed={episode.watched}
+                            className="episode-watch"
                             data-focus="true"
-                            disabled={pending !== null || action.disabled}
-                            onClick={() => void downloadEpisode(episode)}
+                            disabled={marking !== null}
+                            onClick={() => void toggleEpisodeWatched(episode)}
                             type="button"
                           >
-                            {pending === key ? "Queuing..." : action.label}
+                            {episode.watched ? "Mark unwatched" : "Mark watched"}
                           </button>
-                        ) : null}
-                        <button
-                          aria-pressed={episode.watched}
-                          className="episode-watch"
-                          data-focus="true"
-                          disabled={marking !== null}
-                          onClick={() => void toggleEpisodeWatched(episode)}
-                          type="button"
-                        >
-                          {episode.watched ? "Mark unwatched" : "Mark watched"}
-                        </button>
+                        )}
                       </div>
                     </div>
                   );

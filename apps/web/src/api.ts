@@ -179,6 +179,8 @@ export interface Episode {
   readonly playable: boolean;
   /** Whether a live transfer has named a file this host can stream for it. */
   readonly streamable: boolean;
+  /** A schedule is waiting for this episode's air date. */
+  readonly scheduled: boolean;
   /** The download job's lifecycle state for this episode, or null when nobody asked. */
   readonly downloadState: DownloadState;
   /** The job's completion, 0 to 100, when one is running. */
@@ -207,6 +209,8 @@ export interface Title {
   readonly downloadState: DownloadState;
   /** The title-level job's completion, 0 to 100. */
   readonly downloadPercent: number | null;
+  /** A title-level schedule is waiting for its release date. */
+  readonly scheduled: boolean;
   readonly seasons: Season[];
   readonly episodes: Episode[];
   readonly similar: Tile[];
@@ -334,6 +338,12 @@ export const api = {
     }),
   acquireSeason: (titleId: number, season: number): Promise<SeasonAcquireResult> =>
     request<SeasonAcquireResult>("/api/acquire/season", "POST", { titleId, season }),
+  schedule: (titleId: number, season?: number, episode?: number): Promise<void> =>
+    request<void>("/api/schedule", "POST", {
+      titleId,
+      season: season ?? null,
+      episode: episode ?? null,
+    }),
   watchlistSet: (titleId: number, saved: boolean): Promise<void> =>
     request<void>("/api/watchlist", "POST", { titleId, saved }),
   watchedSet: (change: WatchedChange): Promise<void> =>

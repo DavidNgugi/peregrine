@@ -387,6 +387,14 @@ describe("TitleScreen", () => {
     expect(arriving.match(/<button[^>]*disabled/gu)?.length).toBe(1);
   });
 
+  it("offers Schedule and no watch mark for a film that is not out", () => {
+    const html = markup(detail({ offer: "acquire", released: "2999-01-01" }), "movie");
+
+    expect(html).toContain("Schedule");
+    expect(html).not.toContain("Mark watched");
+    expect(html).not.toContain("Download");
+  });
+
   it("plays a film whose download has named its file", () => {
     const arriving = markup(detail({ offer: "arriving", playSupport: "webview" }), "movie");
 
