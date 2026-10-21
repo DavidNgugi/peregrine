@@ -126,10 +126,12 @@ export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactEle
             <Button
               onClick={() => {
                 const target = removing;
-                setRemoving(null);
-                if (target !== null) {
-                  void libraries.remove(target.id);
+                if (target === null) {
+                  return undefined;
                 }
+                return libraries.remove(target.id).finally(() => {
+                  setRemoving(null);
+                });
               }}
               size="sm"
               variant="danger"

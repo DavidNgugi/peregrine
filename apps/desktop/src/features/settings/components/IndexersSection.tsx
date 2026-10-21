@@ -422,10 +422,11 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
               {t("common.cancel")}
             </Button>
             <Button
-              onClick={() => {
-                setConfirmingClear(false);
-                void indexers.clear();
-              }}
+              onClick={() =>
+                indexers.clear().finally(() => {
+                  setConfirmingClear(false);
+                })
+              }
               size="sm"
               variant="danger"
             >
@@ -457,8 +458,9 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
             <Button
               onClick={() => {
                 const target = pendingRemove;
-                setPendingRemove(null);
-                void indexers.remove(target.id);
+                return indexers.remove(target.id).finally(() => {
+                  setPendingRemove(null);
+                });
               }}
               size="sm"
               variant="danger"

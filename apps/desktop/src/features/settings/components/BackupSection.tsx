@@ -132,8 +132,9 @@ export function BackupSection(): ReactElement {
             <Button
               onClick={() => {
                 const source = chosen.path;
-                setChosen(null);
-                void backup.restore(source);
+                return backup.restore(source).finally(() => {
+                  setChosen(null);
+                });
               }}
               size="sm"
               variant="danger"

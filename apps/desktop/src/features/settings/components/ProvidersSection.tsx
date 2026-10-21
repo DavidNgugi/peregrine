@@ -153,10 +153,11 @@ function ProviderRow({
               {t("common.cancel")}
             </Button>
             <Button
-              onClick={() => {
-                setConfirming(false);
-                void onRemove(entry.provider);
-              }}
+              onClick={() =>
+                onRemove(entry.provider).finally(() => {
+                  setConfirming(false);
+                })
+              }
               size="sm"
               variant="danger"
             >

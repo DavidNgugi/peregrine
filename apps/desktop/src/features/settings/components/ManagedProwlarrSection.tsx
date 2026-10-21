@@ -108,10 +108,11 @@ export function ManagedProwlarrSection({ prowlarr }: ManagedProwlarrSectionProps
                   {t("settings.prowlarr.stopConfirm.cancel")}
                 </Button>
                 <Button
-                  onClick={() => {
-                    setConfirmingStop(false);
-                    void prowlarr.stop();
-                  }}
+                  onClick={() =>
+                    prowlarr.stop().finally(() => {
+                      setConfirmingStop(false);
+                    })
+                  }
                   variant="danger"
                 >
                   {t("settings.prowlarr.stopConfirm.confirm")}

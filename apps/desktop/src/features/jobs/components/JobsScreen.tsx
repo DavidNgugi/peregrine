@@ -147,10 +147,11 @@ export function JobsScreen({
               {t("jobs.cancelConfirm.cancel")}
             </Button>
             <Button
-              onClick={() => {
-                setConfirmingCancel(false);
-                void cancel();
-              }}
+              onClick={() =>
+                cancel().finally(() => {
+                  setConfirmingCancel(false);
+                })
+              }
               size="sm"
               variant="danger"
             >
