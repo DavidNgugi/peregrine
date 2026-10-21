@@ -1,0 +1,185 @@
+/* The setup screen is the only screen this app draws. It is 1920x1080 first, operated with a
+   D-pad, and read from a sofa; every value below is in vw/vh so a 1280 panel still fits. */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: #111417;
+  color: #eff2f5;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  cursor: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+main {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8vh 10vw 14vh;
+}
+
+.eyebrow {
+  margin-bottom: 2.2vh;
+  color: #8fa3b8;
+  font-size: 1.05vw;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 70vw;
+  font-size: 4.6vw;
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.lede {
+  max-width: 62vw;
+  margin-top: 2.2vh;
+  color: #b3b8be;
+  font-size: 1.55vw;
+  line-height: 1.45;
+}
+
+.address {
+  margin-top: 2.4vh;
+  color: #3b9cf6;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 2vw;
+  overflow-wrap: anywhere;
+}
+
+form {
+  max-width: 62vw;
+  margin-top: 4vh;
+}
+
+label {
+  display: block;
+  margin-bottom: 1vh;
+  color: #8fa3b8;
+  font-size: 1.1vw;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+input {
+  width: 100%;
+  padding: 1.8vh 1.6vw;
+  border: 2px solid #2f3338;
+  border-radius: 10px;
+  background: #191d22;
+  color: #eff2f5;
+  font: inherit;
+  font-size: 1.8vw;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input::placeholder {
+  color: #6c7278;
+}
+
+button {
+  margin-top: 2.2vh;
+  padding: 1.7vh 2.8vw;
+  border: 0;
+  border-radius: 10px;
+  background: #3b9cf6;
+  color: #10161c;
+  font: inherit;
+  font-size: 1.5vw;
+  font-weight: 700;
+  cursor: none;
+}
+
+button.secondary {
+  margin-top: 3vh;
+  border: 2px solid #3b9cf6;
+  background: transparent;
+  color: #3b9cf6;
+}
+
+button:focus,
+input:focus {
+  outline: 6px solid #3b9cf6;
+  outline-offset: 6px;
+}
+
+input:focus {
+  border-color: #3b9cf6;
+}
+
+.status {
+  min-height: 2.4vh;
+  margin-top: 2.2vh;
+  color: #b3b8be;
+  font-size: 1.2vw;
+}
+
+.error {
+  min-height: 2.4vh;
+  margin-top: 0.8vh;
+  color: #f75d59;
+  font-size: 1.2vw;
+}
+
+.hint {
+  margin-top: 3vh;
+  color: #8b9095;
+  font-size: 1vw;
+}
+
+.diagnostics {
+  position: absolute;
+  right: 4vw;
+  bottom: 4vh;
+  left: 4vw;
+  color: #6c7278;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9vw;
+  text-align: right;
+}
+
+@media (max-width: 1280px) {
+  h1 {
+    max-width: 80vw;
+    font-size: 5.6vw;
+  }
+
+  .lede,
+  form {
+    max-width: 78vw;
+  }
+
+  .lede {
+    font-size: 1.9vw;
+  }
+
+  input {
+    font-size: 2.2vw;
+  }
+}

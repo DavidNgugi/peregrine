@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="theme-color" content="#111417" />
+    <title>Peregrine</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Peregrine</p>
+
+      <section id="connecting" hidden>
+        <h1>Connecting</h1>
+        <p id="connecting-url" class="address"></p>
+        <p class="lede">Press BACK within 3 seconds to change the server.</p>
+        <button id="change-server" class="secondary" type="button">Change server</button>
+      </section>
+
+      <section id="setup">
+        <h1>Your library, on this screen</h1>
+        <p class="lede">
+          On the computer running Peregrine, open Settings, then Web access. Enter the address it
+          shows here. The computer must stay on while you watch.
+        </p>
+        <form id="server-form" autocomplete="off">
+          <label for="server-url">Peregrine address</label>
+          <input
+            id="server-url"
+            name="server-url"
+            type="text"
+            inputmode="url"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            placeholder="http://192.168.1.50:8642"
+          />
+          <button id="connect" type="submit">Connect</button>
+        </form>
+        <p id="status" class="status" role="status"></p>
+        <p id="error" class="error" role="alert"></p>
+        <p class="hint">Press BACK to exit. The address can be changed from the next start.</p>
+      </section>
+
+      <footer id="diagnostics" class="diagnostics"></footer>
+    </main>
+    <script src="config.js"></script>
+    <script src="server-url.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>

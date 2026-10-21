@@ -24,6 +24,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["packages/*/src/**/*.test.{ts,tsx}", "apps/*/src/**/*.test.{ts,tsx}"],
+    include: [
+      "packages/*/src/**/*.test.{ts,tsx}",
+      "apps/*/src/**/*.test.{ts,tsx}",
+      // The Tizen shell is plain JavaScript with no bundler; its one pure rule is tested from
+      // the packaged source itself rather than through a build step it does not have.
+      "apps/tizen/test/**/*.test.mjs",
+    ],
   },
 });

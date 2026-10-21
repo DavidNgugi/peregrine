@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Episode, type PlaybackTicket, type Tile, type Title } from "./api.js";
 import { downloadTone } from "./download-state.js";
+import { useAutoFocus } from "./focus.js";
 import { TitleFeed } from "./Feed.js";
 import { BookmarkIcon, StarIcon } from "./icons.js";
 import {
@@ -28,6 +29,8 @@ export function TitleScreen({
   const [title, setTitle] = useState<Title | null>(null);
   const [season, setSeason] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  // Play/Resume (or the first download action when there is no file) is the entry point.
+  useAutoFocus(title?.id);
   const [message, setMessage] = useState<string | null>(null);
   const [messageError, setMessageError] = useState(false);
   const [busy, setBusy] = useState(false);

@@ -81,6 +81,7 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
               <TileCard
                 autofocus={index === 0}
                 onOpen={onOpen}
+                priority={index < 6}
                 tile={tile}
                 watchlisted={tile.watchlisted}
               />

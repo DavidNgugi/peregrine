@@ -102,3 +102,58 @@
     transform: translateX(100%);
   }
 }
+
+/* Chromium 76 (Tizen 6.0, ADR 0034) cannot parse `oklch()`. A custom property accepts the
+   token stream and only fails when it is substituted, so the declaration cannot fall back in
+   place: the whole semantic layer gets sRGB equivalents under a feature query instead. Engines
+   that understand oklch keep the values above; the television keeps a readable palette. */
+@supports not (color: oklch(0 0 0)) {
+  :root {
+    --surface-0: #111417;
+    --surface-1: #191d22;
+    --surface-2: #22272c;
+    --surface-scrim: rgba(4, 6, 9, 0.72);
+
+    --text-primary: #eff2f5;
+    --text-secondary: #b3b8be;
+    --text-tertiary: #8b9095;
+    --text-on-accent: #2e2e2e;
+
+    --border-subtle: #2f3338;
+    --elev-3: 0 16px 40px -12px rgba(0, 0, 0, 0.55);
+    --border-strong: #6c7278;
+
+    --accent: #3b9cf6;
+    --accent-hover: #4dadff;
+    --accent-muted: #285077;
+
+    --state-ok: #53be70;
+    --state-warn: #eab532;
+    --state-danger: #f75d59;
+    --state-info: #55aee8;
+  }
+
+  [data-theme="light"] {
+    --surface-0: #f0f2f4;
+    --surface-1: #e5e8ec;
+    --surface-2: #d7dbe0;
+    --surface-scrim: rgba(42, 46, 51, 0.45);
+
+    --text-primary: #0e1216;
+    --text-secondary: #44484d;
+    --text-tertiary: #51565b;
+    --text-on-accent: #fcfcfc;
+
+    --border-subtle: #cdd1d6;
+    --border-strong: #70757a;
+
+    --accent: #0072d5;
+    --accent-hover: #0063c4;
+    --accent-muted: #d1e7ff;
+
+    --state-ok: #1c8742;
+    --state-warn: #a36500;
+    --state-danger: #c92f33;
+    --state-info: #0079ba;
+  }
+}

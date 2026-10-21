@@ -35,6 +35,7 @@ import { MyListScreen } from "./MyList.js";
 import { Player } from "./Player.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { parseRoute, routePath, type Route } from "./routing.js";
+import { backTarget, exitTizenApp, isTizen, useTizenBack, useTizenFocusPlate } from "./tizen.js";
 import { TitleScreen } from "./Title.js";
 
 type Screen =
@@ -264,7 +265,26 @@ export function App() {
     }
   }, []);
 
+  const tizen = isTizen(navigator.userAgent);
   useSpatialFocus(screen.name !== "loading");
+  useTizenFocusPlate(tizen);
+
+  // The Tizen shell navigates away, so the remote's hardware Back key is this client's to handle.
+  // At the root there is no earlier screen to show, and Back leaves the app rather than bouncing.
+  useTizenBack(tizen, () => {
+    const target = backTarget(screenRef.current.name);
+    if (target === "exit") return exitTizenApp();
+    if (target === "player") {
+      const current = screenRef.current;
+      if (current.name === "player") {
+        void api.stopPlayback(current.ticket.url).catch(() => {});
+        closePlayer(current.titleId);
+      }
+      return true;
+    }
+    goBack();
+    return true;
+  });
 
   // A title page is read from its top however it was entered. A season switch is internal state
   // and keeps its place, so this keys on the title's id rather than on the screen.
@@ -609,7 +629,13 @@ function LibraryScreen({
               {row.poster === null ? (
                 <div className="poster placeholder" />
               ) : (
-                <img alt="" className="poster" decoding="async" loading="lazy" src={row.poster} />
+                <img
+                  alt=""
+                  className="poster"
+                  decoding="async"
+                  loading={index < 6 ? "eager" : "lazy"}
+                  src={row.poster}
+                />
               )}
               {row.rating === null ? null : <span className="chip">{row.rating.toFixed(1)}</span>}
               <span className="tile-title">{row.name}</span>

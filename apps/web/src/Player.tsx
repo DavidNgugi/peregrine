@@ -29,6 +29,7 @@ import {
   subtitleLabel,
   totalDurationMs,
 } from "./player-tracks.js";
+import { transportAction } from "./tizen.js";
 
 export interface PlayerProps {
   readonly titleId: number;
@@ -533,6 +534,46 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
   };
 
   const shown = pendingMs ?? absoluteMs;
+
+  // A television remote's transport keys are not the on-screen buttons, and they exist only while
+  // this screen does: the listener is the "only when a player is open" rule. The ref keeps one
+  // handler across the four updates a second that `shown` changes.
+  const transport = useRef({ close, seekTo, shown });
+  transport.current = { close, seekTo, shown };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const action = transportAction(event.keyCode, event.key);
+      if (action === null) return;
+      event.preventDefault();
+      const element = video.current;
+      const current = transport.current;
+      switch (action) {
+        case "play":
+          if (element !== null) void element.play().catch(() => {});
+          break;
+        case "pause":
+          element?.pause();
+          break;
+        case "toggle":
+          if (element !== null) {
+            if (element.paused) void element.play().catch(() => {});
+            else element.pause();
+          }
+          break;
+        case "stop":
+          current.close();
+          break;
+        case "forward":
+          current.seekTo(current.shown + 10_000);
+          break;
+        case "rewind":
+          current.seekTo(current.shown - 10_000);
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <main className="player">

@@ -30,6 +30,13 @@ test-results/
 *.pem
 *.p12
 
+# Tizen packages are built locally and signed with one TV's certificate
+apps/tizen/build/
+*.wgt
+apps/tizen/.manifest.tmp
+apps/tizen/author-signature.xml
+apps/tizen/signature*.xml
+
 # Fetched sidecar binaries (scripts/fetch-sidecars.mjs)
 /vendor/
 apps/desktop/src-tauri/sidecars/*

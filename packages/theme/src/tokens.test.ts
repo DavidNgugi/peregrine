@@ -98,6 +98,18 @@ describe("tokens.css", () => {
       }
     }
   });
+
+  it("gives an engine without OKLCH an sRGB value for every semantic colour", () => {
+    // Chromium 76 (Tizen 6.0, ADR 0034) cannot substitute an oklch() custom property; the
+    // television would otherwise render every surface and label with an invalid colour.
+    const start = stylesheet.indexOf("@supports not (color: oklch(0 0 0))");
+    expect(start).toBeGreaterThan(-1);
+    const legacy = stylesheet.slice(start);
+    for (const token of SEMANTIC_COLOUR_TOKENS) {
+      if (token === "--focus-ring") continue;
+      expect(legacy, token).toContain(token + ":");
+    }
+  });
 });
 
 describe("TYPOGRAPHY_SIZE_UTILITIES", () => {

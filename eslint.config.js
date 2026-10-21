@@ -62,4 +62,18 @@ export default tseslint.config(
       globals: { ...globals.node },
     },
   },
+  {
+    // The Tizen shell is a packaged classic script running in a browser webview, not a Node
+    // module. ES5 is deliberate: the engine is Chromium 76 and there is no transpiler.
+    files: ["apps/tizen/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 5,
+      sourceType: "script",
+      globals: { ...globals.browser },
+    },
+    rules: {
+      // ES5 has no optional catch binding, and these catches are deliberate no-ops.
+      "@typescript-eslint/no-unused-vars": ["error", { caughtErrors: "none" }],
+    },
+  },
 );

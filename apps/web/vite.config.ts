@@ -30,6 +30,11 @@ export default defineConfig({
     ),
   },
   build: {
+    // The Samsung Tizen client (ADR 0034) is Chromium 76, and a top-level navigation to this
+    // bundle is how it runs: optional chaining and nullish coalescing are syntax that engine
+    // cannot parse, so they are lowered here rather than left to the desktop webview.
+    target: "chrome76",
+    cssTarget: "chrome76",
     outDir: "dist",
     emptyOutDir: true,
   },

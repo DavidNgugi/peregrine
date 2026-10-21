@@ -1934,3 +1934,405 @@ button {
     max-width: min(760px, 58%);
   }
 }
+
+/* The Samsung Tizen client is Chromium 76 (ADR 0034). `dvh`, `min()`, `max()` and `clamp()`
+   postdate it, and the CSS transpiler can only lower one into another, not into a static value;
+   without these the root and the player have no height and the pairing code has no size. The
+   feature query is false on every engine that understands `dvh`, so the modern rules win there. */
+@supports not (height: 100dvh) {
+  #root,
+  .screen {
+    min-height: 100vh;
+  }
+
+  .player,
+  .player video {
+    height: 100vh;
+  }
+
+  .hero {
+    min-height: 680px;
+  }
+
+  .title-hero {
+    min-height: 620px;
+  }
+
+  .code {
+    font-size: 72px;
+  }
+
+  .title-info h1 {
+    font-size: 48px;
+  }
+
+  .hero-copy h1,
+  .title-hero-copy h1 {
+    font-size: 64px;
+  }
+
+  .browse-head h1 {
+    font-size: 40px;
+  }
+
+  .player-warning {
+    max-width: 640px;
+  }
+
+  .profile-dialog {
+    width: 560px;
+    max-width: 100%;
+  }
+
+  .poster-hero .hero-copy,
+  .poster-hero .title-hero-copy {
+    max-width: 760px;
+  }
+}
+
+/* Ten feet, a D-pad, and no pointer. A 6px ring is the smallest that reads from a sofa; the
+   backdrop blur is dropped because a live blur on this class of SoC costs more than it says. */
+html.tizen {
+  cursor: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The television is a ten-foot surface, not a desktop window on a large monitor: fewer, larger
+   posters and type that scales with the viewport, so a 1080p set and a 4K set agree. Everything
+   here is scoped to the Tizen class the client sets from the user agent; a desktop never sees it. */
+html.tizen {
+  scroll-padding-top: 0;
+}
+
+html.tizen body {
+  font-size: 1.25vw;
+}
+
+html.tizen .topbar {
+  position: relative;
+  gap: 1.2vw;
+  padding: 1.5vw 3.3vw;
+}
+
+html.tizen .brand {
+  font-size: 2vw;
+}
+
+html.tizen .topbar-nav {
+  gap: 0.3vw;
+}
+
+html.tizen .nav,
+html.tizen .tab {
+  padding: 0.5vw 1vw;
+  font-size: 1.15vw;
+}
+
+html.tizen .topbar-back {
+  width: 2.3vw;
+  height: 2.3vw;
+}
+
+html.tizen .topbar-back svg {
+  width: 1.15vw;
+  height: 1.15vw;
+}
+
+html.tizen .grid {
+  grid-template-columns: repeat(auto-fill, minmax(14vw, 1fr));
+  gap: 2vw 1.5vw;
+  padding: 0 3.3vw;
+}
+
+html.tizen .rail-track {
+  grid-template-columns: repeat(auto-fill, minmax(13.5vw, 1fr));
+  gap: 1.6vw 1.25vw;
+  padding: 0.6vw 3.3vw 1.5vw;
+}
+
+html.tizen .browse-grid,
+html.tizen .feed-grid {
+  grid-template-columns: repeat(auto-fill, minmax(13.5vw, 1fr));
+  gap: 1.8vw 1.25vw;
+}
+
+html.tizen .browse-grid {
+  padding: 1.5vw 3.3vw 2.5vw;
+}
+
+html.tizen .title-feed,
+html.tizen .episodes {
+  padding: 0 3.3vw;
+}
+
+html.tizen .title-page {
+  grid-template-columns: minmax(16vw, 22vw) minmax(0, 1fr);
+  gap: 2.5vw;
+  padding: 0.6vw 3.3vw;
+}
+
+html.tizen .tile-title {
+  font-size: 1.15vw;
+}
+
+html.tizen .card-name {
+  font-size: 1.05vw;
+}
+
+html.tizen .rail h2,
+html.tizen .title-feed .section-head h2 {
+  font-size: 1.6vw;
+}
+
+html.tizen .rail-head {
+  padding: 0 3.3vw;
+}
+
+html.tizen .browse-head {
+  gap: 1.2vw;
+  padding: 0.4vw 3.3vw 0;
+}
+
+html.tizen .browse-head h1 {
+  font-size: 2.4vw;
+}
+
+html.tizen .filter-row,
+html.tizen .genre-row {
+  gap: 0.8vw;
+  padding: 0.9vw 3.3vw 0;
+}
+
+html.tizen .search-field {
+  flex-basis: 25vw;
+  min-width: 14vw;
+  padding: 0 0.8vw;
+}
+
+html.tizen .search-field input {
+  height: 2.6vw;
+  font-size: 1.15vw;
+}
+
+html.tizen .search-field svg {
+  width: 1.1vw;
+  height: 1.1vw;
+}
+
+html.tizen .segment {
+  padding: 0.45vw 1vw;
+  font-size: 1vw;
+}
+
+html.tizen .genre {
+  padding: 0.4vw 0.8vw;
+  font-size: 0.95vw;
+}
+
+html.tizen .hero {
+  min-height: 63vh;
+}
+
+html.tizen .title-hero {
+  min-height: 57vh;
+}
+
+html.tizen .hero-copy,
+html.tizen .title-hero-copy {
+  gap: 0.8vw;
+  max-width: 40vw;
+  padding: 0 3.3vw 2.3vw;
+}
+
+html.tizen .hero-copy h1,
+html.tizen .title-hero-copy h1 {
+  font-size: 3.8vw;
+}
+
+html.tizen .hero-meta {
+  font-size: 0.95vw;
+}
+
+html.tizen .hero-overview,
+html.tizen .overview {
+  max-width: 38vw;
+  font-size: 1.2vw;
+}
+
+html.tizen .title-info h1 {
+  font-size: 3vw;
+}
+
+html.tizen .actions {
+  gap: 0.8vw;
+}
+
+html.tizen .play,
+html.tizen .secondary,
+html.tizen .back {
+  padding: 0.8vw 2.4vw;
+  font-size: 1.15vw;
+}
+
+/* Reserve the card's 2:3 box on this engine itself. Chromium 76 has no usable aspect-ratio,
+   and its @supports answer is not reliable enough to carry every tile: the Library and Downloads
+   posters work because they already have an explicit height, while the rail and grid cards did
+   not. Padding from the width is the same box the modern property computes. */
+html.tizen .card {
+  /* The card is a button (a flex container) inside a grid. Old flexbox resolves a percentage
+     width on a non-replaced flex item against an indefinite container width, which shrank the
+     card art to its content while the grid track stayed full width. Stretch avoids the
+     percentage entirely. */
+  align-items: stretch;
+}
+
+html.tizen .card-art {
+  width: auto;
+  align-self: stretch;
+  height: 0;
+  padding-top: 150%;
+}
+
+html.tizen .card-art::before {
+  display: none;
+}
+
+/* With the content box at zero height, a percentage height on the absolutely positioned image
+   can resolve to zero on an old engine. The top/bottom offsets against the padding box are the
+   reliable stretch; `height: auto` lets them do it. */
+html.tizen .card-art img {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+}
+
+html.tizen .episode-still {
+  height: 0;
+  padding-top: 56.25%;
+}
+
+html.tizen .episode-still::before {
+  display: none;
+}
+
+html.tizen .episode-still img {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+}
+
+html.tizen .grid .poster,
+html.tizen .grid .poster.placeholder {
+  height: 21vw;
+}
+
+html.tizen .download-row {
+  grid-template-columns: 8vw minmax(0, 1fr);
+}
+
+html.tizen .download-poster {
+  width: 8vw;
+  height: 12vw;
+}
+
+html.tizen .code {
+  font-size: 5vw;
+  letter-spacing: 0.08em;
+}
+
+/* The remote has no pointer. A hover shadow following a virtual cursor reads as a stuck focus
+   rectangle; focus is the only highlight on this surface. */
+html.tizen .card:hover .card-art,
+html.tizen .tile:hover .poster {
+  transform: none;
+  box-shadow: none;
+}
+
+html.tizen .card:hover .card-art img {
+  transform: none;
+}
+
+html.tizen .card:hover .card-name {
+  color: var(--text-secondary);
+}
+
+html.tizen .episode:hover {
+  transform: none;
+  border-color: var(--border-subtle);
+}
+
+html.tizen .play:hover,
+html.tizen .secondary:hover {
+  filter: none;
+}
+
+/* The focus plate is the television's only highlight. Until its script has created the plate,
+   the stylesheet still gives every control a ring, so a failed script is not a lost focus; once
+   the plate exists, the per-tile outline is gone because it repaints the tile on every move. */
+html.tizen:not([data-tv-focus]) button:focus,
+html.tizen:not([data-tv-focus]) a:focus,
+html.tizen:not([data-tv-focus]) video:focus,
+html.tizen:not([data-tv-focus]) [data-focus]:focus {
+  outline: 6px solid var(--focus-ring);
+  outline-offset: 6px;
+}
+
+html.tizen[data-tv-focus] button:focus,
+html.tizen[data-tv-focus] button:focus-visible,
+html.tizen[data-tv-focus] a:focus,
+html.tizen[data-tv-focus] a:focus-visible,
+html.tizen[data-tv-focus] video:focus,
+html.tizen[data-tv-focus] [data-focus]:focus {
+  outline: none;
+}
+
+/* The title's colour change is a text paint on every focus move; the plate carries the focus
+   instead, exactly as the reference set's measured recipe requires. */
+html.tizen .tile:focus-visible .tile-title {
+  color: var(--text-secondary);
+}
+
+/* One promoted layer moved with transform; the border and radius are written only when the
+   target changes, and opacity is the only other animated property. */
+#tizen-focus {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+  box-sizing: border-box;
+  width: 0;
+  height: 0;
+  border: 0.3vw solid var(--focus-ring);
+  border-radius: 14px;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.65);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(-9999px, -9999px, 0);
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 120ms linear;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  contain: layout style paint;
+}
+
+#tizen-focus[data-visible="true"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tizen-focus {
+    transition: none;
+  }
+}

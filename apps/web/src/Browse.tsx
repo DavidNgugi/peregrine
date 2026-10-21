@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, type Genre, type Tile } from "./api.js";
+import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
 import { SearchIcon } from "./icons.js";
 
@@ -21,6 +22,7 @@ const SORTS = [
  * same way a browse page is.
  */
 export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void }) {
+  useAutoFocus();
   const [kind, setKind] = useState<Kind>("movie");
   const [sort, setSort] = useState<string>("popularity");
   const [genre, setGenre] = useState<number | undefined>(undefined);
@@ -151,6 +153,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
           <input
             aria-label="Search films and series"
             id="browse-search"
+            data-autofocus="true"
             data-focus="true"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search films and series"
@@ -241,8 +244,14 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
         <p className="dim browse-empty">Nothing matched. Try another title or filter.</p>
       ) : (
         <div className="browse-grid">
-          {items.map((tile) => (
-            <TileCard key={tile.id} onOpen={onOpen} tile={tile} watchlisted={tile.watchlisted} />
+          {items.map((tile, index) => (
+            <TileCard
+              key={tile.id}
+              onOpen={onOpen}
+              priority={index < 6}
+              tile={tile}
+              watchlisted={tile.watchlisted}
+            />
           ))}
         </div>
       )}

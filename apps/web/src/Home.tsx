@@ -11,7 +11,9 @@ import {
   type PreviewEvent,
   type PreviewState,
 } from "./hover-preview.js";
+import { useAutoFocus } from "./focus.js";
 import { BookmarkIcon, StarIcon } from "./icons.js";
+import { isTizen } from "./tizen.js";
 
 /** The one input the ladder answers to: a mouse or trackpad, not a remote or a finger. */
 const FINE_POINTER = "(hover: hover) and (pointer: fine)";
@@ -52,18 +54,24 @@ export function TileCard({
   tile,
   onOpen,
   autofocus = false,
+  priority = false,
   watchlisted = tile.watchlisted,
 }: {
   readonly tile: Tile;
   readonly onOpen: (tile: Tile) => void;
   readonly autofocus?: boolean;
+  /** Whether the first visible row should load its poster eagerly. */
+  readonly priority?: boolean;
   readonly watchlisted?: boolean;
 }) {
   const [preview, setPreview] = useState<PreviewState>(IDLE_PREVIEW);
   const [focused, setFocused] = useState(false);
   // The input type is a property of the device, and a listener per tile on a grid of thousands is
   // the cost the reference card avoids. Navigating remounts the grid if the input ever changes.
-  const [hoverable] = useState(finePointer);
+  // The television has no pointer: the focus panel is the only reveal, and a hover-preview
+  // transform on a tile the remote just left is the "stuck highlight" the reference guide warns
+  // about. This is evaluated once per grid, not per focus move.
+  const [hoverable] = useState(() => finePointer() && !isTizen(navigator.userAgent));
   const [node, setNode] = useState<HTMLElement | null>(null);
 
   const dispatch = useCallback((event: PreviewEvent) => {
@@ -168,7 +176,7 @@ export function TileCard({
         {tile.poster === null ? (
           <span className="card-placeholder" />
         ) : (
-          <img alt="" decoding="async" loading="lazy" src={tile.poster} />
+          <img alt="" decoding="async" loading={priority ? "eager" : "lazy"} src={tile.poster} />
         )}
         {tile.percent === null || tile.percent <= 0 ? null : (
           <span className="card-progress">
@@ -237,8 +245,14 @@ export function RailRow({
       </div>
       {open ? (
         <div className="rail-track" id={panelId}>
-          {rail.items.map((tile) => (
-            <TileCard key={tile.id} onOpen={onOpen} tile={tile} watchlisted={tile.watchlisted} />
+          {rail.items.map((tile, index) => (
+            <TileCard
+              key={tile.id}
+              onOpen={onOpen}
+              priority={index < 6}
+              tile={tile}
+              watchlisted={tile.watchlisted}
+            />
           ))}
         </div>
       ) : null}
@@ -330,6 +344,10 @@ export function HomeScreen({
   const [slide, setSlide] = useState(0);
   const [paused, setPaused] = useState(false);
   const current = heroes[slide] ?? heroes[0];
+
+  // The hero's Details/Play button is the entry point. The key is the first hero's id rather
+  // than the rotating slide, so a carousel tick never steals focus from the rails.
+  useAutoFocus(data?.hero?.id);
 
   useEffect(() => {
     setSlide(0);
