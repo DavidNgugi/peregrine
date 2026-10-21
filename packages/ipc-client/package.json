@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/ipc-client",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "private": true,
   "description": "Typed access to the Rust core over Tauri IPC; today the error-code mapping, later the generated bindings.",
   "license": "MIT OR Apache-2.0",

@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/i18n",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "private": true,
   "description": "Message catalogues and the configured i18next instance every screen renders through.",
   "license": "MIT OR Apache-2.0",

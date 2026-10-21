@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/theme",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "private": true,
   "description": "Design tokens: the three-layer colour model and the typography scale from docs/DESIGN_SYSTEM.md §2-3.",
   "license": "MIT OR Apache-2.0",

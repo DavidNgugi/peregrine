@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/web",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "private": true,
   "description": "The ten-foot web client: the LAN surface's browser UI (ADR 0028).",
   "license": "MIT OR Apache-2.0",
