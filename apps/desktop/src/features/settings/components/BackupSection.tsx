@@ -1,4 +1,4 @@
-import { Button, Dialog, SettingsRow, SettingsSection } from "@peregrine/ui";
+import { Button, Dialog, Progress, SettingsRow, SettingsSection } from "@peregrine/ui";
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { pickFile } from "../../../lib/picker.js";
@@ -21,6 +21,18 @@ export function BackupSection(): ReactElement {
   const { t } = useTranslation();
   const backup = useBackup();
   const [chosen, setChosen] = useState<ChosenBackup | null>(null);
+  const action =
+    backup.active === "restore"
+      ? t("settings.backup.restore.busy")
+      : t("settings.backup.create.busy");
+  const phase =
+    backup.progress === null
+      ? t("settings.backup.progress.working")
+      : t(`settings.backup.progress.${backup.progress.operation}.${backup.progress.phase}`, {
+          defaultValue: t("settings.backup.progress.working"),
+        });
+  const label = t("settings.backup.progress.label", { action, phase });
+  const percent = (backup.progress?.permille ?? 0) / 10;
 
   const choose = async (): Promise<void> => {
     const picked = await pickFile({
@@ -52,10 +64,10 @@ export function BackupSection(): ReactElement {
         label={t("settings.backup.create.label")}
       >
         <Button
+          busy={backup.busy && backup.active === "backup"}
+          busyLabel={t("settings.backup.create.busy")}
           disabled={backup.busy}
-          onClick={() => {
-            void backup.create();
-          }}
+          onClick={() => backup.create()}
           size="sm"
           variant="secondary"
         >
@@ -67,16 +79,22 @@ export function BackupSection(): ReactElement {
         label={t("settings.backup.restore.label")}
       >
         <Button
+          busy={backup.busy && backup.active === "restore"}
+          busyLabel={t("settings.backup.restore.busy")}
           disabled={backup.busy}
-          onClick={() => {
-            void choose();
-          }}
+          onClick={() => choose()}
           size="sm"
           variant="secondary"
         >
           {t("settings.backup.restore.action")}
         </Button>
       </SettingsRow>
+      {backup.busy && backup.outcome?.kind !== "restoring" ? (
+        <div aria-live="polite" className="flex flex-col gap-1.5 px-3 py-2" role="status">
+          <span className="text-caption text-text-secondary">{label}</span>
+          <Progress label={label} value={percent} />
+        </div>
+      ) : null}
       {backup.outcome?.kind === "created" ? (
         <p className="px-3 py-2 text-caption text-text-secondary" role="status">
           {t("settings.backup.created", { path: backup.outcome.backup.path })}

@@ -133,7 +133,7 @@ describe("JobsScreen", () => {
 
     expect(markup).toContain('role="alert"');
     expect(markup).toContain("The library database is busy.");
-    expect(markup).toContain("Dismiss");
+    expect(markup).toContain("Dismiss error");
   });
 
   it("says what to do next rather than only what happened", () => {

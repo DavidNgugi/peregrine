@@ -37,9 +37,7 @@ export function NetworkSection(): ReactElement {
         <div className="flex flex-wrap items-center gap-3">
           <Button
             disabled={check.checking}
-            onClick={() => {
-              void check.check();
-            }}
+            onClick={() => check.check()}
             size="sm"
             variant="secondary"
           >

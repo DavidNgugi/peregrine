@@ -128,9 +128,7 @@ export function ProviderStep({
           <Button
             className="self-start"
             disabled={busy}
-            onClick={() => {
-              void onUseBuiltIn();
-            }}
+            onClick={() => onUseBuiltIn()}
             variant="primary"
           >
             {t("setup.provider.builtIn")}
@@ -172,13 +170,7 @@ export function ProviderStep({
         />
         <div className="flex items-center gap-2">
           {view.configured ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void onTest(view.provider);
-              }}
-              variant="secondary"
-            >
+            <Button disabled={busy} onClick={() => onTest(view.provider)} variant="secondary">
               {t("setup.provider.test")}
             </Button>
           ) : null}

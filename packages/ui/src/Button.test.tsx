@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Button } from "./Button.js";
+import { Button, isThenable } from "./Button.js";
 
 function classesOf(markup: string): string[] {
   const match = /class="([^"]*)"/u.exec(markup);
@@ -74,6 +74,35 @@ describe("Button", () => {
     const classes = classesOf(renderToStaticMarkup(<Button>Play</Button>));
     expect(classes).toContain("focus-visible:outline-focus-ring");
     expect(classes).toContain("motion-reduce:transition-none");
+  });
+
+  it("shows a full busy label, a spinner, and phase progress while working", () => {
+    const markup = renderToStaticMarkup(
+      <Button busy busyLabel="Saving the key" progress={40}>
+        Save and test
+      </Button>,
+    );
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("Saving the key");
+    expect(markup).toContain("disabled");
+    expect(markup).toContain("scaleX(0.4)");
+    expect(markup).toContain("animate-spin");
+  });
+
+  it("keeps the action label when the caller does not rename the busy state", () => {
+    const markup = renderToStaticMarkup(<Button busy>Scan folders</Button>);
+
+    expect(markup).toContain("Scan folders");
+    expect(markup).toContain('aria-busy="true"');
+  });
+
+  it("tracks only a real thenable, not every click that returns a value", () => {
+    expect(isThenable(Promise.resolve())).toBe(true);
+    expect(isThenable({ then: () => undefined })).toBe(true);
+    expect(isThenable(undefined)).toBe(false);
+    expect(isThenable(true)).toBe(false);
+    expect(isThenable({ value: 1 })).toBe(false);
   });
 });
 

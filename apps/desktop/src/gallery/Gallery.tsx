@@ -408,7 +408,7 @@ export function Gallery(): ReactElement {
 
       <Section_
         component="Button"
-        description="Three variants, two sizes, and disabled. Tab through them to see the focus ring."
+        description="Three variants, two sizes, disabled, and busy with a full label and phase progress. Tab through them to see the focus ring."
       >
         <Button variant="primary">Primary action</Button>
         <Button variant="secondary">Secondary</Button>
@@ -419,6 +419,12 @@ export function Gallery(): ReactElement {
         </Button>
         <Button disabled>Disabled</Button>
         <Button variant="primary">Primary with a much longer label</Button>
+        <Button busy busyLabel="Saving the key" progress={40} variant="secondary">
+          Save the key
+        </Button>
+        <Button busy busyLabel="Scanning folders" variant="primary">
+          Scan folders
+        </Button>
       </Section_>
 
       <Section_
@@ -455,6 +461,7 @@ export function Gallery(): ReactElement {
         <IconButton icon="sun" label="Switch to the light theme" />
         <IconButton icon="moon" label="Switch to the dark theme" size="sm" />
         <IconButton icon="tune" label="Settings" variant="secondary" />
+        <IconButton busy icon="copy" label="Copying the link" variant="secondary" />
         <IconButton disabled icon="pulse" label="Unavailable" />
       </Section_>
 

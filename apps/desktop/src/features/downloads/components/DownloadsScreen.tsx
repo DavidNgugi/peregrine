@@ -112,21 +112,21 @@ export function DownloadsScreen({
     | null
   >(null);
 
-  const confirm = (): void => {
+  const confirm = async (): Promise<void> => {
     const target = confirming;
-    setConfirming(null);
     if (target === null) {
       return;
     }
     if (target.kind === "clear") {
-      void actions.clearFinished();
+      await actions.clearFinished();
     } else if (target.kind === "delete") {
-      void actions.deleteFiles(target.row.id);
+      await actions.deleteFiles(target.row.id);
     } else if (target.kind === "remove") {
-      void actions.remove(target.row.id);
+      await actions.remove(target.row.id);
     } else {
-      void actions.dismiss(target.row.id);
+      await actions.dismiss(target.row.id);
     }
+    setConfirming(null);
   };
 
   const hasClearable = downloads.downloads.some((row) => CLEARABLE_STATES.has(row.state));
@@ -256,7 +256,9 @@ export function DownloadsScreen({
               {rateLabel(row.downloadRateBps, t)}
               {" · "}
               {etaLabel(row.etaSeconds, t)}
-              {row.protocol === "torrent" ? ` · ${String(row.peersConnected)}/${String(row.peersSwarm)} peers` : ""}
+              {row.protocol === "torrent"
+                ? ` · ${String(row.peersConnected)}/${String(row.peersSwarm)} peers`
+                : ""}
             </span>
           </div>
         );
@@ -330,9 +332,7 @@ export function DownloadsScreen({
               <Button
                 className="download-primary-action"
                 disabled={busy}
-                onClick={() => {
-                  void actions.resume(row.id);
-                }}
+                onClick={() => actions.resume(row.id)}
                 size="sm"
                 variant="secondary"
               >
@@ -343,9 +343,7 @@ export function DownloadsScreen({
               <Button
                 className="download-primary-action"
                 disabled={busy}
-                onClick={() => {
-                  void actions.pause(row.id);
-                }}
+                onClick={() => actions.pause(row.id)}
                 size="sm"
                 variant="secondary"
               >
@@ -360,9 +358,7 @@ export function DownloadsScreen({
                 row.findings.some((finding) => finding.reason === "nested_archive") ? (
                   <Button
                     disabled={busy}
-                    onClick={() => {
-                      void actions.consent(row.id);
-                    }}
+                    onClick={() => actions.consent(row.id)}
                     size="sm"
                     variant="secondary"
                   >
@@ -464,12 +460,7 @@ export function DownloadsScreen({
         {downloads.failed ? (
           <ErrorState
             action={
-              <Button
-                onClick={() => {
-                  void downloads.refresh();
-                }}
-                variant="secondary"
-              >
+              <Button onClick={() => downloads.refresh()} variant="secondary">
                 {t("shell.error.retry")}
               </Button>
             }

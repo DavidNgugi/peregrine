@@ -36,6 +36,42 @@ const FAILED: &str = "failed.sqlite";
 /// What a staged file is called while it is being copied.
 const PARTIAL: &str = "pending.sqlite.partial";
 
+/// The steps of staging a restore, for the bar a person watches.
+///
+/// The same shape as the storage layer's backup phases: a share of the whole per step, not a
+/// byte count SQLite does not report. The last step is emitted before the app restarts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestorePhase {
+    /// An exact copy of the database being replaced is being written.
+    Snapshotting,
+    /// The chosen file is being copied into the staging folder.
+    Staging,
+    /// The staged file is complete; the restart is next.
+    Staged,
+}
+
+impl RestorePhase {
+    /// The stable spelling an event payload carries.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Snapshotting => "snapshotting",
+            Self::Staging => "staging",
+            Self::Staged => "staged",
+        }
+    }
+
+    /// How far through the whole the phase starts, in permille.
+    #[must_use]
+    pub const fn permille(self) -> u16 {
+        match self {
+            Self::Snapshotting => 100,
+            Self::Staging => 600,
+            Self::Staged => 1_000,
+        }
+    }
+}
+
 /// The name a backup gets, from the instant the runtime's clock reports.
 ///
 /// UTC and a fixed-width stamp: the file is portable, and two backups taken in the same second
@@ -87,6 +123,7 @@ pub(crate) async fn stage_restore(
     data_directory: &Path,
     database_path: &Path,
     source: &Path,
+    progress: &(dyn Fn(RestorePhase) + Send + Sync),
 ) -> Result<BackupInfo, RuntimeError> {
     let source = fs::canonicalize(source)
         .await
@@ -129,8 +166,10 @@ pub(crate) async fn stage_restore(
     remove_if_present(&previous).await?;
 
     // A consistent copy of the state being replaced, taken while the writer is running.
-    database.write_snapshot(&previous).await?;
+    progress(RestorePhase::Snapshotting);
+    database.write_snapshot(&previous, &|_| {}).await?;
 
+    progress(RestorePhase::Staging);
     let partial = directory.join(PARTIAL);
     remove_if_present(&partial).await?;
     if let Err(error) = fs::copy(&source, &partial).await {
@@ -141,6 +180,7 @@ pub(crate) async fn stage_restore(
         .await
         .map_err(|error| io_failure(&directory, error))?;
 
+    progress(RestorePhase::Staged);
     info!(
         source = %source.display(),
         schema_version = info.schema_version,
@@ -333,7 +373,7 @@ mod tests {
     /// prove — that `Runtime::start` applies the stage before it opens the database.
     #[tokio::test]
     async fn a_backup_restores_profiles_and_wishlists_on_the_next_launch() {
-        use std::sync::Arc;
+        use std::sync::{Arc, Mutex};
 
         use crate::testing::{CountingSecretStore, RecordingSink};
         use crate::{EventSink, Observability, Runtime, RuntimeConfig};
@@ -372,16 +412,37 @@ mod tests {
         let backups = directory.path().join("backups");
         tokio::fs::create_dir_all(&backups).await.unwrap();
 
+        let restore_phases = Arc::new(Mutex::new(Vec::new()));
         let profile = {
             let runtime = start(&directory).await;
             let profile = runtime.create_profile("Ada", "adult", None).await.unwrap();
             runtime.add_to_watchlist(title).await.unwrap();
             let backup = runtime.create_backup(&backups).await.unwrap();
             runtime.remove_from_watchlist(title).await.unwrap();
-            runtime.restore_backup(&backup.path).await.unwrap();
+            let sink = Arc::clone(&restore_phases);
+            runtime
+                .restore_backup_with_progress(&backup.path, &move |phase| {
+                    sink.lock()
+                        .expect("the phase log is not poisoned")
+                        .push(phase);
+                })
+                .await
+                .unwrap();
             runtime.shutdown().await;
             profile
         };
+
+        assert_eq!(
+            *restore_phases
+                .lock()
+                .expect("the phase log is not poisoned"),
+            vec![
+                RestorePhase::Snapshotting,
+                RestorePhase::Staging,
+                RestorePhase::Staged,
+            ],
+            "the bar sees every restore phase before the restart"
+        );
 
         let runtime = start(&directory).await;
         let profiles = runtime.profiles().await.unwrap();

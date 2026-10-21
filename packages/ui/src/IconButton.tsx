@@ -1,6 +1,8 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { clsx } from "clsx";
-import type { ButtonHTMLAttributes, ReactElement } from "react";
+import type { ButtonHTMLAttributes, MouseEvent, ReactElement } from "react";
+import { useState } from "react";
+import { isThenable } from "./Button.js";
 import { twMerge } from "./merge.js";
 import { Icon, type IconName } from "./Icon.js";
 
@@ -43,15 +45,17 @@ export type IconButtonProps = Omit<
     readonly label: string;
     readonly icon: IconName;
     readonly className?: string;
+    /** The action is running; the icon becomes a spinner and the control is disabled. */
+    readonly busy?: boolean;
   };
 
 /**
  * A button that draws one icon and no text.
  *
- * The label is what a screen reader announces and what a tooltip would show, and it is a
+ * The label is what a screen reader announces and the default native tooltip, and it is a
  * required prop rather than an optional one because an icon-only control without it is
- * unusable by anyone not looking at it. To show the same text to sighted users, pass it as
- * `title` too; no tooltip is drawn here, because the tooltip primitive is PG-E21-03's.
+ * unusable by anyone not looking at it. A caller may pass a shorter `title`; the accessible
+ * name stays the full label. The richer tooltip primitive is PG-E21-03's.
  */
 export function IconButton({
   variant,
@@ -59,17 +63,54 @@ export function IconButton({
   className,
   icon,
   label,
+  busy = false,
+  disabled,
+  onClick,
+  title,
   type = "button",
   ...rest
 }: IconButtonProps): ReactElement {
+  const [running, setRunning] = useState(false);
+  const busyNow = busy || running;
+
+  const handleClick = (event: MouseEvent<HTMLButtonElement>): void => {
+    const result: unknown = onClick?.(event);
+    if (!isThenable(result)) {
+      return;
+    }
+    setRunning(true);
+    void result.then(
+      () => {
+        setRunning(false);
+      },
+      () => {
+        setRunning(false);
+      },
+    );
+  };
+
   return (
     <button
+      aria-busy={busyNow ? true : undefined}
       aria-label={label}
       className={twMerge(clsx(iconButtonVariants({ variant, size }), className))}
+      disabled={disabled === true || busyNow}
+      onClick={handleClick}
+      title={title ?? label}
       type={type}
       {...rest}
     >
-      <Icon name={icon} size={size === "sm" ? 16 : size === "lg" ? 24 : 20} />
+      {busyNow ? (
+        <span
+          aria-hidden="true"
+          className={clsx(
+            "animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none",
+            size === "sm" ? "size-3.5" : size === "lg" ? "size-5" : "size-4",
+          )}
+        />
+      ) : (
+        <Icon name={icon} size={size === "sm" ? 16 : size === "lg" ? 24 : 20} />
+      )}
     </button>
   );
 }

@@ -103,9 +103,7 @@ export function JobsScreen({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           disabled={starting || (live !== null && !terminal)}
-          onClick={() => {
-            void start(STEPS);
-          }}
+          onClick={() => start(STEPS)}
           variant="primary"
         >
           {t("jobs.action.start")}
@@ -119,13 +117,7 @@ export function JobsScreen({
         >
           {t("jobs.action.cancel")}
         </Button>
-        <Button
-          disabled={refreshing}
-          onClick={() => {
-            void refresh();
-          }}
-          variant="secondary"
-        >
+        <Button disabled={refreshing} onClick={() => refresh()} variant="secondary">
           {t("jobs.action.refresh")}
         </Button>
         {health?.events.degraded === true ? (

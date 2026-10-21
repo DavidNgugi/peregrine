@@ -82,6 +82,47 @@ pub struct BackupInfo {
     pub schema_version: i64,
 }
 
+/// The steps of writing a backup, for the bar a person watches.
+///
+/// SQLite does not report how many pages `VACUUM INTO` has written, so this is phase
+/// progress rather than byte progress: the bar moves when a step starts, and the sentence
+/// beside it says which step. Each figure is a share of the whole, not a measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupPhase {
+    /// `VACUUM INTO` is writing the copy.
+    Copying,
+    /// The process-local rows are being removed.
+    Cleaning,
+    /// The copy is being compacted and checkpointed.
+    Compacting,
+    /// The file is complete and renamed into place.
+    Done,
+}
+
+impl BackupPhase {
+    /// The stable spelling an event payload carries.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Copying => "copying",
+            Self::Cleaning => "cleaning",
+            Self::Compacting => "compacting",
+            Self::Done => "done",
+        }
+    }
+
+    /// How far through the whole the phase starts, in permille.
+    #[must_use]
+    pub const fn permille(self) -> u16 {
+        match self {
+            Self::Copying => 100,
+            Self::Cleaning => 650,
+            Self::Compacting => 900,
+            Self::Done => 1_000,
+        }
+    }
+}
+
 /// Copies `path` to a new file beside it, then prunes the oldest beyond [`KEPT`].
 ///
 /// `from_version` is the highest migration already applied, and it is part of the name:
@@ -261,6 +302,7 @@ pub(crate) async fn write(
     pool: &SqlitePool,
     destination: &Path,
     scrub: bool,
+    progress: &(dyn Fn(BackupPhase) + Send + Sync),
 ) -> Result<BackupReport, StorageError> {
     if tokio::fs::try_exists(destination).await.unwrap_or(false) {
         return Err(backup_failed(
@@ -287,6 +329,7 @@ pub(crate) async fn write(
         ));
     };
 
+    progress(BackupPhase::Copying);
     let mut connection = pool.acquire().await.map_err(StorageError::from_sqlx)?;
     sqlx::query("VACUUM INTO ?1")
         .bind(partial_path)
@@ -301,7 +344,8 @@ pub(crate) async fn write(
     drop(connection);
 
     if scrub {
-        let result = remove_transient_tables(&partial).await;
+        progress(BackupPhase::Cleaning);
+        let result = remove_transient_tables(&partial, progress).await;
         if let Err(error) = result {
             let _ = tokio::fs::remove_file(&partial).await;
             return Err(error);
@@ -330,6 +374,7 @@ pub(crate) async fn write(
             )
         })?;
 
+    progress(BackupPhase::Done);
     info!(
         backup = %destination.display(),
         bytes,
@@ -347,7 +392,10 @@ pub(crate) async fn write(
 ///
 /// The deletes run in one transaction so a failure leaves the copy as VACUUM INTO wrote it;
 /// VACUUM runs afterwards because SQLite refuses it inside a transaction.
-async fn remove_transient_tables(path: &Path) -> Result<(), StorageError> {
+async fn remove_transient_tables(
+    path: &Path,
+    progress: &(dyn Fn(BackupPhase) + Send + Sync),
+) -> Result<(), StorageError> {
     let mut connection = crate::database::open_writer_connection(path).await?;
     let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
     for statement in NOT_IN_A_BACKUP {
@@ -365,6 +413,7 @@ async fn remove_transient_tables(path: &Path) -> Result<(), StorageError> {
         .commit()
         .await
         .map_err(StorageError::from_sqlx)?;
+    progress(BackupPhase::Compacting);
     sqlx::query("VACUUM")
         .execute(&mut connection)
         .await
@@ -465,6 +514,7 @@ mod tests {
     use crate::migrations;
     use jiff::Timestamp;
     use peregrine_domain::{AccountId, WatchlistEntry};
+    use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
     /// The migration versions a database records, which is how a copy is shown to be a
@@ -676,7 +726,7 @@ mod tests {
         let (database, _source, account) = populated(&directory).await;
         let destination = directory.path().join("backup.sqlite");
 
-        let report = database.write_backup(&destination).await.unwrap();
+        let report = database.write_backup(&destination, &|_| {}).await.unwrap();
         assert_eq!(report.path, destination);
         assert!(report.bytes > 0);
         assert_eq!(report.schema_version, migrations::latest_version());
@@ -712,6 +762,36 @@ mod tests {
         assert_eq!(info.schema_version, migrations::latest_version());
     }
 
+    /// The bar a screen draws follows the storage work: each phase is reported once, in the
+    /// order the copy goes through them, and the final one says the file exists.
+    #[tokio::test]
+    async fn a_backup_reports_each_phase_once_in_order() {
+        let directory = TempDir::new().unwrap();
+        let (database, _source, _account) = populated(&directory).await;
+        let destination = directory.path().join("backup.sqlite");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+
+        database
+            .write_backup(&destination, &move |phase| {
+                sink.lock()
+                    .expect("the phase log is not poisoned")
+                    .push(phase);
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *seen.lock().expect("the phase log is not poisoned"),
+            vec![
+                BackupPhase::Copying,
+                BackupPhase::Cleaning,
+                BackupPhase::Compacting,
+                BackupPhase::Done,
+            ]
+        );
+    }
+
     /// A destination is the caller's, so a second backup never overwrites the first, and a
     /// refusal leaves no partial file behind.
     #[tokio::test]
@@ -719,9 +799,12 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let (database, _source, _account) = populated(&directory).await;
         let destination = directory.path().join("backup.sqlite");
-        database.write_backup(&destination).await.unwrap();
+        database.write_backup(&destination, &|_| {}).await.unwrap();
 
-        let error = database.write_backup(&destination).await.unwrap_err();
+        let error = database
+            .write_backup(&destination, &|_| {})
+            .await
+            .unwrap_err();
         assert!(matches!(error, StorageError::Backup { .. }));
         assert!(
             !with_suffix(&destination, PARTIAL).exists(),
@@ -748,7 +831,7 @@ mod tests {
 
         let (database, _source, _account) = populated(&directory).await;
         let backup = directory.path().join("backup.sqlite");
-        database.write_backup(&backup).await.unwrap();
+        database.write_backup(&backup, &|_| {}).await.unwrap();
         let newer = directory.path().join("newer.sqlite");
         tokio::fs::copy(&backup, &newer).await.unwrap();
         let mut connection = open_writer_connection(&newer).await.unwrap();

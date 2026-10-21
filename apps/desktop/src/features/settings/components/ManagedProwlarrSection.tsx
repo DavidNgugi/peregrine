@@ -52,10 +52,11 @@ export function ManagedProwlarrSection({ prowlarr }: ManagedProwlarrSectionProps
           <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
             {status.installed ? null : (
               <Button
+                busy={prowlarr.phase === "installing"}
+                busyLabel={t("settings.prowlarr.installing")}
                 disabled={prowlarr.busy}
-                onClick={() => {
-                  void prowlarr.install();
-                }}
+                onClick={() => prowlarr.install()}
+                progress={prowlarr.progressPermille / 10}
                 variant="primary"
               >
                 {prowlarr.phase === "installing"
@@ -65,10 +66,10 @@ export function ManagedProwlarrSection({ prowlarr }: ManagedProwlarrSectionProps
             )}
             {status.installed && !status.running ? (
               <Button
+                busy={prowlarr.phase === "starting"}
+                busyLabel={t("settings.prowlarr.starting")}
                 disabled={prowlarr.busy}
-                onClick={() => {
-                  void prowlarr.start();
-                }}
+                onClick={() => prowlarr.start()}
                 variant="primary"
               >
                 {prowlarr.phase === "starting"

@@ -43,10 +43,10 @@ pub use prowlarr::{Installed, ProwlarrError, Supervisor, VERSION as PROWLARR_VER
 // The runtime's own surface speaks these, so a caller that only uses `Runtime` — the IPC
 // layer, which may depend on this crate and not on storage — can name what it is handed
 // without a second dependency edge (AGENTS R6).
-pub use backup::backup_file_name;
+pub use backup::{RestorePhase, backup_file_name};
 pub use peregrine_storage::{
-    BackupInfo, BackupReport, Cursor, DownloadJobRow, JobPhase, JobRecord, PageRequest,
-    PairedDevice, StorageError, WatchProgressRow,
+    BackupInfo, BackupPhase, BackupReport, Cursor, DownloadJobRow, JobPhase, JobRecord,
+    PageRequest, PairedDevice, StorageError, WatchProgressRow,
 };
 pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,

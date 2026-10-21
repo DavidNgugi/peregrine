@@ -103,9 +103,7 @@ export function ReleaseOffers({
                 <div className="flex shrink-0 items-center gap-2">
                   <Button
                     disabled={offers.busyId !== null}
-                    onClick={() => {
-                      void offers.choose(offer.id);
-                    }}
+                    onClick={() => offers.choose(offer.id)}
                     size="sm"
                     variant="primary"
                   >
@@ -113,9 +111,7 @@ export function ReleaseOffers({
                   </Button>
                   <Button
                     disabled={offers.busyId !== null}
-                    onClick={() => {
-                      void offers.dismiss(offer.id);
-                    }}
+                    onClick={() => offers.dismiss(offer.id)}
                     size="sm"
                     variant="ghost"
                   >

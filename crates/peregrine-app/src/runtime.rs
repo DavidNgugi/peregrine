@@ -1522,6 +1522,23 @@ impl Runtime {
         &self,
         directory: &Path,
     ) -> Result<peregrine_storage::BackupReport, RuntimeError> {
+        self.create_backup_with_progress(directory, &|_| {}).await
+    }
+
+    /// Writes a backup, reporting each step to progress.
+    ///
+    /// The callback is called on the thread doing the copy, a handful of times per backup:
+    /// the work is phase-based because SQLite does not report pages written, and a sender
+    /// that emitted per frame would spend more time on the UI than the copy does.
+    ///
+    /// # Errors
+    ///
+    /// The same failures as `Self::create_backup`.
+    pub async fn create_backup_with_progress(
+        &self,
+        directory: &Path,
+        progress: &(dyn Fn(peregrine_storage::BackupPhase) + Send + Sync),
+    ) -> Result<peregrine_storage::BackupReport, RuntimeError> {
         let directory =
             tokio::fs::canonicalize(directory)
                 .await
@@ -1541,7 +1558,7 @@ impl Runtime {
         }
         let name = crate::backup::backup_file_name(self.clock.now().as_millisecond());
         let destination = crate::backup::free_destination(&directory, &name).await?;
-        Ok(self.database.write_backup(&destination).await?)
+        Ok(self.database.write_backup(&destination, progress).await?)
     }
 
     /// Validates a chosen backup and stages it for the next launch.
@@ -1558,11 +1575,25 @@ impl Runtime {
         &self,
         source: &Path,
     ) -> Result<peregrine_storage::BackupInfo, RuntimeError> {
+        self.restore_backup_with_progress(source, &|_| {}).await
+    }
+
+    /// Validates and stages a restore, reporting each step to progress.
+    ///
+    /// # Errors
+    ///
+    /// The same failures as `Self::restore_backup`.
+    pub async fn restore_backup_with_progress(
+        &self,
+        source: &Path,
+        progress: &(dyn Fn(crate::backup::RestorePhase) + Send + Sync),
+    ) -> Result<peregrine_storage::BackupInfo, RuntimeError> {
         crate::backup::stage_restore(
             &self.database,
             self.config.data_directory(),
             &self.config.database_path(),
             source,
+            progress,
         )
         .await
     }

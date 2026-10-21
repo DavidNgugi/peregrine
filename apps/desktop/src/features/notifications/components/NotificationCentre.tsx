@@ -109,13 +109,7 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
             <div className="flex shrink-0 items-center justify-between px-1 pb-1">
               <p className="text-caption text-text-secondary">{t("shell.notifications.title")}</p>
               {unread > 0 ? (
-                <Button
-                  onClick={() => {
-                    void notifications.markAllRead();
-                  }}
-                  size="sm"
-                  variant="ghost"
-                >
+                <Button onClick={() => notifications.markAllRead()} size="sm" variant="ghost">
                   {t("shell.notifications.markAll")}
                 </Button>
               ) : null}
@@ -146,13 +140,7 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
                         <p className="text-caption text-text-secondary">{row.body}</p>
                       )}
                     </button>
-                    <Button
-                      onClick={() => {
-                        void notifications.dismiss(row.id);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
+                    <Button onClick={() => notifications.dismiss(row.id)} size="sm" variant="ghost">
                       {t("shell.notifications.dismiss")}
                     </Button>
                   </li>

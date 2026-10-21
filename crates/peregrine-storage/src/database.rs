@@ -114,8 +114,9 @@ impl Database {
     pub async fn write_backup(
         &self,
         destination: &Path,
+        progress: &(dyn Fn(crate::backup::BackupPhase) + Send + Sync),
     ) -> Result<crate::backup::BackupReport, StorageError> {
-        crate::backup::write(&self.readers, destination, true).await
+        crate::backup::write(&self.readers, destination, true, progress).await
     }
 
     /// Writes an exact copy of the database to destination.
@@ -129,8 +130,9 @@ impl Database {
     pub async fn write_snapshot(
         &self,
         destination: &Path,
+        progress: &(dyn Fn(crate::backup::BackupPhase) + Send + Sync),
     ) -> Result<crate::backup::BackupReport, StorageError> {
-        crate::backup::write(&self.readers, destination, false).await
+        crate::backup::write(&self.readers, destination, false, progress).await
     }
 
     /// The single-writer handle, for a repository that lives in its own module.

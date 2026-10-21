@@ -102,7 +102,7 @@ describe("ProvidersSection", () => {
     expect(unconfigured).toContain("Save and test");
     expect(unconfigured).not.toContain("Test connection");
     expect(configured).toContain("Test connection");
-    expect(configured).toContain("Remove");
+    expect(configured).toContain("Remove key");
   });
 
   it("says the keychain refused access rather than that no key is stored", () => {
@@ -117,7 +117,7 @@ describe("ProvidersSection", () => {
     expect(denied).toContain("Nothing has been deleted");
     expect(denied).toContain("Keychain Access");
     expect(denied).not.toContain("No key stored");
-    expect(denied).toContain("Try again");
+    expect(denied).toContain("Try the keychain again");
   });
 
   it("says there is no keychain on this system rather than that the key is gone", () => {
@@ -140,7 +140,7 @@ describe("ProvidersSection", () => {
     expect(unread).not.toContain("No key stored");
     // And a way to ask again without reopening the app, because the request may just have been
     // allowed.
-    expect(unread).toContain("Try again");
+    expect(unread).toContain("Try the keychain again");
   });
 
   it("still says a provider is configured when a later read was refused", () => {
@@ -161,7 +161,7 @@ describe("ProvidersSection", () => {
     // does nothing visible.
     const answered = markup(settings({ providers: [provider()] }));
 
-    expect(answered).not.toContain("Try again");
+    expect(answered).not.toContain("Try the keychain again");
   });
 
   it("says where the key lives, so a reinstall is not mistaken for a deletion", () => {
@@ -194,7 +194,7 @@ describe("ProvidersSection", () => {
     expect(html).toContain("Asking the provider whether that key works…");
     expect(disabledButton(html, "Save and test")).toBe(true);
     expect(disabledButton(html, "Test connection")).toBe(true);
-    expect(disabledButton(html, "Remove")).toBe(true);
+    expect(disabledButton(html, "Remove key")).toBe(true);
   });
 
   it("reports a refused key with the sentence for the code the job recorded", () => {

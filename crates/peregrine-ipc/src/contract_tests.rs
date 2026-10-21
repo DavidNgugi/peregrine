@@ -903,9 +903,13 @@ fn backup_cases() -> Vec<ContractCase> {
 
 fn create_backup_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
-        backup::create_backup(harness.dead_state(), "/tmp".to_owned())
-            .await
-            .map(drop)
+        backup::create_backup(
+            harness.dead_handle(),
+            harness.dead_state(),
+            "/tmp".to_owned(),
+        )
+        .await
+        .map(drop)
     })
 }
 

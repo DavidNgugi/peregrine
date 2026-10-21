@@ -82,9 +82,7 @@ export function IndexersStep({
             <Button
               className="self-start"
               disabled={installing || starting}
-              onClick={() => {
-                void (status.installed ? onStart() : onInstall());
-              }}
+              onClick={() => (status.installed ? onStart() : onInstall())}
               variant="primary"
             >
               {installing

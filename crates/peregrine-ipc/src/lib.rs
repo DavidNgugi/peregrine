@@ -70,7 +70,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             system::health,
             system::provider_attribution,
             system::log_tail,
-            backup::create_backup,
+            backup::create_backup::<tauri::Wry>,
             backup::restore_backup::<tauri::Wry>,
             network::public_ip,
             shortcuts::list_shortcuts,

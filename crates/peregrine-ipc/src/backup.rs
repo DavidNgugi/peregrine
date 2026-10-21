@@ -9,9 +9,10 @@ use std::path::Path;
 
 use peregrine_app::BackupInfo;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use specta::Type;
 use specta_typescript::Number;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter as _, State};
 
 use crate::error::AppError;
 use crate::guard::guard_response;
@@ -48,6 +49,40 @@ impl From<BackupInfo> for RestoreDto {
     }
 }
 
+/// The topic the Settings section listens on while a copy runs.
+const PROGRESS_TOPIC: &str = "backup://progress";
+
+/// The versioned envelope every progress event carries.
+///
+/// The same `{ schemaVersion, payload }` shape every other topic uses, so the webview's one
+/// reader accepts it and a payload from a build it does not understand is dropped rather than
+/// rendered as `undefined`. The events are phase boundaries, not a stream: there are at most
+/// four per backup, which is less work than the spinner they accompany.
+fn progress_payload(
+    operation: &'static str,
+    phase: &'static str,
+    permille: u16,
+) -> serde_json::Value {
+    json!({
+        "schemaVersion": 1,
+        "payload": {
+            "operation": operation,
+            "phase": phase,
+            "permille": permille,
+        },
+    })
+}
+
+/// Publishes one phase of a backup or restore.
+fn emit_progress<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    operation: &'static str,
+    phase: &'static str,
+    permille: u16,
+) {
+    let _ = app.emit(PROGRESS_TOPIC, progress_payload(operation, phase, permille));
+}
+
 /// Writes a backup of this installation into a folder the user chose.
 ///
 /// # Errors
@@ -56,13 +91,16 @@ impl From<BackupInfo> for RestoreDto {
 /// `PermissionDenied` when the file cannot be written.
 #[tauri::command]
 #[specta::specta]
-pub async fn create_backup(
+pub async fn create_backup<R: tauri::Runtime>(
+    app: AppHandle<R>,
     state: State<'_, RuntimeState>,
     directory: String,
 ) -> Result<BackupDto, AppError> {
     let report = state
         .runtime()?
-        .create_backup(Path::new(&directory))
+        .create_backup_with_progress(Path::new(&directory), &|phase| {
+            emit_progress(&app, "backup", phase.as_str(), phase.permille());
+        })
         .await?;
     Ok(guard_response(
         "backup::create_backup",
@@ -87,8 +125,31 @@ pub async fn restore_backup<R: tauri::Runtime>(
     state: State<'_, RuntimeState>,
     source: String,
 ) -> Result<RestoreDto, AppError> {
-    let info = state.runtime()?.restore_backup(Path::new(&source)).await?;
+    let info = state
+        .runtime()?
+        .restore_backup_with_progress(Path::new(&source), &|phase| {
+            emit_progress(&app, "restore", phase.as_str(), phase.permille());
+        })
+        .await?;
     let restored = RestoreDto::from(info);
     app.request_restart();
     Ok(guard_response("backup::restore_backup", restored))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The webview's reader accepts one envelope shape, so this pins the keys the Settings
+    /// section parses rather than trusting the `json!` call site to stay in step.
+    #[test]
+    fn progress_payload_is_versioned_and_names_the_phase() {
+        let value = progress_payload("backup", "cleaning", 650);
+
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["payload"]["operation"], "backup");
+        assert_eq!(value["payload"]["phase"], "cleaning");
+        assert_eq!(value["payload"]["permille"], 650);
+        assert_eq!(PROGRESS_TOPIC, "backup://progress");
+    }
 }

@@ -512,8 +512,8 @@ describe("DiscoverView", () => {
   });
 
   it("offers a Refresh control in both of its states", () => {
-    expect(markup(railsView())).toContain("Refresh");
-    expect(markup(railsView({ refreshing: true }))).toContain("Refreshing…");
+    expect(markup(railsView())).toContain("Refresh recommendations");
+    expect(markup(railsView({ refreshing: true }))).toContain("Refreshing recommendations…");
   });
 
   it("reports a failed refresh without discarding the rails that did arrive", () => {

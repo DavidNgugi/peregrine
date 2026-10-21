@@ -118,7 +118,7 @@ describe("LibrariesSection", () => {
     const html = markup(libraries({ roots: [root(1, "/media/Movies")] }));
 
     expect(html).toContain("Add folder");
-    expect(html).toContain("Remove");
+    expect(html).toContain("Remove folder");
     expect(html).toContain("Scan now");
   });
 
@@ -155,7 +155,7 @@ describe("LibrariesSection", () => {
     expect(refused).toContain("That folder is already one of your libraries.");
     expect(disabledButton(busy, "Add folder")).toBe(true);
     expect(disabledButton(busy, "Scan now")).toBe(true);
-    expect(disabledButton(busy, "Remove")).toBe(true);
+    expect(disabledButton(busy, "Remove folder")).toBe(true);
   });
 
   it("does not offer to add a folder when the core could not be read", () => {

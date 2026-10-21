@@ -78,9 +78,7 @@ function ProviderRow({
           <div className="flex items-center gap-2">
             <Button
               disabled={busy}
-              onClick={() => {
-                void onTest(entry.provider);
-              }}
+              onClick={() => onTest(entry.provider)}
               size="sm"
               variant="secondary"
             >
@@ -125,7 +123,7 @@ function ProviderRow({
               // key left on screen after the reason for having it has gone.
               const candidate = key;
               setKey("");
-              void onSave(entry.provider, candidate);
+              return onSave(entry.provider, candidate);
             }}
             size="sm"
             variant="primary"

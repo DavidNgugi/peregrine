@@ -146,9 +146,7 @@ export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactEle
       >
         <Button
           disabled={busy || libraries.failed}
-          onClick={() => {
-            void libraries.add(ADDED_KIND);
-          }}
+          onClick={() => libraries.add(ADDED_KIND)}
           size="sm"
           variant="primary"
         >
@@ -162,9 +160,7 @@ export function LibrariesSection({ libraries }: LibrariesSectionProps): ReactEle
       >
         <Button
           disabled={busy || libraries.failed || libraries.roots.length === 0}
-          onClick={() => {
-            void libraries.scan();
-          }}
+          onClick={() => libraries.scan()}
           size="sm"
           variant="secondary"
         >

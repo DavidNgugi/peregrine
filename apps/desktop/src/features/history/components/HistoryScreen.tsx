@@ -205,12 +205,7 @@ export function HistoryScreen({
             >
               {t("history.cancel")}
             </Button>
-            <Button
-              onClick={() => {
-                void clear();
-              }}
-              variant="danger"
-            >
+            <Button onClick={() => clear()} variant="danger">
               {t("history.confirm")}
             </Button>
           </div>

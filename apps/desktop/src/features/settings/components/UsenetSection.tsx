@@ -50,7 +50,7 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
     setForm((current) => ({ ...current, ...patch }));
   };
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     const input: UsenetServerInputDto = {
       id: form.id,
       name: form.name,
@@ -63,7 +63,7 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
       priority: Number(form.priority),
       enabled: form.enabled,
     };
-    void usenet.save(input);
+    await usenet.save(input);
     setForm((current) => ({ ...current, password: "" }));
   };
 
@@ -133,9 +133,7 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
                   </Button>
                   <Button
                     disabled={usenet.busy}
-                    onClick={() => {
-                      void usenet.remove(server.id);
-                    }}
+                    onClick={() => usenet.remove(server.id)}
                     size="sm"
                     variant="secondary"
                   >
@@ -149,7 +147,9 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
           <div className="usenet-editor">
             <div className="usenet-editor-heading">
               <div>
-                <h3>{form.id === null ? t("settings.usenet.add") : t("settings.usenet.editTitle")}</h3>
+                <h3>
+                  {form.id === null ? t("settings.usenet.add") : t("settings.usenet.editTitle")}
+                </h3>
                 <p>{t("settings.usenet.formDescription")}</p>
               </div>
               <Button disabled={usenet.busy} onClick={submit} size="sm">
@@ -214,10 +214,7 @@ export function UsenetSection({ usenet }: UsenetSectionProps): ReactElement {
               checked={usenet.status?.allowArchives ?? false}
               label={t("settings.usenet.allowArchives")}
               onChange={(next) => {
-                void usenet.setArchives(
-                  next,
-                  usenet.status?.deleteArchivesAfterImport ?? true,
-                );
+                void usenet.setArchives(next, usenet.status?.deleteArchivesAfterImport ?? true);
               }}
             />
           </SettingsRow>

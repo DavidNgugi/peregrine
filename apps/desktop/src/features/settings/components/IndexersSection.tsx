@@ -176,9 +176,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
                 />
                 <Button
                   disabled={indexers.busy || indexers.catalogLoading}
-                  onClick={() => {
-                    void indexers.loadCatalog();
-                  }}
+                  onClick={() => indexers.loadCatalog()}
                   size="sm"
                   variant="secondary"
                 >
@@ -374,7 +372,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
               // on screen after the reason for having it has gone.
               const candidate = apiKey;
               setApiKey("");
-              void indexers.save(baseUrl.trim(), candidate);
+              return indexers.save(baseUrl.trim(), candidate);
             }}
             size="sm"
             variant="primary"
@@ -383,9 +381,7 @@ export function IndexersSection({ indexers }: IndexersSectionProps): ReactElemen
           </Button>
           <Button
             disabled={!ready || indexers.busy}
-            onClick={() => {
-              void indexers.test(baseUrl.trim(), apiKey);
-            }}
+            onClick={() => indexers.test(baseUrl.trim(), apiKey)}
             size="sm"
             variant="secondary"
           >

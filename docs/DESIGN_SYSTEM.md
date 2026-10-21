@@ -249,6 +249,10 @@ A poster to detail transition uses a view transition group: the poster animates 
 
 Each component ships with a static gallery entry used for visual regression, plus an accessibility note and its animation tokens.
 
+### Busy controls
+
+A button that starts work returns the promise from its `onClick`; `Button` and `IconButton` then disable only themselves, set `aria-busy`, and keep the action's label visible. A feature that owns a phase — an install, a backup, a restore — passes `busyLabel` and `progress` as well. The label names the work ("Backing up the database"), never a bare spinner, and the progress bar moves by `transform` only, so a running action never takes layout or paint work from scrolling and typing. A screen-wide overlay is reserved for a decision that blocks the page, never for work a person can keep using the page around.
+
 ---
 
 ## 7. Theming

@@ -256,9 +256,7 @@ export function DiscoverToolbar({
           disabled={rails.refreshing}
           icon="refresh"
           label={rails.refreshing ? t("discover.refresh.running") : t("discover.refresh.action")}
-          onClick={() => {
-            void rails.refresh();
-          }}
+          onClick={() => rails.refresh()}
           title={rails.refreshing ? t("discover.refresh.running") : t("discover.refresh.action")}
           variant="ghost"
         />

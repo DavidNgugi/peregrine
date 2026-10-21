@@ -18,6 +18,14 @@ describe("IconButton", () => {
     expect(markup).not.toContain("Switch to the light theme<");
   });
 
+  it("shows the full label as the native tooltip when no shorter title is given", () => {
+    const markup = renderToStaticMarkup(
+      <IconButton icon="sun" label="Switch to the light theme" />,
+    );
+
+    expect(markup).toContain('title="Switch to the light theme"');
+  });
+
   it("defaults to type=button so it cannot submit a form by accident", () => {
     expect(renderToStaticMarkup(<IconButton icon="sun" label="Theme" />)).toContain(
       'type="button"',
@@ -58,6 +66,15 @@ describe("IconButton", () => {
     const classes = classesOf(renderToStaticMarkup(<IconButton icon="sun" label="Theme" />));
     expect(classes).toContain("focus-visible:outline-focus-ring");
     expect(classes).toContain("motion-reduce:transition-none");
+  });
+
+  it("replaces the mark with a spinner while keeping its accessible name", () => {
+    const markup = renderToStaticMarkup(<IconButton busy icon="copy" label="Copy link" />);
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('aria-label="Copy link"');
+    expect(markup).toContain("animate-spin");
+    expect(markup).not.toContain("<svg");
   });
 
   it("lets the call site win a conflicting utility", () => {

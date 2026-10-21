@@ -72,9 +72,7 @@ export function LibraryStep({
       <Button
         className="self-start"
         disabled={busy}
-        onClick={() => {
-          void onChoose();
-        }}
+        onClick={() => onChoose()}
         variant={roots.length === 0 ? "primary" : "secondary"}
       >
         {adding
@@ -93,14 +91,7 @@ export function LibraryStep({
       {scan === "failed" ? (
         <ErrorState
           action={
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void onScan();
-              }}
-              size="sm"
-              variant="secondary"
-            >
+            <Button disabled={busy} onClick={() => onScan()} size="sm" variant="secondary">
               {t("setup.library.scanFailed.action")}
             </Button>
           }

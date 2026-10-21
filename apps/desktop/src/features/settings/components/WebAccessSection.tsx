@@ -218,9 +218,7 @@ export function WebAccessSection(): ReactElement {
               {status?.running === true ? t("settings.web.running") : t("settings.web.stopped")}
             </span>
             <Button
-              onClick={() => {
-                void (status?.running === true ? stop() : start());
-              }}
+              onClick={() => (status?.running === true ? stop() : start())}
               size="sm"
               variant="secondary"
             >
@@ -249,9 +247,7 @@ export function WebAccessSection(): ReactElement {
                 <IconButton
                   icon={copyState === "copied" ? "check" : "copy"}
                   label={copyLabel}
-                  onClick={() => {
-                    void copy();
-                  }}
+                  onClick={() => copy()}
                   size="sm"
                   title={copyLabel}
                   variant="ghost"
@@ -316,27 +312,25 @@ export function WebAccessSection(): ReactElement {
                   </label>
                   <span className="flex gap-2">
                     <Button
-                      onClick={() => {
-                        void unwrap(
-                          commands.webApprove(pair.pairId, allowAcquire[pair.pairId] ?? false),
-                        )
+                      onClick={() =>
+                        unwrap(commands.webApprove(pair.pairId, allowAcquire[pair.pairId] ?? false))
                           .then(read)
                           .catch(() => {
                             setFailed(true);
-                          });
-                      }}
+                          })
+                      }
                       size="sm"
                     >
                       {t("settings.web.approve")}
                     </Button>
                     <Button
-                      onClick={() => {
-                        void unwrap(commands.webDeny(pair.pairId))
+                      onClick={() =>
+                        unwrap(commands.webDeny(pair.pairId))
                           .then(read)
                           .catch(() => {
                             setFailed(true);
-                          });
-                      }}
+                          })
+                      }
                       size="sm"
                       variant="ghost"
                     >
@@ -397,9 +391,7 @@ export function WebAccessSection(): ReactElement {
                       <>
                         <Button
                           disabled={draft.trim() === ""}
-                          onClick={() => {
-                            void saveName(device.id);
-                          }}
+                          onClick={() => saveName(device.id)}
                           size="sm"
                         >
                           {t("settings.web.save")}
@@ -427,13 +419,13 @@ export function WebAccessSection(): ReactElement {
                           {t("settings.web.rename")}
                         </Button>
                         <Button
-                          onClick={() => {
-                            void unwrap(commands.webRevoke({ id: device.id }))
+                          onClick={() =>
+                            unwrap(commands.webRevoke({ id: device.id }))
                               .then(read)
                               .catch(() => {
                                 setFailed(true);
-                              });
-                          }}
+                              })
+                          }
                           size="sm"
                           variant="ghost"
                         >

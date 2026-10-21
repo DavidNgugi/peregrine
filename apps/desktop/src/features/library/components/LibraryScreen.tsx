@@ -508,9 +508,7 @@ export function LibraryScreen({
               )}
               <Button
                 disabled={scan.starting || scan.running}
-                onClick={() => {
-                  void scan.start();
-                }}
+                onClick={() => scan.start()}
                 size="sm"
                 variant="secondary"
               >

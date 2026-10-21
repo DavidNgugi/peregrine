@@ -516,9 +516,7 @@ export function TitleScreen({
                 {acquire === undefined ? null : (
                   <Button
                     disabled={seasonDisabled}
-                    onClick={() => {
-                      void downloadSeason();
-                    }}
+                    onClick={() => downloadSeason()}
                     size="sm"
                     variant="secondary"
                   >
@@ -530,9 +528,7 @@ export function TitleScreen({
                 {seasonUpcoming && !seasonWatched ? null : (
                   <Button
                     disabled={seasons.marking}
-                    onClick={() => {
-                      void seasons.setSeasonWatched(!seasonWatched);
-                    }}
+                    onClick={() => seasons.setSeasonWatched(!seasonWatched)}
                     size="sm"
                     variant="secondary"
                   >
