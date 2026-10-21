@@ -66,7 +66,7 @@ export function WatchMetricsPanel(): ReactElement {
 
   return (
     <section
-      className="flex flex-col gap-3 rounded-md border border-border-subtle bg-surface-1 p-3"
+      className="flex shrink-0 flex-col gap-3 rounded-md border border-border-subtle bg-surface-1 p-3"
       aria-label={t("history.metrics.title")}
     >
       <div className="flex flex-wrap items-end justify-between gap-3">

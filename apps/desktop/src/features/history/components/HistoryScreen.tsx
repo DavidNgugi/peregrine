@@ -23,8 +23,12 @@ export function HistoryList({
   const [visible, setVisible] = useState(HISTORY_PAGE);
   const shown = history.rows.slice(0, visible);
 
+  // **`shrink-0` is load-bearing, and its absence was the bug.** The screen is a fixed-height
+  // flex column with its own scroll, so a child left shrinkable is squeezed to the viewport and
+  // `overflow-hidden` clips the rest: the page then has nothing to scroll and the list simply
+  // ends at the window edge.
   return (
-    <Panel className="flex flex-col divide-y divide-border-subtle overflow-hidden">
+    <Panel className="flex shrink-0 flex-col divide-y divide-border-subtle overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-3 py-2">
         <span className="text-caption text-text-tertiary">
           {t("history.count", { count: history.rows.length })}
