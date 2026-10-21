@@ -1558,7 +1558,20 @@ impl Runtime {
         }
         let name = crate::backup::backup_file_name(self.clock.now().as_millisecond());
         let destination = crate::backup::free_destination(&directory, &name).await?;
-        Ok(self.database.write_backup(&destination, progress).await?)
+        self.database
+            .write_backup(&destination, progress)
+            .await
+            .map_err(|error| {
+                // The IPC payload deliberately says only that the copy failed. The typed error
+                // names the file and the driver's reason, which is what makes a support report
+                // actionable without putting a path in the webview.
+                warn!(
+                    %error,
+                    backup = %destination.display(),
+                    "the backup could not be written"
+                );
+                RuntimeError::Storage(error)
+            })
     }
 
     /// Validates a chosen backup and stages it for the next launch.

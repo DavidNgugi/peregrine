@@ -42,6 +42,8 @@ const PARTIAL: &str = ".partial";
 /// caches, casting and LAN sessions, and the diagnostics log. A restored process writes its
 /// own, and carrying these over would either claim work that no longer exists or restore a
 /// session that can never be used.
+///
+/// The order is the foreign-key order: a child is cleared before the parent it references.
 const NOT_IN_A_BACKUP: [&str; 12] = [
     "DELETE FROM download_file",
     "DELETE FROM release_decision",
@@ -52,8 +54,8 @@ const NOT_IN_A_BACKUP: [&str; 12] = [
     "DELETE FROM dataset_state",
     "DELETE FROM cast_session",
     "DELETE FROM device",
-    "DELETE FROM paired_device",
     "DELETE FROM web_audit",
+    "DELETE FROM paired_device",
     "DELETE FROM event_log",
 ];
 
@@ -713,6 +715,15 @@ mod tests {
         .execute(&mut connection)
         .await
         .unwrap();
+        // The audit is a child of the paired device. A backup that clears the parent first is
+        // refused by the foreign key, which is how the shipped rc.4 failed on a real library.
+        sqlx::query(
+            "INSERT INTO web_audit (device_id, action, title_id, created_at)              SELECT id, 'acquire', ?1, 1 FROM paired_device LIMIT 1",
+        )
+        .bind(title)
+        .execute(&mut connection)
+        .await
+        .unwrap();
         drop(connection);
 
         (database, path, account)
@@ -748,6 +759,7 @@ mod tests {
             ("job", "SELECT COUNT(*) FROM job"),
             ("event_log", "SELECT COUNT(*) FROM event_log"),
             ("provider_cache", "SELECT COUNT(*) FROM provider_cache"),
+            ("web_audit", "SELECT COUNT(*) FROM web_audit"),
             ("paired_device", "SELECT COUNT(*) FROM paired_device"),
         ] {
             let rows: i64 = sqlx::query_scalar(count)
