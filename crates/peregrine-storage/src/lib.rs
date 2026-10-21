@@ -51,6 +51,7 @@ pub use offers::{ChosenOfferRow, NewOffer, OfferRow};
 pub use watch_options::{WatchOfferRow, WatchRegionRow};
 
 pub use account::{AccountEdit, AccountRow, NewAccount};
+pub use backup::{BackupInfo, BackupReport, inspect as inspect_backup};
 pub use catalogue::{CastRow, CastWrite, PersonRow};
 pub use catalogue::{
     MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StubEpisode, StubSeason, StubTitle,

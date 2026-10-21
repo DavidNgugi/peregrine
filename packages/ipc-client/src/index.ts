@@ -5,7 +5,9 @@ export { commands, eventTopics } from "./generated/bindings.js";
 export type {
   AppError,
   AttributionDto,
+  BackupDto,
   BrowsePageDto,
+  RestoreDto,
   BrowseSortDto,
   BuildInfo,
   CastMemberDto,
@@ -83,6 +85,8 @@ export type {
 export {
   addLibraryRoot,
   browse,
+  createBackup,
+  restoreBackup,
   genres,
   recommendations,
   getAutoStartEnabled,

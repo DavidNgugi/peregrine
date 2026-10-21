@@ -52,6 +52,24 @@ export const commands = {
 	 */
 	logTail: (lines: number | null) => typedError<string[], AppError_Serialize>(__TAURI_INVOKE("log_tail", { lines })),
 	/**
+	 *  Writes a backup of this installation into a folder the user chose.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] with `InvalidInput` when the destination is not a folder, and
+	 *  `PermissionDenied` when the file cannot be written.
+	 */
+	createBackup: (directory: string) => typedError<BackupDto, AppError_Serialize>(__TAURI_INVOKE("create_backup", { directory })),
+	/**
+	 *  Validates a chosen backup, stages it, and restarts so the next launch opens it.
+	 * 
+	 *  # Errors
+	 * 
+	 *  [`AppError`] with `InvalidInput` when the file is not a backup this build can restore,
+	 *  and `PermissionDenied` when it cannot be copied. Nothing changes on either path.
+	 */
+	restoreBackup: (source: string) => typedError<RestoreDto, AppError_Serialize>(__TAURI_INVOKE("restore_backup", { source })),
+	/**
 	 *  The address the internet sees, or a refusal that says the check could not be made.
 	 * 
 	 *  # Errors
@@ -894,6 +912,16 @@ export type AttributionDto = {
 	notice: string,
 	/**  Whether the provider's terms also require its logo beside the notice. */
 	requiresLogo: boolean,
+};
+
+/**  What a backup that was just written carries. */
+export type BackupDto = {
+	/**  Where the file is, as the user chose the folder. */
+	path: string,
+	/**  How large the file is. */
+	bytes: number,
+	/**  The newest migration the copy holds. */
+	schemaVersion: number,
 };
 
 /**
@@ -2057,6 +2085,12 @@ export type ReleaseOfferDto = {
 	seeders: number | null,
 	/**  The protocol this offer transfers over: `torrent` or `usenet`. */
 	protocol: string,
+};
+
+/**  What a staged restore found. */
+export type RestoreDto = {
+	/**  The newest migration the staged copy holds, which the next launch will migrate. */
+	schemaVersion: number,
 };
 
 /**  What a root is expected to hold, as the webview spells it. */

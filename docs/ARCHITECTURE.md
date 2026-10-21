@@ -377,6 +377,7 @@ graph LR
 | `watchlist` | `add`, `remove`, `list`, `reorder` | Optimistic |
 | `settings` | `get_schema`, `get_values`, `set_value`, `reset_section`, `export_config`, `import_config` | Schema-driven; the UI renders from the registry |
 | `jobs` | `start_hello`, `cancel`, `list` | Job-scoped: a start returns an ID and streams `job://progress` and `job://state`; `cancel` records the request before it trips the token; `list` is a capped page of the journal |
+| `backup` | `create_backup`, `restore_backup` | One file per call. A restore validates and stages the file, then restarts the app; the swap happens before the next launch opens the database ([ADR 0033](./adr/0033-account-backup-and-restore.md)) |
 | `system` | `get_permissions`, `request_permission`, `open_path`, `get_disk_budget`, `health`, `log_tail`, `export_diagnostics` | `health` reports the scheduler's and the event bus's counters, `log_tail` the newest lines of the redacted log |
 
 ### Rules

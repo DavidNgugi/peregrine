@@ -393,8 +393,13 @@ fn storage_error(error: &StorageError) -> AppError {
             .with_detail("The library database could not be upgraded; it was left unchanged.")
             .with_cause(format!("migration {version:04}_{description} failed")),
         StorageError::Backup { .. } => AppError::new(ErrorCode::PermissionDenied)
-            .with_detail("The library database could not be copied before upgrading it.")
-            .with_cause("the pre-migration copy could not be written"),
+            .with_detail("The library database could not be copied.")
+            .with_cause("the copy could not be written"),
+        // The user chose a file; the answer is theirs to act on, which is why this is input
+        // rather than corruption. The path stays in the log (ARCHITECTURE §7 rule 3).
+        StorageError::InvalidBackup { detail, .. } => AppError::new(ErrorCode::InvalidInput)
+            .with_detail("That file is not a backup Peregrine can restore.")
+            .with_cause(detail.clone()),
         StorageError::Quarantine { .. } => AppError::new(ErrorCode::StorageCorrupt)
             .with_detail(
                 "The library database is damaged and could not be moved aside. Close any \
@@ -550,6 +555,16 @@ mod tests {
                     source: "the disk is full".into(),
                 }),
                 ErrorCode::PermissionDenied,
+                false,
+            ),
+            (
+                RuntimeError::Storage(StorageError::InvalidBackup {
+                    path: std::path::PathBuf::from(
+                        "/home/someone/.local/share/peregrine-leak-canary",
+                    ),
+                    detail: "it was written by a newer version of Peregrine".to_owned(),
+                }),
+                ErrorCode::InvalidInput,
                 false,
             ),
             (

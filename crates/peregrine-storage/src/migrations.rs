@@ -52,6 +52,19 @@ pub(crate) fn count() -> usize {
     MIGRATOR.iter().count()
 }
 
+/// The newest migration version this build embeds.
+///
+/// A backup records the newest version it holds, and a restore refuses one above this number
+/// rather than running an older binary against a schema it cannot read.
+#[must_use]
+pub(crate) fn latest_version() -> i64 {
+    MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .max()
+        .unwrap_or_default()
+}
+
 /// Applies `migrator`'s pending migrations, copying an existing database first.
 ///
 /// The migrator is a parameter so a test can run a set that contains a migration designed

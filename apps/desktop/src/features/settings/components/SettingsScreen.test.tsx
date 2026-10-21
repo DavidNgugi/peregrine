@@ -163,8 +163,17 @@ describe("SettingsScreen", () => {
     expect(html).toContain('href="#settings-library"');
     expect(html).toContain('href="#settings-acquisition"');
     expect(html).toContain('href="#settings-connection"');
+    expect(html).toContain('href="#settings-data"');
     expect(html).toContain('id="settings-about"');
     expect(html).toContain('aria-current="location"');
+  });
+
+  it("offers a backup and a restore under Data", () => {
+    const html = markup(registry([]));
+
+    expect(html).toContain("Backup and restore");
+    expect(html).toContain("Back up now");
+    expect(html).toContain("Restore from backup");
   });
 
   it("draws one row per registry entry, in the registry's order", () => {

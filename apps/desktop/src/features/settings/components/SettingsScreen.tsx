@@ -22,6 +22,7 @@ import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import type { UsenetSettings } from "../hooks/useUsenet.js";
 import { AboutSection } from "./AboutSection.js";
+import { BackupSection } from "./BackupSection.js";
 import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
@@ -172,6 +173,13 @@ export function SettingsScreen({
               {t("settings.navigation.connection")}
             </a>
             <a
+              aria-current={activeGroup === "settings-data" ? "location" : undefined}
+              className={activeGroup === "settings-data" ? "is-active" : undefined}
+              href="#settings-data"
+            >
+              {t("settings.navigation.data")}
+            </a>
+            <a
               aria-current={activeGroup === "settings-about" ? "location" : undefined}
               className={activeGroup === "settings-about" ? "is-active" : undefined}
               href="#settings-about"
@@ -277,6 +285,14 @@ export function SettingsScreen({
             </div>
             <NetworkSection />
             <WebAccessSection />
+          </div>
+
+          <div className="settings-group" id="settings-data">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.data")}</h2>
+              <p>{t("settings.group.data")}</p>
+            </div>
+            <BackupSection />
           </div>
 
           <div className="settings-group" id="settings-about">

@@ -1203,9 +1203,37 @@ impl Runtime {
         // that file as a fallback (crate::indexers).
         crate::indexers::set_managed_data_dir(config.data_directory().to_path_buf());
 
+        // A restore is staged while the app runs and applied before anything opens the file:
+        // the live database has a writer task and a reader pool, and SQLite offers no swap
+        // beneath them. Doing it here means the next launch starts on the restored file, and a
+        // file that cannot be opened puts the previous database back instead of taking the
+        // installation with it (ADR 0033).
+        let restored =
+            crate::backup::apply_pending_restore(config.data_directory(), &config.database_path())
+                .await?;
         // A recovery is logged where it happens, in `Database::open`; the runtime carries
         // the signal on to health.
-        let database = Arc::new(Database::open(config.database_path()).await?);
+        let database = match Database::open(config.database_path()).await {
+            Ok(database) => Arc::new(database),
+            Err(error) => {
+                if !restored {
+                    return Err(error.into());
+                }
+                warn!(
+                    %error,
+                    "the restored database could not be opened; putting the previous one back"
+                );
+                crate::backup::roll_back_restore(config.data_directory(), &config.database_path())
+                    .await?;
+                Arc::new(Database::open(config.database_path()).await?)
+            }
+        };
+        if restored {
+            info!(
+                database = %config.database_path().display(),
+                "the restored database is open"
+            );
+        }
         // The last profile the household chose applies before the first read of this process.
         match database.active_profile().await {
             Ok(Some(account)) => activate(&account),
@@ -1478,6 +1506,65 @@ impl Runtime {
     #[must_use]
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
+    }
+
+    /// Writes a backup of this installation's data into the chosen folder.
+    ///
+    /// The destination is a folder the caller already chose in an OS dialog. It is canonicalized
+    /// and checked for being a directory here rather than trusted from the webview (SECURITY.md),
+    /// and the file name is generated so no part of the user's text becomes a path component.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::InvalidRequest` when the destination is not a directory, and
+    /// `RuntimeError::Storage` when the copy cannot be written.
+    pub async fn create_backup(
+        &self,
+        directory: &Path,
+    ) -> Result<peregrine_storage::BackupReport, RuntimeError> {
+        let directory =
+            tokio::fs::canonicalize(directory)
+                .await
+                .map_err(|_| RuntimeError::InvalidRequest {
+                    detail: "That folder could not be found.".to_owned(),
+                })?;
+        if !tokio::fs::metadata(&directory)
+            .await
+            .map_err(|_| RuntimeError::InvalidRequest {
+                detail: "That folder could not be read.".to_owned(),
+            })?
+            .is_dir()
+        {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "Choose a folder, not a file.".to_owned(),
+            });
+        }
+        let name = crate::backup::backup_file_name(self.clock.now().as_millisecond());
+        let destination = crate::backup::free_destination(&directory, &name).await?;
+        Ok(self.database.write_backup(&destination).await?)
+    }
+
+    /// Validates a chosen backup and stages it for the next launch.
+    ///
+    /// The running database is untouched: the command that calls this restarts the app, and the
+    /// swap happens in `Runtime::start` before the file is opened. A file that is not a backup,
+    /// or one written by a newer build, is refused here while the installation still works.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::InvalidRequest` when the file is not a Peregrine backup, and
+    /// `RuntimeError::Storage` when the copy cannot be staged.
+    pub async fn restore_backup(
+        &self,
+        source: &Path,
+    ) -> Result<peregrine_storage::BackupInfo, RuntimeError> {
+        crate::backup::stage_restore(
+            &self.database,
+            self.config.data_directory(),
+            &self.config.database_path(),
+            source,
+        )
+        .await
     }
 
     /// The torrent session, or the typed refusal that says it did not start.

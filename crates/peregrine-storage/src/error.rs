@@ -65,6 +65,19 @@ pub enum StorageError {
         source: Box<dyn StdError + Send + Sync>,
     },
 
+    /// A file a user chose to restore is not a database this build can read.
+    ///
+    /// Distinct from every other variant because the answer is the user's: the file is not a
+    /// Peregrine backup, was written by a newer version, or was damaged in transit. Nothing was
+    /// changed by the attempt.
+    #[error("the file at {} is not a backup this build can restore: {detail}", path.display())]
+    InvalidBackup {
+        /// The file the user chose.
+        path: PathBuf,
+        /// What inspection objected to, phrased for a person.
+        detail: String,
+    },
+
     /// A database that failed its integrity check could not be moved aside.
     ///
     /// Nothing was deleted: the file is still where it was, and the next boot retries.

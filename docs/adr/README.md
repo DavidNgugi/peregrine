@@ -36,5 +36,6 @@ One file per decision that constrains the architecture. Each records the context
 | [0030](./0030-usenet-acquisition.md) | Usenet acquisition: a native engine, a quarantined archive, and an import boundary | Accepted, post-1.0 (E38) |
 | [0031](./0031-browser-client-parity.md) | Browser client parity: viewer writes, subtitles, and language defaults | Accepted; refines 0028 §3 and §6 and 0029 |
 | [0032](./0032-shared-profiles.md) | Shared profiles on the account table | Accepted; supersedes 0027 |
+| [0033](./0033-account-backup-and-restore.md) | Account backup and restore: one database file, staged and swapped on the next launch | Accepted |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.

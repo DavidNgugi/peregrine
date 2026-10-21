@@ -102,6 +102,37 @@ impl Database {
         &self.recovery
     }
 
+    /// Writes a user's backup to destination, with the process-local tables removed.
+    ///
+    /// The copy is consistent while writers are active: VACUUM INTO runs a read transaction
+    /// that sees a committed state, including whatever is still only in the write-ahead log.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Backup`] when the file cannot be written, and
+    /// [`StorageError::Statement`] when the database refuses the copy.
+    pub async fn write_backup(
+        &self,
+        destination: &Path,
+    ) -> Result<crate::backup::BackupReport, StorageError> {
+        crate::backup::write(&self.readers, destination, true).await
+    }
+
+    /// Writes an exact copy of the database to destination.
+    ///
+    /// The restore path's safety copy: unlike [`Self::write_backup`], nothing is removed, so
+    /// the file is the whole installation as it stood before the restore.
+    ///
+    /// # Errors
+    ///
+    /// The same failures as [`Self::write_backup`].
+    pub async fn write_snapshot(
+        &self,
+        destination: &Path,
+    ) -> Result<crate::backup::BackupReport, StorageError> {
+        crate::backup::write(&self.readers, destination, false).await
+    }
+
     /// The single-writer handle, for a repository that lives in its own module.
     ///
     /// A repository needs the writer and a reader, not the handle's whole surface; handing

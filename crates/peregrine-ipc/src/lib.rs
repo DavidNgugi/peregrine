@@ -16,6 +16,7 @@
 //! [`runtime::shutdown`] on the way out.
 
 pub mod autostart;
+pub mod backup;
 pub mod bindings;
 pub mod discover;
 pub mod downloads;
@@ -69,6 +70,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             system::health,
             system::provider_attribution,
             system::log_tail,
+            backup::create_backup,
+            backup::restore_backup::<tauri::Wry>,
             network::public_ip,
             shortcuts::list_shortcuts,
             autostart::autostart_enabled::<tauri::Wry>,

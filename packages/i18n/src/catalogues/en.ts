@@ -810,6 +810,34 @@ export const en = {
         licencesBody:
           "The installer carries the third-party notices in THIRD_PARTY.md, NOTICE, and the licence files for bundled components.",
       },
+      backup: {
+        title: "Backup and restore",
+        description:
+          "A backup holds every profile, wishlist, watch-history row, setting, and scheduled download on this installation, plus the library index and catalogue. It does not hold downloaded films or series, downloads in progress, cached artwork, or API keys, which stay in your operating system's keychain.",
+        create: {
+          label: "Back up now",
+          description:
+            "Choose a folder. The backup is one file you can move to another drive or computer; it holds the household's viewing history, so keep it somewhere private.",
+          action: "Back up…",
+        },
+        restore: {
+          label: "Restore from backup",
+          description:
+            "Replace everything above with the contents of a backup file. Peregrine restarts to finish.",
+          action: "Choose a backup…",
+          pick: "Choose a backup",
+          filter: "Peregrine backup",
+        },
+        created: "Backup written to {{path}}.",
+        restoring:
+          "The backup is staged. Peregrine is restarting to open it. If it does not, quit and reopen it.",
+        confirm: {
+          title: "Replace this installation?",
+          body: "Your current profiles, wishlists, watch history, settings, and library index will be replaced by {{file}}. A copy of the current database is kept first, but there is no undo after the restart.",
+          confirm: "Restore and restart",
+          cancel: "Keep current data",
+        },
+      },
       history: {
         empty: "Nothing watched yet.",
         failed: "The history could not be read. Reopen Settings to try again.",
@@ -827,6 +855,7 @@ export const en = {
         library: "Library",
         acquisition: "Acquisition",
         connection: "Connection",
+        data: "Data",
         about: "About",
       },
       group: {
@@ -834,6 +863,7 @@ export const en = {
         library: "Where your media comes from and how it is described.",
         acquisition: "Sources Peregrine can use to find and fetch releases.",
         connection: "Local network access and VPN guidance.",
+        data: "A full copy of this installation, and how to put it back.",
         about: "Build details and third-party notices.",
       },
       quality: {
@@ -1007,7 +1037,8 @@ export const en = {
         remove: "Remove",
         add: "Add a provider",
         editTitle: "Edit provider",
-        formDescription: "Connection details are kept local and the password stays in your keychain.",
+        formDescription:
+          "Connection details are kept local and the password stays in your keychain.",
         name: "Name",
         host: "Host",
         port: "Port",

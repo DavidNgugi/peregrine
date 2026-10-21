@@ -26,7 +26,7 @@ use tempfile::TempDir;
 use crate::error::{AppError, ErrorCode};
 use crate::guard::MAX_RESPONSE_BYTES;
 use crate::runtime::RuntimeState;
-use crate::{jobs, system};
+use crate::{backup, jobs, system};
 
 /// A job id that is well formed and belongs to no scheduler in this process, so cancelling it
 /// is the second half of `cancel`'s failure path: the request is understood, the job is not
@@ -880,6 +880,47 @@ fn update_profile_without_a_runtime(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// The backup commands' failure path: both refuse without a running runtime before touching a
+/// file, and a restore therefore never reaches its restart.
+fn backup_cases() -> Vec<ContractCase> {
+    let fails = || Expected::Fails {
+        code: ErrorCode::Internal,
+        retryable: false,
+    };
+    vec![
+        ContractCase {
+            command: "create_backup",
+            expected: fails(),
+            drive: create_backup_without_a_runtime,
+        },
+        ContractCase {
+            command: "restore_backup",
+            expected: fails(),
+            drive: restore_backup_without_a_runtime,
+        },
+    ]
+}
+
+fn create_backup_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        backup::create_backup(harness.dead_state(), "/tmp".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+fn restore_backup_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        backup::restore_backup(
+            harness.dead_handle(),
+            harness.dead_state(),
+            "/tmp/peregrine-backup.sqlite".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
 fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
     all.extend(provider_cases());
@@ -893,6 +934,7 @@ fn cases() -> Vec<ContractCase> {
     all.extend(profile_cases());
     all.extend(prowlarr_cases());
     all.extend(web_cases());
+    all.extend(backup_cases());
     all
 }
 

@@ -1,4 +1,4 @@
-//! The pre-migration copy of the database and its rotation.
+//! Copies of the database: the pre-migration rollback and the user's own backup file.
 //!
 //! `DATA_MODEL` §5 requires a copy of the database beside it before a migration, rotated to
 //! keep the last three, and this is the rollback path the migration gate relies on: rolling
@@ -9,10 +9,19 @@
 //! file would miss whatever is still only in the write-ahead log. It is written under a
 //! `.partial` name and renamed once complete, so a crash cannot leave a half-written file
 //! under a name that reads like a backup (`DATA_MODEL` §5, "crash-atomic writes").
+//!
+//! A user's backup is the same copy with the tables that cannot survive the trip removed
+//! ([ADR 0033](../../../docs/adr/0033-account-backup-and-restore.md)): cached bytes, the
+//! scheduler's journal, the acquisition queue, paired sessions, and the audit log are all
+//! about *this* process and *this* machine. Profiles, wishlists, watch progress, settings,
+//! the library index, and the catalogue remain. Credentials were never in the database, and
+//! `secret_ref` rows only name keyring entries, so a restored installation on the same
+//! machine keeps working and one on another machine asks for its keys again.
 
 use std::path::{Path, PathBuf};
 
-use sqlx::SqliteConnection;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions as _, Connection as _, SqliteConnection, SqlitePool};
 use tracing::{info, warn};
 
 use crate::error::StorageError;
@@ -25,6 +34,53 @@ const MARKER: &str = ".backup-";
 
 /// What a copy is named with while `VACUUM INTO` is writing it.
 const PARTIAL: &str = ".partial";
+
+/// The tables a user's backup does not carry.
+///
+/// Each is about the process or the machine that wrote it, not the household's data: the
+/// scheduler's journal, the acquisition queue and its audit trail, the provider and image
+/// caches, casting and LAN sessions, and the diagnostics log. A restored process writes its
+/// own, and carrying these over would either claim work that no longer exists or restore a
+/// session that can never be used.
+const NOT_IN_A_BACKUP: [&str; 12] = [
+    "DELETE FROM download_file",
+    "DELETE FROM release_decision",
+    "DELETE FROM download_job",
+    "DELETE FROM job",
+    "DELETE FROM provider_cache",
+    "DELETE FROM image_cache",
+    "DELETE FROM dataset_state",
+    "DELETE FROM cast_session",
+    "DELETE FROM device",
+    "DELETE FROM paired_device",
+    "DELETE FROM web_audit",
+    "DELETE FROM event_log",
+];
+
+/// The tables a restore candidate must hold before it is treated as a Peregrine database.
+///
+/// `_sqlx_migrations` is checked separately because its presence is what carries the schema
+/// version, and the others are the four tables a database with no household data cannot
+/// plausibly have.
+const REQUIRED_TABLES: [&str; 4] = ["account", "settings", "title", "watchlist_entry"];
+
+/// A backup that was just written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupReport {
+    /// Where the file is.
+    pub path: PathBuf,
+    /// How large it is.
+    pub bytes: u64,
+    /// The newest migration the copy holds.
+    pub schema_version: i64,
+}
+
+/// What inspection found in a file a user chose to restore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackupInfo {
+    /// The newest migration the candidate holds.
+    pub schema_version: i64,
+}
 
 /// Copies `path` to a new file beside it, then prunes the oldest beyond [`KEPT`].
 ///
@@ -193,11 +249,222 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Writes one consistent copy of the database to `destination`.
+///
+/// `scrub` selects the user's backup (the transient tables in `NOT_IN_A_BACKUP` removed)
+/// over an exact snapshot, which is what a restore safety copy wants.
+///
+/// The copy is written under `destination.partial` and renamed only once it is complete and,
+/// when scrubbing, consistent again. A destination that already exists is refused rather than
+/// overwritten: the caller names the file, and a name collision is the caller's to resolve.
+pub(crate) async fn write(
+    pool: &SqlitePool,
+    destination: &Path,
+    scrub: bool,
+) -> Result<BackupReport, StorageError> {
+    if tokio::fs::try_exists(destination).await.unwrap_or(false) {
+        return Err(backup_failed(
+            destination,
+            "that file already exists".to_owned(),
+        ));
+    }
+    let partial = with_suffix(destination, PARTIAL);
+    if let Err(error) = tokio::fs::remove_file(&partial).await
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(backup_failed(
+            destination,
+            format!(
+                "the leftover copy at {} could not be removed: {error}",
+                partial.display()
+            ),
+        ));
+    }
+    let Some(partial_path) = partial.to_str() else {
+        return Err(backup_failed(
+            destination,
+            format!("the copy's path {} is not valid UTF-8", partial.display()),
+        ));
+    };
+
+    let mut connection = pool.acquire().await.map_err(StorageError::from_sqlx)?;
+    sqlx::query("VACUUM INTO ?1")
+        .bind(partial_path)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| {
+            backup_failed(
+                destination,
+                format!("the copy could not be written: {error}"),
+            )
+        })?;
+    drop(connection);
+
+    if scrub {
+        let result = remove_transient_tables(&partial).await;
+        if let Err(error) = result {
+            let _ = tokio::fs::remove_file(&partial).await;
+            return Err(error);
+        }
+    }
+
+    let bytes = tokio::fs::metadata(&partial)
+        .await
+        .map_err(|error| {
+            backup_failed(
+                destination,
+                format!("the copy could not be read back: {error}"),
+            )
+        })?
+        .len();
+    tokio::fs::rename(&partial, destination)
+        .await
+        .map_err(|error| {
+            backup_failed(
+                destination,
+                format!(
+                    "the copy at {} could not be moved to {}: {error}",
+                    partial.display(),
+                    destination.display()
+                ),
+            )
+        })?;
+
+    info!(
+        backup = %destination.display(),
+        bytes,
+        scrub,
+        "wrote a database backup"
+    );
+    Ok(BackupReport {
+        path: destination.to_path_buf(),
+        bytes,
+        schema_version: crate::migrations::latest_version(),
+    })
+}
+
+/// Removes the transient tables from a copy, then reclaims their pages.
+///
+/// The deletes run in one transaction so a failure leaves the copy as VACUUM INTO wrote it;
+/// VACUUM runs afterwards because SQLite refuses it inside a transaction.
+async fn remove_transient_tables(path: &Path) -> Result<(), StorageError> {
+    let mut connection = crate::database::open_writer_connection(path).await?;
+    let mut transaction = connection.begin().await.map_err(StorageError::from_sqlx)?;
+    for statement in NOT_IN_A_BACKUP {
+        sqlx::query(statement)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| {
+                backup_failed(
+                    path,
+                    format!("the copy could not be cleared of transient rows: {error}"),
+                )
+            })?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(StorageError::from_sqlx)?;
+    sqlx::query("VACUUM")
+        .execute(&mut connection)
+        .await
+        .map_err(|error| {
+            backup_failed(path, format!("the copy could not be compacted: {error}"))
+        })?;
+    // The copy was opened in WAL mode, like every connection this crate makes, so the rows
+    // that were just deleted may still live only in its write-ahead log. Renaming the main
+    // file without this checkpoint would publish a backup that still has them.
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(&mut connection)
+        .await
+        .map_err(|error| {
+            backup_failed(path, format!("the copy could not be checkpointed: {error}"))
+        })?;
+    drop(connection);
+    for suffix in ["-wal", "-shm"] {
+        let _ = tokio::fs::remove_file(with_suffix(path, suffix)).await;
+    }
+    Ok(())
+}
+
+/// Inspects a file a user chose to restore.
+///
+/// The answer is deliberately narrow: a schema version the restore path compares with this
+/// build's, or a typed refusal. It never opens the candidate read-write and never runs a
+/// migration, because a file from another installation is untrusted input (SECURITY.md).
+pub async fn inspect(path: &Path) -> Result<BackupInfo, StorageError> {
+    let mut connection = SqliteConnectOptions::new()
+        .filename(path)
+        .read_only(true)
+        .connect()
+        .await
+        .map_err(|error| invalid(path, format!("it could not be opened: {error}")))?;
+
+    let report: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|error| invalid(path, format!("its integrity check did not run: {error}")))?;
+    if report.as_slice() != ["ok"] {
+        return Err(invalid(
+            path,
+            "its integrity check reported damage".to_owned(),
+        ));
+    }
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .fetch_all(&mut connection)
+            .await
+            .map_err(|error| invalid(path, format!("its schema could not be read: {error}")))?;
+    if !tables.iter().any(|table| table == "_sqlx_migrations") {
+        return Err(invalid(path, "it is not a Peregrine database".to_owned()));
+    }
+    for required in REQUIRED_TABLES {
+        if !tables.iter().any(|table| table == required) {
+            return Err(invalid(path, format!("it is missing the {required} table")));
+        }
+    }
+
+    let version: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(&mut connection)
+        .await
+        .map_err(|error| {
+            invalid(
+                path,
+                format!("its schema version could not be read: {error}"),
+            )
+        })?;
+    let Some(version) = version else {
+        return Err(invalid(path, "it holds no schema version".to_owned()));
+    };
+    let latest = crate::migrations::latest_version();
+    if version > latest {
+        return Err(invalid(
+            path,
+            "it was written by a newer version of Peregrine".to_owned(),
+        ));
+    }
+    Ok(BackupInfo {
+        schema_version: version,
+    })
+}
+
+/// The typed refusal for a file that is not a backup this build can restore.
+fn invalid(path: &Path, detail: String) -> StorageError {
+    StorageError::InvalidBackup {
+        path: path.to_path_buf(),
+        detail,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Database;
     use crate::database::open_writer_connection;
     use crate::migrations;
+    use jiff::Timestamp;
+    use peregrine_domain::{AccountId, WatchlistEntry};
     use tempfile::TempDir;
 
     /// The migration versions a database records, which is how a copy is shown to be a
@@ -335,5 +602,164 @@ mod tests {
             versions(&mut restored).await,
             (1..=embedded).collect::<Vec<_>>()
         );
+    }
+
+    /// One database with one household row in every shape a backup has to keep, and one
+    /// process-local row in every table a backup has to leave behind.
+    async fn populated(directory: &TempDir) -> (Database, PathBuf, i64) {
+        let path = directory.path().join("peregrine.sqlite");
+        let database = Database::open(&path).await.unwrap();
+        let account = database
+            .create_profile(crate::NewAccount {
+                name: "Ada".to_owned(),
+                kind: "adult".to_owned(),
+                avatar_kind: "initials".to_owned(),
+                avatar_ref: None,
+                rating_ceiling: None,
+                curated_only: false,
+                can_acquire: true,
+                created_at: 1_700_000_000_000,
+            })
+            .await
+            .unwrap();
+        let title = database
+            .insert_stub_title(crate::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Movie,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "The Matrix".to_owned(),
+                original_name: None,
+                sort_name: "the matrix".to_owned(),
+                at: 1_700_000_000_000,
+            })
+            .await
+            .unwrap();
+        database
+            .add_to_watchlist(WatchlistEntry::new(
+                AccountId::new(account).unwrap(),
+                title,
+                Timestamp::from_millisecond(1_700_000_000_000).unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        let mut connection = open_writer_connection(&path).await.unwrap();
+        sqlx::query("INSERT INTO job (kind, state, payload_json, created_at) VALUES ('test', 'queued', '{}', 1)")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO event_log (at, kind) VALUES (1, 'test.backup')")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO provider_cache (key, provider, resource, fetched_at, expires_at, schema_version, body, size_bytes)              VALUES ('cache', 'tmdb', 'movie', 1, 2, 1, X'00', 1)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO paired_device (name, token_hash, scopes, created_at)              VALUES ('TV', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'read', 1)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        drop(connection);
+
+        (database, path, account)
+    }
+
+    /// The acceptance for a user's backup: the household's rows survive, the rows that are
+    /// about this process and this machine do not, and the file passes inspection.
+    #[tokio::test]
+    async fn a_user_backup_keeps_household_rows_and_drops_process_rows() {
+        let directory = TempDir::new().unwrap();
+        let (database, _source, account) = populated(&directory).await;
+        let destination = directory.path().join("backup.sqlite");
+
+        let report = database.write_backup(&destination).await.unwrap();
+        assert_eq!(report.path, destination);
+        assert!(report.bytes > 0);
+        assert_eq!(report.schema_version, migrations::latest_version());
+
+        let mut copy = open_writer_connection(&destination).await.unwrap();
+        let profile: String = sqlx::query_scalar("SELECT name FROM account WHERE id = ?1")
+            .bind(account)
+            .fetch_one(&mut copy)
+            .await
+            .unwrap();
+        assert_eq!(profile, "Ada");
+        let watchlist: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM watchlist_entry")
+            .fetch_one(&mut copy)
+            .await
+            .unwrap();
+        assert_eq!(watchlist, 1, "the wishlist is the point of the backup");
+
+        for (table, count) in [
+            ("job", "SELECT COUNT(*) FROM job"),
+            ("event_log", "SELECT COUNT(*) FROM event_log"),
+            ("provider_cache", "SELECT COUNT(*) FROM provider_cache"),
+            ("paired_device", "SELECT COUNT(*) FROM paired_device"),
+        ] {
+            let rows: i64 = sqlx::query_scalar(count)
+                .fetch_one(&mut copy)
+                .await
+                .unwrap();
+            assert_eq!(rows, 0, "{table} must not travel in a backup");
+        }
+        drop(copy);
+
+        let info = inspect(&destination).await.unwrap();
+        assert_eq!(info.schema_version, migrations::latest_version());
+    }
+
+    /// A destination is the caller's, so a second backup never overwrites the first, and a
+    /// refusal leaves no partial file behind.
+    #[tokio::test]
+    async fn a_backup_does_not_overwrite_an_existing_file() {
+        let directory = TempDir::new().unwrap();
+        let (database, _source, _account) = populated(&directory).await;
+        let destination = directory.path().join("backup.sqlite");
+        database.write_backup(&destination).await.unwrap();
+
+        let error = database.write_backup(&destination).await.unwrap_err();
+        assert!(matches!(error, StorageError::Backup { .. }));
+        assert!(
+            !with_suffix(&destination, PARTIAL).exists(),
+            "the refusal must not leave a partial copy"
+        );
+    }
+
+    /// Inspection is the boundary between a chosen file and a database: an ordinary SQLite
+    /// file is refused, and so is a backup written by a newer schema.
+    #[tokio::test]
+    async fn inspection_refuses_a_plain_database_and_a_newer_schema() {
+        let directory = TempDir::new().unwrap();
+        let plain = directory.path().join("notes.sqlite");
+        let mut connection = open_writer_connection(&plain).await.unwrap();
+        sqlx::query("CREATE TABLE notes (body TEXT)")
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        drop(connection);
+        assert!(matches!(
+            inspect(&plain).await,
+            Err(StorageError::InvalidBackup { .. })
+        ));
+
+        let (database, _source, _account) = populated(&directory).await;
+        let backup = directory.path().join("backup.sqlite");
+        database.write_backup(&backup).await.unwrap();
+        let newer = directory.path().join("newer.sqlite");
+        tokio::fs::copy(&backup, &newer).await.unwrap();
+        let mut connection = open_writer_connection(&newer).await.unwrap();
+        sqlx::query(
+            "UPDATE _sqlx_migrations SET version = version + 100000              WHERE version = (SELECT MAX(version) FROM _sqlx_migrations)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        drop(connection);
+        let error = inspect(&newer).await.unwrap_err();
+        assert!(matches!(error, StorageError::InvalidBackup { .. }));
     }
 }
