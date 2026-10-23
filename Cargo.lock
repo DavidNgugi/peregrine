@@ -4275,7 +4275,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "peregrine-app"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "axum",
  "flate2",
@@ -4313,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-cast"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "peregrine-domain",
  "serde",
@@ -4323,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-desktop"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "peregrine-domain",
  "peregrine-ipc",
@@ -4345,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-domain"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "jiff",
  "proptest",
@@ -4357,7 +4357,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-indexers"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "peregrine-domain",
  "reqwest",
@@ -4369,7 +4369,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-ipc"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "muda",
  "peregrine-app",
@@ -4390,15 +4390,15 @@ dependencies = [
 
 [[package]]
 name = "peregrine-mcp"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 
 [[package]]
 name = "peregrine-monitor"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 
 [[package]]
 name = "peregrine-platform"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "jiff",
  "keepawake",
@@ -4415,7 +4415,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-playback"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "peregrine-domain",
  "peregrine-stream",
@@ -4427,7 +4427,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-providers"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "jiff",
  "peregrine-domain",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-secrets"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "keyring",
  "secrecy",
@@ -4455,7 +4455,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-storage"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "jiff",
  "peregrine-domain",
@@ -4470,7 +4470,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-stream"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "axum",
  "futures",
@@ -4484,7 +4484,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-sync"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "futures",
  "jiff",
@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-testkit"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "futures",
  "jiff",
@@ -4518,7 +4518,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-torrent"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "librqbit",
  "peregrine-domain",
@@ -4528,7 +4528,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-usenet"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "crc32fast",
  "peregrine-domain",
@@ -8413,7 +8413,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "anyhow",
  "serde",

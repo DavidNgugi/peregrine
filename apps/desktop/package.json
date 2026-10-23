@@ -1,6 +1,6 @@
 {
   "name": "@peregrine/desktop",
-  "version": "1.0.0-rc.5",
+  "version": "1.0.0-rc.6",
   "private": true,
   "description": "The Peregrine desktop frontend: React app in the Tauri shell.",
   "license": "MIT OR Apache-2.0",

@@ -1,6 +1,6 @@
 {
   "name": "peregrine",
-  "version": "1.0.0-rc.5",
+  "version": "1.0.0-rc.6",
   "private": true,
   "description": "Peregrine: media discovery, library management, torrent acquisition, and playback.",
   "license": "MIT OR Apache-2.0",
