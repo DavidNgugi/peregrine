@@ -4,18 +4,73 @@
  * No bridge and no store: the screen is a projection of one read, so a row drawn from a hand-made
  * DTO is enough to hold the one move this file owns — a title that resolves becomes a link to its
  * own route, and one that does not stays text.
+ *
+ * **A click is recorded rather than dispatched.** Vitest runs in `node`, and
+ * `renderToStaticMarkup` is one pass with no DOM and no event loop, so the kit's `Button` is
+ * wrapped to keep the props a row handed it and the hook that owns the moves is replaced by spies.
+ * Invoking the recorded handler is the call the button's own `onClick` makes with a click. A DOM
+ * render is PG-E21-03's.
  */
 
 import { createI18n } from "@peregrine/i18n";
+import type * as Ui from "@peregrine/ui";
 import type { DownloadJobDto } from "@peregrine/ipc-client";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { downloadTree } from "./download-tree.js";
 import { DownloadsScreen } from "./DownloadsScreen.js";
 
 const i18n = createI18n();
+
+/** What a row handed the kit's `Button`, as a click and a render are what this file can see. */
+interface RecordedButton {
+  readonly children?: ReactNode | undefined;
+  readonly disabled?: boolean | undefined;
+  /** Called without an event, because no row's handler reads one. */
+  readonly onClick?: (() => unknown) | undefined;
+}
+
+const recorded = vi.hoisted(() => ({
+  buttons: [] as RecordedButton[],
+  busyId: null as number | null,
+  pause: vi.fn(() => Promise.resolve()),
+  resume: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@peregrine/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof Ui>();
+  const { createElement } = await import("react");
+  const RecordingButton = (props: Parameters<typeof actual.Button>[0]) => {
+    recorded.buttons.push({
+      children: props.children,
+      disabled: props.disabled,
+      onClick: props.onClick as (() => unknown) | undefined,
+    });
+    return createElement(actual.Button, props);
+  };
+  return { ...actual, Button: RecordingButton };
+});
+
+vi.mock("../hooks/useDownloadActions.js", () => ({
+  useDownloadActions: () => ({
+    busyId: recorded.busyId,
+    clearing: false,
+    planningId: null,
+    error: null,
+    pause: recorded.pause,
+    resume: recorded.resume,
+    findPeers: () => Promise.resolve(),
+    remove: () => Promise.resolve(),
+    dismiss: () => Promise.resolve(),
+    clearFinished: () => Promise.resolve(),
+    planDeletion: () => Promise.resolve(null),
+    deleteFiles: () => Promise.resolve(),
+    consent: () => Promise.resolve(),
+  }),
+}));
 
 function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
   return {
@@ -58,6 +113,7 @@ function seasonJob(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
 }
 
 function markup(rows: readonly DownloadJobDto[]): string {
+  recorded.buttons.length = 0;
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <DownloadsScreen
@@ -73,7 +129,29 @@ function markup(rows: readonly DownloadJobDto[]): string {
   );
 }
 
+/** The text of the control that carries the row's primary-action class, if it drew one. */
+function primaryAction(html: string): string | undefined {
+  return /class="[^"]*download-primary-action[^"]*"[^>]*>([^<]*)</u.exec(html)?.[1];
+}
+
+/** How many times a label was drawn. A move belongs to one place, so the answer is one or none. */
+function occurrences(html: string, label: string): number {
+  return html.split(label).length - 1;
+}
+
+/** Whether the label was drawn inside the row's More actions popover rather than above it. */
+function inActionMenu(html: string, label: string): boolean {
+  const popover = html.indexOf("download-action-popover");
+  return popover !== -1 && html.indexOf(label) > popover;
+}
+
 describe("DownloadsScreen", () => {
+  beforeEach(() => {
+    recorded.busyId = null;
+    recorded.pause.mockClear();
+    recorded.resume.mockClear();
+  });
+
   it("opens the title a row is filling", () => {
     expect(markup([job()])).toContain('href="/title/movie/7"');
   });
@@ -195,6 +273,56 @@ describe("DownloadsScreen", () => {
     // The first row for an episode is the one the season reads, as seasonDownloadPlan does.
     expect(html).toContain("75%");
     expect(html.match(/More actions/gu)).toHaveLength(3);
+  });
+
+  it("keeps Play primary on a playable row and puts Pause in its menu", () => {
+    const html = markup([job({ state: "downloading", hasMediaFile: true })]);
+    expect(primaryAction(html)).toBe("Play");
+    // One control, and it is the menu's rather than a second primary button.
+    expect(occurrences(html, "Pause download")).toBe(1);
+    expect(inActionMenu(html, "Pause download")).toBe(true);
+  });
+
+  it("offers Resume instead of Pause in the menu once the playable row is paused", () => {
+    const html = markup([job({ state: "paused", hasMediaFile: true })]);
+    expect(primaryAction(html)).toBe("Play");
+    expect(occurrences(html, "Resume download")).toBe(1);
+    expect(inActionMenu(html, "Resume download")).toBe(true);
+    expect(html).not.toContain("Pause download");
+  });
+
+  it("keeps a row without a media file's Pause or Resume primary and out of the menu", () => {
+    const downloading = markup([job({ state: "downloading", hasMediaFile: false })]);
+    expect(primaryAction(downloading)).toBe("Pause download");
+    expect(occurrences(downloading, "Pause download")).toBe(1);
+    expect(inActionMenu(downloading, "Pause download")).toBe(false);
+
+    const paused = markup([job({ state: "paused", hasMediaFile: false })]);
+    expect(primaryAction(paused)).toBe("Resume download");
+    expect(occurrences(paused, "Resume download")).toBe(1);
+    expect(inActionMenu(paused, "Resume download")).toBe(false);
+  });
+
+  it("disables a playable row's menu control while its own move is in flight", () => {
+    recorded.busyId = 1;
+    const html = markup([job({ id: 1, state: "downloading", hasMediaFile: true })]);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Pause download<\/button>/u);
+  });
+
+  it("calls the row's pause from its menu control", async () => {
+    markup([job({ id: 1, state: "downloading", hasMediaFile: true })]);
+    const control = recorded.buttons.find((button) => button.children === "Pause download");
+    expect(control).toBeDefined();
+    await control?.onClick?.();
+    expect(recorded.pause).toHaveBeenCalledWith(1);
+  });
+
+  it("calls the row's resume from its menu control", async () => {
+    markup([job({ id: 2, state: "paused", hasMediaFile: true })]);
+    const control = recorded.buttons.find((button) => button.children === "Resume download");
+    expect(control).toBeDefined();
+    await control?.onClick?.();
+    expect(recorded.resume).toHaveBeenCalledWith(2);
   });
 });
 
