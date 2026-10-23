@@ -733,6 +733,8 @@ mod tests {
         ("nzb_sha256", "TEXT", 0, None, 0),
         ("nzb_path", "TEXT", 0, None, 0),
         ("stage", "TEXT", 1, Some("'transfer'"), 0),
+        // Added by migration 0030, so the physical column comes after every original one.
+        ("season_number", "INTEGER", 0, None, 0),
     ];
 
     const DOWNLOAD_FILE: &[ColumnShape] = &[

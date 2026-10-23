@@ -16,5 +16,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+# The adapter's fetch is async, and the redaction test needs one call to observe its error.
+tokio = { workspace = true }
+
 [lints]
 workspace = true

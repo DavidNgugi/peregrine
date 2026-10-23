@@ -15,6 +15,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Icon,
   Link,
   Progress,
   Screen,
@@ -31,6 +32,7 @@ import { downloadPercentOf } from "../../../lib/download-status.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import { imageUrl } from "../../../lib/media.js";
 import { useDownloadActions } from "../hooks/useDownloadActions.js";
+import { downloadTree, type QueueLine, type SeasonLine } from "./download-tree.js";
 import { ScheduledTransfers } from "./ScheduledTransfers.js";
 import type { Downloads } from "../hooks/useDownloads.js";
 
@@ -111,6 +113,9 @@ export function DownloadsScreen({
     | { kind: "delete"; row: DownloadJobDto; plan: DeletionPlanDto }
     | null
   >(null);
+  // One set of season keys, so collapsing one season leaves every other disclosure where it was.
+  // Expanded is the default, and the set holds the exceptions.
+  const [collapsedSeasons, setCollapsedSeasons] = useState<ReadonlySet<string>>(() => new Set());
 
   const confirm = async (): Promise<void> => {
     const target = confirming;
@@ -130,8 +135,21 @@ export function DownloadsScreen({
   };
 
   const hasClearable = downloads.downloads.some((row) => CLEARABLE_STATES.has(row.state));
+  const lines = downloadTree(downloads.downloads, collapsedSeasons);
 
-  const columns: readonly TableColumn<DownloadJobDto>[] = [
+  const toggleSeason = (key: string): void => {
+    setCollapsedSeasons((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const jobColumns: readonly TableColumn<DownloadJobDto>[] = [
     {
       id: "title",
       header: t("downloads.column.title"),
@@ -218,21 +236,27 @@ export function DownloadsScreen({
     {
       id: "reason",
       header: t("downloads.column.reason"),
-      // Only a blocked row has findings, and they are the whole reason it is not downloading. The
-      // report is the one the gate persisted, read back rather than recomputed (invariant I4).
-      cell: (row) =>
-        row.state === "blocked" && row.findings.length > 0 ? (
-          <ul className="flex flex-col gap-1 text-caption text-text-tertiary">
-            {row.findings.map((finding, index) => (
-              <li key={`${finding.reason}-${String(index)}`}>
-                {t(`downloads.finding.${finding.reason}`, { defaultValue: finding.reason })}
-                {finding.entry === null ? "" : ` — ${finding.entry}`}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          t("downloads.none")
-        ),
+      // A blocked row's findings are the whole reason it is not downloading: the report is the one
+      // the gate persisted, read back rather than recomputed (invariant I4). A failed row carries
+      // the core's own sentence instead, which is where a stalled transfer says it found no peers.
+      cell: (row) => {
+        if (row.state === "blocked" && row.findings.length > 0) {
+          return (
+            <ul className="flex flex-col gap-1 text-caption text-text-tertiary">
+              {row.findings.map((finding, index) => (
+                <li key={`${finding.reason}-${String(index)}`}>
+                  {t(`downloads.finding.${finding.reason}`, { defaultValue: finding.reason })}
+                  {finding.entry === null ? "" : ` — ${finding.entry}`}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        if (row.state === "failed" && row.errorMessage !== null) {
+          return <span className="text-caption text-text-tertiary">{row.errorMessage}</span>;
+        }
+        return t("downloads.none");
+      },
     },
     {
       id: "progress",
@@ -353,6 +377,21 @@ export function DownloadsScreen({
             <details className="download-action-menu">
               <summary>{t("downloads.action.more")}</summary>
               <div className="download-action-popover">
+                {/* The core re-announces a stalled transfer on its own; this is the same move on
+                    demand, for a person who does not want to wait out the grace period. */}
+                {row.protocol === "torrent" &&
+                (row.state === "downloading" ||
+                  row.state === "seeding" ||
+                  row.state === "metadata") ? (
+                  <Button
+                    disabled={busy}
+                    onClick={() => actions.findPeers(row.id)}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {t("downloads.action.findPeers")}
+                  </Button>
+                ) : null}
                 {row.protocol === "usenet" &&
                 row.state === "blocked" &&
                 row.findings.some((finding) => finding.reason === "nested_archive") ? (
@@ -412,6 +451,101 @@ export function DownloadsScreen({
       },
     },
   ];
+
+  const seasonTitle = (line: SeasonLine): ReactElement => {
+    const expanded = !collapsedSeasons.has(line.key);
+    // A pack is named beside the episodes rather than instead of them: a season can have both
+    // queued, and a header that dropped one would misstate what the queue is doing.
+    const episodes = t("downloads.season.episodes", { count: line.episodeCount });
+    const summary =
+      line.packCount === 0
+        ? episodes
+        : line.episodeCount === 0
+          ? t("downloads.season.pack", { count: line.packCount })
+          : t("downloads.season.episodesAndPack", {
+              count: line.packCount,
+              episodes,
+            });
+    const label = t(expanded ? "downloads.season.collapse" : "downloads.season.expand", {
+      season: line.seasonNumber,
+      title: line.title,
+    });
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        {/* The button is the disclosure: `aria-expanded` is the state a screen reader announces,
+            and Enter and Space are the browser's own. */}
+        <button
+          aria-expanded={expanded}
+          aria-label={label}
+          className="grid size-6 shrink-0 place-items-center rounded-sm text-text-secondary hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          onClick={() => {
+            toggleSeason(line.key);
+          }}
+          title={label}
+          type="button"
+        >
+          <Icon
+            className={
+              expanded
+                ? "rotate-90 transition-transform motion-reduce:transition-none"
+                : "transition-transform motion-reduce:transition-none"
+            }
+            name="chevron-right"
+            size={16}
+          />
+        </button>
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate font-medium text-text-primary">{line.title}</span>
+          <span className="text-caption text-text-tertiary">
+            {t("downloads.season.number", { number: line.seasonNumber })}
+            {" · "}
+            {summary}
+          </span>
+        </span>
+      </span>
+    );
+  };
+
+  const seasonProgress = (line: SeasonLine): ReactElement =>
+    line.episodeCount === 0 && line.packCount === 0 ? (
+      <span className="text-text-tertiary">{t("downloads.none")}</span>
+    ) : (
+      <div className="download-progress-cell">
+        <div className="flex items-center gap-2">
+          <Progress
+            label={t("downloads.season.progress", {
+              title: line.title,
+              season: line.seasonNumber,
+            })}
+            value={line.percent}
+          />
+          <span className="text-text-tertiary">{line.percent}%</span>
+        </div>
+      </div>
+    );
+
+  // The existing per-row cells are reused below the header, so a row keeps every move it had;
+  // the two season columns are the only cells the header replaces.
+  const columns: readonly TableColumn<QueueLine>[] = jobColumns.map((column) => ({
+    ...column,
+    cell: (line) => {
+      if (line.kind === "job") {
+        const content = column.cell(line.job);
+        return line.nested && column.id === "title" ? (
+          <span className="block ps-6">{content}</span>
+        ) : (
+          content
+        );
+      }
+      if (column.id === "title") {
+        return seasonTitle(line);
+      }
+      if (column.id === "progress") {
+        return seasonProgress(line);
+      }
+      return null;
+    },
+  }));
 
   const copy =
     confirming === null
@@ -496,8 +630,8 @@ export function DownloadsScreen({
             <Table
               className="downloads-table"
               columns={columns}
-              rowKey={(row) => row.id}
-              rows={downloads.downloads}
+              rowKey={(line) => line.key}
+              rows={lines}
             />
           </>
         )}

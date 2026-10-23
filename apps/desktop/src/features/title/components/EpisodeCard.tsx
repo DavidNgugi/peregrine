@@ -32,6 +32,7 @@ import { useTranslation } from "react-i18next";
 
 import { imageUrl } from "../../../lib/media.js";
 import { episodeAvailability } from "../hooks/seasons.js";
+import type { SeasonPack } from "../hooks/season-download.js";
 
 /**
  * The intrinsic size the cache's `w300` still variant is served at.
@@ -63,6 +64,14 @@ export interface EpisodeCardProps {
   readonly streamable?: boolean | undefined;
   /** How far that transfer has got, 0-100. */
   readonly downloadPercent?: number | undefined;
+  /**
+   * The season plan's live pack, when one is covering this episode's whole season.
+   *
+   * The plan has already decided that the pack is live and what it is doing; the card only says
+   * so. It must not re-read the queue itself, or the chip and the season control could disagree
+   * about the same row.
+   */
+  readonly seasonPack?: SeasonPack | undefined;
   /** Whether the account finished this episode; the bar under the still fills when it did. */
   readonly watched?: boolean | undefined;
   /** How far through the episode is, as a fraction in `0..=1`, for a partially watched one. */
@@ -86,6 +95,7 @@ export function EpisodeCard({
   onPlay,
   downloading = false,
   downloadPercent,
+  seasonPack,
   streamable = false,
   watched = false,
   progress = 0,
@@ -106,6 +116,10 @@ export function EpisodeCard({
   const today = new Date().toISOString().slice(0, 10);
   const unaired = episode.airDate !== null && episode.airDate > today;
   const availability = unaired ? null : episodeAvailability(episode);
+  // A pack is only the answer for an episode nothing else has claimed: a file on disk keeps its
+  // own word, and the pack is what covers the ones still wanted.
+  const covering = availability === "wanted" ? seasonPack : undefined;
+  const transferring = downloading || covering !== undefined;
 
   return (
     <article
@@ -161,9 +175,16 @@ export function EpisodeCard({
             </span>
           ) : null}
           <span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-caption text-text-secondary">
-            {availability === null
-              ? t("title.episode.availability.unaired")
-              : t(`title.episode.availability.${availability}`)}
+            {covering === undefined
+              ? availability === null
+                ? t("title.episode.availability.unaired")
+                : t(`title.episode.availability.${availability}`)
+              : t(
+                  covering.status === "active"
+                    ? "title.episode.downloadingWithSeason"
+                    : "title.episode.queuedWithSeason",
+                  { season: covering.season },
+                )}
           </span>
         </div>
 
@@ -207,7 +228,7 @@ export function EpisodeCard({
             </div>
           )
         ) : onPlay === undefined &&
-          (onDownload === undefined || (availability !== "wanted" && !downloading)) ? null : (
+          (onDownload === undefined || (availability !== "wanted" && !transferring)) ? null : (
           <div className="mt-auto flex flex-wrap gap-2 pt-1">
             {onPlay !== undefined &&
             (availability === "available" ||
@@ -227,24 +248,28 @@ export function EpisodeCard({
                 {t("title.episode.play")}
               </Button>
             ) : null}
-            {onDownload === undefined || (availability !== "wanted" && !downloading) ? null : (
+            {onDownload === undefined || (availability !== "wanted" && !transferring) ? null : (
               <Button
                 aria-label={t("title.episode.downloadLabel", {
                   number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
                   name: episode.name ?? t("title.unnamedEpisode"),
                 })}
-                disabled={downloading}
+                disabled={transferring}
                 onClick={() => {
                   onDownload(episode);
                 }}
                 size="sm"
-                variant={downloading ? "primary" : "secondary"}
+                variant={transferring ? "primary" : "secondary"}
               >
                 {downloading
                   ? downloadPercent === undefined
                     ? t("title.episode.downloadingWaiting")
                     : t("title.episode.downloading", { percent: downloadPercent })
-                  : t("title.episode.download")}
+                  : covering === undefined
+                    ? t("title.episode.download")
+                    : covering.status === "active"
+                      ? t("title.episode.downloading", { percent: covering.percent })
+                      : t("title.episode.queued")}
               </Button>
             )}
           </div>

@@ -3,7 +3,8 @@
 //! A notification is written by the core and read here; the OS toast is a side effect that
 //! `PG-E1-14` owns, so this surface is how a user sees one at all today.
 
-use peregrine_app::{CentreEntry, Severity};
+use peregrine_app::notify::ConsentDecision;
+use peregrine_app::{CentreEntry, Preferences, Severity};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Number;
@@ -75,6 +76,100 @@ impl NotificationDto {
             subject_id: entry.subject_id,
         }
     }
+}
+
+/// The consent state the notification settings screen draws.
+///
+/// Three decisions rather than a boolean, because "never asked" and "asked and declined" are
+/// different facts and R31 lets the app ask only the first. The OS's own answer is carried beside
+/// it so the screen can say that the system withdrew what it once granted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPreferencesDto {
+    /// `unanswered`, `granted`, or `declined`.
+    pub consent: String,
+    /// Whether the user also asked not to be asked again.
+    pub dont_ask_again: bool,
+    /// What the OS last reported about its own permission, when it has been asked.
+    pub os_granted: Option<bool>,
+    /// Whether the app may still raise the consent question unprompted.
+    pub should_prompt: bool,
+}
+
+impl NotificationPreferencesDto {
+    fn of(preferences: &Preferences) -> Self {
+        Self {
+            consent: match preferences.consent.decision {
+                ConsentDecision::Unanswered => "unanswered",
+                ConsentDecision::Granted => "granted",
+                ConsentDecision::Declined => "declined",
+            }
+            .to_owned(),
+            dont_ask_again: preferences.consent.dont_ask_again,
+            os_granted: preferences.consent.os_granted,
+            should_prompt: preferences.should_prompt(),
+        }
+    }
+}
+
+/// The user's notification consent and the catalogue defaults around it.
+///
+/// # Errors
+///
+/// `INTERNAL` when the stored consent cannot be read; the cause is logged and the message stays
+/// generic because a database failure is not the user's to act on.
+#[tauri::command]
+#[specta::specta]
+pub async fn notification_preferences(
+    state: State<'_, RuntimeState>,
+) -> Result<NotificationPreferencesDto, AppError> {
+    let runtime = state.runtime()?;
+    let preferences = runtime
+        .notification_preferences()
+        .await
+        .map_err(|error| notification_error(&error))?;
+    Ok(guard_response(
+        "notifications::preferences",
+        NotificationPreferencesDto::of(&preferences),
+    ))
+}
+
+/// Records the user's answer to the notification consent question.
+///
+/// The UI asks the operating system first when the answer is `true`, so `granted` is the
+/// effective decision rather than the intent. A refusal is stored with "do not ask again", which
+/// the wizard reads; the Settings control remains the user's to change.
+///
+/// # Errors
+///
+/// `INTERNAL` when the answer cannot be stored; the cause is logged and the message stays
+/// generic.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_notification_consent(
+    state: State<'_, RuntimeState>,
+    granted: bool,
+) -> Result<NotificationPreferencesDto, AppError> {
+    let runtime = state.runtime()?;
+    let preferences = runtime
+        .set_notification_consent(granted)
+        .await
+        .map_err(|error| notification_error(&error))?;
+    Ok(guard_response(
+        "notifications::setConsent",
+        NotificationPreferencesDto::of(&preferences),
+    ))
+}
+
+/// The one mapping from a notification-service refusal to the wire.
+///
+/// The service's messages are fixed and carry no path or secret; the database's own sentence is
+/// not passed through because several of its variants name an absolute path (ARCHITECTURE §7
+/// rule 3).
+fn notification_error(error: &peregrine_app::notify::ServiceError) -> AppError {
+    AppError::new(ErrorCode::Internal)
+        .with_detail("Notification settings could not be read or saved.")
+        .with_cause(error.to_string())
 }
 
 /// The most recent centre rows, newest first.

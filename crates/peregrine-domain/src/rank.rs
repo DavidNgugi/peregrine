@@ -19,6 +19,22 @@
 //! * A candidate the profile does not accept is a typed [`Rejection`] naming the
 //!   rule that refused it, never a low score. A silent zero would look like a
 //!   legitimate result to the caller and to the audit trail.
+//!
+//! The preference order is explicit, and a fallback never crosses it:
+//!
+//! 1. **Declared and allowed** — every quality field the profile constrains is in
+//!    the name and every value is allowed.
+//! 2. **Declared but lower-ranked** — allowed, and loses weighted steps to the
+//!    profile's preference order.
+//! 3. **Undeclared** — the name does not state a resolution, source, video codec,
+//!    or audio codec the profile constrains. Unknown is not disallowed: a release
+//!    the indexers actually return must not become unusable because its title
+//!    omits a tag, so it is a low-tier fallback that is offered only after every
+//!    declared candidate and is marked as such ([`crate::rank::Undeclared`]).
+//!
+//! A hard refusal is outside that order. A value the profile disallows, a blocked
+//! group, or a size outside the caps stays refused even when another field is
+//! undeclared: tier 3 is for an unknowable field, never for a known-bad one.
 
 use serde::{Deserialize, Serialize};
 
@@ -208,28 +224,22 @@ impl RankReason {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum Rejection {
-    /// The profile constrains the resolution and the candidate declares none.
-    ResolutionNotDeclared,
     /// The candidate declares a resolution outside the profile's list.
     ResolutionNotAllowed {
         /// The refused resolution.
         value: Resolution,
     },
-    /// The profile constrains the source and the candidate declares none.
-    SourceNotDeclared,
     /// The candidate declares a source outside the profile's list.
     SourceNotAllowed {
         /// The refused source.
         value: ReleaseSource,
     },
-    /// The profile constrains the video codec and the candidate declares none.
-    VideoCodecNotDeclared,
     /// The candidate declares a video codec outside the profile's list.
     VideoCodecNotAllowed {
         /// The refused codec.
         value: VideoCodec,
     },
-    /// The profile constrains the audio and the candidate declares no codec on the list.
+    /// The profile constrains the audio and the candidate declares a codec outside the list.
     AudioNotAllowed {
         /// The profile's audio list, in preference order.
         allowed: Vec<AudioCodec>,
@@ -264,13 +274,9 @@ impl Rejection {
     /// The rule that refused the candidate.
     pub const fn kind(&self) -> ReasonKind {
         match self {
-            Self::ResolutionNotDeclared | Self::ResolutionNotAllowed { .. } => {
-                ReasonKind::Resolution
-            }
-            Self::SourceNotDeclared | Self::SourceNotAllowed { .. } => ReasonKind::Source,
-            Self::VideoCodecNotDeclared | Self::VideoCodecNotAllowed { .. } => {
-                ReasonKind::VideoCodec
-            }
+            Self::ResolutionNotAllowed { .. } => ReasonKind::Resolution,
+            Self::SourceNotAllowed { .. } => ReasonKind::Source,
+            Self::VideoCodecNotAllowed { .. } => ReasonKind::VideoCodec,
             Self::AudioNotAllowed { .. } => ReasonKind::Audio,
             Self::GroupBlocked { .. } | Self::GroupNotAllowed { .. } => ReasonKind::Group,
             Self::BelowSizeFloor { .. } | Self::AboveSizeCeiling { .. } => ReasonKind::Size,
@@ -281,13 +287,10 @@ impl Rejection {
     /// the refusal has one, with no spaces so a log line stays parseable.
     pub fn label(&self) -> String {
         match self {
-            Self::ResolutionNotDeclared => "resolution-not-declared".to_owned(),
             Self::ResolutionNotAllowed { value } => {
                 format!("resolution-not-allowed:{}", value.as_str())
             }
-            Self::SourceNotDeclared => "source-not-declared".to_owned(),
             Self::SourceNotAllowed { value } => format!("source-not-allowed:{}", value.as_str()),
-            Self::VideoCodecNotDeclared => "video-codec-not-declared".to_owned(),
             Self::VideoCodecNotAllowed { value } => {
                 format!("video-codec-not-allowed:{}", value.as_str())
             }
@@ -311,17 +314,14 @@ impl Rejection {
     /// The declaration index, which is the only thing two refusals compare on.
     const fn order(&self) -> u8 {
         match self {
-            Self::ResolutionNotDeclared => 0,
-            Self::ResolutionNotAllowed { .. } => 1,
-            Self::SourceNotDeclared => 2,
-            Self::SourceNotAllowed { .. } => 3,
-            Self::VideoCodecNotDeclared => 4,
-            Self::VideoCodecNotAllowed { .. } => 5,
-            Self::AudioNotAllowed { .. } => 6,
-            Self::GroupBlocked { .. } => 7,
-            Self::GroupNotAllowed { .. } => 8,
-            Self::BelowSizeFloor { .. } => 9,
-            Self::AboveSizeCeiling { .. } => 10,
+            Self::ResolutionNotAllowed { .. } => 0,
+            Self::SourceNotAllowed { .. } => 1,
+            Self::VideoCodecNotAllowed { .. } => 2,
+            Self::AudioNotAllowed { .. } => 3,
+            Self::GroupBlocked { .. } => 4,
+            Self::GroupNotAllowed { .. } => 5,
+            Self::BelowSizeFloor { .. } => 6,
+            Self::AboveSizeCeiling { .. } => 7,
         }
     }
 }
@@ -338,12 +338,62 @@ impl Ord for Rejection {
     }
 }
 
+/// The quality fields a release's name does not declare, when the profile constrains
+/// them.
+///
+/// An undeclared field is unknown rather than disallowed, so the candidate is a
+/// low-tier fallback instead of a refusal. The fields are only ever set for the
+/// quality families whose absence the release name cannot express — the resolution,
+/// the source, the video codec, and the audio codec. A missing source says the name
+/// does not state the transfer, not that the profile refused it; a source the name
+/// *does* state and the profile disallows stays a hard refusal.
+#[allow(clippy::struct_excessive_bools)] // Four independent known/unknown facts the audit trail names separately.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Undeclared {
+    /// The name states no resolution and the profile constrains the resolution.
+    resolution: bool,
+    /// The name states no source and the profile constrains the source.
+    source: bool,
+    /// The name states no video codec and the profile constrains the video codec.
+    video_codec: bool,
+    /// The name states no audio codec the profile accepts, and the profile
+    /// constrains the audio.
+    audio: bool,
+}
+
+impl Undeclared {
+    /// True when no field is undeclared, which is the shape of a declared candidate.
+    pub const fn is_empty(self) -> bool {
+        !self.resolution && !self.source && !self.video_codec && !self.audio
+    }
+
+    /// The undeclared fields, in the ranker's rule order, as the audit trail and the
+    /// acquire job's log spell them.
+    pub fn fields(self) -> Vec<&'static str> {
+        let mut fields = Vec::with_capacity(4);
+        if self.resolution {
+            fields.push("resolution");
+        }
+        if self.source {
+            fields.push("source");
+        }
+        if self.video_codec {
+            fields.push("video_codec");
+        }
+        if self.audio {
+            fields.push("audio");
+        }
+        fields
+    }
+}
+
 /// The outcome of ranking one candidate.
 ///
-/// The comparison is total and states the winner rule in one place: a ranked
-/// candidate sorts above a rejected one, and among ranked candidates the higher
-/// score sorts first. Two rankings that tie compare equal, because equal scores are
-/// a tie and nothing else orders them.
+/// The comparison is total and states the winner rule in one place: a declared
+/// candidate sorts above an undeclared fallback, a fallback sorts above a
+/// rejection, and among candidates of one tier the higher score sorts first. Two
+/// rankings that tie compare equal, because equal scores are a tie and nothing else
+/// orders them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Ranking {
@@ -353,6 +403,20 @@ pub enum Ranking {
         score: u64,
         /// One entry per rule the ranker consulted, in a fixed order.
         reasons: Vec<RankReason>,
+    },
+    /// The name does not declare a quality field the profile constrains.
+    ///
+    /// The candidate is not refused: an unknown value is none of the profile's
+    /// business to disallow. It is a low-tier fallback offered only after every
+    /// declared candidate, and this variant is what marks it as one.
+    Undeclared {
+        /// `MAX_SCORE` less the points of the fields the name does declare.
+        score: u64,
+        /// One entry per rule the ranker could evaluate. A family the name does not
+        /// declare is named by `undeclared` instead, because it has no position.
+        reasons: Vec<RankReason>,
+        /// Which quality fields the name does not declare.
+        undeclared: Undeclared,
     },
     /// The profile refuses the candidate.
     Rejected {
@@ -365,16 +429,17 @@ impl Ranking {
     /// The candidate's score, or `None` when the profile refused it.
     pub const fn score(&self) -> Option<u64> {
         match self {
-            Self::Ranked { score, .. } => Some(*score),
+            Self::Ranked { score, .. } | Self::Undeclared { score, .. } => Some(*score),
             Self::Rejected { .. } => None,
         }
     }
 
-    /// Every rule the ranker consulted, in the order it consulted them; empty for a
-    /// rejection, which stops at the first rule that refuses it.
+    /// Every rule the ranker could evaluate, in the order it consulted them; empty
+    /// for a rejection, which stops at the first rule that refuses it. A fallback's
+    /// undeclared families are not reasons: [`Ranking::undeclared`] names them.
     pub fn reasons(&self) -> &[RankReason] {
         match self {
-            Self::Ranked { reasons, .. } => reasons,
+            Self::Ranked { reasons, .. } | Self::Undeclared { reasons, .. } => reasons,
             Self::Rejected { .. } => &[],
         }
     }
@@ -382,18 +447,49 @@ impl Ranking {
     /// The refusal, when the profile made one.
     pub const fn rejection(&self) -> Option<&Rejection> {
         match self {
-            Self::Ranked { .. } => None,
+            Self::Ranked { .. } | Self::Undeclared { .. } => None,
             Self::Rejected { rejection } => Some(rejection),
         }
     }
 
-    /// The audit-trail line for this outcome: the score and every reason, or the
-    /// named rejection. This is the only place a [`RankReason`] becomes text.
+    /// The quality fields the name does not declare, when the profile accepts the
+    /// candidate as a fallback.
+    pub const fn undeclared(&self) -> Option<Undeclared> {
+        match self {
+            Self::Undeclared { undeclared, .. } => Some(*undeclared),
+            Self::Ranked { .. } | Self::Rejected { .. } => None,
+        }
+    }
+
+    /// True when this candidate is the low-tier fallback and not a declared one.
+    pub const fn is_fallback(&self) -> bool {
+        matches!(self, Self::Undeclared { .. })
+    }
+
+    /// The audit-trail line for this outcome: the score and every reason, the
+    /// fallback marker and the fields it does not declare, or the named rejection.
+    /// This is the only place a [`RankReason`] becomes text.
     pub fn describe(&self) -> String {
         match self {
             Self::Ranked { score, reasons } => {
                 let reasons: Vec<String> = reasons.iter().map(describe_reason).collect();
                 format!("score={score} {}", reasons.join("+"))
+            }
+            Self::Undeclared {
+                score,
+                reasons,
+                undeclared,
+            } => {
+                let reasons: Vec<String> = reasons.iter().map(describe_reason).collect();
+                let mut line = format!(
+                    "fallback=undeclared:{} score={score}",
+                    undeclared.fields().join("+")
+                );
+                if !reasons.is_empty() {
+                    line.push(' ');
+                    line.push_str(&reasons.join("+"));
+                }
+                line
             }
             Self::Rejected { rejection } => format!("rejected={}", rejection.label()),
         }
@@ -430,15 +526,33 @@ impl PartialOrd for Ranking {
 
 impl Ord for Ranking {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (Self::Rejected { .. }, Self::Ranked { .. }) => std::cmp::Ordering::Less,
-            (Self::Ranked { .. }, Self::Rejected { .. }) => std::cmp::Ordering::Greater,
-            (Self::Rejected { rejection: left }, Self::Rejected { rejection: right }) => {
-                left.cmp(right)
-            }
-            (Self::Ranked { score: left, .. }, Self::Ranked { score: right, .. }) => {
-                left.cmp(right)
-            }
+        // The tier first, so a fallback can never outrank a declared candidate
+        // however well its declared fields score.
+        match self.tier().cmp(&other.tier()) {
+            std::cmp::Ordering::Equal => match (self, other) {
+                (Self::Ranked { score: left, .. }, Self::Ranked { score: right, .. })
+                | (Self::Undeclared { score: left, .. }, Self::Undeclared { score: right, .. }) => {
+                    left.cmp(right)
+                }
+                (Self::Rejected { rejection: left }, Self::Rejected { rejection: right }) => {
+                    left.cmp(right)
+                }
+                // Unreachable: equal tiers are equal variants. Total rather than
+                // panicking because this is an Ord implementation.
+                _ => std::cmp::Ordering::Equal,
+            },
+            ordering => ordering,
+        }
+    }
+}
+
+impl Ranking {
+    /// The tier this outcome belongs to: declared, undeclared fallback, or refused.
+    const fn tier(&self) -> u8 {
+        match self {
+            Self::Ranked { .. } => 2,
+            Self::Undeclared { .. } => 1,
+            Self::Rejected { .. } => 0,
         }
     }
 }
@@ -464,36 +578,51 @@ impl Candidate {
 
 /// The index of the best candidate the profile accepts, or None when it refuses all of them.
 ///
-/// Only the score decides here. Every admission rule a caller adds on top — a seeder floor, an
-/// indexer health check, a size the metadata has not yet confirmed — filters the slice before it
-/// reaches this, so the ranking is one rule in one place.
+/// The declared candidates come first, so this answers a fallback only when no declared candidate
+/// is acceptable. Every admission rule a caller adds on top — a seeder floor, an indexer health
+/// check, a size the metadata has not yet confirmed — filters the slice before it reaches this, so
+/// the ranking is one rule in one place.
 #[must_use]
 pub fn best_candidate(candidates: &[Candidate], profile: &QualityProfile) -> Option<usize> {
     ranked_candidates(candidates, profile).into_iter().next()
 }
 
-/// The indices of every candidate the profile accepts, best first.
+/// The indices of every candidate the profile accepts, best first: every declared candidate, then
+/// every undeclared fallback.
 ///
 /// [`best_candidate`] is this function's first element, kept under its own name because most
 /// callers want exactly one answer. A caller that has to step past a release the *inspection*
 /// gate will refuse — a rule the ranker cannot evaluate, because it needs the destination and
 /// the volume — walks this list instead, so one refusal costs one candidate rather than the
 /// attempt.
+///
+/// The two tiers are sorted separately and concatenated, so a fallback never outranks a declared
+/// candidate no matter what its declared fields score. The caller can tell the tiers apart with
+/// [`Ranking::undeclared`], which is what makes the fallback's use visible in a log and in the
+/// audit trail.
 #[must_use]
 pub fn ranked_candidates(candidates: &[Candidate], profile: &QualityProfile) -> Vec<usize> {
-    let mut scored: Vec<(usize, u64)> = candidates
-        .iter()
-        .enumerate()
-        .filter_map(|(index, candidate)| {
-            ReleaseRanker::rank(candidate, profile)
-                .score()
-                .map(|score| (index, score))
-        })
-        .collect();
+    let mut declared: Vec<(usize, u64)> = Vec::new();
+    let mut fallbacks: Vec<(usize, u64)> = Vec::new();
+    for (index, candidate) in candidates.iter().enumerate() {
+        match ReleaseRanker::rank(candidate, profile) {
+            Ranking::Ranked { score, .. } => declared.push((index, score)),
+            Ranking::Undeclared { score, .. } => fallbacks.push((index, score)),
+            Ranking::Rejected { .. } => {}
+        }
+    }
     // Ties resolve to the later index, which is what `max_by_key` chose before this existed, so
     // `best_candidate` keeps its exact former answer.
-    scored.sort_by(|left, right| right.1.cmp(&left.1).then(right.0.cmp(&left.0)));
-    scored.into_iter().map(|(index, _)| index).collect()
+    let best_first = |scored: &mut Vec<(usize, u64)>| {
+        scored.sort_by(|left, right| right.1.cmp(&left.1).then(right.0.cmp(&left.0)));
+    };
+    best_first(&mut declared);
+    best_first(&mut fallbacks);
+    declared
+        .into_iter()
+        .chain(fallbacks)
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// The indices of the candidates the profile refused for a *quality* reason only, best first.
@@ -542,26 +671,47 @@ pub fn alternative_candidates(candidates: &[Candidate], profile: &QualityProfile
 pub struct ReleaseRanker;
 
 impl ReleaseRanker {
-    /// Scores a candidate against a profile, or names the rule that refuses it.
+    /// Scores a candidate against a profile, marks it as an undeclared fallback, or
+    /// names the rule that refuses it.
     pub fn rank(candidate: &Candidate, profile: &QualityProfile) -> Ranking {
         let rules = profile.rules();
+        // A field the profile constrains and the name does not declare is collected
+        // here rather than refused: unknown is not disallowed. Every other error is a
+        // hard refusal and ends the ranking immediately.
+        let mut undeclared = Undeclared::default();
 
         let resolution = match score_resolution(candidate.name.resolution(), rules.resolutions()) {
             Ok(position) => position,
-            Err(rejection) => return Ranking::Rejected { rejection },
+            Err(FieldScore::NotDeclared) => {
+                undeclared.resolution = true;
+                None
+            }
+            Err(FieldScore::Refused(rejection)) => return Ranking::Rejected { rejection },
         };
         let source = match score_source(candidate.name.source(), rules.sources()) {
             Ok(position) => position,
-            Err(rejection) => return Ranking::Rejected { rejection },
+            Err(FieldScore::NotDeclared) => {
+                undeclared.source = true;
+                None
+            }
+            Err(FieldScore::Refused(rejection)) => return Ranking::Rejected { rejection },
         };
         let video_codec =
             match score_video_codec(candidate.name.video_codec(), rules.video_codecs()) {
                 Ok(position) => position,
-                Err(rejection) => return Ranking::Rejected { rejection },
+                Err(FieldScore::NotDeclared) => {
+                    undeclared.video_codec = true;
+                    None
+                }
+                Err(FieldScore::Refused(rejection)) => return Ranking::Rejected { rejection },
             };
         let audio = match score_audio(candidate.name.audio(), rules.audio_codecs()) {
             Ok(position) => position,
-            Err(rejection) => return Ranking::Rejected { rejection },
+            Err(FieldScore::NotDeclared) => {
+                undeclared.audio = true;
+                None
+            }
+            Err(FieldScore::Refused(rejection)) => return Ranking::Rejected { rejection },
         };
         if let Err(rejection) = check_group(candidate.name.group(), profile) {
             return Ranking::Rejected { rejection };
@@ -570,34 +720,60 @@ impl ReleaseRanker {
             return Ranking::Rejected { rejection };
         }
 
-        // One entry per family, in the order the rules are applied and the weights
-        // descend, so the output order never depends on which rules happened to
-        // match. Size is a gate, so it contributes a reason and no points.
-        let reasons = vec![
-            RankReason::Resolution {
+        // One entry per evaluable family, in the order the rules are applied and the
+        // weights descend, so the output order never depends on which rules happened
+        // to match. Size is a gate, so it contributes a reason and no points. An
+        // undeclared family has no position to report and is named by `undeclared`.
+        let mut reasons = Vec::with_capacity(6);
+        if !undeclared.resolution {
+            reasons.push(RankReason::Resolution {
                 position: resolution,
-            },
-            RankReason::Source { position: source },
-            RankReason::VideoCodec {
+            });
+        }
+        if !undeclared.source {
+            reasons.push(RankReason::Source { position: source });
+        }
+        if !undeclared.video_codec {
+            reasons.push(RankReason::VideoCodec {
                 position: video_codec,
-            },
-            RankReason::Audio { position: audio },
-            RankReason::Group,
-            RankReason::Size {
-                bytes: candidate.size_bytes,
-            },
-        ];
+            });
+        }
+        if !undeclared.audio {
+            reasons.push(RankReason::Audio { position: audio });
+        }
+        reasons.push(RankReason::Group);
+        reasons.push(RankReason::Size {
+            bytes: candidate.size_bytes,
+        });
         // The subtraction cannot underflow: `listed_position` is the first match in a
         // list whose entries are values of a family with a fixed number of variants,
         // so an index can only reach `MAX_*_INDEX`, which `MAX_SCORE` covers by
         // construction.
         let penalty: u64 = reasons.iter().map(RankReason::points).sum();
+        let score = MAX_SCORE - penalty;
 
-        Ranking::Ranked {
-            score: MAX_SCORE - penalty,
-            reasons,
+        if undeclared.is_empty() {
+            Ranking::Ranked { score, reasons }
+        } else {
+            Ranking::Undeclared {
+                score,
+                reasons,
+                undeclared,
+            }
         }
     }
+}
+
+/// Why one quality field could not be scored.
+///
+/// The families the release name can omit — resolution, source, video codec, and
+/// audio — separate an unknown value from a refused one. An unknown value makes the
+/// candidate a fallback; a refused value ends the ranking.
+enum FieldScore {
+    /// The profile constrains the field and the name does not declare it.
+    NotDeclared,
+    /// The name declares a value the profile does not allow.
+    Refused(Rejection),
 }
 
 /// The index of `value` in a profile's preference list.
@@ -611,70 +787,73 @@ fn listed_position<T: PartialEq>(list: &[T], value: Option<&T>) -> Option<Positi
     u32::try_from(index).ok().map(Position::new)
 }
 
-/// Scores the resolution, or names why it cannot be scored.
+/// Scores the resolution, or says whether it is undeclared or refused.
 fn score_resolution(
     value: Option<Resolution>,
     list: &[Resolution],
-) -> Result<Option<Position>, Rejection> {
+) -> Result<Option<Position>, FieldScore> {
     if list.is_empty() {
         return Ok(None);
     }
     listed_position(list, value.as_ref()).map_or_else(
         || {
             Err(match value {
-                Some(value) => Rejection::ResolutionNotAllowed { value },
-                None => Rejection::ResolutionNotDeclared,
+                Some(value) => FieldScore::Refused(Rejection::ResolutionNotAllowed { value }),
+                None => FieldScore::NotDeclared,
             })
         },
         |position| Ok(Some(position)),
     )
 }
 
-/// Scores the source, or names why it cannot be scored.
+/// Scores the source, or says whether it is undeclared or refused.
 fn score_source(
     value: Option<ReleaseSource>,
     list: &[ReleaseSource],
-) -> Result<Option<Position>, Rejection> {
+) -> Result<Option<Position>, FieldScore> {
     if list.is_empty() {
         return Ok(None);
     }
     listed_position(list, value.as_ref()).map_or_else(
         || {
             Err(match value {
-                Some(value) => Rejection::SourceNotAllowed { value },
-                None => Rejection::SourceNotDeclared,
+                Some(value) => FieldScore::Refused(Rejection::SourceNotAllowed { value }),
+                None => FieldScore::NotDeclared,
             })
         },
         |position| Ok(Some(position)),
     )
 }
 
-/// Scores the video codec, or names why it cannot be scored.
+/// Scores the video codec, or says whether it is undeclared or refused.
 fn score_video_codec(
     value: Option<VideoCodec>,
     list: &[VideoCodec],
-) -> Result<Option<Position>, Rejection> {
+) -> Result<Option<Position>, FieldScore> {
     if list.is_empty() {
         return Ok(None);
     }
     listed_position(list, value.as_ref()).map_or_else(
         || {
             Err(match value {
-                Some(value) => Rejection::VideoCodecNotAllowed { value },
-                None => Rejection::VideoCodecNotDeclared,
+                Some(value) => FieldScore::Refused(Rejection::VideoCodecNotAllowed { value }),
+                None => FieldScore::NotDeclared,
             })
         },
         |position| Ok(Some(position)),
     )
 }
 
-/// Scores the audio by its best-matching codec, or names why none matches.
+/// Scores the audio by its best-matching codec, or says whether it is undeclared or refused.
 ///
 /// A release states several audio codecs — `DTS-HD MA 5.1` also implies plain
 /// `DTS` — so the best position any of them holds is the one that counts.
-fn score_audio(values: &[AudioCodec], list: &[AudioCodec]) -> Result<Option<Position>, Rejection> {
+fn score_audio(values: &[AudioCodec], list: &[AudioCodec]) -> Result<Option<Position>, FieldScore> {
     if list.is_empty() {
         return Ok(None);
+    }
+    if values.is_empty() {
+        return Err(FieldScore::NotDeclared);
     }
     values
         .iter()
@@ -683,9 +862,9 @@ fn score_audio(values: &[AudioCodec], list: &[AudioCodec]) -> Result<Option<Posi
         .and_then(|index| u32::try_from(index).ok())
         .map_or_else(
             || {
-                Err(Rejection::AudioNotAllowed {
+                Err(FieldScore::Refused(Rejection::AudioNotAllowed {
                     allowed: list.to_vec(),
-                })
+                }))
             },
             |index| Ok(Some(Position::new(index))),
         )
@@ -924,6 +1103,21 @@ mod tests {
         )
     }
 
+    /// The default profile's shape: every quality family constrained, with no size
+    /// or group gate in the way. The domain cannot depend on the storage crate that
+    /// owns the default's exact lists, so the golden rules stand in for them; every
+    /// value the tests use is on the corresponding list.
+    fn default_shape() -> QualityProfile {
+        profile_with(
+            GOLDEN_RESOLUTIONS.to_vec(),
+            GOLDEN_SOURCES.to_vec(),
+            GOLDEN_VIDEO_CODECS.to_vec(),
+            GOLDEN_AUDIO_CODECS.to_vec(),
+            caps(None, None),
+            groups(&[], &[]),
+        )
+    }
+
     /// The points a reason deducted, for the golden table's audit.
     fn points(ranking: &Ranking, kind: ReasonKind) -> u64 {
         ranking
@@ -1031,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_rule_rejects_a_candidate_that_declares_nothing() {
+    fn a_configured_rule_marks_a_candidate_that_declares_nothing_as_a_fallback() {
         let rules = |resolutions: Vec<Resolution>| {
             profile_with(
                 resolutions,
@@ -1043,19 +1237,305 @@ mod tests {
             )
         };
         let tagless = Candidate::new(ReleaseName::parse("Some Random File Name"), 5);
+        let fallback = ReleaseRanker::rank(&tagless, &rules(vec![Resolution::FullHd]));
         assert_eq!(
-            ReleaseRanker::rank(&tagless, &rules(vec![Resolution::FullHd])).rejection(),
-            Some(&Rejection::ResolutionNotDeclared)
+            fallback.undeclared(),
+            Some(Undeclared {
+                resolution: true,
+                source: false,
+                video_codec: false,
+                audio: false,
+            }),
+            "a missing resolution is unknown, not disallowed"
         );
         assert_eq!(
-            ReleaseRanker::rank(&tagless, &rules(vec![Resolution::Hd])).describe(),
-            "rejected=resolution-not-declared"
+            fallback.undeclared().map(Undeclared::fields),
+            Some(vec!["resolution"])
+        );
+        assert_eq!(
+            fallback.describe(),
+            "fallback=undeclared:resolution score=28251 source@-+video_codec@-+audio@-+group+size:5",
+            "the audit line marks the fallback and names the field"
         );
         assert_eq!(
             ReleaseRanker::rank(&tagless, &rules(Vec::new())).score(),
             Some(MAX_SCORE),
             "an empty rule accepts a name that declares nothing"
         );
+    }
+
+    /// The live Peppa Pig pack's name as the indexer states it: the name states 1080p
+    /// and WEB (which parses as `WebDl`), but no video codec and no audio. Only the
+    /// fields the profile constrains and the name omits are undeclared; the resolution
+    /// and source it does state still score.
+    #[test]
+    fn a_declared_resolution_with_no_codec_or_audio_is_still_a_fallback() {
+        let profile = profile_with(
+            vec![Resolution::FullHd, Resolution::Hd],
+            vec![ReleaseSource::WebDl, ReleaseSource::BluRay],
+            vec![VideoCodec::H264],
+            vec![AudioCodec::Aac],
+            caps(None, None),
+            groups(&[], &[]),
+        );
+        let candidate = Candidate::new(
+            ReleaseName::parse("Peppa Pig Season 1 MULTI 1080p WEB"),
+            9_090_000_000,
+        );
+        let ranking = ReleaseRanker::rank(&candidate, &profile);
+        assert_eq!(
+            ranking.undeclared(),
+            Some(Undeclared {
+                resolution: false,
+                source: false,
+                video_codec: true,
+                audio: true,
+            }),
+            "the declared resolution and source are not undeclared: {}",
+            ranking.describe()
+        );
+        assert_eq!(
+            ranking.undeclared().map(Undeclared::fields),
+            Some(vec!["video_codec", "audio"])
+        );
+        assert_eq!(
+            ranking.reasons().first(),
+            Some(&RankReason::Resolution {
+                position: Some(Position::new(0))
+            }),
+            "the resolution the name does declare still scores"
+        );
+        assert_eq!(
+            ranking.describe(),
+            "fallback=undeclared:video_codec+audio score=28251 \
+             resolution@0+source@0+group+size:9090000000"
+        );
+        assert_eq!(
+            best_candidate(std::slice::from_ref(&candidate), &profile),
+            Some(0),
+            "a fallback is selectable when nothing declared exists"
+        );
+        assert!(
+            alternative_candidates(std::slice::from_ref(&candidate), &profile).is_empty(),
+            "a fallback is chosen directly, not offered as another quality"
+        );
+    }
+
+    /// The pack that was refused live: the same Peppa shape with no source token at
+    /// all. Missing source is unknown exactly like a missing codec, so every family
+    /// the name omits is named and the pack is a selectable fallback rather than a
+    /// refusal.
+    #[test]
+    fn a_pack_that_declares_no_source_is_an_undeclared_fallback() {
+        let profile = default_shape();
+        let candidate = Candidate::new(
+            ReleaseName::parse("Peppa Pig Season 1 MULTI 1080p"),
+            9_090_000_000,
+        );
+        let ranking = ReleaseRanker::rank(&candidate, &profile);
+        assert_eq!(
+            ranking.undeclared(),
+            Some(Undeclared {
+                resolution: false,
+                source: true,
+                video_codec: true,
+                audio: true,
+            }),
+            "the missing source is unknown, not disallowed: {}",
+            ranking.describe()
+        );
+        assert_eq!(
+            ranking.undeclared().map(Undeclared::fields),
+            Some(vec!["source", "video_codec", "audio"])
+        );
+        assert_eq!(
+            ranking.describe(),
+            "fallback=undeclared:source+video_codec+audio score=24155 resolution@1+group+size:9090000000"
+        );
+        assert_eq!(
+            best_candidate(std::slice::from_ref(&candidate), &profile),
+            Some(0),
+            "the source-less pack is selectable when nothing declared exists"
+        );
+        assert!(
+            alternative_candidates(std::slice::from_ref(&candidate), &profile).is_empty(),
+            "a fallback is chosen directly, not offered as another quality"
+        );
+    }
+
+    /// The actual title behind the live `source-not-declared` refusal: it states a
+    /// season but no resolution, source, codec, or audio. Every constrained field is
+    /// unknown, so the pack is a fallback and is selectable; none of it is refused.
+    #[test]
+    fn the_live_source_less_season_pack_is_an_undeclared_fallback() {
+        let profile = default_shape();
+        let candidate = Candidate::new(ReleaseName::parse("Peppa Pig S01 2 3 4 5"), 8_152_630_768);
+        let ranking = ReleaseRanker::rank(&candidate, &profile);
+        assert_eq!(
+            ranking.undeclared(),
+            Some(Undeclared {
+                resolution: true,
+                source: true,
+                video_codec: true,
+                audio: true,
+            }),
+            "every family the name omits is unknown: {}",
+            ranking.describe()
+        );
+        assert_eq!(
+            ranking.undeclared().map(Undeclared::fields),
+            Some(vec!["resolution", "source", "video_codec", "audio"])
+        );
+        assert_eq!(
+            ranking.describe(),
+            "fallback=undeclared:resolution+source+video_codec+audio score=28251 group+size:8152630768"
+        );
+        assert_eq!(
+            best_candidate(std::slice::from_ref(&candidate), &profile),
+            Some(0),
+            "the live source-less pack is selectable"
+        );
+    }
+
+    /// A fully declared release wins over the source-less fallback, and a source
+    /// the profile disallows is still a hard refusal even when the rest of the name
+    /// is undeclared.
+    #[test]
+    fn a_declared_release_wins_and_a_disallowed_source_stays_refused() {
+        let profile = default_shape();
+        let fallback = Candidate::new(
+            ReleaseName::parse("Peppa Pig Season 1 MULTI 1080p"),
+            9_090_000_000,
+        );
+        let declared = Candidate::new(
+            ReleaseName::parse("Show Season 1 1080p BluRay x264 AAC"),
+            9_090_000_000,
+        );
+        assert!(
+            matches!(
+                ReleaseRanker::rank(&declared, &profile),
+                Ranking::Ranked { .. }
+            ),
+            "every constrained family is declared"
+        );
+        assert_eq!(
+            best_candidate(&[fallback, declared], &profile),
+            Some(1),
+            "the declared release outranks the source-less fallback"
+        );
+
+        let refused = Candidate::new(ReleaseName::parse("Show Season 1 1080p CAM"), 9_090_000_000);
+        let ranking = ReleaseRanker::rank(&refused, &profile);
+        assert_eq!(
+            ranking.rejection(),
+            Some(&Rejection::SourceNotAllowed {
+                value: ReleaseSource::Cam,
+            }),
+            "a declared and disallowed source is never a fallback"
+        );
+        assert!(ranking.undeclared().is_none());
+        assert_eq!(
+            best_candidate(std::slice::from_ref(&refused), &profile),
+            None,
+            "the refused release is never selected"
+        );
+    }
+
+    /// The tier boundary: a declared candidate wins even when the undeclared one is
+    /// the better resolution, which is what "never outranking a declared candidate"
+    /// means in practice.
+    #[test]
+    fn every_declared_candidate_sorts_before_every_undeclared_one() {
+        let profile = profile_with(
+            vec![Resolution::FullHd, Resolution::Hd],
+            vec![ReleaseSource::WebDl],
+            vec![VideoCodec::H264],
+            vec![AudioCodec::Aac],
+            caps(None, None),
+            groups(&[], &[]),
+        );
+        let undeclared = Candidate::new(
+            ReleaseName::parse("Movie.2024.1080p.WEB-DL-GROUP"),
+            5_000_000_000,
+        );
+        let declared = Candidate::new(
+            ReleaseName::parse("Movie.2024.720p.WEB-DL.x264.AAC-GROUP"),
+            5_000_000_000,
+        );
+        assert_eq!(
+            ranked_candidates(&[undeclared.clone(), declared.clone()], &profile),
+            vec![1, 0],
+            "the lower-ranked declared release still outranks the fallback"
+        );
+        assert_eq!(
+            ranked_candidates(&[declared, undeclared], &profile),
+            vec![0, 1],
+            "and input order cannot change that"
+        );
+    }
+
+    /// A value the profile disallows is a hard refusal whatever else the name omits.
+    #[test]
+    fn a_disallowed_field_is_refused_even_when_another_field_is_undeclared() {
+        let profile = profile_with(
+            vec![Resolution::FullHd],
+            vec![ReleaseSource::WebDl],
+            vec![VideoCodec::H264],
+            vec![AudioCodec::Aac],
+            caps(None, Some(5_000_000_000)),
+            groups(&[], &["YIFY"]),
+        );
+        let cases = [
+            (
+                "Movie.2024.2160p.WEB-DL-GROUP",
+                1_000_000_000,
+                Rejection::ResolutionNotAllowed {
+                    value: Resolution::UltraHd,
+                },
+            ),
+            (
+                "Movie.2024.1080p.WEB-DL.x265-GROUP",
+                1_000_000_000,
+                Rejection::VideoCodecNotAllowed {
+                    value: VideoCodec::H265,
+                },
+            ),
+            (
+                "Movie.2024.1080p.WEB-DL.x264.AC3-GROUP",
+                1_000_000_000,
+                Rejection::AudioNotAllowed {
+                    allowed: vec![AudioCodec::Aac],
+                },
+            ),
+            (
+                "Movie.2024.1080p.WEB-DL-YIFY",
+                1_000_000_000,
+                Rejection::GroupBlocked {
+                    group: "YIFY".to_owned(),
+                },
+            ),
+            (
+                "Movie.2024.1080p.WEB-DL-GROUP",
+                6_000_000_000,
+                Rejection::AboveSizeCeiling {
+                    bytes: 6_000_000_000,
+                    ceiling: 5_000_000_000,
+                },
+            ),
+        ];
+        for (raw, size, expected) in cases {
+            let candidate = Candidate::new(ReleaseName::parse(raw), size);
+            let ranking = ReleaseRanker::rank(&candidate, &profile);
+            assert_eq!(
+                ranking.rejection(),
+                Some(&expected),
+                "{raw} must stay refused"
+            );
+            assert!(
+                ranking.undeclared().is_none(),
+                "{raw} must not become a fallback"
+            );
+        }
     }
 
     #[test]
@@ -1243,6 +1723,33 @@ mod tests {
             serde_json::from_str::<Ranking>(&json).expect("the rejection reads back"),
             refused
         );
+
+        // The fallback's wire form keeps the tier and the undeclared fields, so the audit trail
+        // can still say why an unknown-quality release was chosen.
+        let fallback = ReleaseRanker::rank(
+            &Candidate::new(
+                ReleaseName::parse("Movie.2024.1080p.BluRay-FRAMESTOR"),
+                2_000_000_000,
+            ),
+            &profile,
+        );
+        let json = serde_json::to_string(&fallback).expect("a fallback serializes");
+        assert_eq!(
+            json,
+            concat!(
+                r#"{"outcome":"undeclared","score":23899,"reasons":["#,
+                r#"{"rule":"resolution","position":1},"#,
+                r#"{"rule":"source","position":1},"#,
+                r#"{"rule":"group"},"#,
+                r#"{"rule":"size","bytes":2000000000}],"#,
+                r#""undeclared":{"resolution":false,"source":false,"video_codec":true,"audio":true}}"#,
+            ),
+            "the fallback is marked on the wire, not inferred from a low score"
+        );
+        assert_eq!(
+            serde_json::from_str::<Ranking>(&json).expect("the fallback reads back"),
+            fallback
+        );
     }
 
     #[test]
@@ -1280,15 +1787,12 @@ mod tests {
         );
 
         for rejection in [
-            Rejection::ResolutionNotDeclared,
             Rejection::ResolutionNotAllowed {
                 value: Resolution::Hd,
             },
-            Rejection::SourceNotDeclared,
             Rejection::SourceNotAllowed {
                 value: ReleaseSource::Cam,
             },
-            Rejection::VideoCodecNotDeclared,
             Rejection::VideoCodecNotAllowed {
                 value: VideoCodec::Vp9,
             },
@@ -1538,7 +2042,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_audio_track_is_rejected_only_when_audio_is_constrained() {
+    fn a_missing_audio_track_is_a_fallback_not_a_refusal() {
         let tagless = Candidate::new(ReleaseName::parse("Some Random File Name"), 5);
         let constrained = profile_with(
             Vec::new(),
@@ -1548,11 +2052,21 @@ mod tests {
             caps(None, None),
             groups(&[], &[]),
         );
+        let fallback = ReleaseRanker::rank(&tagless, &constrained);
         assert_eq!(
-            ReleaseRanker::rank(&tagless, &constrained).rejection(),
-            Some(&Rejection::AudioNotAllowed {
-                allowed: vec![AudioCodec::Aac],
-            })
+            fallback.undeclared(),
+            Some(Undeclared {
+                resolution: false,
+                source: false,
+                video_codec: false,
+                audio: true,
+            }),
+            "no audio is unknown, not an audio codec the profile disallows"
+        );
+        assert!(
+            fallback.describe().contains("undeclared:audio"),
+            "{}",
+            fallback.describe()
         );
         assert_eq!(
             ReleaseRanker::rank(&tagless, &permissive()).score(),
@@ -1639,6 +2153,13 @@ mod tests {
             ),
             &profile,
         );
+        let fallback = ReleaseRanker::rank(
+            &Candidate::new(
+                ReleaseName::parse("Movie.2024.1080p.BluRay-FRAMESTOR"),
+                5_000_000_000,
+            ),
+            &profile,
+        );
         let rejected = ReleaseRanker::rank(
             &candidate(
                 &Parts {
@@ -1649,19 +2170,29 @@ mod tests {
             ),
             &profile,
         );
+        assert!(fallback.is_fallback());
         assert!(
             better
                 .score()
                 .is_some_and(|score| score > worse.score().unwrap_or(0))
         );
         assert!(
+            worse > fallback,
+            "a fallback never outranks a declared candidate, whatever it scores"
+        );
+        assert!(
             worse > rejected,
             "a ranked candidate outranks a rejected one"
         );
         assert_eq!(better.cmp(&better), std::cmp::Ordering::Equal);
-        let mut all = [rejected.clone(), better.clone(), worse.clone()];
+        let mut all = [
+            rejected.clone(),
+            fallback.clone(),
+            better.clone(),
+            worse.clone(),
+        ];
         all.sort();
-        assert_eq!(all, [rejected, worse, better]);
+        assert_eq!(all, [rejected, fallback, worse, better]);
     }
 
     fn resolution_strategy() -> impl Strategy<Value = Resolution> {
@@ -2002,6 +2533,19 @@ mod tests {
                 Ranking::Ranked { score, reasons } => {
                     prop_assert!(*score <= MAX_SCORE);
                     prop_assert_eq!(reasons.len(), 6, "one reason per family");
+                }
+                Ranking::Undeclared {
+                    score,
+                    reasons,
+                    undeclared,
+                } => {
+                    prop_assert!(*score <= MAX_SCORE);
+                    prop_assert!(!undeclared.is_empty());
+                    prop_assert_eq!(
+                        reasons.len(),
+                        6 - undeclared.fields().len(),
+                        "an undeclared family has no position to report"
+                    );
                 }
                 Ranking::Rejected { rejection } => {
                     prop_assert!(ranking.score().is_none());

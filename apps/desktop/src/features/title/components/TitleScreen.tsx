@@ -38,7 +38,7 @@ import { SeasonSwitcher } from "./SeasonSwitcher.js";
 import { logUiError } from "../../../lib/error-log.js";
 import { messageOf } from "../../../lib/ipc-message.js";
 import type { AcquireControl } from "../hooks/useAcquire.js";
-import { seasonDownloadPlan } from "../hooks/season-download.js";
+import { requestSeasonDownload, seasonDownloadPlan } from "../hooks/season-download.js";
 import type { TitleDetail } from "../hooks/useTitle.js";
 import type { TitleSeasons } from "../hooks/useSeasons.js";
 import type { TitleFeed } from "../hooks/useTitleFeed.js";
@@ -163,6 +163,7 @@ export function TitleScreen({
   // clicked. The requested set bridges that gap; the queue row takes over as soon as it exists.
   const [requested, setRequested] = useState<ReadonlySet<string>>(() => new Set());
   const [seasonStarting, setSeasonStarting] = useState(false);
+  const [seasonFailure, setSeasonFailure] = useState<string | null>(null);
   const episodeKey = (season: number, episode: number): string =>
     `${String(season)}:${String(episode)}`;
   const seasonNumber = seasons.season?.seasonNumber ?? 0;
@@ -174,21 +175,35 @@ export function TitleScreen({
     requested,
     busy: seasonStarting,
   });
+  // A pack is one job for the whole season, so the control says how many rows are covering it
+  // and how far the pack itself has got, rather than pretending the season is an episode list.
   const seasonLabel =
-    seasonPlan.status === "active"
-      ? t("title.episodes.downloadingSeason", {
-          season: seasonNumber,
-          percent: seasonPlan.percent,
-        })
-      : seasonPlan.status === "queued"
-        ? t("title.episodes.queuedSeason", { season: seasonNumber })
-        : seasonPlan.status === "done"
-          ? t("title.episodes.seasonDownloaded", { season: seasonNumber })
-          : seasonPlan.status === "retry"
-            ? t("title.episodes.retrySeason", { season: seasonNumber })
-            : t("title.episodes.downloadSeason", { season: seasonNumber });
+    seasonPlan.pack !== null
+      ? seasonPlan.pack.status === "active"
+        ? t("title.episodes.packDownloading", {
+            season: seasonNumber,
+            count: seasonPlan.pack.count,
+            percent: seasonPlan.pack.percent,
+          })
+        : t("title.episodes.packQueued", {
+            season: seasonNumber,
+            count: seasonPlan.pack.count,
+          })
+      : seasonPlan.status === "active"
+        ? t("title.episodes.downloadingSeason", {
+            season: seasonNumber,
+            percent: seasonPlan.percent,
+          })
+        : seasonPlan.status === "queued"
+          ? t("title.episodes.queuedSeason", { season: seasonNumber })
+          : seasonPlan.status === "done"
+            ? t("title.episodes.seasonDownloaded", { season: seasonNumber })
+            : seasonPlan.status === "retry"
+              ? t("title.episodes.retrySeason", { season: seasonNumber })
+              : t("title.episodes.downloadSeason", { season: seasonNumber });
   const seasonDisabled =
     seasonStarting ||
+    seasonPlan.pack !== null ||
     seasonPlan.status === "active" ||
     seasonPlan.status === "queued" ||
     seasonPlan.status === "done" ||
@@ -198,16 +213,28 @@ export function TitleScreen({
       return;
     }
     setSeasonStarting(true);
-    try {
+    setSeasonFailure(null);
+    setRequested((previous) => {
+      const next = new Set(previous);
       for (const episode of seasonPlan.missing) {
-        setRequested((previous) =>
-          new Set(previous).add(episodeKey(episode.seasonNumber, episode.episodeNumber)),
-        );
-        await acquire.start(title.id, {
-          season: episode.seasonNumber,
-          episode: episode.episodeNumber,
-        });
+        next.add(episodeKey(episode.seasonNumber, episode.episodeNumber));
       }
+      return next;
+    });
+    try {
+      await requestSeasonDownload(title.id, seasonNumber);
+    } catch (caught: unknown) {
+      const error = normalizeIpcError(caught);
+      logUiError("acquireSeason", error);
+      setSeasonFailure(messageOf(error));
+      // A refused start never creates a row; the bridge must not keep claiming a request.
+      setRequested((previous) => {
+        const next = new Set(previous);
+        for (const episode of seasonPlan.missing) {
+          next.delete(episodeKey(episode.seasonNumber, episode.episodeNumber));
+        }
+        return next;
+      });
     } finally {
       setSeasonStarting(false);
     }
@@ -540,6 +567,12 @@ export function TitleScreen({
               </div>
             )}
 
+            {seasonFailure === null ? null : (
+              <p className="text-caption text-state-danger" role="status">
+                {seasonFailure}
+              </p>
+            )}
+
             {seasons.failed === null ? null : (
               <p className="text-caption text-state-danger" role="status">
                 {t("title.episodes.failed")}
@@ -585,6 +618,13 @@ export function TitleScreen({
                       row.episodeNumber === episode.episodeNumber &&
                       downloadStatusOf(row.state) === "active",
                   );
+                  // The plan has already decided whether a pack covers this season; the card is
+                  // told that answer rather than reading the queue a second way. A click's bridge
+                  // key is not a progress source while a pack exists, so it stops saying waiting.
+                  const seasonPack =
+                    seasonPlan.pack !== null && seasonPlan.pack.season === episode.seasonNumber
+                      ? seasonPlan.pack
+                      : undefined;
                   return (
                     // The season and the number together, because an episode's number is only unique
                     // within its season — and a title can hold the same number in two of them.
@@ -596,7 +636,10 @@ export function TitleScreen({
                         {...(job === undefined
                           ? {}
                           : { downloadPercent: downloadPercentOf(job.progressPermille) })}
-                        downloading={job !== undefined || requested.has(key)}
+                        downloading={
+                          job !== undefined || (seasonPack === undefined && requested.has(key))
+                        }
+                        seasonPack={seasonPack}
                         streamable={job?.hasMediaFile ?? false}
                         episode={episode}
                         onSchedule={

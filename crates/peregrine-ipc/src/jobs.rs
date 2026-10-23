@@ -412,9 +412,17 @@ fn storage_error(error: &StorageError) -> AppError {
         StorageError::WriterStopped => AppError::new(ErrorCode::Internal)
             .with_detail("The library database is not accepting writes.")
             .with_cause("the single-writer task has stopped"),
-        StorageError::Statement { .. } => AppError::new(ErrorCode::Internal)
-            .with_detail("The library database rejected a statement.")
-            .with_cause("a statement failed"),
+        // The driver's sentence is what makes the next one diagnosable — a UNIQUE violation
+        // names the index's columns, a missing column names itself — and it carries no path and
+        // no secret. The detail a person reads stays generic, because "no such column" is not
+        // something they can act on (ARCHITECTURE §7 rule 3).
+        StorageError::Statement { source } => {
+            let cause = source.to_string();
+            tracing::warn!(error = %cause, "a library database statement failed");
+            AppError::new(ErrorCode::Internal)
+                .with_detail("The library database rejected a statement.")
+                .with_cause(cause)
+        }
         StorageError::UnexpectedValue { column, .. } => AppError::new(ErrorCode::StorageCorrupt)
             .with_detail("The library database holds a value this version cannot read.")
             .with_cause(format!("`{column}` is outside its allowed values")),
@@ -616,6 +624,31 @@ mod tests {
                 crate::redaction::assert_no_path("a mapped runtime failure", text);
             }
         }
+    }
+
+    /// A statement failure keeps its fixed sentence for the person and carries the driver's own
+    /// text as the cause, which is the diagnostic line the next one of these is read from.
+    ///
+    /// The live failure this comes from was `UNIQUE constraint failed: job.kind, job.dedupe_key`;
+    /// the screen said only "The library database rejected a statement." and nothing anywhere said
+    /// which statement or why.
+    #[test]
+    fn a_statement_failure_carries_the_drivers_sentence_as_its_cause() {
+        let mapped = AppError::from(RuntimeError::Storage(StorageError::Statement {
+            source: "UNIQUE constraint failed: job.kind, job.dedupe_key".into(),
+        }));
+        assert_eq!(mapped.code, ErrorCode::Internal);
+        assert_eq!(
+            mapped.detail.as_deref(),
+            Some("The library database rejected a statement."),
+            "the sentence a person reads does not change"
+        );
+        assert_eq!(
+            mapped.cause.as_deref(),
+            Some("UNIQUE constraint failed: job.kind, job.dedupe_key"),
+            "the driver's text is what makes the failure diagnosable"
+        );
+        crate::redaction::assert_no_path("a statement cause", mapped.cause.as_deref().unwrap());
     }
 }
 

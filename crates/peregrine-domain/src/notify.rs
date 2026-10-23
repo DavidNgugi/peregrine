@@ -301,6 +301,13 @@ pub enum NotificationEvent {
     DownloadCompleted,
     /// A download failed, including a stall past the retry limit.
     DownloadFailed,
+    /// An acquisition job ended without queueing a download: no release matched, the
+    /// season had nothing queueable, or the release for a season could not be mapped.
+    ///
+    /// A separate event because the subject is the title a person asked for, not a
+    /// download row: the job that found nothing never created one, and naming the
+    /// title is the whole of what the person needs to know.
+    AcquisitionFailed,
     /// The safety gate blocked a torrent. Critical, and not disableable.
     TorrentBlocked,
     /// A watchlisted show has a new episode.
@@ -331,9 +338,10 @@ pub enum NotificationEvent {
 impl NotificationEvent {
     /// Every event, in the order ADR 0015 §3 lists them, with the internal
     /// digest last.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::DownloadCompleted,
         Self::DownloadFailed,
+        Self::AcquisitionFailed,
         Self::TorrentBlocked,
         Self::NewEpisodeAvailable,
         Self::DiskSpaceLow,
@@ -351,6 +359,7 @@ impl NotificationEvent {
         match self {
             Self::DownloadCompleted => "download.completed",
             Self::DownloadFailed => "download.failed",
+            Self::AcquisitionFailed => "acquisition.failed",
             Self::TorrentBlocked => "torrent.blocked",
             Self::NewEpisodeAvailable => "episode.available",
             Self::DiskSpaceLow => "disk.low",
@@ -373,6 +382,7 @@ impl NotificationEvent {
         match self {
             Self::DownloadCompleted
             | Self::DownloadFailed
+            | Self::AcquisitionFailed
             | Self::TorrentBlocked
             | Self::NewEpisodeAvailable
             | Self::DiskSpaceLow
@@ -391,6 +401,7 @@ impl NotificationEvent {
         match self {
             Self::DownloadCompleted
             | Self::DownloadFailed
+            | Self::AcquisitionFailed
             | Self::TorrentBlocked
             | Self::DiskSpaceLow => true,
             Self::NewEpisodeAvailable
@@ -717,9 +728,9 @@ pub fn deep_link(route: &str, segments: &[&str]) -> Result<DeepLink, DeepLinkErr
 pub fn deep_link_for(event: NotificationEvent, subject_id: i64) -> Result<DeepLink, DeepLinkError> {
     let subject = subject_id.to_string();
     match event {
-        NotificationEvent::DownloadCompleted | NotificationEvent::DownloadFailed => {
-            deep_link("downloads", &[])
-        }
+        NotificationEvent::DownloadCompleted
+        | NotificationEvent::DownloadFailed
+        | NotificationEvent::AcquisitionFailed => deep_link("downloads", &[]),
         NotificationEvent::NewEpisodeAvailable | NotificationEvent::SubtitleDownloadFinished => {
             let id = subject.as_str();
             deep_link("title", &["tmdb", id])
@@ -949,6 +960,10 @@ impl NotificationPayload {
             NotificationEvent::DownloadFailed => (
                 self.subject("Download failed"),
                 Some("The queue has the reason".to_owned()),
+            ),
+            NotificationEvent::AcquisitionFailed => (
+                self.subject("Acquisition failed"),
+                Some("Could not be acquired; open the downloads queue to retry".to_owned()),
             ),
             NotificationEvent::TorrentBlocked => (
                 "Torrent blocked by the safety check".to_owned(),

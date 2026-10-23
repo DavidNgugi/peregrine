@@ -205,6 +205,8 @@ pub struct NewDownloadJob {
     pub title_id: i64,
     /// The episode, for a series, or `None` for a film.
     pub episode_id: Option<i64>,
+    /// The season this job is for: a pack's whole season, or the season of the episode it names.
+    pub season_number: Option<u32>,
     /// The release's title as the indexer wrote it.
     pub release_title: String,
     /// The source tag the release name parsed to, when it had one.
@@ -282,6 +284,8 @@ pub struct DownloadJobRow {
     pub title_id: i64,
     /// The episode, for a series.
     pub episode_id: Option<i64>,
+    /// The season this job is for: a pack's whole season, or the season of the episode it names.
+    pub season_number: Option<u32>,
     /// The library item this download is to fill, when one is already known.
     pub media_item_id: Option<i64>,
     /// The quality profile the release was chosen against.
@@ -424,8 +428,8 @@ pub(crate) async fn insert(
         "INSERT INTO download_job (title_id, episode_id, state, priority, release_title, \
          release_source, release_group, resolution, video_codec, hdr_format, audio_summary, \
          reported_size_bytes, info_hash, magnet_uri, torrent_file_path, nzb_sha256, nzb_path, \
-         protocol, save_path, added_by, added_at) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7, \
-         ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+         protocol, save_path, added_by, added_at, season_number) VALUES (?1, ?2, 'queued', ?3, \
+         ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
     )
     .bind(job.title_id)
     .bind(job.episode_id)
@@ -451,6 +455,7 @@ pub(crate) async fn insert(
     .bind(save_path.as_str())
     .bind(job.added_by.as_str())
     .bind(as_millis(job.added_at))
+    .bind(job.season_number.map(i64::from))
     .execute(&mut *transaction)
     .await
     .map_err(|error| {
@@ -727,6 +732,31 @@ pub(crate) async fn record_engine_state(
     Ok(result.rows_affected() > 0)
 }
 
+/// Writes the reason a job stopped, leaving its state to the state machine.
+///
+/// The pair of columns is the only place a failure is explained, and the queue draws both: a row
+/// that reached `failed` with no reason is a user staring at a word. Terminal-by-choice states are
+/// refused so a late reason cannot rewrite what a person already decided, and `failed` is accepted
+/// because the watchdog writes the reason before it applies the transition that fails the row.
+pub(crate) async fn record_failure(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    code: &str,
+    message: &str,
+) -> Result<bool, StorageError> {
+    let result = sqlx::query(
+        "UPDATE download_job SET error_code = ?2, error_message = ?3 WHERE id = ?1 \
+         AND state NOT IN ('completed','removed')",
+    )
+    .bind(id)
+    .bind(code)
+    .bind(message)
+    .execute(connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Reads one job by id, without a scope, for the write path's own read-back.
 ///
 /// The row was written by this connection one statement earlier, so there is no scope question to
@@ -737,7 +767,7 @@ async fn read_by_id(
     id: i64,
 ) -> Result<DownloadJobRow, StorageError> {
     let row = sqlx::query_as::<_, JobRow>(
-        "SELECT id, job_id, title_id, episode_id, media_item_id, quality_profile_id, indexer_id, \
+        "SELECT id, job_id, title_id, episode_id, season_number, media_item_id, quality_profile_id, indexer_id, \
          state, priority, is_upgrade, release_title, release_source, release_group, resolution, \
          video_codec, hdr_format, audio_summary, reported_size_bytes, info_hash, magnet_uri, \
          torrent_file_path, nzb_sha256, nzb_path, protocol, stage, save_path, downloaded_bytes, \
@@ -837,7 +867,8 @@ pub(crate) async fn job(
     id: i64,
 ) -> Result<Option<DownloadJobRow>, StorageError> {
     let row = sqlx::query_as::<_, JobRow>(
-        "SELECT d.id, d.job_id, d.title_id, d.episode_id, d.media_item_id, d.quality_profile_id, \
+        "SELECT d.id, d.job_id, d.title_id, d.episode_id, d.season_number, d.media_item_id, \
+         d.quality_profile_id, \
          d.indexer_id, d.state, d.priority, d.is_upgrade, d.release_title, d.release_source, \
          d.release_group, d.resolution, d.video_codec, d.hdr_format, d.audio_summary, \
          d.reported_size_bytes, d.info_hash, d.magnet_uri, d.torrent_file_path, d.nzb_sha256, d.nzb_path, d.protocol, d.stage, d.save_path, \
@@ -869,7 +900,8 @@ pub(crate) async fn list_jobs(
 ) -> Result<Vec<DownloadJobRow>, StorageError> {
     let states = encode_states(states);
     let rows = sqlx::query_as::<_, JobRow>(
-        "SELECT d.id, d.job_id, d.title_id, d.episode_id, d.media_item_id, d.quality_profile_id, \
+        "SELECT d.id, d.job_id, d.title_id, d.episode_id, d.season_number, d.media_item_id, \
+         d.quality_profile_id, \
          d.indexer_id, d.state, d.priority, d.is_upgrade, d.release_title, d.release_source, \
          d.release_group, d.resolution, d.video_codec, d.hdr_format, d.audio_summary, \
          d.reported_size_bytes, d.info_hash, d.magnet_uri, d.torrent_file_path, d.nzb_sha256, d.nzb_path, d.protocol, d.stage, d.save_path, \
@@ -983,6 +1015,7 @@ struct JobRow {
     job_id: Option<i64>,
     title_id: i64,
     episode_id: Option<i64>,
+    season_number: Option<i64>,
     media_item_id: Option<i64>,
     quality_profile_id: Option<i64>,
     indexer_id: Option<i64>,
@@ -1104,6 +1137,10 @@ impl TryFrom<JobRow> for DownloadJobRow {
             job_id: row.job_id,
             title_id: row.title_id,
             episode_id: row.episode_id,
+            season_number: row
+                .season_number
+                .map(|value| bounded::<u32>(value, "download_job.season_number"))
+                .transpose()?,
             media_item_id: row.media_item_id,
             quality_profile_id: row.quality_profile_id,
             indexer_id: row.indexer_id,
@@ -1382,6 +1419,7 @@ mod tests {
         NewDownloadJob {
             title_id,
             episode_id: None,
+            season_number: None,
             release_title: "Alien.1979.1080p.BluRay.x264-GROUP".to_owned(),
             release_source: Some("BluRay".to_owned()),
             release_group: Some("GROUP".to_owned()),
@@ -1552,6 +1590,35 @@ mod tests {
             1,
             "the refused insert wrote nothing"
         );
+    }
+
+    /// A season request's number is the request's, not something a reader re-derives: season zero
+    /// is specials, so the boundary has to survive rather than read as "no season".
+    #[tokio::test]
+    async fn a_season_number_round_trips_through_every_job_read() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _, _) = catalogue(&directory).await;
+        let mut job = new_job(&directory, certified);
+        job.season_number = Some(0);
+        let stored = database
+            .create_download_job(job)
+            .await
+            .expect("a season job is admitted");
+        assert_eq!(stored.season_number, Some(0), "the insert reads it back");
+
+        let read = database
+            .download_job(any_account(), stored.id)
+            .await
+            .expect("the scoped read answers")
+            .expect("the row is there");
+        assert_eq!(read.season_number, Some(0));
+
+        let listed = database
+            .list_download_jobs(any_account(), DownloadState::ALL, PageRequest::first(10))
+            .await
+            .expect("the list answers");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].season_number, Some(0));
     }
 
     #[tokio::test]
@@ -2480,6 +2547,56 @@ mod tests {
         );
     }
 
+    // ---- the reason a job stopped ------------------------------------------------
+
+    /// The reason is written onto a live row and never onto one a person already closed.
+    #[tokio::test]
+    async fn a_failure_reason_is_written_on_a_live_row_and_refused_on_a_removed_one() {
+        let directory = TempDir::new().unwrap();
+        let (database, certified, _, _) = catalogue(&directory).await;
+        let id = database
+            .create_download_job(new_job(&directory, certified))
+            .await
+            .unwrap()
+            .id;
+
+        assert!(
+            database
+                .record_download_failure(id, "NO_PEERS", "no peers answered after three attempts")
+                .await
+                .unwrap()
+        );
+        let row = database
+            .download_job(any_account(), id)
+            .await
+            .unwrap()
+            .expect("the row is there");
+        assert_eq!(row.error_code.as_deref(), Some("NO_PEERS"));
+        assert_eq!(
+            row.error_message.as_deref(),
+            Some("no peers answered after three attempts")
+        );
+
+        database
+            .transition_download_job(id, DownloadEvent::Removed)
+            .await
+            .unwrap();
+        assert!(
+            !database
+                .record_download_failure(id, "NO_PEERS", "a late reason")
+                .await
+                .unwrap(),
+            "a removed row keeps the reason it stopped for"
+        );
+        assert!(
+            !database
+                .record_download_failure(9_999, "NO_PEERS", "nowhere")
+                .await
+                .unwrap(),
+            "a row that is not there changes nothing"
+        );
+    }
+
     // ---- scope -------------------------------------------------------------------
 
     /// R34: a job for a title outside the scope is indistinguishable from a job that does not
@@ -3016,6 +3133,7 @@ mod tests {
                 let expected = NewDownloadJob {
                     title_id: certified,
                     episode_id,
+                    season_number: None,
                     release_title: release_title.clone(),
                     release_source: release_source.clone(),
                     release_group: release_group.clone(),

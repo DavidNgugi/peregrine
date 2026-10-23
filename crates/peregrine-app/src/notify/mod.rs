@@ -13,10 +13,13 @@
 //! [`Outcome`] a caller reports, and the service that composes the ports. What lives in
 //! `peregrine-domain`: the catalogue, the copy, the deep-link routes, the leak scanner, the
 //! planner, and the centre's own port and rows. What lives in `peregrine-storage`: the
-//! `notification` table's repository. What lives in `peregrine-platform` and is **not written
-//! yet**: the `OsNotifier` adapter that talks to the notification server, which PG-E1-14 owns.
+//! `notification` table's repository. What lives in the shell (`apps/desktop/src-tauri`): the
+//! `OsNotifier` adapter that talks to `tauri-plugin-notification`, installed here through
+//! [`install_os_notifier`] before the runtime composes the service.
 
 pub mod service;
+
+use std::sync::{Arc, OnceLock};
 
 use jiff::Timestamp;
 use jiff::civil::Time;
@@ -24,6 +27,8 @@ use peregrine_domain::notify::{
     EnableReason, EventSetting, NotificationEvent, NotifyError, OsNotifier, Outgoing,
     QuietHoursWindow, Severity,
 };
+use peregrine_domain::ports::Clock;
+use peregrine_storage::Database;
 
 pub use peregrine_domain::centre::{
     CentreCursor, CentreEntry, CentreError, Delivery, DeliveryState, NewCentreEntry,
@@ -33,37 +38,74 @@ pub use peregrine_domain::centre::{
 pub use peregrine_domain::notify::{Consent, ConsentDecision};
 pub use service::{NotificationService, ServiceError};
 
-/// The preferences the shipping binary uses until \`PG-E20-01\`'s settings registry exists.
+/// The notification preferences the shipping runtime owns.
 ///
-/// It answers the catalogue defaults and stores nothing. \``Preferences::default`\` carries
-/// \``Consent::UNASKED`\`, so no toast is delivered while the centre row is still written — which
-/// is R31's order and ADR 0015 §1's. Replacing it with a real store is \`PG-E20-01\`'s job;
-/// writing through it is \`PG-E1-20\`'s.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CataloguePreferences;
+/// **Consent is the only field this stores, and that is the whole of what the Settings screen
+/// writes today.** The other fields answer [`Preferences::default`], which is the ADR 0015 §3
+/// catalogue; the settings registry that will own them is PG-E20-01's.
+///
+/// The consent lives in the existing `settings` table rather than in a new one, because it is one
+/// answer to one question and the registry has not arrived to give the rest a home.
+#[derive(Clone)]
+pub struct StoredPreferences {
+    database: Arc<Database>,
+    clock: Arc<dyn Clock + Send + Sync>,
+}
 
-impl NotificationPreferences for CataloguePreferences {
+impl StoredPreferences {
+    /// Builds the store over the database and the clock this process already holds.
+    #[must_use]
+    pub fn new(database: Arc<Database>, clock: Arc<dyn Clock + Send + Sync>) -> Self {
+        Self { database, clock }
+    }
+}
+
+impl NotificationPreferences for StoredPreferences {
     fn load(
         &self,
     ) -> impl std::future::Future<Output = Result<Preferences, PreferencesError>> + Send {
-        std::future::ready(Ok(Preferences::default()))
+        let database = Arc::clone(&self.database);
+        async move {
+            let consent = database.notification_consent().await.map_err(|error| {
+                tracing::warn!(%error, "the stored notification consent could not be read");
+                PreferencesError::Unavailable {
+                    message: "the notification consent could not be read".to_owned(),
+                }
+            })?;
+            Ok(Preferences {
+                consent,
+                ..Preferences::default()
+            })
+        }
     }
 
     fn save(
         &self,
-        _preferences: &Preferences,
+        preferences: &Preferences,
     ) -> impl std::future::Future<Output = Result<(), PreferencesError>> + Send {
-        // Nothing is stored yet, so a save is accepted and dropped rather than reported as a
-        // failure: the only writers would be the wizard and permissions UI that do not exist.
-        std::future::ready(Ok(()))
+        let database = Arc::clone(&self.database);
+        let consent = preferences.consent;
+        let at = self.clock.now();
+        async move {
+            database
+                .set_notification_consent(consent, at)
+                .await
+                .map_err(|error| {
+                    tracing::warn!(%error, "the notification consent could not be stored");
+                    PreferencesError::Unavailable {
+                        message: "the notification consent could not be stored".to_owned(),
+                    }
+                })
+        }
     }
 }
 
-/// The OS notifier until \`PG-E1-14\` writes the adapter that talks to the notification server.
+/// The OS notifier for a process with no adapter: tests, and a build without the plugin.
 ///
 /// It reports the honest outcome — no server is reachable — rather than claiming a toast the
-/// user never saw. The service reaches it only when consent permits delivery, which the
-/// catalogue defaults do not, so today the centre row is the whole record.
+/// user never saw. The service reaches it when consent permits delivery and no shell adapter was
+/// installed: a test process, or a build without the plugin. The shipping shell installs
+/// `TauriOsNotifier`, so there the centre row is not the whole record.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoOsNotifier;
 
@@ -73,14 +115,69 @@ impl OsNotifier for NoOsNotifier {
     }
 }
 
-/// The one notification the acquisition path raises, so a job does not have to name the
+/// The shell's OS notifier, installed once before the runtime starts.
+///
+/// The adapter names `tauri`, so it lives in the shell crate and reaches this process through
+/// this slot rather than a field on [`crate::RuntimeConfig`]: the IPC layer composes that
+/// configuration and may not name a Tauri type either (AGENTS R8). Set-once because a process
+/// has one notification channel; a second install is ignored rather than replacing the first.
+static INSTALLED_OS_NOTIFIER: OnceLock<Arc<dyn OsNotifier + Send + Sync>> = OnceLock::new();
+
+/// Installs the shell's [`OsNotifier`] for this process.
+///
+/// Called from the shell's `setup`, before [`crate::Runtime::start`] composes the notification
+/// service. It does not ask the OS for permission and cannot grant consent; the adapter it
+/// receives reports a refusal on its own (AGENTS R31).
+pub fn install_os_notifier(notifier: Arc<dyn OsNotifier + Send + Sync>) {
+    let _ = INSTALLED_OS_NOTIFIER.set(notifier);
+}
+
+/// The OS notifier the runtime composes.
+///
+/// The installed adapter when [`install_os_notifier`] ran before startup, and [`NoOsNotifier`]
+/// otherwise. A wrapper rather than a bare `Arc<dyn OsNotifier>` because the orphan rule does
+/// not let the standard library's `Arc` implement the domain's port here.
+pub struct InstalledOsNotifier(Arc<dyn OsNotifier + Send + Sync>);
+
+impl InstalledOsNotifier {
+    /// The installed adapter, or the placeholder when none was installed.
+    #[must_use]
+    pub fn installed() -> Self {
+        Self(
+            INSTALLED_OS_NOTIFIER
+                .get()
+                .cloned()
+                .unwrap_or_else(|| Arc::new(NoOsNotifier)),
+        )
+    }
+}
+
+impl OsNotifier for InstalledOsNotifier {
+    fn notify(&self, notification: &Outgoing) -> Result<i32, NotifyError> {
+        self.0.notify(notification)
+    }
+}
+
+/// The notifications the acquisition path raises, so a job does not have to name the
 /// service's four generic ports.
 ///
-/// The future is boxed to keep the trait object-safe: a job holds \`Arc<dyn NotifyOffers>\`, and
-/// an \`impl Future\` return would make that impossible.
-pub trait NotifyOffers: Send + Sync {
+/// The futures are boxed to keep the trait object-safe: a job holds `Arc<dyn NotifyAcquisition>`,
+/// and an `impl Future` return would make that impossible.
+pub trait NotifyAcquisition: Send + Sync {
     /// Records that a search found only alternatives to the preferred quality.
     fn offers_available<'a>(
+        &'a self,
+        scope: peregrine_domain::AccountScope,
+        title_id: i64,
+        label: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+
+    /// Records that an acquire job for `title_id` ended in failure.
+    ///
+    /// The title is named because the job that found nothing wrote no download row: there
+    /// is no other subject to open. A cancellation is not this event, so a caller that
+    /// stopped at the person's request raises nothing.
+    fn failed<'a>(
         &'a self,
         scope: peregrine_domain::AccountScope,
         title_id: i64,
@@ -90,11 +187,9 @@ pub trait NotifyOffers: Send + Sync {
 
 /// Where the user's notification choices are stored.
 ///
-/// Not yet implemented, and deliberately not implemented here: the settings registry that
-/// owns `settings` is PG-E20-01's, and the wizard and permissions UI that write through it
-/// are PG-E1-20's. Until it exists the service is constructed with the test double in
-/// `crates/peregrine-app/tests/notify.rs`, and nothing in the shipping binary constructs a
-/// [`NotificationService`] yet.
+/// The shipping implementation is [`StoredPreferences`], which carries the consent today and
+/// leaves the per-event choices to the catalogue until PG-E20-01's settings registry owns them.
+/// A test supplies its own store, because the service must not reach a database it was not given.
 pub trait NotificationPreferences {
     /// Reads the current preferences, or the catalogue defaults when unset.
     fn load(
@@ -370,6 +465,24 @@ mod tests {
         assert!(!window.contains(midday));
     }
 
+    /// The shell is the only installer, and it is a different binary, so a process that
+    /// composes the runtime without one keeps the honest no-server answer.
+    #[test]
+    fn an_uninstalled_os_channel_reports_unavailable() {
+        let outgoing = Outgoing {
+            notification_id: 1,
+            title: "Download finished".to_owned(),
+            body: None,
+            deep_link: "peregrine://downloads".to_owned(),
+            sound: None,
+        };
+        assert_eq!(
+            InstalledOsNotifier::installed().notify(&outgoing),
+            Err(NotifyError::Unavailable),
+            "a build with no OS adapter reports the honest outcome rather than claiming a toast"
+        );
+    }
+
     #[test]
     fn the_master_sound_switch_gates_every_event() {
         let preferences = Preferences {
@@ -382,5 +495,54 @@ mod tests {
                 "{event:?} must be silent with the master switch off"
             );
         }
+    }
+
+    /// The consent is the one preference the Settings screen writes, and it survives a restart:
+    /// a second store over the same database reads the answer back, while every other choice
+    /// stays the catalogue default PG-E20-01 will replace.
+    #[tokio::test]
+    async fn a_stored_consent_survives_a_new_store() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let database = Arc::new(
+            Database::open(directory.path().join("peregrine.sqlite"))
+                .await
+                .expect("the database opens"),
+        );
+        let store = StoredPreferences::new(
+            Arc::clone(&database),
+            Arc::new(peregrine_testkit::FakeClock::default()),
+        );
+        assert_eq!(
+            store.load().await.expect("the default loads").consent,
+            Consent::UNASKED
+        );
+
+        let granted = Consent {
+            decision: ConsentDecision::Granted,
+            dont_ask_again: true,
+            os_granted: Some(true),
+        };
+        store
+            .save(&Preferences {
+                consent: granted,
+                ..Preferences::default()
+            })
+            .await
+            .expect("the consent is stored");
+
+        let reloaded = StoredPreferences::new(
+            Arc::clone(&database),
+            Arc::new(peregrine_testkit::FakeClock::default()),
+        )
+        .load()
+        .await
+        .expect("the stored consent loads");
+        assert_eq!(reloaded.consent, granted);
+        assert_eq!(
+            reloaded.sounds_enabled,
+            Preferences::default().sounds_enabled,
+            "the fields PG-E20-01 will own still answer the catalogue"
+        );
+        assert_eq!(reloaded.events.len(), Preferences::default().events.len());
     }
 }

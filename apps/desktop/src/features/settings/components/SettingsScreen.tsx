@@ -10,6 +10,7 @@ import {
 import { useEffect, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
+import { useNotificationConsent } from "../hooks/useNotificationConsent.js";
 import {
   PREFERRED_QUALITIES,
   usePreferredQuality,
@@ -27,6 +28,7 @@ import { IndexersSection } from "./IndexersSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
 import { NetworkSection } from "./NetworkSection.js";
+import { NotificationsSection } from "./NotificationsSection.js";
 import { PlaybackSection } from "./PlaybackSection.js";
 import { WebAccessSection } from "./WebAccessSection.js";
 import { ProvidersSection } from "./ProvidersSection.js";
@@ -106,6 +108,7 @@ export function SettingsScreen({
   const { t } = useTranslation();
   const autoStart = useAutoStart();
   const quality = usePreferredQuality();
+  const notifications = useNotificationConsent();
   const [activeGroup, setActiveGroup] = useState("settings-general");
 
   useEffect(() => {
@@ -257,6 +260,7 @@ export function SettingsScreen({
             </SettingsSection>
 
             <PlaybackSection />
+            <NotificationsSection control={notifications} />
           </div>
 
           <div className="settings-group" id="settings-library">

@@ -590,6 +590,30 @@ impl Database {
         }
     }
 
+    /// Writes the reason a job stopped, reporting whether the row was there and still open.
+    ///
+    /// The state is the state machine's, so this writes only the pair of columns that explains a
+    /// failure; the caller applies the transition itself.
+    pub async fn record_download_failure(
+        &self,
+        id: i64,
+        code: &str,
+        message: &str,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordDownloadFailure {
+                id,
+                code: code.to_owned(),
+                message: message.to_owned(),
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("record_download_failure", &other)),
+        }
+    }
+
     /// Writes a job's `download_file` rows from the metadata's list and the engine's selection.
     pub async fn select_download_files(
         &self,
@@ -762,6 +786,23 @@ impl Database {
         id: i64,
     ) -> Result<Option<TitleIdentity>, StorageError> {
         crate::catalogue::identity(&self.readers, scope, id).await
+    }
+
+    /// The year one title was released or first aired, when `scope` may see it and a date is stored.
+    ///
+    /// Acquisition's title match reads this for a film, where a short name is ambiguous without it.
+    /// The scope is applied in SQL for the same reason [`Self::title_identity`] applies it: a title
+    /// outside the scope must answer exactly as one that does not exist (AGENTS R34).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails.
+    pub async fn title_year(
+        &self,
+        scope: AccountScope,
+        id: i64,
+    ) -> Result<Option<u32>, StorageError> {
+        crate::catalogue::title_year(&self.readers, scope, id).await
     }
 
     /// The newest titles still in the stub state, for the automatic matcher.
@@ -1708,6 +1749,56 @@ impl Database {
             .await
     }
 
+    /// Episodes with no still whose library holds a present file, keyset by episode id.
+    ///
+    /// The startup still backfill reads a bounded page at a time; `after_id` is the last episode the
+    /// previous page answered for, so a pass never uses OFFSET and a large library is walked once.
+    pub async fn episodes_missing_still(
+        &self,
+        after_id: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::library::EpisodeStillSource>, StorageError> {
+        crate::library::episodes_missing_still(&self.readers, after_id, limit).await
+    }
+
+    /// The still one episode records, when it records one.
+    ///
+    /// A raw pair rather than an artwork reference: a still this machine captured is not a
+    /// provider's, and a caller that captured one must still see it here so it does not capture
+    /// over its own frame.
+    pub async fn episode_still(
+        &self,
+        id: i64,
+    ) -> Result<Option<crate::catalogue::StoredStill>, StorageError> {
+        crate::catalogue::episode_still(&self.readers, id).await
+    }
+
+    /// Records one episode's still, but only when it has none.
+    ///
+    /// Answers whether this write was the one that landed. A provider still that arrived first is
+    /// never replaced by a captured frame, and a re-import over a captured still leaves it alone.
+    pub async fn set_episode_still(
+        &self,
+        id: i64,
+        provider: &str,
+        path: &str,
+        at: i64,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetEpisodeStill {
+                id,
+                provider: provider.to_owned(),
+                path: path.to_owned(),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("set_episode_still", &other)),
+        }
+    }
+
     /// The file at `path` and the numbers a scan compares, whatever account may see it.
     ///
     /// Part of the **scanner's** surface rather than a general read: the module doc in
@@ -2388,6 +2479,32 @@ impl Database {
         {
             WriteResponse::Applied => Ok(()),
             other => Err(unexpected_response("set_playback_preference", &other)),
+        }
+    }
+
+    /// The user's answer to the notification consent question.
+    ///
+    /// A row that has never been written answers `Consent::UNASKED`, which is the state that
+    /// permits asking; a row this build cannot parse is reported rather than guessed at.
+    pub async fn notification_consent(
+        &self,
+    ) -> Result<peregrine_domain::notify::Consent, StorageError> {
+        crate::preferences::read_notification_consent(&self.readers).await
+    }
+
+    /// Stores the user's notification consent, replacing whatever was there.
+    pub async fn set_notification_consent(
+        &self,
+        consent: peregrine_domain::notify::Consent,
+        at: jiff::Timestamp,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetNotificationConsent { consent, at })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("set_notification_consent", &other)),
         }
     }
 

@@ -5,13 +5,16 @@
 //!
 //! Prowlarr v1 search is `GET /api/v1/search` with the query parameters `query`, `type`,
 //! `indexerIds`, `categories`, `limit`, and `offset`, authenticated by an `X-Api-Key`
-//! header (the spec also accepts an `apikey` query parameter; this adapter uses the header so
-//! the key never reaches a URL). The response is a `ReleaseResource` array. Verified against
+//! header (the spec also accepts an `apikey` query parameter). Prowlarr's proxy URL is the one
+//! place the key appears in a URL; the adapter strips that parameter before retaining the URL and
+//! re-sends the key as a header only to Prowlarr's own origin. The response is a
+//! `ReleaseResource` array. Verified against
 //! the `OpenAPI` the project publishes at
 //! `https://raw.githubusercontent.com/Prowlarr/Prowlarr/develop/src/Prowlarr.Api.V1/openapi.json`
 //! (path `/api/v1/search`; security scheme `X-Api-Key`, `in: header`) on 2026-10-16. The
 //! fields this adapter reads are `title`, `size`, `seeders`, `leechers`, `magnetUrl`,
-//! `infoHash`, `indexer`, `publishDate`, `guid`, and `protocol` (`unknown | usenet | torrent`).
+//! `downloadUrl`, `infoHash`, `indexer`, `publishDate`, `guid`, and `protocol`
+//! (`unknown | usenet | torrent`).
 //!
 //! Indexer management is the same v1 API: `GET /api/v1/indexer` lists the configured rows,
 //! `GET /api/v1/indexer/schema` lists the addable definitions (each an `IndexerResource` with its

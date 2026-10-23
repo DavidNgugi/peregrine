@@ -1541,6 +1541,7 @@ mod tests {
     fn an_episode_read_carries_its_still_its_date_and_its_runtime() {
         let dto = EpisodeDto::from(peregrine_app::TitleEpisodeDetail {
             row: peregrine_app::TitleEpisodeRow {
+                id: 7,
                 season_number: peregrine_app::SeasonNumber::new(1),
                 episode_number: peregrine_app::EpisodeNumber::new(3),
                 name: Some("Misplaced Redemption".to_owned()),
@@ -1572,6 +1573,7 @@ mod tests {
         // episode the library holds and no provider has described arrives in, so it cannot be an error.
         let bare = EpisodeDto::from(peregrine_app::TitleEpisodeDetail {
             row: peregrine_app::TitleEpisodeRow {
+                id: 8,
                 season_number: peregrine_app::SeasonNumber::new(1),
                 episode_number: peregrine_app::EpisodeNumber::new(4),
                 name: None,

@@ -87,7 +87,7 @@
 //! - **No state fan-out.** Every transition is written; publishing one event per transition is
 //!   `PG-E13-01`'s, which owns the topic's consumer.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -95,8 +95,8 @@ use jiff::Timestamp;
 use peregrine_domain::{
     AccountScope, Clock, DeletionEntry, DeletionPlan, DownloadEvent, DownloadState, InfoHash,
     InspectionLimits, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, OptIn,
-    PathGuard, PathGuardError, PayloadDescription, PayloadInspector, Protocol, SafePath,
-    SafetyReport, TransitionRejected, Trash, TrashError, Verdict,
+    PathGuard, PathGuardError, PayloadDescription, PayloadInspector, Protocol, ReleaseName,
+    SafePath, SafetyReport, TransitionRejected, Trash, TrashError, Verdict,
 };
 use peregrine_storage::{
     Database, DownloadFileRow, DownloadJobRow, DownloadSource, DownloadStatistics,
@@ -104,14 +104,14 @@ use peregrine_storage::{
 };
 use peregrine_torrent::{
     AddIntent, AddRefused, AddRequest, EngineError, EngineState, FileSelection, TorrentEngine,
-    TorrentHandle, TorrentMetadataFetch, TorrentSource,
+    TorrentHandle, TorrentHealth, TorrentMetadataFetch, TorrentSource,
 };
 use peregrine_usenet::{AddNzbRequest, NzbDocument, ServerConfig, UsenetEngine, UsenetHandle};
 use thiserror::Error;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::events::{DOWNLOAD_STATS, Event, EventBus};
 use crate::library::scan::modified_millis;
@@ -128,6 +128,36 @@ const TICK_INTERVAL_MILLIS: i64 = 1_000;
 /// discarded by [`AcquisitionService::statistics`] without even reading the engine, and a
 /// slower one would leave the queue behind the transfer it is describing.
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(TICK_INTERVAL_MILLIS as u64);
+
+/// How long a peerless transfer is left alone before the service asks its swarm again.
+///
+/// Two minutes is longer than an announcement's round trip and shorter than a person's patience:
+/// a torrent that found no peer in that window is one the trackers are done answering for.
+const STALL_GRACE_MILLIS: i64 = 120_000;
+
+/// How long between those attempts, once the first one has been made.
+const STALL_RETRY_MILLIS: i64 = 300_000;
+
+/// How many attempts a stalled row is given before it is failed with the reason.
+const STALL_ATTEMPTS: u32 = 3;
+
+/// How long an engine add may take before the service gives up on it.
+///
+/// **librqbit resolves a magnet's metadata inside `add`.** A torrent whose swarm never answers
+/// therefore holds the calling task for as long as the magnet exists — and for an IPC command that
+/// is the button that asked for it, stuck for hours behind a swarm that will never answer. Thirty
+/// seconds is longer than a healthy resolution and shorter than a person's patience; a dropped add
+/// leaves no torrent in the session, so trying again later is the same action.
+const ADD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often the pump retries a live row it holds no engine handle for.
+const REATTACH_INTERVAL_MILLIS: i64 = 120_000;
+
+/// How often the handoffs left in `metadata` are retried.
+///
+/// The magnet's metadata is what a handoff waits on, and Prowlarr's swarms answer in seconds, so a
+/// sweep this often is a retry budget rather than a poll.
+const HANDOFF_SWEEP_MILLIS: i64 = 30_000;
 
 /// How long recovery may wait for a magnet's file list before leaving the row for the next start.
 ///
@@ -307,6 +337,12 @@ pub struct StartRequest {
     pub job: NewDownloadJob,
     /// The torrent's file list, as the metadata fetch (`PG-E10-03`) produced it.
     pub description: PayloadDescription,
+    /// The entries this download may write, when the caller narrows them.
+    ///
+    /// `None` selects every entry, which is the shape a single release and a title-wide acquisition
+    /// both have. A season pack passes the entries whose own names place them in the requested
+    /// season, so a torrent that carries two seasons does not download both.
+    pub selection: Option<Vec<usize>>,
     /// The torrent's identity, which is also the dedupe key.
     pub info_hash: InfoHash,
 }
@@ -378,9 +414,20 @@ pub struct AcquisitionService {
     /// The archive tools, when this build found them. None means an archive-only payload fails
     /// with a named refusal rather than reporting a completion with nothing imported.
     post: Option<crate::usenet_post::PostTools>,
+    /// Where an imported episode with no still gets one from its own file, when this build can take
+    /// one. `None` leaves every still as the provider wrote it, which is what a unit test that is not
+    /// about captures sees.
+    stills: Option<Arc<crate::episode_stills::EpisodeStills>>,
     /// The last instant each job's statistics reached the database, which is the whole of the
     /// coalescing state.
     written_at: Mutex<HashMap<i64, Timestamp>>,
+    /// The stall history of every live row the pump has seen, so a peerless transfer is asked for
+    /// peers again and eventually fails with a reason instead of parking for ever.
+    stalls: Mutex<HashMap<i64, StallWatch>>,
+    /// When the handoffs left in `metadata` were last retried.
+    last_handoff_sweep: Mutex<Option<i64>>,
+    /// When the pump may next try to re-add a live row it holds no handle for.
+    reattach_at: Mutex<HashMap<i64, i64>>,
     /// The statistics pump, started by [`AcquisitionService::start_pump`] and `None` until then.
     ///
     /// The engine is pull-only: it transfers without telling anyone, so without this a live
@@ -417,6 +464,62 @@ impl DownloadNotices for NoDownloadNotices {
         _failed: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         Box::pin(async {})
+    }
+}
+
+/// What one observation of a live transfer asks the service to do about its peers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StallAction {
+    /// The transfer is moving, so there is nothing a peer search would add.
+    Moving,
+    /// Stalled, but not for long enough to act, or waiting out the retry interval.
+    Waiting,
+    /// Ask the engine's swarm for peers again.
+    Reannounce,
+    /// The attempts are spent: the row has to be failed with the reason.
+    GiveUp,
+}
+
+/// One live row's stall history.
+///
+/// The instant comes from the caller rather than a clock of this struct's own, so the rule is a
+/// function of the observations and a test drives it with explicit times (AGENTS R14). An engine
+/// that reports no peers is not an error — a swarm can be asleep — but it is also not progress, and
+/// before this nothing in the app told the two apart: the row sat at `downloading` for ever.
+#[derive(Debug, Default)]
+struct StallWatch {
+    /// When the current stall was first observed, or `None` while the transfer moves.
+    since: Option<i64>,
+    /// How many peer searches this stall has already caused.
+    attempts: u32,
+    /// When the last one was made.
+    last_attempt_at: Option<i64>,
+}
+
+impl StallWatch {
+    /// Folds in one observation and answers what it asks for.
+    fn observe(&mut self, now: i64, stalled: bool) -> StallAction {
+        if !stalled {
+            *self = Self::default();
+            return StallAction::Moving;
+        }
+        let Some(since) = self.since else {
+            self.since = Some(now);
+            return StallAction::Waiting;
+        };
+        let due = match self.last_attempt_at {
+            None => now.saturating_sub(since) >= STALL_GRACE_MILLIS,
+            Some(at) => now.saturating_sub(at) >= STALL_RETRY_MILLIS,
+        };
+        if !due {
+            return StallAction::Waiting;
+        }
+        if self.attempts >= STALL_ATTEMPTS {
+            return StallAction::GiveUp;
+        }
+        self.attempts = self.attempts.saturating_add(1);
+        self.last_attempt_at = Some(now);
+        StallAction::Reannounce
     }
 }
 
@@ -464,7 +567,11 @@ impl AcquisitionService {
             usenet_handles: Mutex::new(HashMap::new()),
             metadata: None,
             post: None,
+            stills: None,
             written_at: Mutex::new(HashMap::new()),
+            stalls: Mutex::new(HashMap::new()),
+            last_handoff_sweep: Mutex::new(None),
+            reattach_at: Mutex::new(HashMap::new()),
             pump: Mutex::new(None),
         }
     }
@@ -502,13 +609,27 @@ impl AcquisitionService {
         self
     }
 
+    /// Gives the service the capture port a downloaded episode's missing still is filled from.
+    ///
+    /// Without one the import is unchanged and every episode keeps the still its provider wrote —
+    /// the state a host with no ffmpeg, and a test that is not about captures, both run in.
+    #[must_use]
+    pub fn with_stills(mut self, stills: Arc<crate::episode_stills::EpisodeStills>) -> Self {
+        self.stills = Some(stills);
+        self
+    }
+
     /// The live engine handle for a job this process started, when it still holds one.
     ///
     /// A job started by another process has no handle here — `PG-E10-08`'s reattach is what finds it
     /// again — so `None` is "not this session's to read", not "no such job".
     #[must_use]
     pub fn handle_for(&self, job_id: i64) -> Option<TorrentHandle> {
-        self.handles.lock().ok()?.get(&job_id).copied()
+        self.handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&job_id)
+            .copied()
     }
 
     /// Starts the statistics pump, once, for this service.
@@ -536,7 +657,16 @@ impl AcquisitionService {
             loop {
                 tokio::select! {
                     () = token.cancelled() => break,
-                    _ = ticker.tick() => service.sample().await,
+                    _ = ticker.tick() => {
+                        // **A tick runs in its own task so a panic cannot end the pump.** One
+                        // engine call that unwinds used to stop every later update in the app
+                        // silently, and a queue that never moves is the failure this pump exists
+                        // to prevent.
+                        let tick = Arc::clone(&service);
+                        if tokio::spawn(async move { tick.sample().await }).await.is_err() {
+                            warn!("a statistics tick panicked; the pump continues");
+                        }
+                    }
                 }
             }
         });
@@ -565,28 +695,105 @@ impl AcquisitionService {
         }
     }
 
-    /// Asks every job this session holds for one statistics tick.
+    /// Asks every live job for one statistics tick.
     ///
-    /// The ids are taken under the lock and the lock is released before any await, so a slow
-    /// engine read never blocks a pause or an add. A tick the domain refuses — a job that went
-    /// terminal between the read and the sample — is logged and skipped rather than ending the
-    /// sweep: one finished job must not stop every other transfer's progress.
-    async fn sample(&self) {
-        let ids: Vec<i64> = {
-            let mut ids = std::collections::BTreeSet::new();
-            if let Ok(handles) = self.handles.lock() {
-                ids.extend(handles.keys().copied());
+    /// **The journal is what this reads, not the handle map.** A handle is an in-memory fact: a
+    /// restart loses it, and a map that disagrees with the journal used to stop every update in the
+    /// app without a single log line — the pump simply found no ids and kept ticking. The live rows
+    /// are the state (FLOWS SM1), so a row is ticked because it says it is running, and a row this
+    /// session holds no handle for is re-added rather than skipped.
+    ///
+    /// A tick the domain refuses — a job that went terminal between the read and the sample — is
+    /// logged and skipped rather than ending the sweep: one finished job must not stop every other
+    /// transfer's progress.
+    async fn sample(self: &Arc<Self>) {
+        let live = match self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                &[DownloadState::Downloading, DownloadState::Seeding],
+                PageRequest::first(peregrine_storage::MAX_PAGE_ROWS),
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                debug!(%error, "the live downloads could not be read, so nothing was sampled");
+                return;
             }
-            if let Ok(handles) = self.usenet_handles.lock() {
-                ids.extend(handles.keys().copied());
-            }
-            ids.into_iter().collect()
         };
-        for id in ids {
+        let now = self.clock.now().as_millisecond();
+        for row in live {
+            if self.handle(row.id).is_err() {
+                self.reattach_in_background(row, now);
+                continue;
+            }
+            if let Err(error) = self.statistics(row.id).await {
+                debug!(%error, job = row.id, "a download statistics tick was refused");
+            }
+        }
+        // Usenet handles are this process's own; their rows have no reattach path yet, so the map
+        // is the only thing that can name them.
+        let usenet: Vec<i64> = self
+            .usenet_handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .copied()
+            .collect();
+        for id in usenet {
             if let Err(error) = self.statistics(id).await {
                 debug!(%error, job = id, "a download statistics tick was refused");
             }
         }
+        if let Err(error) = self.sweep_handoffs().await {
+            debug!(%error, "the metadata handoff sweep failed");
+        }
+    }
+
+    /// Re-adds a live row this session holds no handle for, off the pump's thread.
+    ///
+    /// The attempt is detached because a magnet with no peers costs a bounded but long wait, and
+    /// one such row must not hold the tick that describes every other one. A row is retried at most
+    /// once per [`REATTACH_INTERVAL_MILLIS`], so a hopeless swarm costs a background task rather
+    /// than a storm.
+    fn reattach_in_background(self: &Arc<Self>, row: DownloadJobRow, now: i64) {
+        {
+            let mut due = self
+                .reattach_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if due
+                .get(&row.id)
+                .is_some_and(|at| now.saturating_sub(*at) < REATTACH_INTERVAL_MILLIS)
+            {
+                return;
+            }
+            due.insert(row.id, now);
+        }
+        let service = Arc::clone(self);
+        tokio::spawn(async move {
+            match service.reattach_row(&row).await {
+                Ok(_) => info!(job = row.id, "a live download was reattached"),
+                Err(error) => {
+                    debug!(%error, job = row.id, "a live download could not be reattached");
+                }
+            }
+        });
+    }
+
+    /// Adds one torrent, giving up when the engine cannot resolve it.
+    ///
+    /// librqbit resolves a magnet's metadata **inside `add`**, so an unbounded call is a task held
+    /// for as long as the swarm stays silent: an IPC command behind a button, or the startup
+    /// reattach. A dropped add leaves no torrent in the session, so trying again later is the same
+    /// action rather than a second one.
+    async fn add(&self, request: &AddRequest) -> Result<TorrentHandle, AcquisitionError> {
+        let Ok(handle) = tokio::time::timeout(ADD_TIMEOUT, self.engine.add(request)).await else {
+            warn!("a torrent was not resolved within the add budget, so the add was dropped");
+            return Err(AcquisitionError::Engine(EngineError::Failed));
+        };
+        Ok(handle?)
     }
 
     /// Inspects one release and, if the gate allows it, hands it to the engine.
@@ -603,11 +810,22 @@ impl AcquisitionService {
     /// [`AcquisitionError::DiskFull`] and [`AcquisitionError::SpaceUnknown`] when the volume does
     /// not admit the job, and [`AcquisitionError::Engine`] when the engine refused the add.
     pub async fn start(&self, request: StartRequest) -> Result<Started, AcquisitionError> {
+        let StartRequest {
+            account,
+            mut job,
+            description,
+            selection,
+            info_hash,
+        } = request;
+        // The caller's selection when it narrowed one, otherwise every entry: a single release and
+        // a title-wide acquisition have no reason to name one.
+        let selection: Vec<usize> =
+            selection.unwrap_or_else(|| (0..description.entries().len()).collect());
         // 1. The scope gate. `None` covers both "no such title" and "not for you", and the refusal
         //    below is one sentence for both (AGENTS R34).
         if self
             .database
-            .title_identity(request.account, request.job.title_id)
+            .title_identity(account, job.title_id)
             .await?
             .is_none()
         {
@@ -617,7 +835,7 @@ impl AcquisitionService {
         // 2. The destination, before a row exists to point at it.
         let save_path = self
             .destination
-            .resolve(std::path::Path::new(request.job.save_path.as_str()))
+            .resolve(std::path::Path::new(job.save_path.as_str()))
             .map_err(|source| AcquisitionError::SavePath { source })?;
 
         // 3. The gate, over the description the caller already has. Its caps come from the same
@@ -625,17 +843,15 @@ impl AcquisitionService {
         //    rather than after it.
         let limits = self.limits_for(&save_path);
         let report = PayloadInspector::new(limits).inspect(
-            &request.description,
+            &description,
             &self.destination,
             OptIn::NotGranted,
         );
         let verdict = report.verdict();
-        let selection: Vec<usize> = (0..request.description.entries().len()).collect();
 
         // 4. The row, inserted `queued`. The state literal is the repository's, so no caller can
         //    admit a job anywhere else.
-        let mut job = request.job;
-        job.info_hash = Some(request.info_hash);
+        job.info_hash = Some(info_hash);
         job.save_path = text_of(&save_path)?;
         job.added_at = self.clock.now();
         let row = match self.database.create_download_job(job.clone()).await {
@@ -649,7 +865,7 @@ impl AcquisitionService {
         // reattach; writing it here means every metadata row already carries the list its recovery
         // needs. The handoff writes it again, which is the same upsert.
         self.database
-            .select_download_files(row.id, request.description.clone(), &selection)
+            .select_download_files(row.id, description.clone(), &selection)
             .await?;
 
         // 5. Admission's free-space floor, for a job that could actually run. A job the volume
@@ -659,12 +875,12 @@ impl AcquisitionService {
         //    answering "free some space" would send the user to do that for a download that still
         //    cannot start.
         if verdict == Verdict::Allowed {
-            self.admit_space(&save_path, request.description.total_bytes())?;
+            self.admit_space(&save_path, description.total_bytes())?;
         } else if report.total_bytes() > limits.max_total_bytes() {
             // The cap is the volume's own room, so a size refusal is the same fact admission
             // reports with numbers; \`DiskFull\` is the reason a person can act on, and it leaves
             // the row \`queued\` rather than parked in \`blocked\`.
-            self.admit_space(&save_path, request.description.total_bytes())?;
+            self.admit_space(&save_path, description.total_bytes())?;
         }
 
         // 6. The two transitions that persist the judgement.
@@ -685,14 +901,8 @@ impl AcquisitionService {
 
         // 7. The handoff, built from the report the transition persisted, so a verdict the engine
         //    would refuse cannot be spelled (AddRequest::new).
-        self.hand_off(
-            row.id,
-            &save_path,
-            &selection,
-            &request.description,
-            &report,
-        )
-        .await?;
+        self.hand_off(row.id, &save_path, &selection, &description, &report)
+            .await?;
 
         let row = self.reload(row.id).await?;
         Ok(Started {
@@ -945,7 +1155,7 @@ impl AcquisitionService {
             AddIntent::Download,
             report,
         )?;
-        let handle = self.engine.add(&request).await?;
+        let handle = self.add(&request).await?;
         self.handles
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1080,6 +1290,210 @@ impl AcquisitionService {
         };
         self.engine.resume(handle).await?;
         self.apply(id, DownloadEvent::Resumed).await
+    }
+
+    /// Asks the torrent's swarm for peers again, now.
+    ///
+    /// **The engine has no reannounce call**, and a torrent announces when its task starts: a live
+    /// transfer is paused and unpaused, which restarts that task, and a row this process holds no
+    /// handle for — a restart's leftover, or a handoff that never finished — is re-added from its
+    /// stored magnet with the bytes already on disk. Nothing about the row changes, which is why no
+    /// event is applied: a transfer that found peers is still `downloading`.
+    ///
+    /// A paused transfer is refused rather than served: restarting its task is a Resume, and this
+    /// call must not unpause what a person stopped. The stall guard uses the same two moves, so a
+    /// person asking by hand spends the attempts again rather than inheriting the guard's.
+    ///
+    /// # Errors
+    ///
+    /// [`AcquisitionError::NotLive`] for a row a peer search cannot move, and the engine, storage,
+    /// and metadata refusals the re-add can produce.
+    pub async fn find_peers(&self, id: i64) -> Result<DownloadState, AcquisitionError> {
+        let row = self.reload(id).await?;
+        if row.protocol != Protocol::Torrent {
+            return Err(AcquisitionError::NotLive);
+        }
+        match row.state {
+            DownloadState::Metadata => {
+                self.reattach_row(&row).await?;
+                self.apply(id, DownloadEvent::EngineAccepted).await
+            }
+            DownloadState::Downloading | DownloadState::Seeding => {
+                match self.handle(id) {
+                    Ok(handle) => {
+                        self.forget_stall(id);
+                        self.announce_again(handle).await?;
+                    }
+                    // The handle is gone but the row is live: a restart's leftover, which the
+                    // reattach path adds again with the bytes this session already has.
+                    Err(_) => {
+                        self.reattach_row(&row).await?;
+                    }
+                }
+                Ok(row.state)
+            }
+            _ => Err(AcquisitionError::NotLive),
+        }
+    }
+
+    /// Restarts a torrent's announcer, which is the closest the engine has to a reannounce.
+    async fn announce_again(&self, handle: TorrentHandle) -> Result<(), AcquisitionError> {
+        self.engine.pause(handle).await?;
+        self.engine.resume(handle).await?;
+        Ok(())
+    }
+
+    /// Forgets what the stall guard has spent on one row.
+    fn forget_stall(&self, id: i64) {
+        self.stalls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+    }
+
+    /// Watches one transfer for a stall and acts on it.
+    ///
+    /// The engine is a pull: a peerless torrent never changes its own row, and a swarm that is
+    /// asleep when the add happened is never asked again. This is the caller that was missing —
+    /// a stall past [`STALL_GRACE_MILLIS`] re-announces, and a row that has spent
+    /// [`STALL_ATTEMPTS`] announce attempts fails with the reason the queue can draw.
+    ///
+    /// It is fed by the statistics tick, which has already read the engine, so a tick still costs
+    /// one read per transfer. Only a `downloading` row is watched: a paused one is stopped on
+    /// purpose and restarting its task would undo that, and a seeding one having nobody leeching
+    /// from it is not a stall in the sense this guards against.
+    async fn guard_stall(
+        &self,
+        id: i64,
+        handle: TorrentHandle,
+        state: DownloadState,
+        health: TorrentHealth,
+        now: i64,
+    ) -> Result<(), AcquisitionError> {
+        if state != DownloadState::Downloading {
+            self.forget_stall(id);
+            return Ok(());
+        }
+        let stalled = matches!(health, TorrentHealth::NoPeers | TorrentHealth::Stalled);
+        let action = self
+            .stalls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(id)
+            .or_default()
+            .observe(now, stalled);
+        match action {
+            StallAction::Moving | StallAction::Waiting => Ok(()),
+            StallAction::Reannounce => {
+                info!(
+                    job = id,
+                    "a stalled download is asking its swarm for peers again"
+                );
+                self.announce_again(handle).await
+            }
+            StallAction::GiveUp => self.abandon(id, handle).await,
+        }
+    }
+
+    /// Fails a stalled row with the sentence that says why, and stops reading its transfer.
+    ///
+    /// The reason is written first, because the transition is what makes the row terminal and a
+    /// terminal row keeps the reason it stopped for. The engine handle is dropped so the pump stops
+    /// reading a transfer that will not move; the bytes on disk are untouched, and the row's own
+    /// magnet is what a later download re-adds.
+    async fn abandon(&self, id: i64, handle: TorrentHandle) -> Result<(), AcquisitionError> {
+        let message = format!(
+            "no peers answered after {STALL_ATTEMPTS} attempts; the release may have no seeders left"
+        );
+        if let Err(error) = self
+            .database
+            .record_download_failure(id, "NO_PEERS", &message)
+            .await
+        {
+            warn!(%error, job = id, "the reason a stalled download stopped could not be written");
+        }
+        let _ = self.engine.pause(handle).await;
+        self.handles
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        self.forget_stall(id);
+        self.apply(id, DownloadEvent::EngineFailed).await?;
+        Ok(())
+    }
+
+    /// Retries the handoffs a previous process left in `metadata`.
+    ///
+    /// The state machine has one ordinary edge out of `metadata` — the engine's acceptance — and a
+    /// handoff that lost its process had nothing walking it: a real row sat there for hours, through
+    /// two restarts, with no peer and no error. The sweep runs on a timer rather than once at
+    /// startup because a magnet's metadata may not arrive on the first attempt, and it gives up
+    /// through the domain's own `metadata timed out` edge so the queue says why instead of waiting.
+    async fn sweep_handoffs(&self) -> Result<(), AcquisitionError> {
+        let now = self.clock.now().as_millisecond();
+        {
+            let mut last = self
+                .last_handoff_sweep
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(at) = *last
+                && now.saturating_sub(at) < HANDOFF_SWEEP_MILLIS
+            {
+                return Ok(());
+            }
+            *last = Some(now);
+        }
+        let rows = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                &[DownloadState::Metadata],
+                PageRequest::first(peregrine_storage::MAX_PAGE_ROWS),
+            )
+            .await?;
+        for row in rows {
+            if row.protocol != Protocol::Torrent {
+                continue;
+            }
+            let action = self
+                .stalls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(row.id)
+                .or_default()
+                .observe(now, true);
+            match action {
+                StallAction::Reannounce => match self.reattach_row(&row).await {
+                    Ok(_) => {
+                        if let Err(error) = self.apply(row.id, DownloadEvent::EngineAccepted).await
+                        {
+                            debug!(%error, job = row.id, "a recovered handoff could not be marked downloading");
+                        }
+                    }
+                    Err(error) => {
+                        debug!(%error, job = row.id, "a metadata handoff could not be retried");
+                    }
+                },
+                StallAction::GiveUp => {
+                    let message = format!(
+                        "the torrent's metadata did not arrive after {STALL_ATTEMPTS} attempts; the release may have no seeders left"
+                    );
+                    if let Err(error) = self
+                        .database
+                        .record_download_failure(row.id, "NO_PEERS", &message)
+                        .await
+                    {
+                        warn!(%error, job = row.id, "the reason a stalled handoff stopped could not be written");
+                    }
+                    self.forget_stall(row.id);
+                    if let Err(error) = self.apply(row.id, DownloadEvent::MetadataTimedOut).await {
+                        debug!(%error, job = row.id, "a timed-out handoff could not be failed");
+                    }
+                }
+                StallAction::Moving | StallAction::Waiting => {}
+            }
+        }
+        Ok(())
     }
 
     /// Removes one job, from any non-terminal state.
@@ -1217,6 +1631,13 @@ impl AcquisitionService {
         // transfer stays downloading at 100 % for ever.
         if statistics.progress_permille >= 1_000 && row.state == DownloadState::Downloading {
             self.finish_download(id, handle).await?;
+        } else if let Err(error) = self
+            .guard_stall(id, handle, row.state, stats.health(), now.as_millisecond())
+            .await
+        {
+            // The tick's own write and publish already happened, so a peer search that failed is
+            // logged rather than reported as a statistics read that could not be taken.
+            debug!(%error, job = id, "the stall guard could not act");
         }
         Ok(Some(statistics))
     }
@@ -1372,7 +1793,7 @@ impl AcquisitionService {
             },
             &report,
         )?;
-        let handle = self.engine.add(&request).await?;
+        let handle = self.add(&request).await?;
         self.handles
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1508,7 +1929,7 @@ impl AcquisitionService {
             ) else {
                 continue;
             };
-            match self.engine.add(&request).await {
+            match self.add(&request).await {
                 Ok(handle) => {
                     if row.state == DownloadState::Paused {
                         let _ = self.engine.pause(handle).await;
@@ -1917,6 +2338,23 @@ impl AcquisitionService {
         Ok(swept)
     }
 
+    /// The episode a payload file belongs to, read from its own name.
+    ///
+    /// One season and one episode, and nothing else: a multi-episode span, a season pack's folder,
+    /// an extra, and a cartoon numbered absolutely all answer `None`, because a file placed on the
+    /// wrong episode is worse than one the title keeps.
+    #[must_use]
+    fn episode_number_in(path: &str) -> Option<(u32, u32)> {
+        let name = std::path::Path::new(path).file_name().map_or_else(
+            || path.to_owned(),
+            |file| file.to_string_lossy().into_owned(),
+        );
+        let parsed = ReleaseName::parse(&name);
+        let season = parsed.season()?;
+        let span = parsed.episodes()?;
+        (!span.is_multi()).then(|| (season, span.first()))
+    }
+
     /// Gives the library the media files a completed download wrote.
     ///
     /// The full import (PG-E14-19) owns probing, naming, and episode placement. This is the part a
@@ -1924,14 +2362,17 @@ impl AcquisitionService {
     /// known, so the item is that title, and each selected media entry that is on disk becomes a
     /// `media_file` row. A file the engine has not flushed is skipped rather than failing the
     /// import, and a path that is already recorded is left alone (`media_file.path` is UNIQUE, I3).
+    ///
+    /// **An episode with no still gets one from the file just imported.** A provider may publish an
+    /// episode's still after the payload exists, and a season synced early keeps a NULL column with
+    /// nothing that re-syncs it; the bytes are here, so a frame is. It is attempted once per episode
+    /// even when a pack carries several files for one, and a capture that fails is a logged warning
+    /// rather than a failed import (`crate::episode_stills` owns the rule).
     async fn import_completed(&self, row: &DownloadJobRow) -> Result<(), AcquisitionError> {
         let files = self.database.download_files(unrestricted(), row.id).await?;
         let at = self.clock.now();
         let folder = std::path::Path::new(row.save_path.as_str());
-        let mut item_id = self
-            .database
-            .item_id_for(row.title_id, row.episode_id)
-            .await?;
+        let mut captured: HashSet<i64> = HashSet::new();
 
         for file in files.iter().filter(|file| file.selected && file.is_media) {
             let candidate = folder.join(file.path.as_str());
@@ -1946,76 +2387,123 @@ impl AcquisitionService {
             if !metadata.is_file() {
                 continue;
             }
-            let id = if let Some(id) = item_id {
-                id
-            } else {
-                let created = self
-                    .database
-                    .insert_media_item(MediaItem {
-                        id: 0,
-                        title_id: row.title_id,
-                        episode_id: row.episode_id,
-                        state: MediaItemState::Available,
-                        origin: match row.protocol {
-                            Protocol::Torrent => MediaOrigin::Torrent,
-                            Protocol::Usenet => MediaOrigin::Usenet,
-                        },
-                        preferred_file_id: None,
-                        quality_label: None,
-                        created_at: at,
-                        updated_at: at,
-                    })
-                    .await?;
-                item_id = Some(created);
-                created
+            // **A pack's files belong to their own episodes.** A job that named one episode owns
+            // every file it wrote; one that named none — a season pack — carries the episode in
+            // each file's own name, and a file that names no single episode stays on the title
+            // rather than being guessed onto one.
+            let episode_id = match row.episode_id {
+                Some(id) => Some(id),
+                None => match Self::episode_number_in(file.path.as_str()) {
+                    Some((season, episode)) => {
+                        self.database
+                            .episode_id_for(row.title_id, season, episode)
+                            .await?
+                    }
+                    None => None,
+                },
+            };
+            let id = match self.database.item_id_for(row.title_id, episode_id).await? {
+                Some(id) => id,
+                None => {
+                    self.database
+                        .insert_media_item(MediaItem {
+                            id: 0,
+                            title_id: row.title_id,
+                            episode_id,
+                            state: MediaItemState::Available,
+                            origin: match row.protocol {
+                                Protocol::Torrent => MediaOrigin::Torrent,
+                                Protocol::Usenet => MediaOrigin::Usenet,
+                            },
+                            preferred_file_id: None,
+                            quality_label: None,
+                            created_at: at,
+                            updated_at: at,
+                        })
+                        .await?
+                }
             };
             let Ok(path) = NonEmptyText::new(safe.as_path().to_string_lossy().as_ref()) else {
                 continue;
             };
+            // A recorded path is not inserted twice, but it is still a file this episode holds: the
+            // capture below is what a re-import of an older job backfills, so the skip cannot be a
+            // `continue`.
             if self
                 .database
                 .media_file_by_path(unrestricted(), path.as_str())
                 .await?
-                .is_some()
+                .is_none()
             {
-                continue;
+                self.database
+                    .insert_media_file(MediaFile {
+                        id: 0,
+                        media_item_id: id,
+                        path,
+                        // No root owns a download: it lives under the app own download directory,
+                        // which is not a configured library root. A scan that later adopts the file
+                        // refreshes the root id.
+                        root_id: None,
+                        size_bytes: metadata.len(),
+                        mtime_ms: Timestamp::from_millisecond(modified_millis(&metadata))
+                            .unwrap_or(at),
+                        added_at: at,
+                        missing_since: None,
+                        container: None,
+                        duration_ms: None,
+                        video_codec: None,
+                        video_profile: None,
+                        width: None,
+                        height: None,
+                        bit_depth: None,
+                        hdr_format: None,
+                        frame_rate: None,
+                        bitrate_kbps: None,
+                        audio_codec: None,
+                        audio_channels: None,
+                        audio_layout: None,
+                        audio_languages: None,
+                        subtitle_format: None,
+                        probe_version: None,
+                        probe_json: None,
+                        quality_label: None,
+                        updated_at: at,
+                    })
+                    .await?;
             }
-            self.database
-                .insert_media_file(MediaFile {
-                    id: 0,
-                    media_item_id: id,
-                    path,
-                    // No root owns a download: it lives under the app own download directory,
-                    // which is not a configured library root. A scan that later adopts the file
-                    // refreshes the root id.
-                    root_id: None,
-                    size_bytes: metadata.len(),
-                    mtime_ms: Timestamp::from_millisecond(modified_millis(&metadata)).unwrap_or(at),
-                    added_at: at,
-                    missing_since: None,
-                    container: None,
-                    duration_ms: None,
-                    video_codec: None,
-                    video_profile: None,
-                    width: None,
-                    height: None,
-                    bit_depth: None,
-                    hdr_format: None,
-                    frame_rate: None,
-                    bitrate_kbps: None,
-                    audio_codec: None,
-                    audio_channels: None,
-                    audio_layout: None,
-                    audio_languages: None,
-                    subtitle_format: None,
-                    probe_version: None,
-                    probe_json: None,
-                    quality_label: None,
-                    updated_at: at,
-                })
-                .await?;
+            if let Some(episode_id) = episode_id {
+                self.capture_missing_still(episode_id, safe.as_path(), &mut captured)
+                    .await;
+            }
         }
         Ok(())
+    }
+
+    /// Fills one downloaded episode's missing still, at most once per episode in one import.
+    ///
+    /// A pack can carry several files for one episode, and a capture that failed must not be retried
+    /// per file; the set is what makes "logs once" true. The failure is logged and swallowed because
+    /// the import it belongs to is still a successful import — the episode simply keeps its NULL
+    /// still until a later one can capture.
+    async fn capture_missing_still(
+        &self,
+        episode_id: i64,
+        source: &std::path::Path,
+        attempted: &mut HashSet<i64>,
+    ) {
+        let Some(stills) = self.stills.as_ref() else {
+            return;
+        };
+        if !attempted.insert(episode_id) {
+            return;
+        }
+        if let Err(error) = stills.capture_if_missing(episode_id, source).await {
+            warn!(
+                %error,
+                episode = episode_id,
+                "an episode still could not be captured from its downloaded file"
+            );
+        }
     }
 
     /// Enumerates exactly what deleting one download would remove, without removing anything.
@@ -2214,7 +2702,14 @@ mod tests {
     };
     use tempfile::TempDir;
 
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use peregrine_domain::catalogue::CAPTURED_STILL_PROVIDER;
+    use peregrine_sync::{ImageCache, ImageKey};
+
     use super::*;
+    use crate::episode_stills::{CaptureError, EpisodeStills, FrameCapture};
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
 
@@ -2341,6 +2836,7 @@ mod tests {
         NewDownloadJob {
             title_id,
             episode_id: None,
+            season_number: None,
             release_title: "Movie.2024.1080p.BluRay.x264-GROUP".to_owned(),
             release_source: Some("BluRay".to_owned()),
             release_group: Some("GROUP".to_owned()),
@@ -2379,13 +2875,38 @@ mod tests {
             account: account(),
             job: new_job(title_id),
             description,
+            selection: None,
             info_hash: hash(byte),
+        }
+    }
+
+    /// A file's own name is what places a pack's episode, and only an unambiguous name does.
+    ///
+    /// A pack's folder or an extra names no episode; a span names several; absolute numbering says
+    /// nothing about the season. Each has to answer nothing rather than a guess.
+    #[test]
+    fn only_a_file_that_names_one_episode_is_placed_on_it() {
+        for (path, expected) in [
+            ("Peppa.Pig.S01E07.720p.WEB-DL.mkv", Some((1, 7))),
+            ("Peppa Pig S02E52 HDTV x264.mkv", Some((2, 52))),
+            ("Show/Season 3/Show.S03E04.1080p.mkv", Some((3, 4))),
+            ("Peppa Pig S01E01-E02.mkv", None),
+            ("Peppa Pig S01E01-52 Complete.mkv", None),
+            ("Peppa Pig - 07 - Muddy Puddles.mkv", None),
+            ("extras/Behind the Scenes.mkv", None),
+            ("Show.S01.Complete.mkv", None),
+        ] {
+            assert_eq!(
+                AcquisitionService::episode_number_in(path),
+                expected,
+                "{path} must place exactly {expected:?}"
+            );
         }
     }
 
     /// The service under test, and the things a test inspects it through.
     struct Harness {
-        service: AcquisitionService,
+        service: Arc<AcquisitionService>,
         engine: Arc<FakeTorrentEngine>,
         clock: Arc<FakeClock>,
         volume: Arc<Volume>,
@@ -2453,7 +2974,7 @@ mod tests {
             service
         };
         Harness {
-            service,
+            service: Arc::new(service),
             engine,
             clock,
             volume,
@@ -2495,6 +3016,206 @@ mod tests {
                 .into_iter()
                 .filter(|call| matches!(call, EngineCall::Add { .. }))
                 .collect()
+        }
+    }
+
+    /// A capture port that writes a fixture instead of running ffmpeg, and counts what it was asked.
+    ///
+    /// The real adapter is a child process, which a unit test must not need (AGENTS R14); this one
+    /// answers the same contract with a file, so the import path can be asserted end to end.
+    #[derive(Default)]
+    struct FakeCapture {
+        calls: AtomicU64,
+        fail: bool,
+    }
+
+    impl FakeCapture {
+        fn new() -> Arc<Self> {
+            Arc::new(Self::default())
+        }
+
+        fn failing() -> Arc<Self> {
+            Arc::new(Self {
+                calls: AtomicU64::new(0),
+                fail: true,
+            })
+        }
+
+        fn calls(&self) -> u64 {
+            self.calls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl FrameCapture for FakeCapture {
+        fn capture<'a>(
+            &'a self,
+            _source: &'a Path,
+            destination: &'a Path,
+        ) -> Pin<Box<dyn Future<Output = Result<(), CaptureError>> + Send + 'a>> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                if self.fail {
+                    return Err(CaptureError::Failed);
+                }
+                tokio::fs::write(destination, b"fixture frame")
+                    .await
+                    .map_err(|_| CaptureError::Failed)
+            })
+        }
+    }
+
+    /// A show with two episodes, a service that captures stills, and the fake behind it.
+    struct StillHarness {
+        service: Arc<AcquisitionService>,
+        database: Arc<Database>,
+        cache: Arc<ImageCache>,
+        capture: Arc<FakeCapture>,
+        directory: TempDir,
+        title_id: i64,
+        episode_three: i64,
+        episode_four: i64,
+    }
+
+    /// The payload entries a job of these names writes.
+    fn episode_files(names: &[&str]) -> PayloadDescription {
+        PayloadDescription::new(
+            names
+                .iter()
+                .map(|name| PayloadEntry::new(*name, 1_000, EntryKind::File))
+                .collect(),
+        )
+    }
+
+    async fn still_harness(capture: Arc<FakeCapture>) -> StillHarness {
+        let directory = TempDir::new().expect("a temporary directory");
+        let database = Arc::new(
+            Database::open(directory.path().join("peregrine.sqlite"))
+                .await
+                .expect("the database opens"),
+        );
+        let at = DEFAULT_EPOCH_MILLISECONDS;
+        let title_id = database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::TitleKind::Show,
+                subtype: peregrine_domain::TitleSubtype::Standard,
+                name: "VisionQuest".to_owned(),
+                original_name: None,
+                sort_name: "VisionQuest".to_owned(),
+                at,
+            })
+            .await
+            .expect("the show is inserted");
+        let season_id = database
+            .insert_stub_season(peregrine_storage::StubSeason {
+                title_id,
+                season_number: 1,
+                at,
+            })
+            .await
+            .expect("the season is inserted");
+        for episode_number in [3, 4] {
+            database
+                .insert_stub_episode(peregrine_storage::StubEpisode {
+                    title_id,
+                    season_id,
+                    season_number: 1,
+                    episode_number,
+                    at,
+                })
+                .await
+                .expect("the episode is inserted");
+        }
+        let episode_three = database
+            .episode_id_for(title_id, 1, 3)
+            .await
+            .expect("the read answers")
+            .expect("episode three is there");
+        let episode_four = database
+            .episode_id_for(title_id, 1, 4)
+            .await
+            .expect("the read answers")
+            .expect("episode four is there");
+
+        let cache = Arc::new(ImageCache::new(directory.path().join("images")));
+        let clock = Arc::new(FakeClock::default());
+        let engine = Arc::new(
+            FakeTorrentEngine::new()
+                .with_files(2, Bytes::new(1_000))
+                .with_downloaded(Bytes::new(2_000)),
+        );
+        let sink = Arc::new(RecordingSink::default());
+        let guard = PathGuard::new(directory.path().join("downloads"))
+            .expect("the fixture root is absolute");
+        let service = AcquisitionService::new(
+            Arc::clone(&database),
+            Arc::clone(&engine) as Arc<dyn TorrentEngine>,
+            Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+            guard,
+            Volume::of(1_000_000) as Arc<dyn VolumeSpace>,
+            FLOOR,
+            bus(&sink),
+            trash(),
+        )
+        .with_metadata_fetch(Arc::new(FixedMetadata))
+        .with_stills(Arc::new(EpisodeStills::new(
+            Arc::clone(&cache),
+            Arc::clone(&database),
+            Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+            Arc::clone(&capture) as Arc<dyn FrameCapture>,
+        )));
+        StillHarness {
+            service: Arc::new(service),
+            database,
+            cache,
+            capture,
+            directory,
+            title_id,
+            episode_three,
+            episode_four,
+        }
+    }
+
+    impl StillHarness {
+        /// Starts a job, writes the payload's files, and drives the tick that imports them.
+        async fn download(&self, request: StartRequest, names: &[&str]) -> Started {
+            let started = self
+                .service
+                .start(request)
+                .await
+                .expect("the download starts");
+            let folder = self.directory.path().join("downloads").join("Movies");
+            std::fs::create_dir_all(&folder).expect("the download folder");
+            for name in names {
+                std::fs::write(folder.join(name), vec![0_u8; 1_000]).expect("the media file");
+            }
+            let statistics = self
+                .service
+                .statistics(started.job.id)
+                .await
+                .expect("the tick answers")
+                .expect("the tick is not coalesced");
+            assert_eq!(statistics.progress_permille, 1_000);
+            started
+        }
+
+        /// A one-episode job naming episode three.
+        fn episode_request(&self, byte: u8) -> StartRequest {
+            let mut request = request(
+                self.title_id,
+                byte,
+                episode_files(&["VisionQuest.S01E03.1080p.mkv"]),
+            );
+            request.job.episode_id = Some(self.episode_three);
+            request
+        }
+
+        /// The still the episode records, which must be there for a capture to have landed.
+        async fn recorded(&self, episode_id: i64) -> peregrine_storage::StoredStill {
+            self.database
+                .episode_still(episode_id)
+                .await
+                .expect("the read answers")
+                .expect("the episode records a still")
         }
     }
 
@@ -2569,6 +3290,38 @@ mod tests {
                 .is_some(),
             "SM1: a downloading job holds a persisted engine state"
         );
+    }
+
+    /// A narrowed selection is the season pack's whole write: the rows for entries outside it stay
+    /// unselected and the engine is told to write only the named ones.
+    #[tokio::test]
+    async fn a_narrowed_selection_keeps_the_entries_it_names_and_no_others() {
+        let harness = harness().await;
+        let mut narrowed = request(harness.title_id, 5, description());
+        narrowed.selection = Some(vec![1]);
+        let started = harness
+            .service
+            .start(narrowed)
+            .await
+            .expect("the gate allows a subset of a media torrent");
+        assert_eq!(started.selection, vec![1]);
+
+        let files = harness
+            .database
+            .download_files(account(), started.job.id)
+            .await
+            .expect("the file read answers");
+        assert_eq!(files.len(), 2, "every entry still has its row");
+        assert!(
+            !files[0].selected,
+            "the entry outside the selection is not written"
+        );
+        assert!(files[1].selected);
+
+        match &harness.add_calls()[0] {
+            EngineCall::Add { selection, .. } => assert_eq!(selection.indices(), &[1]),
+            other => panic!("expected an add, found {other:?}"),
+        }
     }
 
     /// F6's pre-write guarantee, read off the engine's call log rather than off the code: neither a
@@ -2749,6 +3502,154 @@ mod tests {
     #[tokio::test]
     async fn a_metadata_row_is_recovered_from_its_magnet() {
         let harness = harness().await;
+        let id = interrupted_handoff(&harness).await;
+
+        let before = harness
+            .database
+            .download_job(unrestricted(), id)
+            .await
+            .expect("the row reads")
+            .expect("the row exists");
+        assert_eq!(before.state, DownloadState::Metadata);
+        assert!(
+            harness
+                .database
+                .download_files(unrestricted(), id)
+                .await
+                .expect("the files read")
+                .is_empty(),
+            "the interrupted handoff wrote no file list"
+        );
+
+        let recovered = harness
+            .service
+            .recover_metadata_jobs()
+            .await
+            .expect("recovery runs");
+        assert_eq!(recovered, 1);
+
+        let after = harness
+            .database
+            .download_job(unrestricted(), id)
+            .await
+            .expect("the row reads")
+            .expect("the row exists");
+        assert_eq!(after.state, DownloadState::Downloading);
+        let files = harness
+            .database
+            .download_files(unrestricted(), id)
+            .await
+            .expect("the files read");
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|file| file.selected));
+    }
+
+    /// The stall rule on its own: a moving transfer forgets everything, a stalled one waits out the
+    /// grace, then asks again on the retry interval until its attempts are spent.
+    ///
+    /// Driven with explicit instants rather than a timer, which is the whole reason the rule takes
+    /// `now` as an argument (AGENTS R14).
+    #[test]
+    fn a_stall_is_waited_out_asked_about_and_then_given_up() {
+        let mut watch = StallWatch::default();
+        assert_eq!(watch.observe(0, true), StallAction::Waiting);
+        assert_eq!(
+            watch.observe(STALL_GRACE_MILLIS - 1, true),
+            StallAction::Waiting,
+            "the grace period is not over yet"
+        );
+        assert_eq!(
+            watch.observe(STALL_GRACE_MILLIS, true),
+            StallAction::Reannounce
+        );
+        assert_eq!(
+            watch.observe(STALL_GRACE_MILLIS + 1, true),
+            StallAction::Waiting,
+            "the retry interval has not passed"
+        );
+        let mut at = STALL_GRACE_MILLIS;
+        for _ in 1..STALL_ATTEMPTS {
+            at += STALL_RETRY_MILLIS;
+            assert_eq!(watch.observe(at, true), StallAction::Reannounce);
+        }
+        assert_eq!(
+            watch.observe(at + STALL_RETRY_MILLIS, true),
+            StallAction::GiveUp,
+            "the attempts are spent"
+        );
+        assert_eq!(
+            watch.observe(at + 2 * STALL_RETRY_MILLIS, false),
+            StallAction::Moving,
+            "a transfer that moves again resets the watch"
+        );
+        assert_eq!(
+            watch.observe(at + 3 * STALL_RETRY_MILLIS, true),
+            StallAction::Waiting,
+            "and the next stall starts its grace from the beginning"
+        );
+    }
+
+    /// How many pause/resume pairs a slice of the engine's call log holds.
+    fn reannouncements(calls: &[EngineCall]) -> usize {
+        calls
+            .iter()
+            .filter(|call| matches!(call, EngineCall::Pause(_) | EngineCall::Resume(_)))
+            .count()
+    }
+
+    /// A peerless transfer is not left alone: the pump asks its swarm again after the grace period,
+    /// and a row that has spent every attempt is failed with the reason the queue can draw.
+    #[tokio::test]
+    async fn a_peerless_transfer_is_reannounced_and_then_failed_with_its_reason() {
+        let harness = harness().await;
+        let started = harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+        let id = started.job.id;
+
+        // The fake reports an idle, peerless transfer, which is exactly what a dead swarm looks like.
+        let before = harness.engine.calls().len();
+        harness.service.sample().await;
+        assert_eq!(
+            reannouncements(&harness.engine.calls()[before..]),
+            0,
+            "the grace period is not over yet"
+        );
+
+        harness.clock.advance(STALL_GRACE_MILLIS);
+        harness.service.sample().await;
+        assert_eq!(
+            reannouncements(&harness.engine.calls()[before..]),
+            2,
+            "a pause and a resume restart the announcer"
+        );
+
+        for _ in 0..STALL_ATTEMPTS {
+            harness.clock.advance(STALL_RETRY_MILLIS);
+            harness.service.sample().await;
+        }
+
+        let row = harness
+            .database
+            .download_job(account(), id)
+            .await
+            .expect("the row reads")
+            .expect("the row exists");
+        assert_eq!(row.state, DownloadState::Failed);
+        assert_eq!(row.error_code.as_deref(), Some("NO_PEERS"));
+        assert!(
+            row.error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("no peers")),
+            "the row says why: {:?}",
+            row.error_message
+        );
+    }
+
+    /// The row a previous process left in `metadata` with no file list, and the report the handoff
+    /// never carried into an add.
+    async fn interrupted_handoff(harness: &Harness) -> i64 {
         let description = description();
         let mut job = new_job(harness.title_id);
         job.info_hash = Some(hash(42));
@@ -2781,45 +3682,237 @@ mod tests {
             .apply(row.id, DownloadEvent::Inspected(report))
             .await
             .expect("inspected");
+        row.id
+    }
 
-        let before = harness
-            .database
-            .download_job(unrestricted(), row.id)
-            .await
-            .expect("the row reads")
-            .expect("the row exists");
-        assert_eq!(before.state, DownloadState::Metadata);
-        assert!(
+    /// A handoff that lost its process is walked out of `metadata` by the pump, which is the edge the
+    /// domain always had and nothing ever took.
+    #[tokio::test]
+    async fn the_sweep_completes_a_handoff_a_previous_process_abandoned() {
+        let harness = harness().await;
+        let id = interrupted_handoff(&harness).await;
+
+        harness.service.sample().await;
+        assert_eq!(
             harness
                 .database
-                .download_files(unrestricted(), row.id)
+                .download_job(account(), id)
                 .await
-                .expect("the files read")
-                .is_empty(),
-            "the interrupted handoff wrote no file list"
+                .unwrap()
+                .unwrap()
+                .state,
+            DownloadState::Metadata,
+            "the grace period has not passed"
         );
 
-        let recovered = harness
-            .service
-            .recover_metadata_jobs()
-            .await
-            .expect("recovery runs");
-        assert_eq!(recovered, 1);
+        harness.clock.advance(STALL_GRACE_MILLIS);
+        harness.service.sample().await;
 
-        let after = harness
+        let row = harness
             .database
-            .download_job(unrestricted(), row.id)
+            .download_job(account(), id)
             .await
-            .expect("the row reads")
-            .expect("the row exists");
-        assert_eq!(after.state, DownloadState::Downloading);
-        let files = harness
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, DownloadState::Downloading);
+        assert_eq!(
+            harness
+                .database
+                .download_files(account(), id)
+                .await
+                .unwrap()
+                .len(),
+            2,
+            "the file list the re-add produced is written"
+        );
+    }
+
+    /// A handoff whose metadata never arrives ends in `failed` with its reason rather than parking:
+    /// a service without the metadata fetch can never complete the add, which is what a swarm that
+    /// keeps refusing the metadata looks like from here.
+    #[tokio::test]
+    async fn the_sweep_fails_a_handoff_whose_metadata_never_arrives() {
+        let harness = harness().await;
+        let id = interrupted_handoff(&harness).await;
+        let service = AcquisitionService::new(
+            Arc::clone(&harness.database),
+            Arc::clone(&harness.engine) as Arc<dyn TorrentEngine>,
+            Arc::clone(&harness.clock) as Arc<dyn Clock + Send + Sync>,
+            PathGuard::new(harness.directory.path().join("downloads"))
+                .expect("the fixture root is absolute"),
+            Arc::clone(&harness.volume) as Arc<dyn VolumeSpace>,
+            FLOOR,
+            Arc::clone(&harness.bus),
+            trash(),
+        );
+        let service = Arc::new(service);
+
+        service.sample().await;
+        harness.clock.advance(STALL_GRACE_MILLIS);
+        service.sample().await;
+        assert_eq!(
+            harness
+                .database
+                .download_job(account(), id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            DownloadState::Metadata,
+            "a retry that cannot produce metadata leaves the row where it is"
+        );
+        for _ in 0..STALL_ATTEMPTS {
+            harness.clock.advance(STALL_RETRY_MILLIS);
+            service.sample().await;
+        }
+
+        let row = harness
             .database
-            .download_files(unrestricted(), row.id)
+            .download_job(account(), id)
             .await
-            .expect("the files read");
-        assert_eq!(files.len(), 2);
-        assert!(files.iter().all(|file| file.selected));
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, DownloadState::Failed);
+        assert_eq!(row.error_code.as_deref(), Some("NO_PEERS"));
+        assert!(
+            row.error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("metadata")),
+            "the row says what did not arrive: {:?}",
+            row.error_message
+        );
+    }
+
+    /// A person asking for peers by hand restarts the announcer at once, without waiting out the
+    /// guard's grace period, and spends the attempts again.
+    #[tokio::test]
+    async fn find_peers_reannounces_now_and_refuses_a_paused_transfer() {
+        let harness = harness().await;
+        let started = harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+        let id = started.job.id;
+
+        let before = harness.engine.calls().len();
+        harness
+            .service
+            .find_peers(id)
+            .await
+            .expect("a live transfer can be asked for peers");
+        assert_eq!(
+            reannouncements(&harness.engine.calls()[before..]),
+            2,
+            "the announcer is restarted without waiting for the grace period"
+        );
+        assert_eq!(
+            harness
+                .database
+                .download_job(account(), id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            DownloadState::Downloading,
+            "asking for peers does not change what the row is"
+        );
+
+        harness
+            .service
+            .pause(id)
+            .await
+            .expect("the transfer pauses");
+        assert!(
+            matches!(
+                harness.service.find_peers(id).await,
+                Err(AcquisitionError::NotLive)
+            ),
+            "a paused transfer is resumed, not re-announced"
+        );
+    }
+
+    /// The pump ticks what the journal says is running, without being asked.
+    ///
+    /// This is the behaviour the whole queue depends on: an engine transfers in silence, so a row
+    /// moves only because something reads it. Before this test the pump had no coverage at all —
+    /// every other test called statistics directly — which is how a pump that stopped sampling went
+    /// unnoticed while the app showed a frozen queue.
+    #[tokio::test]
+    async fn the_pump_ticks_a_live_download_without_being_asked() {
+        let harness = harness().await;
+        harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+        let reads = |engine: &FakeTorrentEngine| {
+            engine
+                .calls()
+                .into_iter()
+                .filter(|call| matches!(call, EngineCall::Stats(_)))
+                .count()
+        };
+        let before = reads(&harness.engine);
+
+        harness.service.start_pump();
+        tokio::time::sleep(Duration::from_millis(1_300)).await;
+        harness.service.stop_pump().await;
+
+        let after = reads(&harness.engine);
+        assert!(
+            after > before,
+            "the pump reads the engine on its own tick: {before} then {after}"
+        );
+    }
+
+    /// A live row this process holds no handle for is re-added by the pump, not skipped.
+    ///
+    /// The journal is the state. Sampling the handle map instead meant a row whose handle was lost —
+    /// a restart, a failed add, a poisoned lock — was never sampled again, and every update in the
+    /// app stopped with no log line to say why.
+    #[tokio::test]
+    async fn a_live_row_without_a_handle_is_reattached_by_the_pump() {
+        let harness = harness().await;
+        let started = harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+        let id = started.job.id;
+        harness
+            .service
+            .handles
+            .lock()
+            .expect("the handle map is not poisoned")
+            .remove(&id);
+        assert!(
+            harness.service.handle_for(id).is_none(),
+            "the fixture lost the handle it is about to re-add"
+        );
+        let adds = |engine: &FakeTorrentEngine| {
+            engine
+                .calls()
+                .into_iter()
+                .filter(|call| matches!(call, EngineCall::Add { .. }))
+                .count()
+        };
+        let before = adds(&harness.engine);
+
+        harness.service.sample().await;
+        for _ in 0..40 {
+            if harness.service.handle_for(id).is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            harness.service.handle_for(id).is_some(),
+            "the pump re-added the row and kept its handle"
+        );
+        assert_eq!(
+            adds(&harness.engine),
+            before + 1,
+            "exactly one re-add, with reattach semantics"
+        );
     }
 
     #[tokio::test]
@@ -3662,6 +4755,158 @@ mod tests {
                 .is_none(),
             "the library record goes with the bytes"
         );
+    }
+
+    /// An episode imported with no still gets one from the file that was just imported.
+    ///
+    /// The row records the capture, the blob is in the cache under the episode's own key, and the
+    /// media file is imported as it always was.
+    #[tokio::test]
+    async fn an_imported_episode_without_a_still_captures_one() {
+        let harness = still_harness(FakeCapture::new()).await;
+        let capture = Arc::clone(&harness.capture);
+
+        harness
+            .download(
+                harness.episode_request(31),
+                &["VisionQuest.S01E03.1080p.mkv"],
+            )
+            .await;
+
+        assert_eq!(capture.calls(), 1, "one episode asks the port once");
+        let recorded = harness.recorded(harness.episode_three).await;
+        assert_eq!(recorded.provider, CAPTURED_STILL_PROVIDER);
+        assert_eq!(
+            recorded.path,
+            harness.episode_three.to_string(),
+            "the path is the episode's own, which is the cache key's path"
+        );
+        let key = ImageKey::for_captured_still(harness.episode_three);
+        assert!(
+            harness.cache.contains(&key),
+            "the captured bytes are in the same cache a provider still uses"
+        );
+        let entry = harness
+            .database
+            .image_cache_entry(key.as_str())
+            .await
+            .expect("the read answers")
+            .expect("the cache row is written");
+        assert_eq!(entry.provider, CAPTURED_STILL_PROVIDER);
+        assert_eq!(entry.variant, "w300");
+    }
+
+    /// A still a provider recorded is never captured over, and the port is not called at all.
+    #[tokio::test]
+    async fn an_episode_that_already_has_a_still_is_never_captured() {
+        let harness = still_harness(FakeCapture::new()).await;
+        harness
+            .database
+            .set_episode_still(
+                harness.episode_three,
+                "tmdb",
+                "/s01e03.jpg",
+                DEFAULT_EPOCH_MILLISECONDS,
+            )
+            .await
+            .expect("the provider still is recorded");
+        let capture = Arc::clone(&harness.capture);
+
+        harness
+            .download(
+                harness.episode_request(32),
+                &["VisionQuest.S01E03.1080p.mkv"],
+            )
+            .await;
+
+        assert_eq!(
+            capture.calls(),
+            0,
+            "an episode with a still spends no capture"
+        );
+        let recorded = harness.recorded(harness.episode_three).await;
+        assert_eq!(recorded.provider, "tmdb");
+        assert_eq!(recorded.path, "/s01e03.jpg");
+    }
+
+    /// A capture that fails is a warning: the episode keeps no still and the import still lands.
+    #[tokio::test]
+    async fn a_failed_capture_leaves_the_still_null_and_keeps_the_import() {
+        let harness = still_harness(FakeCapture::failing()).await;
+        let capture = Arc::clone(&harness.capture);
+
+        let started = harness
+            .download(
+                harness.episode_request(33),
+                &["VisionQuest.S01E03.1080p.mkv"],
+            )
+            .await;
+
+        assert_eq!(capture.calls(), 1);
+        assert_eq!(
+            harness
+                .database
+                .episode_still(harness.episode_three)
+                .await
+                .expect("the read answers"),
+            None,
+            "a failed capture leaves the column exactly as NULL as it was"
+        );
+        let media = harness
+            .directory
+            .path()
+            .join("downloads")
+            .join("Movies")
+            .join("VisionQuest.S01E03.1080p.mkv");
+        assert!(
+            harness
+                .database
+                .media_file_by_path(account(), media.to_string_lossy().as_ref())
+                .await
+                .expect("the read answers")
+                .is_some(),
+            "the file is imported despite the failed capture"
+        );
+        assert_eq!(
+            harness
+                .database
+                .download_job(account(), started.job.id)
+                .await
+                .expect("the read answers")
+                .expect("the job row is there")
+                .state,
+            DownloadState::Completed
+        );
+    }
+
+    /// A pack's files belong to their own episodes, so the capture is per episode rather than per job.
+    #[tokio::test]
+    async fn a_pack_import_captures_each_episode_rather_than_the_job() {
+        let harness = still_harness(FakeCapture::new()).await;
+        let capture = Arc::clone(&harness.capture);
+        let names = [
+            "VisionQuest.S01E03.1080p.mkv",
+            "VisionQuest.S01E04.1080p.mkv",
+        ];
+        let mut pack = request(harness.title_id, 34, episode_files(&names));
+        pack.job.episode_id = None;
+
+        harness.download(pack, &names).await;
+
+        assert_eq!(capture.calls(), 2, "each episode asks the port for itself");
+        for episode_id in [harness.episode_three, harness.episode_four] {
+            assert_eq!(
+                harness.recorded(episode_id).await.provider,
+                CAPTURED_STILL_PROVIDER,
+                "episode {episode_id} records its own capture"
+            );
+            assert!(
+                harness
+                    .cache
+                    .contains(&ImageKey::for_captured_still(episode_id)),
+                "episode {episode_id} has its own blob"
+            );
+        }
     }
 
     /// A job this process does not hold has no handle, which is a different answer from a state

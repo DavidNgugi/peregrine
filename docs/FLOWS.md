@@ -228,16 +228,20 @@ sequenceDiagram
     end
     Acq->>Acq: normalize, dedupe by info hash and normalized title
     Acq->>Rank: rank(candidate, profile)
-    Rank-->>Acq: score with per-rule reasons, or a named rejection
+    Rank-->>Acq: a declared score, an undeclared fallback, or a named rejection
     Acq->>DB: persist release_decision rows
     Acq-->>UI: ranked releases with explanations
 
     Note over Rank: Pure function. Inputs as implemented: resolution, source,<br/>video codec, audio, size versus the profile's caps, and the release-group<br/>allow and block lists.
 ```
 
-Ranking is a pure domain function so it can be property-tested and unit-tested exhaustively: monotonicity (a candidate the profile ranks higher on one criterion never scores lower), determinism (same inputs, same score, same reason order), and totality (every candidate comes back ranked or rejected, with no panic on any release name).
+Ranking is a pure domain function so it can be property-tested and unit-tested exhaustively: monotonicity (a candidate the profile ranks higher on one criterion never scores lower), determinism (same inputs, same score, same reason order), and totality (every candidate comes back ranked, marked as an undeclared fallback, or rejected, with no panic on any release name).
 
 The score is an integer. A candidate loses one weighted step for each entry the profile's preference list ranks above the value it declares, and the weights are ordered resolution, source, video codec, audio, so one resolution step is worth more than every step below it combined. Size caps and the group rules gate rather than score: a candidate they refuse is a typed rejection naming the rule, never a low score, and it carries no reasons because scoring stopped at the first refusal. HDR, seeder count, and age are not scored yet — `QualityRules` has no input for them.
+
+An undeclared quality field is unknown, not disallowed. A candidate whose name omits a resolution, a source, a video codec, or an audio codec the profile constrains is `Ranking::Undeclared` — a low-tier fallback that is marked as such, sorted after every declared candidate and considered only when no declared candidate is acceptable. The preference order is explicit: declared-and-allowed, then declared-but-lower-ranked, then undeclared, and never across a hard refusal. A value the profile disallows, a blocked group, or a size outside the caps stays refused even when another field of the same name is undeclared; a source the name does state and the profile does not accept is a hard refusal, while a source the name omits is unknown. The acquire job logs the release and the undeclared fields at info when it uses a fallback. A season request is coverage-first: a usable pack — declared, or an undeclared-quality fallback — is always the season's route, because one transfer covers every episode, and the per-episode fan-out runs only when the search found no usable pack. Seeders order packs against each other; they never choose the fan-out over a pack. The existing selection narrows the pack's files to the requested season. A second request for the same title, season, or episode while that job is still live joins its journal row rather than writing another: `job_dedupe_uq` covers the non-terminal phases, so the join is what makes a second press the same season's work instead of a refused insert.
+
+Before scoring, a release has to name the requested title: `peregrine_domain::release_names_title` compares lowercased words and requires the title's words as one contiguous run, so a film request for `Her` cannot choose an anime episode whose name contains the word, and a release that parses as `SxxEyy` never satisfies a film. A one- or two-word film title also has to agree with the catalogue year, because a word that short is what another title is likely to share; a release that states no year is accepted only when it is the title alone, and a longer title is specific enough without the check. A season request applies the same rule to every pack and every episode of its fan-out.
 
 Auto-selection requires all of: the top candidate above the account's minimum score, seeders above the configured floor, size within caps, and the indexer healthy. Otherwise the UI presents the list.
 
@@ -441,6 +445,13 @@ and the differences are worth stating where the flow is, because they are what a
   renderer captures a frame a tenth of the way in, posts it to the same listener, and the image cache
   keeps it under the title — so a freshly scanned folder of stubs has pictures before any provider is
   configured at all.
+* **An episode's still comes from the episode when no provider has one.** After a completed download's
+  files are imported, an episode whose `still_path` is NULL gets one frame taken from the file that was
+  just imported, stored in the same image cache under the `capture` owner and recorded on the episode;
+  a provider's later still replaces it. Episodes downloaded before that fallback existed are filled by
+  a startup pass that reads the same `still_path IS NULL` rows, captures at most eight per launch and
+  waits between attempts; a file that is gone is skipped. The capture is bounded and never fails the
+  import — an episode with no frame keeps its NULL still and the card keeps its reserved box.
 
 The torrent path, the mpv adapter, resume, tracks, subtitles, progress, and next-up are `PG-E16`'s and
 `PG-E10`'s, unchanged.
@@ -1029,6 +1040,8 @@ stateDiagram-v2
 Terminal states: `completed`, `removed`, `failed`. Every state in which the engine is actually holding the torrent — `downloading`, `paused`, `seeding` — has a persisted `engine_state_json`, so a restart reattaches rather than restarting the transfer. The states before the engine has it (`queued`, `inspecting`, `metadata`, `blocked`) have none, which is F6's own order: the job row is inserted at `queued`, and the engine's state is written when it accepts the torrent. Progress writes are coalesced to at most 1 Hz per job.
 
 A retry after a failure is **a new job, not an edge of this one**. `download_job_hash_uq` is unique over the live states, so a failed job vacates its infohash and the retry is inserted fresh with its own `safety_report_json`; that is deliberate, because re-inspecting the same torrent on a retry is how a gate gets skipped. `download::transition` therefore treats `failed` as absorbing, and the diagram above no longer draws a `failed --> queued` arrow it does not have.
+
+A transfer the swarm stops answering is not left in `downloading` for ever. The statistics pump watches the engine's health, and a torrent that has reported `no peers` or `stalled` for two minutes has its announcer restarted — the engine has no reannounce call, so the transfer is paused and unpaused and the task that announces starts again — up to three times, five minutes apart. When the attempts are spent the row is failed with `NO_PEERS` and a sentence the queue draws in its Reason column, and the engine handle is dropped: the bytes on disk stay and the retry is a new job like any other failure. A row a previous process left in `metadata` — the handoff nobody witnessed — is swept every thirty seconds rather than once at startup, because a magnet's metadata can arrive on a second attempt, and the same attempts end it in `failed` through the domain's `metadata timed out` edge. The row's own menu offers both moves on demand as **Find peers**.
 
 `removed` is reachable from **every** non-terminal state, because a user has to be able to cancel a job they are still waiting for. Without the edges from `queued`, `inspecting`, and `metadata`, a job parked behind the active-set limit — which can be hours — has no way out, and a download manager that cannot cancel a queued download is not one. `download::transition` (PG-E4-11) implements all seven, `Event::download_edge` names each of them, and `a_job_can_be_removed_from_every_non_terminal_state` is the test that holds the row.
 

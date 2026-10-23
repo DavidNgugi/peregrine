@@ -83,14 +83,14 @@ pub fn run() -> Result<(), ShellError> {
         })
         .setup(move |app| {
             ipc.mount_events(app);
-            start_runtime(app);
             // Installed before anything can be routed: the single-instance callback and the
             // deep-link listener both run on the event loop, and this is the state that
             // holds a link until the window can receive it.
             app.manage(external::Delivery::default());
-            // After the delivery state, because the click handler reads it, and before
-            // anything could raise an event: a notification shown while no handler is
-            // registered reports no click at all, ever (ADR 0015 §6, PG-E1-14).
+            // After the delivery state, because the click handler reads it, and before the
+            // runtime starts: the notification service is composed during startup, and it
+            // reads the adapter this installs (PG-E1-14). A toast shown while no handler is
+            // registered reports no click at all, ever (ADR 0015 §6).
             if let Err(error) = notifications::install(app.handle()) {
                 eprintln!("peregrine: {error}");
                 tracing::warn!(
@@ -98,6 +98,7 @@ pub fn run() -> Result<(), ShellError> {
                     "native notifications are unavailable; the in-app centre is unaffected"
                 );
             }
+            start_runtime(app);
             // A menu the user cannot use is worse than no menu, so a failure to install
             // one is reported and the app keeps running with the platform default.
             if let Err(error) = menu::install(app.handle()) {

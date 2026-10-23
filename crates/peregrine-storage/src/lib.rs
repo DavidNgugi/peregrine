@@ -54,8 +54,8 @@ pub use account::{AccountEdit, AccountRow, NewAccount};
 pub use backup::{BackupInfo, BackupPhase, BackupReport, inspect as inspect_backup};
 pub use catalogue::{CastRow, CastWrite, PersonRow};
 pub use catalogue::{
-    MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StubEpisode, StubSeason, StubTitle,
-    TitleExternalId, TitleIdentity, TitleKind, TitleSubtype,
+    MatchRuleRow, MetadataState, NewMatchRule, ProviderTitle, StoredStill, StubEpisode, StubSeason,
+    StubTitle, TitleExternalId, TitleIdentity, TitleKind, TitleSubtype,
 };
 pub use database::Database;
 pub use discover_rail::DiscoverRailRow;
@@ -68,8 +68,8 @@ pub use image_cache::ImageCacheEntry;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{
-    ArtworkPath, ItemEvidence, LibraryRootRow, LibraryTitleRow, MediaFileRow, MediaItemRow,
-    SubtitleTrackRow, TitleDetailRow, TitleEpisodeRow, TitleEvidence, TitleSeasonRow,
+    ArtworkPath, EpisodeStillSource, ItemEvidence, LibraryRootRow, LibraryTitleRow, MediaFileRow,
+    MediaItemRow, SubtitleTrackRow, TitleDetailRow, TitleEpisodeRow, TitleEvidence, TitleSeasonRow,
     UnmatchedFileRow,
 };
 pub use maintenance::{

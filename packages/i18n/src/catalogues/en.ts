@@ -92,6 +92,21 @@ export const en = {
         body: "The core did not answer the transfer queue. Try again.",
       },
       progress: { label: "{{title}} download progress" },
+      // One season's disclosure. The episode count is distinct episodes rather than rows: a retry
+      // beside its replacement is still one episode. A live pack is counted apart and named beside
+      // those episodes, because it covers the season rather than one episode of it.
+      season: {
+        number: "Season {{number}}",
+        episodes_one: "{{count}} episode",
+        episodes_other: "{{count}} episodes",
+        pack_one: "{{count}} pack",
+        pack_other: "{{count}} packs",
+        episodesAndPack_one: "{{episodes}} + {{count}} pack",
+        episodesAndPack_other: "{{episodes}} + {{count}} packs",
+        expand: "Expand season {{season}} of {{title}}",
+        collapse: "Collapse season {{season}} of {{title}}",
+        progress: "{{title}} season {{season}} download progress",
+      },
       size: { none: "0 B", value: "{{value}} {{unit}}" },
       rate: { value: "{{value}}/s" },
       eta: { seconds: "{{value}} s", minutes: "{{value}} min", hours: "{{value}} h" },
@@ -112,6 +127,7 @@ export const en = {
         play: "Play",
         more: "More actions",
         resume: "Resume download",
+        findPeers: "Find peers",
         allowArchives: "Allow archives",
         remove: "Remove download",
         dismiss: "Dismiss download",
@@ -468,6 +484,12 @@ export const en = {
         queuingSeason: "Queuing season {{season}}…",
         queuedSeason: "Queued season {{season}}",
         downloadingSeason: "Downloading season {{season}} · {{percent}}%",
+        // A pack is one row for the whole season: the panel says what is covering it rather than
+        // reporting an episode count the pack row cannot answer.
+        packDownloading: "Season {{season}} · {{count}} pack · {{percent}}%",
+        packDownloading_other: "Season {{season}} · {{count}} packs · {{percent}}%",
+        packQueued: "Season {{season}} · {{count}} pack queued",
+        packQueued_other: "Season {{season}} · {{count}} packs queued",
         retrySeason: "Retry season {{season}}",
         seasonDownloaded: "Season {{season}} downloaded",
         none: {
@@ -533,6 +555,11 @@ export const en = {
         download: "Download",
         downloading: "Downloading… {{percent}}%",
         downloadingWaiting: "Downloading…",
+        // A pack covers the whole season, and an episode under it is not a second acquisition: the
+        // chip says which transfer is bringing it instead of "Not acquired".
+        downloadingWithSeason: "Downloading with season {{season}}",
+        queuedWithSeason: "Queued with season {{season}}",
+        queued: "Queued",
         play: "Play",
         playLabel: "Play episode {{number}} ({{name}})",
         nextUp: "Next up",
@@ -924,6 +951,17 @@ export const en = {
           ar: "العربية",
           hi: "हिन्दी",
         },
+      },
+      notifications: {
+        title: "Notifications",
+        description:
+          "Peregrine can show a system notification when a download finishes or needs you. The notification centre records every event either way.",
+        label: "Show system notifications",
+        note: "Turning this on asks your operating system for permission. Peregrine never turns it on for you, and you can change it here at any time.",
+        denied:
+          "Your operating system did not grant permission. Every event still appears in the notification centre.",
+        failed: "Your notification preference could not be read. Reopening Settings tries again.",
+        saveFailed: "Your notification preference could not be saved.",
       },
       web: {
         title: "Web access",

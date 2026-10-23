@@ -38,6 +38,7 @@ Every user-facing event writes a row to the `notification` table and appears in 
 | --- | --- | --- | --- |
 | Download completed | on | on | Coalesced per burst (see 4). Click opens the title in the library |
 | Download failed | on | on | Includes engine errors and stalls that crossed the retry limit |
+| Acquisition failed | on | on | An acquire job that queued nothing: no release matched, the season had nothing queueable, or a pack's files could not be mapped. No download row exists to open, so the copy names the title and the click opens the Downloads queue |
 | Torrent blocked by the safety gate | on | on | **Critical**: ignores quiet hours and cannot be disabled, because it is a security outcome |
 | New episode available for a watchlisted show | on | off | Batched into one digest per day when several land together |
 | Disk space low | on | on | **Critical** |

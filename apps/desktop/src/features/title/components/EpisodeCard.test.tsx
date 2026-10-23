@@ -58,6 +58,22 @@ describe("EpisodeCard", () => {
     expect(html).toContain("Downloading… 12%");
   });
 
+  it("says a live season pack covers the episode and offers no second acquisition", () => {
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <EpisodeCard
+          episode={episode()}
+          onDownload={() => undefined}
+          seasonPack={{ season: 1, status: "active", percent: 45, count: 1 }}
+        />
+      </I18nextProvider>,
+    );
+
+    expect(html).toContain("Downloading with season 1");
+    expect(html).not.toContain("Not acquired");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Downloading… 45%<\/button>/u);
+  });
+
   it("offers Schedule and no watch mark before an episode airs", () => {
     const html = renderToStaticMarkup(
       <I18nextProvider i18n={i18n}>

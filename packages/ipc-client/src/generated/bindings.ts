@@ -684,6 +684,19 @@ export const commands = {
 	 *  torrent session did not start.
 	 */
 	acquire: (title: TitleRef, minSeeders: number | null, season: number | null, episode: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire", { title, minSeeders, season, episode })),
+	/**
+	 *  Starts an automatic acquisition for one whole season, and answers the job doing it.
+	 * 
+	 *  The job searches `Name Sxx` once and chooses a season pack or a single episode of that season
+	 *  by which side has the better-seeded candidate, so the caller names the season and nothing else.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `ErrorCode::PermissionDenied` when this profile may not download, `ErrorCode::Internal` when
+	 *  the runtime is not running or the journal refuses the row, and `ErrorCode::Unsupported` when
+	 *  the torrent session did not start.
+	 */
+	acquireSeason: (title: TitleRef, season: number, minSeeders: number | null) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("acquire_season", { title, season, minSeeders })),
 	/**  The download queue, newest first. */
 	listDownloads: () => typedError<DownloadJobDto[], AppError_Serialize>(__TAURI_INVOKE("list_downloads")),
 	/**  Schedules a download for the first date it may be fetched. */
@@ -696,6 +709,15 @@ export const commands = {
 	pauseDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("pause_download", { download })),
 	/**  Resumes one stopped download. */
 	resumeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("resume_download", { download })),
+	/**
+	 *  Asks a torrent's swarm for peers again, now.
+	 * 
+	 *  The engine has no reannounce call and a torrent announces when its task starts, so the core
+	 *  restarts that task (or re-adds a handoff that never finished). A transfer that has no peers and
+	 *  a swarm that has gone quiet are the same fact from here, which is why this is a move the queue
+	 *  offers on a live row rather than a setting.
+	 */
+	findDownloadPeers: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("find_download_peers", { download })),
 	/**  Removes one download. */
 	removeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("remove_download", { download })),
 	/**
@@ -748,6 +770,28 @@ export const commands = {
 	setUsenetArchives: (allowArchives: boolean, deleteArchivesAfterImport: boolean) => typedError<UsenetStatusDto, AppError_Serialize>(__TAURI_INVOKE("set_usenet_archives", { allowArchives, deleteArchivesAfterImport })),
 	/**  Re-inspects a blocked Usenet job with the archive opt-in. */
 	consentUsenetDownload: (download: DownloadRef) => typedError<string, AppError_Serialize>(__TAURI_INVOKE("consent_usenet_download", { download })),
+	/**
+	 *  The user's notification consent and the catalogue defaults around it.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `INTERNAL` when the stored consent cannot be read; the cause is logged and the message stays
+	 *  generic because a database failure is not the user's to act on.
+	 */
+	notificationPreferences: () => typedError<NotificationPreferencesDto, AppError_Serialize>(__TAURI_INVOKE("notification_preferences")),
+	/**
+	 *  Records the user's answer to the notification consent question.
+	 * 
+	 *  The UI asks the operating system first when the answer is `true`, so `granted` is the
+	 *  effective decision rather than the intent. A refusal is stored with "do not ask again", which
+	 *  the wizard reads; the Settings control remains the user's to change.
+	 * 
+	 *  # Errors
+	 * 
+	 *  `INTERNAL` when the answer cannot be stored; the cause is logged and the message stays
+	 *  generic.
+	 */
+	setNotificationConsent: (granted: boolean) => typedError<NotificationPreferencesDto, AppError_Serialize>(__TAURI_INVOKE("set_notification_consent", { granted })),
 	/**
 	 *  The most recent centre rows, newest first.
 	 * 
@@ -1105,7 +1149,7 @@ export type DownloadJobDto = {
 	 *  can draw the same tile Browse draws; null falls back to the placeholder.
 	 */
 	poster: string | null,
-	/**  The episode's season, when the job was started for one episode. */
+	/**  The season the job is for: a pack's whole season, or the season of the episode it names. */
 	seasonNumber: number | null,
 	/**  The episode's number within that season. */
 	episodeNumber: number | null,
@@ -1695,6 +1739,24 @@ export type NotificationDto = {
 	titleKind: string | null,
 	/**  The subject title's row id, when the notification names a title. */
 	subjectId: number | null,
+};
+
+/**
+ *  The consent state the notification settings screen draws.
+ * 
+ *  Three decisions rather than a boolean, because "never asked" and "asked and declined" are
+ *  different facts and R31 lets the app ask only the first. The OS's own answer is carried beside
+ *  it so the screen can say that the system withdrew what it once granted.
+ */
+export type NotificationPreferencesDto = {
+	/**  `unanswered`, `granted`, or `declined`. */
+	consent: string,
+	/**  Whether the user also asked not to be asked again. */
+	dontAskAgain: boolean,
+	/**  What the OS last reported about its own permission, when it has been asked. */
+	osGranted: boolean | null,
+	/**  Whether the app may still raise the consent question unprompted. */
+	shouldPrompt: boolean,
 };
 
 /**  A centre row's id, as the listing returned it. */

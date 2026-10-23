@@ -82,7 +82,7 @@ pub struct DownloadJobDto {
     /// A path and never bytes (AGENTS R11). It is carried so the Discover Recent Downloads rail
     /// can draw the same tile Browse draws; null falls back to the placeholder.
     pub poster: Option<String>,
-    /// The episode's season, when the job was started for one episode.
+    /// The season the job is for: a pack's whole season, or the season of the episode it names.
     #[specta(type = Option<Number>)]
     pub season_number: Option<u32>,
     /// The episode's number within that season.
@@ -147,7 +147,7 @@ impl DownloadJobDto {
             title,
             title_kind,
             poster,
-            season_number: None,
+            season_number: row.season_number,
             episode_number: None,
             release_title: row.release_title.clone(),
             state: row.state.as_str().to_owned(),
@@ -196,7 +196,9 @@ async fn row_dto(
     if let Some(id) = row.episode_id
         && let Ok(Some((season, episode))) = runtime.episode_numbers(id).await
     {
-        dto.season_number = Some(season);
+        // A row written before the column existed carries no season, so the episode's own numbers
+        // are the fallback; a season pack has no episode id and keeps the row's season.
+        dto.season_number = dto.season_number.or(Some(season));
         dto.episode_number = Some(episode);
     }
     dto.has_media_file = runtime.download_has_media(row.id).await.unwrap_or(false);
@@ -370,6 +372,43 @@ pub async fn acquire(
     ))
 }
 
+/// Starts an automatic acquisition for one whole season, and answers the job doing it.
+///
+/// The job searches `Name Sxx` once and chooses a season pack or a single episode of that season
+/// by which side has the better-seeded candidate, so the caller names the season and nothing else.
+///
+/// # Errors
+///
+/// `ErrorCode::PermissionDenied` when this profile may not download, `ErrorCode::Internal` when
+/// the runtime is not running or the journal refuses the row, and `ErrorCode::Unsupported` when
+/// the torrent session did not start.
+#[tauri::command]
+#[specta::specta]
+pub async fn acquire_season(
+    state: State<'_, RuntimeState>,
+    title: TitleRef,
+    season: u32,
+    min_seeders: Option<u32>,
+) -> Result<JobStarted, AppError> {
+    let runtime = state.runtime()?;
+    if !runtime.can_acquire() {
+        return Err(AppError::new(ErrorCode::PermissionDenied)
+            .with_detail("This profile may not start downloads."));
+    }
+    let started = runtime
+        .start_acquire_season(
+            peregrine_app::runtime::installation_scope(),
+            title.id,
+            season,
+            min_seeders.unwrap_or(1),
+        )
+        .await?;
+    Ok(guard_response(
+        "downloads::acquire_season",
+        JobStarted::from(started),
+    ))
+}
+
 /// The download queue, newest first.
 #[tauri::command]
 #[specta::specta]
@@ -538,6 +577,31 @@ pub async fn resume_download(
     let row = row_after(runtime, download.id).await?;
     Ok(guard_response(
         "downloads::resume",
+        row_dto(runtime, &row).await,
+    ))
+}
+
+/// Asks a torrent's swarm for peers again, now.
+///
+/// The engine has no reannounce call and a torrent announces when its task starts, so the core
+/// restarts that task (or re-adds a handoff that never finished). A transfer that has no peers and
+/// a swarm that has gone quiet are the same fact from here, which is why this is a move the queue
+/// offers on a live row rather than a setting.
+#[tauri::command]
+#[specta::specta]
+pub async fn find_download_peers(
+    state: State<'_, RuntimeState>,
+    download: DownloadRef,
+) -> Result<DownloadJobDto, AppError> {
+    let runtime = state.runtime()?;
+    runtime
+        .acquisition()?
+        .find_peers(download.id)
+        .await
+        .map_err(|error| acquisition_error(&error))?;
+    let row = row_after(runtime, download.id).await?;
+    Ok(guard_response(
+        "downloads::find_peers",
         row_dto(runtime, &row).await,
     ))
 }

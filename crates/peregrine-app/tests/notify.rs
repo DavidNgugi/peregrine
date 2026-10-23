@@ -636,6 +636,73 @@ async fn a_disabled_event_records_disabled() {
     assert_eq!(harness.notifier.count(), 0);
 }
 
+/// A failed acquisition names the title the person asked for and points at the queue that can
+/// retry it, because the job that found nothing wrote no download row to open instead.
+#[tokio::test]
+async fn an_acquisition_failure_names_the_title_and_opens_the_queue() {
+    let directory = TempDir::new().unwrap();
+    let harness = harness(&directory, consented()).await;
+
+    let outcome = harness
+        .service
+        .notify(
+            account(),
+            NotificationEvent::AcquisitionFailed,
+            7,
+            Some("Peppa Pig"),
+            Focus::default(),
+        )
+        .await
+        .expect("the failure is recordable");
+
+    assert!(outcome.delivered());
+    assert_eq!(harness.notifier.count(), 1);
+    let rows = harness.rows().await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].event, "acquisition.failed");
+    assert_eq!(rows[0].title, "Peppa Pig");
+    assert_eq!(
+        rows[0].deep_link.as_deref(),
+        Some("peregrine://downloads"),
+        "the queue is where a failed acquisition is retried"
+    );
+}
+
+/// The service's existing per-event rule applies to the new event unchanged: switching it off
+/// silences the toast and leaves the centre row, which is the record (R31).
+#[tokio::test]
+async fn a_disabled_acquisition_failure_is_centred_without_a_toast() {
+    let directory = TempDir::new().unwrap();
+    let mut preferences = consented();
+    switch_off(&mut preferences, NotificationEvent::AcquisitionFailed);
+    let harness = harness(&directory, preferences).await;
+
+    let outcome = harness
+        .service
+        .notify(
+            account(),
+            NotificationEvent::AcquisitionFailed,
+            7,
+            Some("Peppa Pig"),
+            Focus::default(),
+        )
+        .await
+        .expect("a disabled event is still recordable");
+
+    assert_eq!(
+        outcome.delivery,
+        Delivery::Suppressed(SuppressionReason::Disabled)
+    );
+    assert_eq!(harness.notifier.count(), 0, "the user switched it off");
+    let rows = harness.rows().await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "the centre is the record whatever the switch"
+    );
+    assert_eq!(rows[0].title, "Peppa Pig");
+}
+
 /// I13 — path three: quiet hours hold a normal event back.
 #[tokio::test]
 async fn a_quiet_hours_event_records_quiet_hours() {

@@ -501,7 +501,7 @@ fn locate_probe() -> PathBuf {
 /// The explicit variable exists for a test and for a user pointing at their own build; the sidecar
 /// beside the application comes next, and `PATH` is the development fallback. The binary is run as a
 /// child process with an argument vector, never through a shell.
-fn locate() -> PathBuf {
+pub(crate) fn locate() -> PathBuf {
     if let Ok(explicit) = std::env::var("PEREGRINE_FFMPEG") {
         let path = PathBuf::from(explicit);
         if path.is_file() {

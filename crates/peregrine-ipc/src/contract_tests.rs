@@ -1085,9 +1085,11 @@ fn download_cases() -> Vec<ContractCase> {
             },
             drive: acquire_with_half_an_episode,
         },
+        fails_internal("acquire_season", acquire_season_dead),
         fails_internal("list_downloads", list_downloads_dead),
         fails_internal("pause_download", pause_download_dead),
         fails_internal("resume_download", resume_download_dead),
+        fails_internal("find_download_peers", find_download_peers_dead),
         fails_internal("remove_download", remove_download_dead),
         fails_internal("dismiss_download", dismiss_download_dead),
         fails_internal("clear_finished_downloads", clear_finished_downloads_dead),
@@ -1151,6 +1153,21 @@ fn acquire_dead(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+/// `acquire_season` needs a running runtime and a profile that may download, so the dead state
+/// is the failure this suite can drive.
+fn acquire_season_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::acquire_season(
+            harness.dead_state(),
+            crate::library::TitleRef { id: 1 },
+            1,
+            None,
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// `acquire` refuses half an episode reference before it looks for a runtime.
 fn acquire_with_half_an_episode(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
@@ -1188,6 +1205,17 @@ fn pause_download_dead(harness: &Harness) -> Invocation<'_> {
 fn resume_download_dead(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::downloads::resume_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn find_download_peers_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::find_download_peers(
             harness.dead_state(),
             crate::downloads::DownloadRef { id: 1 },
         )
@@ -1489,6 +1517,8 @@ fn remove_indexer_dead(harness: &Harness) -> Invocation<'_> {
 /// The notifications namespace. Every command reads or writes the centre through the runtime.
 fn notification_cases() -> Vec<ContractCase> {
     vec![
+        fails_internal("notification_preferences", notification_preferences_dead),
+        fails_internal("set_notification_consent", set_notification_consent_dead),
         fails_internal("list_notifications", list_notifications_dead),
         fails_internal("mark_notification_read", mark_notification_read_dead),
         fails_internal(
@@ -1497,6 +1527,22 @@ fn notification_cases() -> Vec<ContractCase> {
         ),
         fails_internal("dismiss_notification", dismiss_notification_dead),
     ]
+}
+
+fn notification_preferences_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::notifications::notification_preferences(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_notification_consent_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::notifications::set_notification_consent(harness.dead_state(), true)
+            .await
+            .map(drop)
+    })
 }
 
 fn list_notifications_dead(harness: &Harness) -> Invocation<'_> {
@@ -1535,6 +1581,40 @@ fn dismiss_notification_dead(harness: &Harness) -> Invocation<'_> {
         .await
         .map(drop)
     })
+}
+
+/// The consent's successful path, which the failure table cannot express: a served runtime stores
+/// the answer and the next read sees it. This is the command the Settings toggle calls, so the
+/// round trip is the deliverable rather than the error code.
+#[tokio::test]
+async fn notification_consent_round_trips_through_the_commands() {
+    let directory = TempDir::new().expect("a temporary directory");
+    let harness = Harness::new(&directory).await;
+
+    let before = crate::notifications::notification_preferences(harness.served_state())
+        .await
+        .expect("the default consent reads");
+    assert_eq!(before.consent, "unanswered");
+    assert!(before.should_prompt);
+
+    let granted = crate::notifications::set_notification_consent(harness.served_state(), true)
+        .await
+        .expect("the grant is stored");
+    assert_eq!(granted.consent, "granted");
+    assert!(!granted.should_prompt);
+
+    let read = crate::notifications::notification_preferences(harness.served_state())
+        .await
+        .expect("the stored consent reads");
+    assert_eq!(read.consent, "granted");
+
+    let declined = crate::notifications::set_notification_consent(harness.served_state(), false)
+        .await
+        .expect("the refusal is stored");
+    assert_eq!(declined.consent, "declined");
+    assert!(!declined.should_prompt);
+
+    harness.shutdown().await;
 }
 
 /// The playback namespace. Both commands read or write the preference row through the runtime.

@@ -1,5 +1,6 @@
 //! The port a release indexer answers through, and the vocabulary it answers in.
 
+use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -25,7 +26,12 @@ pub struct IndexerQuery {
 ///
 /// `Magnet` is preferred when an indexer gives both because it carries the trackers; `InfoHash`
 /// is what a caller has to work with when it does not.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The strings are credentials in the broad sense: a magnet carries the info-hash, and a
+/// Prowlarr proxy URL carries the API key until the adapter strips it. `Debug` therefore names
+/// the variant and never the payload, and no caller may put the payload into a log, an error, or
+/// a DTO.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TorrentSource {
     /// A magnet URI.
     Magnet(String),
@@ -37,11 +43,34 @@ pub enum TorrentSource {
     TorrentUrl(String),
 }
 
+impl fmt::Debug for TorrentSource {
+    /// Prints which kind it is, never the URI, hash, or URL.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Magnet(_) => formatter.write_str("Magnet(..)"),
+            Self::InfoHash(_) => formatter.write_str("InfoHash(..)"),
+            Self::TorrentUrl(_) => formatter.write_str("TorrentUrl(..)"),
+        }
+    }
+}
+
 /// Where a Usenet release's NZB can be fetched from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The URL is usually Prowlarr's proxy address and can carry its API key; like a torrent URL, it
+/// is never printed and the adapter strips the credential before retaining it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UsenetSource {
     /// An HTTP(S) URL for the NZB, usually Prowlarr's proxy download URL.
     NzbUrl(String),
+}
+
+impl fmt::Debug for UsenetSource {
+    /// Prints which kind it is, never the URL.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NzbUrl(_) => formatter.write_str("NzbUrl(..)"),
+        }
+    }
 }
 
 /// A release's source, whichever protocol carries it.
@@ -65,7 +94,7 @@ impl ReleaseSource {
 ///
 /// Prowlarr's proxy URL answers 301 with a `magnet:` Location for a torrent indexer -- a scheme an
 /// HTTP client cannot follow -- and the .torrent or .nzb body for one that serves a file directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum FetchedRelease {
     /// The .torrent file's own bytes.
     TorrentBytes(Vec<u8>),
@@ -73,6 +102,17 @@ pub enum FetchedRelease {
     Magnet(String),
     /// The .nzb file's own bytes.
     NzbBytes(Vec<u8>),
+}
+
+impl fmt::Debug for FetchedRelease {
+    /// Prints a body's size and never a magnet, for the same reason as `TorrentSource`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TorrentBytes(bytes) => write!(formatter, "TorrentBytes({} bytes)", bytes.len()),
+            Self::Magnet(_) => formatter.write_str("Magnet(..)"),
+            Self::NzbBytes(bytes) => write!(formatter, "NzbBytes({} bytes)", bytes.len()),
+        }
+    }
 }
 
 /// One release an indexer found, in this application's vocabulary.

@@ -112,12 +112,12 @@ pub use quality::{
 };
 pub use rank::{
     Candidate, MAX_SCORE, Position, RankReason, Ranking, ReasonKind, Rejection, ReleaseRanker,
-    alternative_candidates, ranked_candidates,
+    Undeclared, alternative_candidates, ranked_candidates,
 };
 pub use redaction::{RedactionError, check_elements, check_text, is_safe};
 pub use release::{
     AudioCodec, EpisodeSpan, HdrFormat, ReleaseName, ReleaseSource, RepackKind, Resolution,
-    VideoCodec,
+    VideoCodec, release_names_title,
 };
 pub use scan::{Freshness, ScanPolicy, ScanVerdict, SkipReason, Stamp, is_media_extension};
 pub use session::{

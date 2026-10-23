@@ -79,6 +79,19 @@ impl Prowlarr {
         format!("{}{path}", self.base)
     }
 
+    /// True when `url` has the same scheme, host, and port as the configured Prowlarr.
+    ///
+    /// The API key is a header, and a header is only safe to send to the origin the key belongs
+    /// to. The proxy URL Prowlarr hands out is on that origin; an indexer's own download host is
+    /// not, and a cross-origin redirect must not inherit the credential.
+    fn same_origin(&self, url: &str) -> bool {
+        let (Ok(base), Ok(target)) = (reqwest::Url::parse(&self.base), reqwest::Url::parse(url))
+        else {
+            return false;
+        };
+        base.origin() == target.origin()
+    }
+
     /// Reads a response under `SEARCH_BODY_CAP`, refusing a non-success status first.
     async fn read_capped(&self, mut response: reqwest::Response) -> Result<Vec<u8>, IndexerError> {
         if !response.status().is_success() {
@@ -184,16 +197,17 @@ impl Indexer for Prowlarr {
                     return Err(IndexerError::UnsupportedSource);
                 }
             };
-            // Prowlarr's proxy URL already carries its api key, so no header is added. Redirects
-            // are followed here rather than by the client: a cross-origin hop must not inherit
-            // anything the proxy URL held, and a magnet hop is not an HTTP redirect at all.
+            // The stored proxy URL has its `apikey` parameter removed. The header is sent only
+            // to this adapter's own origin, so a redirect to an indexer's host cannot inherit the
+            // key. Redirects are followed here rather than by the client: a cross-origin hop must
+            // not inherit anything the proxy URL held, and a magnet hop is not an HTTP redirect at
+            // all.
             for _ in 0..=MAX_REDIRECTS {
-                let response = self
-                    .fetch_client
-                    .get(&next)
-                    .send()
-                    .await
-                    .map_err(|_| IndexerError::Transport)?;
+                let mut request = self.fetch_client.get(&next);
+                if self.same_origin(&next) {
+                    request = request.header("X-Api-Key", &self.api_key);
+                }
+                let response = request.send().await.map_err(|_| IndexerError::Transport)?;
                 if response.status().is_redirection() {
                     let location = response
                         .headers()
@@ -254,7 +268,10 @@ impl Indexer for Prowlarr {
 }
 
 /// One entry of Prowlarr's `ReleaseResource` array. Private: no third-party shape escapes the adapter.
-#[derive(Debug, Deserialize)]
+///
+/// Deliberately not `Debug`: it holds the raw magnet, info hash, and proxy URLs, and a derive
+/// would put them into the first tracing field that formatted a search result.
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireRelease {
     title: Option<String>,
@@ -276,6 +293,52 @@ fn stated(value: Option<String>) -> Option<String> {
         .filter(|text| !text.is_empty())
 }
 
+/// An http(s) URL with Prowlarr's `apikey` query parameter removed.
+///
+/// Prowlarr's proxy URL authenticates with `?apikey=`, but the URL is retained in
+/// `release_decision.source_json` and handed to the engine, and a credential must stay in the
+/// keyring (SECURITY). The adapter adds it back as a header for its own origin. Anything that is
+/// not an http(s) URL is not a source this build can fetch, so it is dropped rather than stored.
+fn stored_url(value: &str) -> Option<String> {
+    if !(value.starts_with("http://") || value.starts_with("https://")) {
+        return None;
+    }
+    reqwest::Url::parse(value).ok()?;
+    let Some((base, rest)) = value.split_once('?') else {
+        return Some(value.to_owned());
+    };
+    let (query, fragment) = match rest.split_once('#') {
+        Some((query, fragment)) => (query, Some(fragment)),
+        None => (rest, None),
+    };
+    // Split the raw query rather than round-tripping through `query_pairs_mut`: Prowlarr's
+    // `link` is an encrypted blob, and re-encoding it could change the bytes the proxy must
+    // decrypt. Only the `apikey` pair is removed; every other pair keeps its original spelling.
+    let mut kept = Vec::new();
+    let mut removed = false;
+    for pair in query.split('&') {
+        let key = pair.split('=').next().unwrap_or_default();
+        if key.eq_ignore_ascii_case("apikey") {
+            removed = true;
+        } else {
+            kept.push(pair);
+        }
+    }
+    if !removed {
+        return Some(value.to_owned());
+    }
+    let mut stripped = base.to_owned();
+    if !kept.is_empty() {
+        stripped.push('?');
+        stripped.push_str(&kept.join("&"));
+    }
+    if let Some(fragment) = fragment {
+        stripped.push('#');
+        stripped.push_str(fragment);
+    }
+    Some(stripped)
+}
+
 impl WireRelease {
     /// The release this entry describes, or None when the protocol carries no usable source.
     fn into_release(self) -> Option<IndexerRelease> {
@@ -288,8 +351,9 @@ impl WireRelease {
             .unwrap_or("torrent");
         let source = if protocol.eq_ignore_ascii_case("usenet") {
             // A Usenet result has no info hash and no magnet: its source is the proxy's download
-            // URL, which a caller fetches before parsing the NZB.
-            let url = stated(self.download_url).or_else(|| stated(self.magnet_url))?;
+            // URL, which a caller fetches before parsing the NZB. It carries the same `apikey`
+            // parameter as the torrent proxy, so it is stripped the same way.
+            let url = stored_url(&stated(self.download_url).or_else(|| stated(self.magnet_url))?)?;
             ReleaseSource::Usenet(UsenetSource::NzbUrl(url))
         } else if protocol.eq_ignore_ascii_case("torrent")
             || protocol.eq_ignore_ascii_case("unknown")
@@ -297,12 +361,22 @@ impl WireRelease {
             // Prowlarr calls the field magnetUrl, but for several indexers it is that indexer's own
             // proxy download URL -- an http(s) address for the .torrent -- and passing it to the
             // engine as a magnet asks the engine to GET it and fail. Classify on what it is.
-            let torrent = match (stated(self.magnet_url), stated(self.info_hash)) {
-                (Some(uri), _) if uri.starts_with("magnet:") => TorrentSource::Magnet(uri),
-                (Some(url), _) if url.starts_with("http://") || url.starts_with("https://") => {
-                    TorrentSource::TorrentUrl(url)
+            //
+            // downloadUrl is the last resort, and it is the field a torrent indexer such as
+            // LimeTorrents fills while leaving magnetUrl and infoHash empty. Without it those
+            // results were dropped before ranking. Its query carries Prowlarr's API key, so the
+            // stored form drops that parameter; the adapter sends the key as a header instead.
+            let torrent = match (
+                stated(self.magnet_url),
+                stated(self.info_hash),
+                stated(self.download_url),
+            ) {
+                (Some(uri), _, _) if uri.starts_with("magnet:") => TorrentSource::Magnet(uri),
+                (Some(url), _, _) if url.starts_with("http://") || url.starts_with("https://") => {
+                    TorrentSource::TorrentUrl(stored_url(&url)?)
                 }
-                (_, Some(hash)) => TorrentSource::InfoHash(hash),
+                (_, Some(hash), _) => TorrentSource::InfoHash(hash),
+                (_, None, Some(url)) => TorrentSource::TorrentUrl(stored_url(&url)?),
                 _ => return None,
             };
             ReleaseSource::Torrent(torrent)
@@ -808,14 +882,18 @@ mod tests {
     }
 
     #[test]
-    fn a_usenet_release_carries_its_nzb_url() {
-        let release = wire("usenet", Some("https://example.test/a.nzb"))
-            .into_release()
-            .expect("a Usenet result survives");
-        assert!(matches!(
-            release.source,
-            ReleaseSource::Usenet(UsenetSource::NzbUrl(_))
-        ));
+    fn a_usenet_release_carries_its_nzb_url_without_the_api_key() {
+        let release = wire(
+            "usenet",
+            Some("https://example.test/a.nzb?apikey=SECRET&link=abc"),
+        )
+        .into_release()
+        .expect("a Usenet result survives");
+        let ReleaseSource::Usenet(UsenetSource::NzbUrl(stored)) = &release.source else {
+            panic!("expected an NZB URL, got {:?}", release.source);
+        };
+        assert_eq!(stored, "https://example.test/a.nzb?link=abc");
+        assert!(!format!("{release:?}").contains("SECRET"));
     }
 
     #[test]
@@ -826,6 +904,112 @@ mod tests {
             release.into_release().expect("a torrent result").source,
             ReleaseSource::Torrent(TorrentSource::Magnet(_))
         ));
+    }
+
+    /// A torrent indexer such as `LimeTorrents` answers with only `downloadUrl`; before this,
+    /// those results were dropped before ranking.
+    #[test]
+    fn a_torrent_release_uses_its_download_url_when_it_has_no_magnet_or_hash() {
+        let release = wire(
+            "torrent",
+            Some("http://127.0.0.1:9696/5/download?apikey=SECRET&link=QXB%2BZG9n%3D&file=A+B"),
+        )
+        .into_release()
+        .expect("a downloadUrl-only torrent survives");
+
+        let ReleaseSource::Torrent(TorrentSource::TorrentUrl(stored)) = &release.source else {
+            panic!("expected a torrent URL, got {:?}", release.source);
+        };
+        assert_eq!(
+            stored, "http://127.0.0.1:9696/5/download?link=QXB%2BZG9n%3D&file=A+B",
+            "the key is removed and every other parameter keeps its exact spelling"
+        );
+        assert!(
+            !format!("{release:?}").contains("SECRET"),
+            "a Debug print never carries the key"
+        );
+    }
+
+    /// A magnet is the richer source because it carries the trackers, so it still wins when the
+    /// result also has a downloadUrl.
+    #[test]
+    fn a_magnet_still_wins_over_a_download_url() {
+        let mut release = wire(
+            "torrent",
+            Some("http://127.0.0.1:9696/5/download?apikey=SECRET&link=abc"),
+        );
+        release.magnet_url = Some("magnet:?xt=urn:btih:abc".to_owned());
+        let release = release.into_release().expect("a torrent result");
+        assert!(matches!(
+            release.source,
+            ReleaseSource::Torrent(TorrentSource::Magnet(_))
+        ));
+        let debug = format!("{release:?}");
+        assert!(!debug.contains("SECRET"), "{debug}");
+        assert!(!debug.contains("magnet:"), "{debug}");
+    }
+
+    /// With no magnet, the info hash wins over the proxy URL: it needs no fetch of its own.
+    #[test]
+    fn an_info_hash_still_wins_over_a_download_url() {
+        let mut release = wire(
+            "torrent",
+            Some("http://127.0.0.1:9696/5/download?apikey=SECRET&link=abc"),
+        );
+        release.info_hash = Some("0123456789abcdef0123456789abcdef01234567".to_owned());
+        let release = release.into_release().expect("a torrent result");
+        assert!(matches!(
+            release.source,
+            ReleaseSource::Torrent(TorrentSource::InfoHash(_))
+        ));
+        let debug = format!("{release:?}");
+        assert!(!debug.contains("SECRET"), "{debug}");
+        assert!(!debug.contains("0123456789abcdef"), "{debug}");
+    }
+
+    /// The API key is a header and is only safe to the origin it belongs to.
+    #[test]
+    fn only_the_configured_origin_is_sent_the_key() {
+        let client = Prowlarr::new("http://127.0.0.1:9696", "SECRET".to_owned()).expect("a client");
+        assert!(client.same_origin("http://127.0.0.1:9696/5/download?link=abc"));
+        assert!(
+            !client.same_origin("http://127.0.0.1:1/download?link=abc"),
+            "another port is another origin"
+        );
+        assert!(
+            !client.same_origin("https://127.0.0.1:9696/5/download?link=abc"),
+            "another scheme is another origin"
+        );
+        assert!(!client.same_origin("http://example.test/5/download?link=abc"));
+    }
+
+    /// The credential is stripped before the URL is stored, and neither the source nor a fetch
+    /// error ever prints the URL or the key.
+    #[tokio::test]
+    async fn a_download_url_and_its_fetch_error_never_show_the_key() {
+        let source = ReleaseSource::Torrent(TorrentSource::TorrentUrl(
+            "http://127.0.0.1:1/download?apikey=SECRET&link=abc".to_owned(),
+        ));
+        let debug = format!("{source:?}");
+        assert!(!debug.contains("SECRET"), "{debug}");
+        assert!(!debug.contains("127.0.0.1:1"), "{debug}");
+        assert!(
+            !format!(
+                "{:?}",
+                FetchedRelease::Magnet("magnet:?xt=urn:btih:SECRET".to_owned())
+            )
+            .contains("SECRET")
+        );
+
+        let client = Prowlarr::new("http://127.0.0.1:9696", "SECRET".to_owned()).expect("a client");
+        let error = client
+            .fetch(&source)
+            .await
+            .expect_err("nothing listens on port 1");
+        for text in [format!("{error}"), format!("{error:?}")] {
+            assert!(!text.contains("SECRET"), "{text}");
+            assert!(!text.contains("127.0.0.1:1"), "{text}");
+        }
     }
 
     #[test]

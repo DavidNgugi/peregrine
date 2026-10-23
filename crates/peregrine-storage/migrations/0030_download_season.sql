@@ -1,0 +1,15 @@
+-- The season a download job is for: a pack's whole season, or the season of the episode it names.
+--
+-- # Why it is a column rather than derived
+--
+-- A season pack names no episode, so episode_id is NULL and the row had no way to say which season
+-- it was started for; the queue could only show the release name. The season is what the request
+-- named, not something a read can recover from the payload once it lands, so it is stored beside
+-- the request that chose it.
+--
+-- # Why it is nullable and has no constraint
+--
+-- Every row written before this migration is a title or a single episode and has no season to
+-- record, so the column starts NULL and no backfill would be guessing. Season 0 is meaningful
+-- (specials), so a CHECK cannot exclude it, and the only writer is the job that parsed the request.
+ALTER TABLE download_job ADD COLUMN season_number INTEGER;

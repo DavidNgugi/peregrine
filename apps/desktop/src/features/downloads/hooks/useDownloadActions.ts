@@ -11,6 +11,7 @@ import {
   commands,
   deleteDownload,
   dismissDownload,
+  findDownloadPeers,
   normalizeIpcError,
   pauseDownload,
   planDownloadDeletion,
@@ -33,6 +34,8 @@ export interface DownloadActions {
   readonly error: IpcError | null;
   readonly pause: (id: number) => Promise<void>;
   readonly resume: (id: number) => Promise<void>;
+  /** Asks one torrent's swarm for peers again, without changing its state. */
+  readonly findPeers: (id: number) => Promise<void>;
   readonly remove: (id: number) => Promise<void>;
   /** Clears one finished entry from the queue. */
   readonly dismiss: (id: number) => Promise<void>;
@@ -77,6 +80,10 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
 
   const pause = useCallback((id: number) => move(id, pauseDownload, "pauseDownload"), [move]);
   const resume = useCallback((id: number) => move(id, resumeDownload, "resumeDownload"), [move]);
+  const findPeers = useCallback(
+    (id: number) => move(id, findDownloadPeers, "findDownloadPeers"),
+    [move],
+  );
   const remove = useCallback((id: number) => move(id, removeDownload, "removeDownload"), [move]);
   const dismiss = useCallback((id: number) => move(id, dismissDownload, "dismissDownload"), [move]);
   const deleteFiles = useCallback(
@@ -131,6 +138,7 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     ...state,
     pause,
     resume,
+    findPeers,
     remove,
     dismiss,
     clearFinished,

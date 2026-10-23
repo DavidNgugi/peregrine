@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use peregrine_domain::Clock;
 use peregrine_secrets::SecretStore;
-use peregrine_storage::{Database, JobChange};
+use peregrine_storage::{Database, JobChange, JobPhase};
 use peregrine_sync::{Job, JobContext, JobError, JobFuture};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -179,10 +180,39 @@ async fn phase(
     ));
 }
 
+/// Records the phase a job ended in.
+///
+/// **This is what releases the dedupe key.** `job_dedupe_uq` is a partial unique index over the
+/// non-terminal phases, so a row left `queued` holds its key for the life of the process and every
+/// later submission is refused by the index — the screen then reports the storage layer's bare
+/// "a statement failed" and the pack can never be started again without a relaunch. A journal
+/// failure is logged and does not fail the job, which is the rule every job here follows.
+async fn finish(
+    database: &Database,
+    journal_id: i64,
+    clock: &(dyn Clock + Send + Sync),
+    phase: JobPhase,
+    detail: Option<String>,
+) {
+    let error_code = detail
+        .as_ref()
+        .map(|_| crate::jobs::INTERNAL_CODE.to_owned());
+    let change = JobChange::Finished {
+        at: clock.now().as_millisecond(),
+        phase,
+        error_code,
+        error: detail,
+    };
+    if let Err(error) = database.update_job(journal_id, change).await {
+        debug!(%error, "the job's final phase could not be journalled");
+    }
+}
+
 /// Downloads, verifies, and unpacks the pinned Prowlarr.
 pub struct ProwlarrInstallJob {
     database: Arc<Database>,
     bus: Arc<EventBus>,
+    clock: Arc<dyn Clock + Send + Sync>,
     managed: Arc<Managed>,
     data_dir: PathBuf,
     journal_id: i64,
@@ -194,6 +224,7 @@ impl ProwlarrInstallJob {
     pub fn new(
         database: Arc<Database>,
         bus: Arc<EventBus>,
+        clock: Arc<dyn Clock + Send + Sync>,
         managed: Arc<Managed>,
         data_dir: PathBuf,
         journal_id: i64,
@@ -201,6 +232,7 @@ impl ProwlarrInstallJob {
         Self {
             database,
             bus,
+            clock,
             managed,
             data_dir,
             journal_id,
@@ -217,9 +249,21 @@ impl ProwlarrInstallJob {
         phase(&self.database, &self.bus, self.journal_id, job, attempt, 50).await;
         let installed = prowlarr::install(&self.data_dir, &self.managed.progress).await;
         self.managed.set_phase(Phase::Idle);
-        let installed = installed.map_err(|error| {
-            JobError::failed(format!("the Prowlarr pack could not be installed: {error}"))
-        })?;
+        let installed = match installed {
+            Ok(installed) => installed,
+            Err(error) => {
+                let detail = format!("the Prowlarr pack could not be installed: {error}");
+                finish(
+                    &self.database,
+                    self.journal_id,
+                    &*self.clock,
+                    JobPhase::Failed,
+                    Some(detail.clone()),
+                )
+                .await;
+                return Err(JobError::failed(detail));
+            }
+        };
         self.managed.set_installed(installed);
         phase(
             &self.database,
@@ -228,6 +272,14 @@ impl ProwlarrInstallJob {
             job,
             attempt,
             1000,
+        )
+        .await;
+        finish(
+            &self.database,
+            self.journal_id,
+            &*self.clock,
+            JobPhase::Succeeded,
+            None,
         )
         .await;
         Ok(Box::new(()))
@@ -247,6 +299,7 @@ impl Job for ProwlarrInstallJob {
 pub struct ProwlarrStartJob {
     database: Arc<Database>,
     bus: Arc<EventBus>,
+    clock: Arc<dyn Clock + Send + Sync>,
     managed: Arc<Managed>,
     store: Arc<dyn SecretStore>,
     data_dir: PathBuf,
@@ -259,6 +312,7 @@ impl ProwlarrStartJob {
     pub fn new(
         database: Arc<Database>,
         bus: Arc<EventBus>,
+        clock: Arc<dyn Clock + Send + Sync>,
         managed: Arc<Managed>,
         store: Arc<dyn SecretStore>,
         data_dir: PathBuf,
@@ -267,6 +321,7 @@ impl ProwlarrStartJob {
         Self {
             database,
             bus,
+            clock,
             managed,
             store,
             data_dir,
@@ -282,13 +337,30 @@ impl ProwlarrStartJob {
     ) -> peregrine_sync::JobResult {
         if self.managed.is_running() {
             // One managed instance is all there can be, so a second Start is a no-op rather than
-            // a second spawn fighting for the same port and config directory.
+            // a second spawn fighting for the same port and config directory. The row still has
+            // to reach a terminal phase, because it is the row holding the dedupe key.
+            finish(
+                &self.database,
+                self.journal_id,
+                &*self.clock,
+                JobPhase::Succeeded,
+                None,
+            )
+            .await;
             return Ok(Box::new(()));
         }
-        let installed = self
-            .managed
-            .installed_pack()
-            .ok_or_else(|| JobError::failed("the Prowlarr pack is not installed yet"))?;
+        let Some(installed) = self.managed.installed_pack() else {
+            let detail = "the Prowlarr pack is not installed yet".to_owned();
+            finish(
+                &self.database,
+                self.journal_id,
+                &*self.clock,
+                JobPhase::Failed,
+                Some(detail.clone()),
+            )
+            .await;
+            return Err(JobError::failed(detail));
+        };
         self.managed.set_phase(Phase::Starting);
         phase(
             &self.database,
@@ -301,14 +373,24 @@ impl ProwlarrStartJob {
         .await;
         let started = Supervisor::start(&installed, Arc::clone(&self.store), &self.data_dir).await;
         self.managed.set_phase(Phase::Idle);
-        let supervisor = started.map_err(|error| {
-            // The scheduler logs only "failed" and leaves the row queued, so without this the
-            // reason a managed start refused is invisible outside a debugger.
-            warn!(%error, "the managed Prowlarr could not be started");
-            JobError::failed(format!(
-                "the managed Prowlarr could not be started: {error}"
-            ))
-        })?;
+        let supervisor = match started {
+            Ok(supervisor) => supervisor,
+            Err(error) => {
+                // The reason a managed start refused is otherwise invisible outside a debugger,
+                // and the row is the only place it survives the process.
+                warn!(%error, "the managed Prowlarr could not be started");
+                let detail = format!("the managed Prowlarr could not be started: {error}");
+                finish(
+                    &self.database,
+                    self.journal_id,
+                    &*self.clock,
+                    JobPhase::Failed,
+                    Some(detail.clone()),
+                )
+                .await;
+                return Err(JobError::failed(detail));
+            }
+        };
         self.managed.set_supervisor(supervisor);
         self.seed_default_indexers().await;
         phase(
@@ -318,6 +400,14 @@ impl ProwlarrStartJob {
             job,
             attempt,
             1000,
+        )
+        .await;
+        finish(
+            &self.database,
+            self.journal_id,
+            &*self.clock,
+            JobPhase::Succeeded,
+            None,
         )
         .await;
         Ok(Box::new(()))
@@ -400,5 +490,98 @@ impl Job for ProwlarrStartJob {
         let attempt = context.attempt();
         let cancellation = context.cancellation().clone();
         Box::pin(self.start(job, attempt, cancellation))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::EventSink;
+    use crate::testing::RecordingSink;
+    use peregrine_storage::NewJob;
+    use peregrine_sync::{JobOutcome, JobSpec, Scheduler, SchedulerConfig};
+    use peregrine_testkit::{CountingIds, FakeClock, MemorySecretStore};
+    use tempfile::TempDir;
+
+    const NOW: i64 = 1_700_000_000_000;
+
+    /// A start that cannot even begin still closes its journal row.
+    ///
+    /// **That is what frees the dedupe key.** `job_dedupe_uq` is a partial unique index over the
+    /// non-terminal phases, so a row this job walks away from while `queued` holds
+    /// `prowlarr.start` for the life of the process, and the next Start is refused by the index —
+    /// which the screen reports as "The library database rejected a statement." rather than as
+    /// anything to do with Prowlarr.
+    #[tokio::test]
+    async fn a_start_that_fails_journals_failure_and_frees_its_key() {
+        let directory = TempDir::new().unwrap();
+        let database = Arc::new(
+            Database::open(directory.path().join("peregrine.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let bus = Arc::new(EventBus::new(
+            Arc::new(RecordingSink::default()) as Arc<dyn EventSink>
+        ));
+        let clock: Arc<dyn Clock + Send + Sync> = Arc::new(FakeClock::at(NOW));
+        let store: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
+        let journal = |kind: &str| NewJob {
+            kind: kind.to_owned(),
+            priority: PRIORITY,
+            dedupe_key: Some(kind.to_owned()),
+            payload_json: "{}".to_owned(),
+            max_attempts: 1,
+            created_at: NOW,
+        };
+
+        let journal_id = database.insert_job(journal(START_KIND)).await.unwrap();
+        let scheduler = Scheduler::new(SchedulerConfig::new(
+            Arc::clone(&clock),
+            Arc::new(CountingIds::default()),
+        ));
+        let job = ProwlarrStartJob::new(
+            Arc::clone(&database),
+            bus,
+            Arc::clone(&clock),
+            Arc::new(Managed::default()),
+            store,
+            directory.path().join("data"),
+            journal_id,
+        );
+        let handle = scheduler
+            .submit(
+                JobSpec {
+                    kind: START_KIND.to_owned(),
+                    priority: PRIORITY,
+                    dedupe_key: Some(START_KIND.to_owned()),
+                    max_attempts: 1,
+                },
+                job,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(handle.wait().await.outcome(), JobOutcome::Failed(_)),
+            "a pack that is not installed cannot be started"
+        );
+
+        let row = database
+            .job(journal_id)
+            .await
+            .unwrap()
+            .expect("the row exists");
+        assert_eq!(row.state, JobPhase::Failed, "the row is terminal");
+        assert!(
+            row.last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("not installed")),
+            "the row says why: {:?}",
+            row.last_error
+        );
+        database
+            .insert_job(journal(START_KIND))
+            .await
+            .expect("the dedupe key was released");
     }
 }

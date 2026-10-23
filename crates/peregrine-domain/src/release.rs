@@ -8,6 +8,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::catalogue::TitleKind;
+
 /// Vertical resolution a release declares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Resolution {
@@ -407,6 +409,7 @@ pub struct ReleaseName {
     group: Option<String>,
     repack: Option<RepackKind>,
     season: Option<u32>,
+    seasons: Option<EpisodeSpan>,
     episodes: Option<EpisodeSpan>,
     season_pack: bool,
 }
@@ -441,6 +444,7 @@ impl ReleaseName {
             group,
             repack,
             season: scanned.season,
+            seasons: scanned.seasons,
             episodes: scanned.episodes,
             season_pack,
         }
@@ -501,6 +505,19 @@ impl ReleaseName {
         self.season_pack
     }
 
+    /// True when the name places its files in more than one season.
+    ///
+    /// `S01-S04` names a range and `S01 2 3 4 5` names a run of consecutive seasons; a single
+    /// `S01` does not. The first season is still what [`Self::season`] answers, because a pack's
+    /// files have to be attributed to the range's start; the range is what tells a caller it
+    /// cannot know where one season ends.
+    pub const fn is_multi_season(&self) -> bool {
+        match self.seasons {
+            Some(span) => span.is_multi(),
+            None => false,
+        }
+    }
+
     /// True when the release is exactly one episode of `season`.
     ///
     /// A season pack names no episode and a multi-episode span names several, so neither
@@ -515,6 +532,99 @@ impl ReleaseName {
     }
 }
 
+/// The longest title, in words, whose film year has to be checked to tell it from another release.
+///
+/// One- and two-word titles are the ones an indexer shares with an unrelated release: `Her` is a
+/// word inside an anime episode's name, `It` and `Up` are ordinary words, and `The Matrix` is the
+/// prefix of `The Matrix Reloaded`. Three or more words are specific enough that the contiguous
+/// run is the evidence — `The Matrix Reloaded` does not contain the three-word title `The Matrix
+/// Resurrections` — so requiring a year there would only add a false refusal.
+const AMBIGUOUS_TITLE_WORDS: usize = 2;
+
+/// The range a four-digit release token must fall in to be a release year rather than a number.
+const FIRST_RELEASE_YEAR: u32 = 1870;
+/// The other end of that range, wide enough for a release dated ahead of today.
+const LAST_RELEASE_YEAR: u32 = 2100;
+
+/// True when `release` names the title `title`.
+///
+/// The comparison is on words, not bytes: both sides are lowercased and split on every
+/// non-alphanumeric character, so `Her.2013.1080p.BluRay` and `Her (2013) [1080p]` both carry the
+/// words `her` and `2013`. The title's words must appear as one **contiguous** run of the
+/// release's words, which is what stops `Her` from matching `... and Her Foodie ...` while still
+/// allowing a group prefix or a language tag before it.
+///
+/// A film request never accepts a release that names an episode: the anime release this rule
+/// exists for is `Some.Show.S02E05.Her.HDTV`, and its `S02E05` is what makes it a different work
+/// however the rest of its name reads.
+///
+/// A one- or two-word film title is ambiguous for the reason [`AMBIGUOUS_TITLE_WORDS`] gives, so
+/// the year disambiguates it. A release that states a year must state the catalogue's year; a
+/// release that states no year is accepted only when its words are the title's words and nothing
+/// else (`Her`), because `The Matrix Reloaded` with no year is otherwise indistinguishable from
+/// `The Matrix`. A film whose catalogue year is unknown cannot be checked, so only the words and
+/// the episode rule apply. A series request ignores the year: a series is named by the same title
+/// every season, and its season and episode markers say which part is wanted.
+#[must_use]
+pub fn release_names_title(
+    release: &ReleaseName,
+    title: &str,
+    kind: TitleKind,
+    year: Option<u32>,
+) -> bool {
+    if kind == TitleKind::Movie && release.episodes().is_some() {
+        return false;
+    }
+
+    let wanted = title_words(title);
+    let actual = title_words(release.raw());
+    let Some(start) = wanted_run(&actual, &wanted) else {
+        return false;
+    };
+    if kind != TitleKind::Movie || wanted.len() > AMBIGUOUS_TITLE_WORDS {
+        return true;
+    }
+
+    let stated = stated_years(&actual, start, wanted.len());
+    if stated.is_empty() {
+        return actual == wanted;
+    }
+    year.is_none_or(|year| stated.iter().all(|stated| *stated == year))
+}
+
+/// The lowercase alphanumeric words in `text`, in order.
+fn title_words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Where `wanted` appears as one contiguous run of `actual`.
+fn wanted_run(actual: &[String], wanted: &[String]) -> Option<usize> {
+    if wanted.is_empty() || wanted.len() > actual.len() {
+        return None;
+    }
+    actual
+        .windows(wanted.len())
+        .position(|window| window == wanted)
+}
+
+/// The four-digit years `words` states outside the title's own run.
+///
+/// The run is skipped so a film whose name is a year (`2012`) is not read as its own release
+/// date, which would make that title impossible to match.
+fn stated_years(words: &[String], skip_start: usize, skip_len: usize) -> Vec<u32> {
+    words
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index < skip_start || *index >= skip_start + skip_len)
+        .filter_map(|(_, word)| word.parse::<u32>().ok())
+        .filter(|year| (FIRST_RELEASE_YEAR..=LAST_RELEASE_YEAR).contains(year))
+        .collect()
+}
+
 #[derive(Debug, Default)]
 struct ReleaseFields {
     resolution: Option<Resolution>,
@@ -527,6 +637,7 @@ struct ReleaseFields {
 #[derive(Debug, Default)]
 struct SeasonScan {
     season: Option<u32>,
+    seasons: Option<EpisodeSpan>,
     episodes: Option<EpisodeSpan>,
     complete: bool,
     spans: Vec<(usize, usize)>,
@@ -1071,6 +1182,10 @@ fn scan_seasons_and_episodes(bytes: &[u8]) -> SeasonScan {
     while index < bytes.len() {
         if let Some((end, season, span)) = match_episode(bytes, index) {
             scan.season.get_or_insert(season);
+            scan.seasons = Some(match scan.seasons {
+                Some(existing) => existing.union(EpisodeSpan::new(season, season)),
+                None => EpisodeSpan::new(season, season),
+            });
             scan.episodes = Some(match scan.episodes {
                 Some(existing) => existing.union(span),
                 None => span,
@@ -1079,14 +1194,22 @@ fn scan_seasons_and_episodes(bytes: &[u8]) -> SeasonScan {
             index = end;
             continue;
         }
-        if let Some((end, season)) = match_season(bytes, index) {
-            scan.season.get_or_insert(season);
+        if let Some((end, span)) = match_season(bytes, index) {
+            scan.season.get_or_insert(span.first());
+            scan.seasons = Some(match scan.seasons {
+                Some(existing) => existing.union(span),
+                None => span,
+            });
             scan.spans.push((index, end));
             index = end;
             continue;
         }
-        if let Some((end, season)) = match_season_word(bytes, index) {
-            scan.season.get_or_insert(season);
+        if let Some((end, span)) = match_season_word(bytes, index) {
+            scan.season.get_or_insert(span.first());
+            scan.seasons = Some(match scan.seasons {
+                Some(existing) => existing.union(span),
+                None => span,
+            });
             scan.spans.push((index, end));
             index = end;
             continue;
@@ -1146,8 +1269,8 @@ fn match_episode_extension(bytes: &[u8], index: usize) -> Option<(u32, usize)> {
     Some((episode, end))
 }
 
-/// Matches a standalone `S01` season marker.
-fn match_season(bytes: &[u8], index: usize) -> Option<(usize, u32)> {
+/// Matches a standalone `S01` season marker and any trailing season-number run.
+fn match_season(bytes: &[u8], index: usize) -> Option<(usize, EpisodeSpan)> {
     if !matches!(bytes.get(index), Some(b's' | b'S')) {
         return None;
     }
@@ -1158,11 +1281,58 @@ fn match_season(bytes: &[u8], index: usize) -> Option<(usize, u32)> {
     if bytes.get(end).is_some_and(u8::is_ascii_alphanumeric) {
         return None;
     }
-    Some((end, season))
+    Some(season_run(bytes, end, season))
 }
 
-/// Matches `Season 1`, `Season.1`, and `Season1`.
-fn match_season_word(bytes: &[u8], index: usize) -> Option<(usize, u32)> {
+/// Extends a season marker over a trailing run of consecutive season numbers.
+///
+/// `S01 2 3 4 5` is a five-season shorthand: the numbers after the marker are the rest of the
+/// range, not episodes, a resolution, or a year. A single trailing number is ambiguous with a
+/// channel layout such as `2.0`, so a run is at least two further consecutive seasons; a number
+/// with a letter suffix (`1080p`) is never part of one.
+fn season_run(bytes: &[u8], end: usize, first: u32) -> (usize, EpisodeSpan) {
+    let mut last = first;
+    let mut cursor = end;
+    let mut accepted = end;
+    let mut length = 0u32;
+    while let Some((season, next)) = season_number_after(bytes, cursor) {
+        if season != last + 1 {
+            break;
+        }
+        last = season;
+        cursor = next;
+        length += 1;
+        if length >= 2 {
+            accepted = next;
+        }
+    }
+    if length >= 2 {
+        (accepted, EpisodeSpan::new(first, last))
+    } else {
+        (end, EpisodeSpan::new(first, first))
+    }
+}
+
+/// The next standalone season number after a separator, if there is one.
+fn season_number_after(bytes: &[u8], index: usize) -> Option<(u32, usize)> {
+    let mut cursor = index;
+    let mut separated = false;
+    while matches!(bytes.get(cursor), Some(b'.' | b' ' | b'_' | b'-')) {
+        cursor += 1;
+        separated = true;
+    }
+    if !separated {
+        return None;
+    }
+    let (season, end) = read_digits(bytes, cursor, 3)?;
+    if bytes.get(end).is_some_and(u8::is_ascii_alphanumeric) {
+        return None;
+    }
+    Some((season, end))
+}
+
+/// Matches `Season 1`, `Season.1`, and `Season1`, plus a trailing season-number run.
+fn match_season_word(bytes: &[u8], index: usize) -> Option<(usize, EpisodeSpan)> {
     const WORD: &[u8] = b"season";
     if index > 0 && bytes[index - 1].is_ascii_alphabetic() {
         return None;
@@ -1182,7 +1352,7 @@ fn match_season_word(bytes: &[u8], index: usize) -> Option<(usize, u32)> {
     if bytes.get(end).is_some_and(u8::is_ascii_alphanumeric) {
         return None;
     }
-    Some((end, season))
+    Some(season_run(bytes, end, season))
 }
 
 /// Matches the `COMPLETE` season-pack marker.
@@ -1495,6 +1665,71 @@ mod tests {
     }
 
     #[test]
+    fn a_season_range_says_where_one_season_ends() {
+        let range = parsed("Peppa.Pig.S01-S04.Complete.1080p.WEB-DL.x264-GROUP");
+        assert_eq!(
+            range.season(),
+            Some(1),
+            "the range starts at the first season"
+        );
+        assert!(range.is_season_pack());
+        assert!(
+            range.is_multi_season(),
+            "a pack naming S01-S04 covers more than one season"
+        );
+
+        let single = parsed("Peppa.Pig.S01.Complete.1080p.WEB-DL.x264-GROUP");
+        assert!(!single.is_multi_season(), "one season marker is one season");
+
+        let episode = parsed("Show.Name.S01E01E02.1080p.WEB-DL.x264-GROUP");
+        assert!(
+            !episode.is_multi_season(),
+            "an episode span inside one season does not make the release multi-season"
+        );
+
+        let unnumbered = parsed("Show.Name.COMPLETE.1080p.BluRay.x264-GROUP");
+        assert!(!unnumbered.is_multi_season());
+    }
+
+    /// The live title: a trailing run of consecutive season numbers is a multi-season
+    /// shorthand, not one season. A resolution number has a letter suffix and is not part of it.
+    #[test]
+    fn a_trailing_run_of_season_numbers_is_multi_season() {
+        let live = parsed("Peppa Pig S01 2 3 4 5");
+        assert_eq!(live.season(), Some(1));
+        assert!(live.is_season_pack());
+        assert!(
+            live.is_multi_season(),
+            "S01 2 3 4 5 covers five seasons, not one"
+        );
+        assert_eq!(
+            live.episodes(),
+            None,
+            "the trailing numbers are seasons, not episodes"
+        );
+
+        let word_form = parsed("Show Season 1 2 3");
+        assert!(
+            word_form.is_multi_season(),
+            "the word form accepts the same run"
+        );
+
+        let single = parsed("Peppa Pig S01 1080p");
+        assert_eq!(single.season(), Some(1));
+        assert!(single.is_season_pack());
+        assert!(
+            !single.is_multi_season(),
+            "1080p is a resolution, not a season"
+        );
+
+        let ambiguous = parsed("Show S01 2.0 1080p");
+        assert!(
+            !ambiguous.is_multi_season(),
+            "one number beside a channel layout is not a run"
+        );
+    }
+
+    #[test]
     fn episodes_take_precedence_over_a_pack_marker() {
         let release = parsed("Show.Name.S01E01E02.COMPLETE.1080p.WEB-DL.x264-GROUP");
         assert!(!release.is_season_pack());
@@ -1671,6 +1906,100 @@ mod tests {
         assert_eq!(release.episodes().map(EpisodeSpan::last), Some(1));
     }
 
+    /// True when `release` names `title` for the kind and year given.
+    fn names(release: &str, title: &str, kind: TitleKind, year: Option<u32>) -> bool {
+        release_names_title(&parsed(release), title, kind, year)
+    }
+
+    #[test]
+    fn a_film_release_that_states_the_year_names_the_film() {
+        assert!(names(
+            "Her.2013.1080p.BluRay.x264.DTS-GROUP",
+            "Her",
+            TitleKind::Movie,
+            Some(2013)
+        ));
+    }
+
+    #[test]
+    fn a_bare_title_names_the_film() {
+        assert!(names("Her", "Her", TitleKind::Movie, Some(2013)));
+    }
+
+    #[test]
+    fn an_episode_release_never_names_a_film() {
+        assert!(!names(
+            "Some.Show.S02E05.Her.HDTV",
+            "Her",
+            TitleKind::Movie,
+            Some(2013)
+        ));
+    }
+
+    #[test]
+    fn a_different_year_is_rejected_for_an_ambiguous_title() {
+        assert!(!names(
+            "Her.2014.1080p.BluRay.x264.DTS-GROUP",
+            "Her",
+            TitleKind::Movie,
+            Some(2013)
+        ));
+    }
+
+    #[test]
+    fn an_extra_title_word_needs_the_year_to_match() {
+        assert!(!names(
+            "The.Matrix.Reloaded.1080p.BluRay.x264.DTS-GROUP",
+            "The Matrix",
+            TitleKind::Movie,
+            Some(1999)
+        ));
+        assert!(!names(
+            "The.Matrix.Reloaded.2003.1080p.BluRay.x264.DTS-GROUP",
+            "The Matrix",
+            TitleKind::Movie,
+            Some(1999)
+        ));
+        assert!(names(
+            "The.Matrix.Reloaded.1999.1080p.BluRay.x264.DTS-GROUP",
+            "The Matrix",
+            TitleKind::Movie,
+            Some(1999)
+        ));
+    }
+
+    #[test]
+    fn a_series_release_names_the_series() {
+        assert!(names(
+            "Peppa.Pig.S01.1080p.WEB-DL.x264.DTS-GROUP",
+            "Peppa Pig",
+            TitleKind::Show,
+            None
+        ));
+        assert!(names(
+            "Peppa.Pig.S01E04.Muddy.Puddles.1080p.WEB-DL.x264-GROUP",
+            "Peppa Pig",
+            TitleKind::Show,
+            None
+        ));
+    }
+
+    #[test]
+    fn a_release_naming_another_title_is_not_a_candidate() {
+        assert!(!names(
+            "Peppa.Pig.S01.1080p.WEB-DL.x264.DTS-GROUP",
+            "Show",
+            TitleKind::Show,
+            None
+        ));
+        assert!(!names(
+            "Some.Other.Film.2013.1080p.BluRay.x264.DTS-GROUP",
+            "Her",
+            TitleKind::Movie,
+            Some(2013)
+        ));
+    }
+
     proptest! {
         #[test]
         fn parse_never_panics_on_arbitrary_input(input in any::<String>()) {
@@ -1680,6 +2009,16 @@ mod tests {
         #[test]
         fn parse_never_panics_on_separator_soup(input in "[._\\-\\[\\]() ]{0,512}") {
             let _ = ReleaseName::parse(&input);
+        }
+
+        #[test]
+        fn title_matching_never_panics(
+            release in any::<String>(),
+            title in any::<String>(),
+        ) {
+            let parsed = ReleaseName::parse(&release);
+            let _ = release_names_title(&parsed, &title, TitleKind::Movie, Some(1999));
+            let _ = release_names_title(&parsed, &title, TitleKind::Show, None);
         }
     }
 }

@@ -40,7 +40,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use peregrine_domain::catalogue::ImageKind;
+use peregrine_domain::catalogue::{CAPTURED_STILL_PROVIDER, ImageKind};
 use peregrine_domain::id::Provider;
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
@@ -148,6 +148,22 @@ impl ImageKey {
     #[must_use]
     pub fn for_image(provider: Provider, path: &str, variant: ImageVariant) -> Self {
         Self::digest(provider.as_str(), path, variant)
+    }
+
+    /// The key a still captured from one episode's own file is stored under.
+    ///
+    /// **`capture` in the provider slot and the episode's id in the path slot**, the same shape
+    /// [`Self::for_local_title`] uses and for the same reason: `image_cache`'s three columns stay one
+    /// shape, and the episode's own `still_provider`/`still_path` record the same pair. A captured
+    /// still is not a provider's picture, so it must not collide with one: the owner slot is what
+    /// keeps a TMDB still and a captured frame for the same episode in two blobs.
+    #[must_use]
+    pub fn for_captured_still(episode_id: i64) -> Self {
+        Self::digest(
+            CAPTURED_STILL_PROVIDER,
+            &episode_id.to_string(),
+            ImageVariant::StillW300,
+        )
     }
 
     /// `sha256(owner|path|variant)`, lowercase hex — the one place the key is spelled.
@@ -514,6 +530,33 @@ mod tests {
             "and the variant is what keeps a local poster from answering a backdrop lookup"
         );
         assert_eq!(seven.as_str().len(), 64, "still a hex digest: {seven}");
+    }
+
+    #[test]
+    fn a_captured_still_is_keyed_by_its_episode_and_can_never_collide_with_a_provider_s() {
+        // The capture is the fallback a card draws when no provider has a still, so two episodes
+        // must have two blobs, and a capture must never be the blob a provider's own still is
+        // fetched to — a collision would let a filmed frame shadow the picture about to arrive.
+        let three = ImageKey::for_captured_still(3);
+        let four = ImageKey::for_captured_still(4);
+
+        assert_ne!(three, four);
+        assert_eq!(
+            three,
+            ImageKey::for_captured_still(3),
+            "the same episode always has the same key, or a second import writes a competitor"
+        );
+        assert_ne!(
+            three,
+            ImageKey::for_image(Provider::Tmdb, "3", ImageVariant::StillW300),
+            "the owner slot is what keeps a capture apart from a provider's still"
+        );
+        assert_ne!(
+            three,
+            ImageKey::for_local_title(3, ImageVariant::LocalPoster),
+            "a captured still is not a title's generated poster"
+        );
+        assert_eq!(three.as_str().len(), 64, "still a hex digest: {three}");
     }
 
     #[test]

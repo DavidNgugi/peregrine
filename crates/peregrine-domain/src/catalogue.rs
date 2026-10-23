@@ -312,6 +312,15 @@ pub enum ImageKind {
     Logo,
 }
 
+/// The `still_provider` value for a still this machine captured from an episode's own file.
+///
+/// Deliberately **not** a [`Provider`](peregrine_domain::Provider) variant: that enum is the closed set of
+/// metadata services and an external id carries one, so a "capture" member would put something no
+/// service serves into a type whose whole job is naming services. The column has no constraint on it,
+/// and this one spelling is shared by the key (`peregrine_sync::ImageKey`), the cache row
+/// (`image_cache.provider`), and the episode's own `still_provider` so the three cannot drift.
+pub const CAPTURED_STILL_PROVIDER: &str = "capture";
+
 /// How a service offers a title, in the order the interface lists the groups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

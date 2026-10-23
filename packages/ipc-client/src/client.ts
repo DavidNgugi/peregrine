@@ -37,6 +37,7 @@ import type {
   DownloadJobDto,
   ReleaseOfferDto,
   NotificationDto,
+  NotificationPreferencesDto,
   ContinueWatchingDto,
   WatchDayDto,
   WatchHistoryDto,
@@ -131,6 +132,20 @@ export async function acquire(
   );
 }
 
+/**
+ * Asks the core to find and queue a whole season of a title.
+ *
+ * The job searches once and acquires the better-seeded side — the season pack or a single episode
+ * of that season — so the caller names the season and nothing else (PG-E12-16).
+ */
+export async function acquireSeason(
+  titleId: number,
+  season: number,
+  minSeeders?: number,
+): Promise<JobStarted> {
+  return unwrap(commands.acquireSeason({ id: titleId }, season, minSeeders ?? null));
+}
+
 /** The transfer queue, newest first. */
 export async function listDownloads(): Promise<DownloadJobDto[]> {
   return unwrap(commands.listDownloads());
@@ -176,6 +191,11 @@ export async function resumeDownload(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.resumeDownload({ id }));
 }
 
+/** Asks a torrent's swarm for peers again, answering the row as it stands after the move. */
+export async function findDownloadPeers(id: number): Promise<DownloadJobDto> {
+  return unwrap(commands.findDownloadPeers({ id }));
+}
+
 /** Removes one job from the queue. Files already written are a different operation. */
 export async function removeDownload(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.removeDownload({ id }));
@@ -209,6 +229,23 @@ export async function clearFinishedDownloads(): Promise<number> {
  */
 export async function listReleaseOffers(titleId: number): Promise<ReleaseOfferDto[]> {
   return unwrap(commands.listReleaseOffers({ id: titleId }));
+}
+
+/** The user's notification consent and the catalogue defaults around it. */
+export async function notificationPreferences(): Promise<NotificationPreferencesDto> {
+  return unwrap(commands.notificationPreferences());
+}
+
+/**
+ * Records the user's answer to the notification consent question.
+ *
+ * The screen asks the operating system first when the answer is `true`, so the value it sends is
+ * the effective decision rather than the intent (R31: the user is asked, never defaulted).
+ */
+export async function setNotificationConsent(
+  granted: boolean,
+): Promise<NotificationPreferencesDto> {
+  return unwrap(commands.setNotificationConsent(granted));
 }
 
 /** The recent notification centre rows, newest first (R31 makes the row the record). */

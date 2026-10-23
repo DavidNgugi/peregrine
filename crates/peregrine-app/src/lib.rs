@@ -8,6 +8,7 @@
 pub mod acquisition;
 pub mod artwork;
 mod backup;
+mod episode_stills;
 pub mod events;
 pub mod indexers;
 pub mod jobs;

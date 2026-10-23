@@ -10,6 +10,12 @@
 //!   first handler reports nothing at all, ever.
 //! * the **rotating int32 id** the plugin requires, persisted in the app data directory.
 //!
+//! The adapter is handed to the core at startup through `peregrine_ipc::install_os_notifier`,
+//! before the runtime composes its notification service; the core names no Tauri type
+//! (AGENTS R8). Consent stays the core's question and is not asked here: the shell requests the
+//! *OS* permission once, in `setup`, and the adapter reports a refusal on every event rather
+//! than prompting from a background path (AGENTS R31).
+//!
 //! # What the plugin can and cannot tell us
 //!
 //! `tauri-plugin-notification` 2.6.0 is fire-and-forget: `show()` prepares the payload and
@@ -40,11 +46,11 @@
 //! which is all that matters while it runs.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use peregrine_domain::notify::{NotifyError, OsNotifier, Outgoing};
 use tauri::{AppHandle, Manager as _, Runtime};
-use tauri_plugin_notification::{ActionPerformed, NotificationExt as _};
+use tauri_plugin_notification::{ActionPerformed, NotificationExt as _, PermissionState};
 
 /// The `extra` key a toast carries its deep link under.
 ///
@@ -75,7 +81,7 @@ pub(crate) enum NotificationError {
     DataDirectory(#[source] tauri::Error),
 }
 
-/// Registers the click handler and installs the [`Notifier`] the service is composed with.
+/// Registers the click handler and installs the [`TauriOsNotifier`] the service composes.
 ///
 /// Called once from the shell's `setup`, before the runtime can raise an event and before
 /// the document loads, which is the earliest point at which the ordering ADR 0015 §6
@@ -88,11 +94,24 @@ pub(crate) enum NotificationError {
 /// an app whose toasts do not work still works.
 pub(crate) fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), NotificationError> {
     register_click_handler(app)?;
+    // The OS's own permission is asked for once, here, where the user is in the application —
+    // never from a background tick. On desktop the plugin answers `Granted` without prompting;
+    // a platform that does prompt asks while the app is in front of the person. A refusal is
+    // not fatal: the adapter reports it on every event and the centre keeps the record (R31).
+    match app.notification().request_permission() {
+        Ok(state) => tracing::debug!(?state, "the OS notification permission was requested"),
+        Err(error) => {
+            tracing::warn!(%error, "the OS notification permission could not be requested");
+        }
+    }
     let directory = app
         .path()
         .app_data_dir()
         .map_err(NotificationError::DataDirectory)?;
-    app.manage(Notifier::new(app.clone(), directory.join(ID_COUNTER_FILE)));
+    peregrine_ipc::install_os_notifier(Arc::new(TauriOsNotifier::new(
+        app.clone(),
+        directory.join(ID_COUNTER_FILE),
+    )));
     Ok(())
 }
 
@@ -192,12 +211,12 @@ fn write_last(path: &Path, value: i32) -> std::io::Result<()> {
 }
 
 /// The `OsNotifier` adapter the notification service is composed with.
-pub(crate) struct Notifier<R: Runtime> {
+pub(crate) struct TauriOsNotifier<R: Runtime> {
     app: AppHandle<R>,
     ids: NativeIds,
 }
 
-impl<R: Runtime> Notifier<R> {
+impl<R: Runtime> TauriOsNotifier<R> {
     /// Builds the adapter, reading the counter from `counter_path`.
     fn new(app: AppHandle<R>, counter_path: PathBuf) -> Self {
         Self {
@@ -206,8 +225,23 @@ impl<R: Runtime> Notifier<R> {
         }
     }
 
+    /// The OS's own permission state, read without asking for it.
+    ///
+    /// The request happens once at startup; this never prompts, so a notification raised by a
+    /// background job cannot raise a system dialog. A refusal is the port's failure, which the
+    /// service records on the centre row beside the entry it already wrote (AGENTS R31).
+    fn permitted(&self) -> Result<(), NotifyError> {
+        let state = self
+            .app
+            .notification()
+            .permission_state()
+            .map_err(|error| refusal(&error))?;
+        permission_decision(state)
+    }
+
     /// Hands one toast to the plugin and reports the id it was shown under.
     fn show(&self, outgoing: &Outgoing) -> Result<i32, NotifyError> {
+        self.permitted()?;
         let toast = Toast::of(self.ids.next(), outgoing);
         let mut builder = self
             .app
@@ -231,9 +265,26 @@ impl<R: Runtime> Notifier<R> {
     }
 }
 
-impl<R: Runtime> OsNotifier for Notifier<R> {
+impl<R: Runtime> OsNotifier for TauriOsNotifier<R> {
     fn notify(&self, notification: &Outgoing) -> Result<i32, NotifyError> {
         self.show(notification)
+    }
+}
+
+/// What the port answers for the OS's permission state.
+///
+/// `Prompt` is a refusal rather than a reason to ask: the app's consent is the core's question
+/// (AGENTS R31), and a notification raised in the background must not put a system dialog in
+/// front of the user. The plugin's desktop `permission_state` always answers `Granted`; the
+/// other arms exist because a denial is a fact this adapter must report wherever it occurs.
+fn permission_decision(state: PermissionState) -> Result<(), NotifyError> {
+    match state {
+        PermissionState::Granted => Ok(()),
+        PermissionState::Denied
+        | PermissionState::Prompt
+        | PermissionState::PromptWithRationale => Err(NotifyError::Refused {
+            message: "the system has not granted permission to show notifications".to_owned(),
+        }),
     }
 }
 
@@ -496,6 +547,56 @@ mod tests {
             refusal.to_string(),
             "the notification server refused the toast: the running executable could not be resolved"
         );
+    }
+
+    /// The event's sound switch is what decides whether the plugin is given a sound at all,
+    /// and the value it is given is the one the domain resolved for this platform. PG-E1-21
+    /// owns whether that value is the right one; this adapter holds no second table.
+    #[test]
+    fn the_event_s_sound_switch_decides_whether_a_sound_is_sent() {
+        let sound = Platform::current().system_sound();
+        assert_eq!(
+            Toast::of(
+                1,
+                &outgoing("Download finished", "peregrine://downloads", Some(sound)),
+            )
+            .sound
+            .as_deref(),
+            Some(sound),
+            "switch on: the platform's resolved sound reaches the toast"
+        );
+        assert_eq!(
+            Toast::of(
+                2,
+                &outgoing("Download finished", "peregrine://downloads", None)
+            )
+            .sound,
+            None,
+            "switch off: no sound value is sent, so the toast is silent"
+        );
+    }
+
+    /// A permission the OS has not granted is the port's failure, not a crash and not a
+    /// prompt: the service records it on the row the centre already holds.
+    #[test]
+    fn a_permission_refusal_is_reported_rather_than_prompted_for() {
+        assert!(
+            permission_decision(PermissionState::Granted).is_ok(),
+            "a granted permission is not a failure"
+        );
+        for state in [
+            PermissionState::Denied,
+            PermissionState::Prompt,
+            PermissionState::PromptWithRationale,
+        ] {
+            match permission_decision(state) {
+                Err(NotifyError::Refused { message }) => assert_eq!(
+                    message, "the system has not granted permission to show notifications",
+                    "{state:?} must be a recordable refusal"
+                ),
+                other => panic!("{state:?} must be refused, got {other:?}"),
+            }
+        }
     }
 
     /// The platform's own sound value is what the domain resolved; this adapter has no

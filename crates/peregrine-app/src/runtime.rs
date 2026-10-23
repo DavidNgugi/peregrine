@@ -20,7 +20,10 @@ use std::time::Duration;
 
 use std::num::NonZeroU32;
 
-use crate::notify::{CataloguePreferences, NoOsNotifier, NotificationService, NotifyOffers};
+use crate::notify::{
+    Consent, InstalledOsNotifier, NotificationService, NotifyAcquisition, Preferences,
+    StoredPreferences,
+};
 use peregrine_domain::catalogue::{ImageKind, Region, WatchCategory, watch_brand};
 use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _, NotificationId};
 use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
@@ -142,6 +145,20 @@ const DOWNLOAD_DIRECTORY: &str = "downloads";
 /// A settings-registry entry (`PG-E20-01`) will own it; until then it is one constant here rather
 /// than a number spelled at a call site with none of the reasoning.
 const FREE_SPACE_FLOOR: u64 = 5 * 1024 * 1024 * 1024;
+
+/// How many episode stills one startup pass may attempt.
+///
+/// A library downloaded before the capture fallback existed can hold thousands of NULL stills, and
+/// a pass that worked through all of them would run ffmpeg for minutes after every launch. Eight is
+/// enough to answer a season in one launch and leaves later launches to continue where this one
+/// stopped, because an episode that gained a still is no longer a candidate.
+const STILL_BACKFILL_ATTEMPTS: usize = 8;
+
+/// The pause between two still capture attempts in that pass.
+///
+/// Long enough that a launch with eight episodes to fill does not run ffmpeg back to back, short
+/// enough that the pass finishes while the reader is still looking at the library.
+const STILL_BACKFILL_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How long a title's watch availability is trusted before a visit asks again.
 ///
@@ -1030,9 +1047,15 @@ pub struct Runtime {
     /// The managed indexer manager (docs/adr/0024). Installed and started only when asked, so a
     /// launch that never opens Settings pays for neither.
     prowlarr: Arc<crate::jobs::prowlarr::Managed>,
-    /// The notification service, behind the one capability the acquisition path uses. The centre
-    /// row is the record; the OS toast is a no-op until `PG-E1-14` writes the adapter.
-    notifications: Arc<dyn NotifyOffers>,
+    /// The notification service, behind the capability the acquisition path uses. The centre
+    /// row is the record; the OS toast goes through the shell's `TauriOsNotifier`, installed
+    /// before startup and gated on the consent this service stores.
+    notifications: Arc<dyn NotifyAcquisition>,
+    /// The same service, for the consent the Settings screen reads and writes.
+    ///
+    /// Kept beside the narrowed [`NotifyAcquisition`] handle because the two audiences differ: a
+    /// job may raise only its own events, while the consent question belongs to the whole service.
+    notification_service: Arc<Notifications>,
 }
 
 /// The notification service this runtime composes.
@@ -1041,21 +1064,53 @@ pub struct Runtime {
 /// centre that stores the row, and the catalogue question asked before a title may be named.
 type Notifications = NotificationService<
     NotificationRepository,
-    CataloguePreferences,
-    NoOsNotifier,
+    StoredPreferences,
+    InstalledOsNotifier,
     NotificationRepository,
 >;
 
 /// The acquire path's view of the notification service.
 ///
 /// A job holds this rather than the service so it does not have to name four generic ports, and
-/// so what it can do is one capability rather than the whole service.
-struct OfferNotifier {
+/// so what it can do is the two events it owns rather than the whole service.
+struct AcquisitionNotifier {
     service: Arc<Notifications>,
     bus: Arc<EventBus>,
 }
 
-impl NotifyOffers for OfferNotifier {
+impl AcquisitionNotifier {
+    /// Records one event and tells the centre to re-read it.
+    ///
+    /// The centre row is the record and the toast is a bonus (R31), so a failure here is
+    /// logged and never changes the acquire job's outcome. The refresh is published only on
+    /// success, because a row that was not written is not news.
+    async fn raise(
+        &self,
+        scope: AccountScope,
+        event: NotificationEvent,
+        title_id: i64,
+        label: Option<&str>,
+    ) {
+        match self
+            .service
+            .notify(scope, event, title_id, label, Focus::default())
+            .await
+        {
+            Ok(_) => {
+                // A trigger to re-read rather than the row itself: the bell asks the centre,
+                // so a subscriber can never render copy the repository has not validated.
+                self.bus.publish(Event::new(
+                    NOTIFICATION_RAISED,
+                    title_id.to_string(),
+                    serde_json::json!({ "event": event.as_str() }),
+                ));
+            }
+            Err(error) => warn!(%error, "the acquisition notification could not be recorded"),
+        }
+    }
+}
+
+impl NotifyAcquisition for AcquisitionNotifier {
     fn offers_available<'a>(
         &'a self,
         scope: AccountScope,
@@ -1063,31 +1118,30 @@ impl NotifyOffers for OfferNotifier {
         label: Option<String>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            // The centre row is the record and the toast is a bonus (R31), so a failure here is
-            // logged and never changes the acquire job's outcome.
-            match self
-                .service
-                .notify(
-                    scope,
-                    NotificationEvent::ReleaseAlternatives,
-                    title_id,
-                    label.as_deref(),
-                    Focus::default(),
-                )
-                .await
-            {
-                Ok(_) => {
-                    // A trigger to re-read rather than the row itself: the bell asks the centre,
-                    // so a subscriber can never render copy the repository has not validated.
-                    // Published only on success, because a row that was not written is not news.
-                    self.bus.publish(Event::new(
-                        NOTIFICATION_RAISED,
-                        title_id.to_string(),
-                        serde_json::json!({ "event": "release.alternatives" }),
-                    ));
-                }
-                Err(error) => warn!(%error, "the alternatives notification could not be recorded"),
-            }
+            self.raise(
+                scope,
+                NotificationEvent::ReleaseAlternatives,
+                title_id,
+                label.as_deref(),
+            )
+            .await;
+        })
+    }
+
+    fn failed<'a>(
+        &'a self,
+        scope: AccountScope,
+        title_id: i64,
+        label: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            self.raise(
+                scope,
+                NotificationEvent::AcquisitionFailed,
+                title_id,
+                label.as_deref(),
+            )
+            .await;
         })
     }
 }
@@ -1322,18 +1376,19 @@ impl Runtime {
         );
 
         // The notification service, composed here because this is the only place that may pick the
-        // adapters. The OS notifier is the placeholder until PG-E1-14 and the preferences answer the
-        // catalogue defaults until PG-E20-01; the centre row is written either way, which is R31's
-        // order and the reason a refused toast is not an error.
+        // adapters. The shell installs the OS notifier before startup (PG-E1-14); the store below
+        // carries the user's consent (PG-E1-20) and leaves the per-event choices to the catalogue
+        // until PG-E20-01. The centre row is written either way, which is R31's order and the reason
+        // a refused toast is not an error.
         let notification_service: Arc<Notifications> = Arc::new(NotificationService::new(
             NotificationRepository::new(Arc::clone(&database)),
-            CataloguePreferences,
-            NoOsNotifier,
+            StoredPreferences::new(Arc::clone(&database), Arc::clone(&clock)),
+            InstalledOsNotifier::installed(),
             NotificationRepository::new(Arc::clone(&database)),
             Box::new(SharedClock(Arc::clone(&clock))),
             Platform::current(),
         ));
-        let notifications: Arc<dyn NotifyOffers> = Arc::new(OfferNotifier {
+        let notifications: Arc<dyn NotifyAcquisition> = Arc::new(AcquisitionNotifier {
             service: Arc::clone(&notification_service),
             bus: Arc::clone(&bus),
         });
@@ -1349,6 +1404,19 @@ impl Runtime {
         // downloads root the user configured can replace it once the settings registry lands
         // (PG-E20-01); this is deliberately not a second reading of that table.
         let download_root = config.data_directory().join(DOWNLOAD_DIRECTORY);
+        // A downloaded episode with no provider still gets one from its own file, and the same
+        // service is the library backfill below. Built before the torrent engine because the
+        // episodes that pass repairs were downloaded in an earlier session, so a launch whose
+        // engine cannot start still fills them.
+        let stills = crate::episode_stills::FfmpegCapture::resolve().map(|capture| {
+            Arc::new(crate::episode_stills::EpisodeStills::new(
+                Arc::clone(&artwork),
+                Arc::clone(&database),
+                Arc::clone(&clock),
+                Arc::new(capture),
+            ))
+        });
+
         let mut torrent_engine: Option<Arc<dyn TorrentEngine>> = None;
         let mut metadata_fetch: Option<Arc<dyn TorrentMetadataFetch>> = None;
         let mut acquisition: Option<Arc<AcquisitionService>> = None;
@@ -1389,6 +1457,11 @@ impl Runtime {
                             .with_metadata_fetch(Arc::clone(&fetch));
                             if let Some(tools) = crate::usenet_post::PostTools::resolve() {
                                 service = service.with_postprocess(tools);
+                            }
+                            // Without an ffmpeg on this host the import is unchanged and the
+                            // backfill below is not started.
+                            if let Some(stills) = &stills {
+                                service = service.with_stills(Arc::clone(stills));
                             }
                             let service = Arc::new(service);
                             // The engine is in-process, so a restart loses every live handle. The
@@ -1473,6 +1546,7 @@ impl Runtime {
             acquisition,
             prowlarr,
             notifications,
+            notification_service,
         };
 
         // The engine is pull-only: it transfers without telling anyone, so a queue row and the
@@ -1497,6 +1571,25 @@ impl Runtime {
             && let Err(error) = runtime.start_prowlarr().await
         {
             tracing::warn!(%error, "the managed Prowlarr did not start automatically");
+        }
+
+        // After the runtime is ready and after the downloads a previous process left are
+        // reconciled, a library that predates the capture fallback fills a few stills per launch.
+        // The pass is spawned rather than awaited so the launch does not wait for ffmpeg, and it
+        // spaces its attempts so it cannot run the machine flat out.
+        if let Some(stills) = stills {
+            tokio::spawn(async move {
+                match stills
+                    .backfill(STILL_BACKFILL_ATTEMPTS, STILL_BACKFILL_INTERVAL)
+                    .await
+                {
+                    Ok(0) => {}
+                    Ok(count) => info!(count, "episode stills backfilled from their files"),
+                    Err(error) => {
+                        warn!(%error, "the episode still backfill stopped");
+                    }
+                }
+            });
         }
 
         Ok(runtime)
@@ -1686,6 +1779,12 @@ impl Runtime {
         let now = self.clock.now().as_millisecond();
         let kind = crate::jobs::prowlarr::INSTALL_KIND;
         let priority = crate::jobs::prowlarr::PRIORITY;
+        // A live row owns the key, and `job_dedupe_uq` would refuse a second one with a bare
+        // constraint error; joining it is what pressing Install twice means (see
+        // `start_discover_rails`).
+        if let Some(live) = self.live_job_for(kind).await? {
+            return Ok(live);
+        }
         let journal_id = self
             .database
             .insert_job(NewJob {
@@ -1706,6 +1805,7 @@ impl Runtime {
         let job = crate::jobs::prowlarr::ProwlarrInstallJob::new(
             Arc::clone(&self.database),
             Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
             Arc::clone(&self.prowlarr),
             self.config.data_directory().to_path_buf(),
             journal_id,
@@ -1747,6 +1847,11 @@ impl Runtime {
         let now = self.clock.now().as_millisecond();
         let kind = crate::jobs::prowlarr::START_KIND;
         let priority = crate::jobs::prowlarr::PRIORITY;
+        // The same join as the install: a live row holds the key, and the index would refuse the
+        // second one with an error that names the database rather than the double press.
+        if let Some(live) = self.live_job_for(kind).await? {
+            return Ok(live);
+        }
         let journal_id = self
             .database
             .insert_job(NewJob {
@@ -1767,6 +1872,7 @@ impl Runtime {
         let job = crate::jobs::prowlarr::ProwlarrStartJob::new(
             Arc::clone(&self.database),
             Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
             Arc::clone(&self.prowlarr),
             Arc::clone(&self.secrets),
             self.config.data_directory().to_path_buf(),
@@ -2289,7 +2395,40 @@ impl Runtime {
             account,
             crate::jobs::acquire::Target {
                 title_id,
+                season: None,
                 episode,
+                chosen: None,
+            },
+            min_seeders,
+        )
+        .await
+    }
+
+    /// Finds one season's releases and queues a download for it, as a job.
+    ///
+    /// The job searches `Name Sxx` once and takes the side — a season pack or a single episode of
+    /// that season — whose best candidate has the most seeders; a pack's selection keeps only the
+    /// entries that name the season.
+    ///
+    /// A second request while the season is already being acquired joins the journalled job rather
+    /// than starting a second one, so pressing the control twice is one season's work.
+    ///
+    /// # Errors
+    ///
+    /// The same storage, scheduler and engine errors that `start_acquire` reports.
+    pub async fn start_acquire_season(
+        &self,
+        account: peregrine_domain::AccountScope,
+        title_id: i64,
+        season: u32,
+        min_seeders: u32,
+    ) -> Result<StartedJob, RuntimeError> {
+        self.submit_acquire(
+            account,
+            crate::jobs::acquire::Target {
+                title_id,
+                season: Some(season),
+                episode: None,
                 chosen: None,
             },
             min_seeders,
@@ -2330,6 +2469,7 @@ impl Runtime {
             account,
             crate::jobs::acquire::Target {
                 title_id: chosen.title_id,
+                season: None,
                 episode: None,
                 chosen: Some(crate::jobs::acquire::ChosenOffer {
                     raw_title: chosen.release_title,
@@ -2374,6 +2514,13 @@ impl Runtime {
     }
 
     /// The one submit path both entry points use.
+    ///
+    /// **A request for work already in flight joins that work.** The journal's `job_dedupe_uq` is
+    /// a partial unique index over the non-terminal phases, and `jobs::insert` reports every driver
+    /// failure as a statement error — so a blind insert while a season's fan-out was running came
+    /// back as "The library database rejected a statement." for what is only a second press. The
+    /// live row is the job the person asked for, so it is the answer; `start_prowlarr` and
+    /// `start_discover_rails` join the same way.
     async fn submit_acquire(
         &self,
         account: peregrine_domain::AccountScope,
@@ -2381,6 +2528,15 @@ impl Runtime {
         min_seeders: u32,
     ) -> Result<StartedJob, RuntimeError> {
         let title_id = target.title_id;
+        let key = crate::jobs::acquire::dedupe_key(title_id, target.season, target.episode);
+        // A chosen release is not a search: a live title-wide search does not do the work a person
+        // picked from the offers, so only a search request joins. Its key is the same because the
+        // offer names no season or episode of its own.
+        if target.chosen.is_none()
+            && let Some(live) = self.live_job_for(&key).await?
+        {
+            return Ok(live);
+        }
         // The account's preference is read once per submit, so the job orders the candidates it
         // finds by the language the person asked the host to prefer.
         let preferred_audio_language = self
@@ -2389,7 +2545,6 @@ impl Runtime {
             .audio_language()
             .to_owned();
         let now = self.clock.now().as_millisecond();
-        let key = crate::jobs::acquire::dedupe_key(title_id, target.episode);
         let journal_id = self
             .database
             .insert_job(NewJob {
@@ -2412,6 +2567,9 @@ impl Runtime {
             Arc::clone(&self.database),
             Arc::clone(&self.bus),
             self.secret_store(),
+            Arc::new(crate::jobs::acquire::ConfiguredReleaseIndexer::new(
+                self.secret_store(),
+            )),
             self.metadata_fetch()?,
             self.acquisition()?,
             Arc::clone(&self.clock),
@@ -3593,17 +3751,27 @@ impl Runtime {
         // One `stat` per episode, and no request: resolving a still is asking the cache whether it
         // holds a blob whose key this layer computes, which is why it cannot be the screen's job
         // (AGENTS R7) — the key is a hash and only the core knows whether the file is there.
+        //
+        // **The provider's still wins, and a captured one stands behind it.** The captured frame is
+        // the fallback for an episode no provider has drawn, so a late TMDB still replaces it the
+        // moment its blob is cached; until then the card still has a picture. The episode id is the
+        // second key because a capture is not a provider's path, and the episode row does not carry
+        // one for it.
         Ok(rows
             .into_iter()
             .map(|row| {
-                let still = row.still.as_ref().and_then(|artwork| {
-                    crate::artwork::cached_image(
-                        &self.artwork,
-                        artwork.provider,
-                        &artwork.path,
-                        peregrine_domain::catalogue::ImageKind::Still,
-                    )
-                });
+                let still = row
+                    .still
+                    .as_ref()
+                    .and_then(|artwork| {
+                        crate::artwork::cached_image(
+                            &self.artwork,
+                            artwork.provider,
+                            &artwork.path,
+                            peregrine_domain::catalogue::ImageKind::Still,
+                        )
+                    })
+                    .or_else(|| crate::episode_stills::cached(&self.artwork, row.id));
                 TitleEpisodeDetail { row, still }
             })
             .collect())
@@ -5363,10 +5531,42 @@ impl Runtime {
         Ok(self.database.list_jobs(request).await?)
     }
 
+    /// The notification consent and the catalogue defaults around it.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::notify::ServiceError::Preferences`] when the stored consent cannot be read.
+    pub async fn notification_preferences(
+        &self,
+    ) -> Result<Preferences, crate::notify::ServiceError> {
+        self.notification_service.preferences().await
+    }
+
+    /// Records the user's answer to the notification consent question.
+    ///
+    /// A refusal is stored with `dont_ask_again`, so the wizard never re-asks a user who has
+    /// answered; the Settings control remains theirs to change. The answer is persisted before
+    /// anything acts on it (R31).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::notify::ServiceError::Preferences`] when the answer cannot be stored.
+    pub async fn set_notification_consent(
+        &self,
+        granted: bool,
+    ) -> Result<Preferences, crate::notify::ServiceError> {
+        let consent = if granted {
+            Consent::granted()
+        } else {
+            Consent::declined(true)
+        };
+        self.notification_service.record_consent(consent).await
+    }
+
     /// The in-app notification centre, newest first.
     ///
     /// R31 makes the centre row the record and the OS toast the bonus, so this read is how a
-    /// notification reaches the user at all while `PG-E1-14`'s notifier is unwritten.
+    /// notification reaches the user even when the system will not show one.
     ///
     /// # Errors
     ///
@@ -6579,6 +6779,106 @@ mod tests {
         assert_eq!(runtime.library_title(9_999).await.unwrap(), None);
     }
 
+    /// An episode card's still is the cache's answer, and a captured frame stands behind a provider's.
+    ///
+    /// This is the wiring the whole capture path exists for: the blob is written under the episode's
+    /// own key, the episode row records the provider's pair only when a provider gave one, and the
+    /// read has to prefer the provider and fall back to the capture.
+    #[tokio::test]
+    async fn an_episode_card_draws_a_captured_still_when_no_provider_has_one() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let show = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Show,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "VisionQuest".to_owned(),
+                original_name: None,
+                sort_name: "visionquest".to_owned(),
+                at: 0,
+            })
+            .await
+            .unwrap();
+        let season = runtime
+            .database
+            .insert_stub_season(peregrine_storage::StubSeason {
+                title_id: show,
+                season_number: 1,
+                at: 0,
+            })
+            .await
+            .unwrap();
+        for episode_number in [3, 4] {
+            runtime
+                .database
+                .insert_stub_episode(peregrine_storage::StubEpisode {
+                    title_id: show,
+                    season_id: season,
+                    season_number: 1,
+                    episode_number,
+                    at: 0,
+                })
+                .await
+                .unwrap();
+        }
+        let three = runtime
+            .database
+            .episode_id_for(show, 1, 3)
+            .await
+            .unwrap()
+            .expect("episode three");
+        let four = runtime
+            .database
+            .episode_id_for(show, 1, 4)
+            .await
+            .unwrap()
+            .expect("episode four");
+
+        let cache = peregrine_sync::ImageCache::new(runtime.config().artwork_directory());
+        let captured = cache
+            .store(
+                &peregrine_sync::ImageKey::for_captured_still(three),
+                b"a frame from the downloaded file",
+            )
+            .expect("the artwork directory is writable");
+        let provider = cache
+            .store(
+                &peregrine_sync::ImageKey::for_image(
+                    peregrine_domain::Provider::Tmdb,
+                    "/s01e04.jpg",
+                    peregrine_sync::ImageVariant::StillW300,
+                ),
+                b"the provider's own still",
+            )
+            .expect("the artwork directory is writable");
+        runtime
+            .database
+            .set_episode_still(four, "tmdb", "/s01e04.jpg", 0)
+            .await
+            .unwrap();
+
+        let episodes = runtime.title_episodes(show, Some(1), 50).await.unwrap();
+        let three_row = episodes
+            .iter()
+            .find(|episode| episode.row.episode_number.get() == 3)
+            .expect("episode three is listed");
+        let four_row = episodes
+            .iter()
+            .find(|episode| episode.row.episode_number.get() == 4)
+            .expect("episode four is listed");
+        assert_eq!(
+            three_row.still.as_deref(),
+            Some(captured.disk_path()),
+            "the capture is the card's still when no provider has one"
+        );
+        assert_eq!(
+            four_row.still.as_deref(),
+            Some(provider.disk_path()),
+            "a provider's still wins over any capture"
+        );
+    }
+
     /// The acceptance for PG-E0-19 in one test: the runtime opens the database, accepts a
     /// job, the job's state is readable from the journal, progress arrived over the bus,
     /// and shutdown leaves nothing running.
@@ -7030,6 +7330,95 @@ mod tests {
         let joined = runtime.start_discover_rails().await.unwrap();
         assert_eq!(joined.journal_id, journal_id);
         assert!(joined.coalesced, "two visits to Discover share one fetch");
+        runtime.shutdown().await;
+    }
+
+    /// Pressing Start while a start is already queued joins that row rather than failing on the
+    /// journal.
+    ///
+    /// `job_dedupe_uq` refuses a second non-terminal row for the same key, and the storage layer
+    /// answers that refusal with a bare "a statement failed" — which the screen shows as "The
+    /// library database rejected a statement." for what is only a second press.
+    #[tokio::test]
+    async fn a_live_prowlarr_start_is_joined_rather_than_duplicated() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let kind = crate::jobs::prowlarr::START_KIND;
+
+        let journal_id = runtime
+            .database
+            .insert_job(NewJob {
+                kind: kind.to_owned(),
+                priority: crate::jobs::prowlarr::PRIORITY,
+                dedupe_key: Some(kind.to_owned()),
+                payload_json: "{}".to_owned(),
+                max_attempts: 1,
+                created_at: runtime.clock.now().as_millisecond(),
+            })
+            .await
+            .unwrap();
+
+        let joined = runtime.start_prowlarr().await.unwrap();
+        assert_eq!(joined.journal_id, journal_id);
+        assert!(
+            joined.coalesced,
+            "the second press joins the start already in flight"
+        );
+        let rows = runtime.jobs(None, 10).await.unwrap();
+        assert_eq!(
+            rows.iter().filter(|row| row.kind == kind).count(),
+            1,
+            "one row per start, not a second one the index would refuse"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// Pressing Download season while that season's fan-out is still running joins the job the
+    /// first press journalled rather than colliding with `job_dedupe_uq`.
+    ///
+    /// **This is the live failure on title 749.** The fan-out runs for minutes, and a second press
+    /// inside that window inserted into a key a non-terminal row already held; the index refused
+    /// it and `jobs::insert` mapped the driver error to `StorageError::Statement`, which the screen
+    /// showed as "The library database rejected a statement." After the job finished, a later check
+    /// found no new row and no live rows at all, which is what made the index look innocent.
+    #[tokio::test]
+    async fn a_second_season_acquire_joins_the_journalled_job_rather_than_colliding() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let key = crate::jobs::acquire::dedupe_key(749, Some(1), None);
+
+        // The row the first press writes, while the season's fan-out is running.
+        let journal_id = runtime
+            .database
+            .insert_job(NewJob {
+                kind: crate::jobs::acquire::KIND.to_owned(),
+                priority: crate::jobs::acquire::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: "{\"titleId\":749}".to_owned(),
+                max_attempts: 2,
+                created_at: runtime.clock.now().as_millisecond(),
+            })
+            .await
+            .expect("a season acquire is journalled");
+
+        let joined = runtime
+            .start_acquire_season(installation_scope(), 749, 1, 1)
+            .await
+            .expect("a second season request joins the job already running");
+        assert_eq!(joined.journal_id, journal_id);
+        assert!(
+            joined.coalesced,
+            "the second press reports the work it joined rather than a new job"
+        );
+
+        let rows = runtime.jobs(None, 10).await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.dedupe_key.as_deref() == Some(key.as_str()))
+                .count(),
+            1,
+            "one journalled season job, not a second row the index would refuse"
+        );
         runtime.shutdown().await;
     }
 

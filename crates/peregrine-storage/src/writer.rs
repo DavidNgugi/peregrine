@@ -121,6 +121,13 @@ pub(crate) enum WriteRequest {
         /// Unix milliseconds the desktop wrote it.
         at: Timestamp,
     },
+    /// Store the user's answer to the notification consent question.
+    SetNotificationConsent {
+        /// The answer the notification service normalised.
+        consent: peregrine_domain::notify::Consent,
+        /// Unix milliseconds the desktop wrote it.
+        at: Timestamp,
+    },
     /// Revoke a paired device, which refuses its next request.
     RevokePairedDevice {
         /// The device row.
@@ -174,6 +181,17 @@ pub(crate) enum WriteRequest {
         details: Box<peregrine_domain::catalogue::EpisodeDetails>,
         /// The provider that answered, for the artwork columns.
         provider: String,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Record one episode's still, unless it already records one.
+    SetEpisodeStill {
+        /// The episode row.
+        id: i64,
+        /// The still's owner — a provider, or `capture` for a frame this machine took.
+        provider: String,
+        /// The owner's path for the still, or the episode id for a capture.
+        path: String,
         /// Unix milliseconds.
         at: i64,
     },
@@ -452,6 +470,15 @@ pub(crate) enum WriteRequest {
         id: i64,
         /// The session's bytes, opaque to this crate.
         state: Vec<u8>,
+    },
+    /// Write the reason a `download_job` stopped, without touching its state.
+    RecordDownloadFailure {
+        /// The row.
+        id: i64,
+        /// The stable code a screen branches on.
+        code: String,
+        /// The sentence a person reads.
+        message: String,
     },
 }
 
@@ -759,6 +786,11 @@ async fn apply_library_write(
             .map_err(StorageError::from_sqlx),
         WriteRequest::SetPlaybackPreference { preference, at } => {
             crate::preferences::write(connection, &preference, at)
+                .await
+                .map(|()| WriteResponse::Applied)
+        }
+        WriteRequest::SetNotificationConsent { consent, at } => {
+            crate::preferences::write_notification_consent(connection, consent, at)
                 .await
                 .map(|()| WriteResponse::Applied)
         }
@@ -1195,6 +1227,11 @@ async fn apply_download_write(
                 .await
                 .map(|changed| WriteResponse::RowChanged { changed })
         }
+        WriteRequest::RecordDownloadFailure { id, code, message } => {
+            crate::download::record_failure(connection, id, &code, &message)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
         other => apply_catalogue_write(connection, other).await,
     }
 }
@@ -1277,6 +1314,14 @@ async fn apply_catalogue_write(
         )
         .await
         .map(|changed| WriteResponse::RowChanged { changed }),
+        WriteRequest::SetEpisodeStill {
+            id,
+            provider,
+            path,
+            at,
+        } => crate::catalogue::set_episode_still(connection, id, &provider, &path, at)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed }),
         other => apply_library_write(connection, other).await,
     }
 }

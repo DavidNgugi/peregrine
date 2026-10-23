@@ -841,6 +841,8 @@ pub(crate) async fn list_library_titles_for_person(
 /// what the availability chip reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TitleEpisodeRow {
+    /// The row id, which is also the key a captured still is stored under.
+    pub id: i64,
     /// The season it sits in, which zero is for a show's specials.
     pub season_number: SeasonNumber,
     /// Its number within the season.
@@ -965,7 +967,7 @@ pub(crate) async fn list_title_episodes(
         // serves the equality on `title_id`, the equality on `season_number` when the switcher supplies
         // one, and the ordering on both numbers without a sort. `episode_air_date_idx` is not the index
         // for this read: it is keyed `(title_id, air_date)` and this asks nothing about a date.
-        "SELECT e.season_number, e.episode_number, e.name, e.overview, e.air_date, \
+        "SELECT e.id, e.season_number, e.episode_number, e.name, e.overview, e.air_date, \
                 e.runtime_minutes, e.vote_average, e.still_provider, e.still_path, \
                 COUNT(DISTINCT m.id) AS items, COUNT(f.id) AS files, \
                 COALESCE(SUM(f.size_bytes), 0) AS bytes, \
@@ -1018,6 +1020,66 @@ pub(crate) async fn list_title_seasons(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// One episode with no still and a recorded file to take one from.
+///
+/// **The path is the file the capture will read**, chosen by the row rather than by the caller:
+/// an episode may hold a 1080p and a 2160p copy, and the item preference already answers "which
+/// one" for playback. No `AccountScope` is taken, for the reason this module scanner reads give:
+/// a missing still is repaired for the installation, and hiding the title from one profile would
+/// only keep its card blank.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpisodeStillSource {
+    /// The episode whose `still_path` is NULL.
+    pub episode_id: i64,
+    /// The recorded file the frame is taken from.
+    pub path: NonEmptyText,
+}
+
+/// Episodes with no still whose library holds a file, keyset by episode id.
+///
+/// The read is bounded and never pages with OFFSET (AGENTS section 5): a caller passes the last id
+/// it answered for and gets the next rows above it. A still this machine captured is not a
+/// provider one, but it still fills `still_path`, which is the one condition that matters here —
+/// an episode with any still recorded is not a candidate.
+///
+/// **The file is chosen the way playback chooses one.** A non-missing file is required, the item
+/// `preferred_file_id` wins when it is present, and the lowest id breaks the tie so two runs over
+/// the same rows answer the same path (AGENTS R14). `media_file_item_idx` serves both per-item
+/// lookups, and the keyset walk is the `episode` primary key, so a page stops at the limit rather
+/// than at the size of the NULL set.
+pub(crate) async fn episodes_missing_still(
+    pool: &sqlx::SqlitePool,
+    after_id: i64,
+    limit: u32,
+) -> Result<Vec<EpisodeStillSource>, StorageError> {
+    let rows = sqlx::query_as::<_, (i64, String)>(
+        "SELECT e.id, f.path \
+           FROM episode e \
+           JOIN media_item m ON m.episode_id = e.id \
+           JOIN media_file f ON f.media_item_id = m.id \
+          WHERE e.still_path IS NULL AND e.id > ?1 AND f.missing_since IS NULL \
+            AND f.id = COALESCE( \
+                         (SELECT f2.id FROM media_file f2 WHERE f2.media_item_id = m.id \
+                           AND f2.missing_since IS NULL AND f2.id = m.preferred_file_id), \
+                         (SELECT f3.id FROM media_file f3 WHERE f3.media_item_id = m.id \
+                           AND f3.missing_since IS NULL ORDER BY f3.id LIMIT 1)) \
+          ORDER BY e.id ASC LIMIT ?2",
+    )
+    .bind(after_id)
+    .bind(i64::from(limit))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    rows.into_iter()
+        .map(|(episode_id, path)| {
+            Ok(EpisodeStillSource {
+                episode_id,
+                path: text(path, "media_file.path")?,
+            })
+        })
+        .collect()
+}
+
 /// Narrows a stored integer to the unsigned number the domain uses, refusing a negative.
 fn u32_of(value: i64, column: &'static str) -> Result<u32, StorageError> {
     u32::try_from(value).map_err(|_| StorageError::UnexpectedValue {
@@ -1029,6 +1091,7 @@ fn u32_of(value: i64, column: &'static str) -> Result<u32, StorageError> {
 /// The columns [`TitleEpisodeRow`] is built from.
 #[derive(sqlx::FromRow)]
 struct TitleEpisodeQueryRow {
+    id: i64,
     season_number: i64,
     episode_number: i64,
     name: Option<String>,
@@ -1049,12 +1112,25 @@ impl TryFrom<TitleEpisodeQueryRow> for TitleEpisodeRow {
 
     fn try_from(mut row: TitleEpisodeQueryRow) -> Result<Self, Self::Error> {
         // Taken before the row is consumed below, which is where the numbers are parsed.
-        let still = artwork_path(
-            "episode.still_provider",
-            row.still_provider.take(),
-            row.still_path.take(),
-        );
+        //
+        // **A captured still is not an `ArtworkPath`**, because its owner is not a provider; the
+        // card's fallback resolves it from the cache by the episode id instead
+        // (`peregrine_app::episode_stills`). Returning `None` here is what keeps the provider
+        // reference the single meaning of `still`, and it is why the captured value is skipped
+        // rather than reported as an unknown provider.
+        let still = if row.still_provider.as_deref()
+            == Some(peregrine_domain::catalogue::CAPTURED_STILL_PROVIDER)
+        {
+            None
+        } else {
+            artwork_path(
+                "episode.still_provider",
+                row.still_provider.take(),
+                row.still_path.take(),
+            )
+        };
         Ok(Self {
+            id: row.id,
             // The schema stores both as integers with no check on their sign, so a negative is a
             // claim about the database's contents rather than about a caller: it is refused rather
             // than wrapped.
@@ -4785,5 +4861,81 @@ mod tests {
                 Ok(())
             })?;
         }
+    }
+
+    #[tokio::test]
+    async fn still_candidates_skip_stills_and_missing_files_and_prefer_the_item_file() {
+        let directory = TempDir::new().expect("a temporary directory");
+        let (database, title_id, _) = populated(&directory).await;
+        let path = path_of(&directory);
+        season(&path, 1, title_id, 1).await;
+        for number in 1..=3 {
+            episode(&path, number, title_id, 1, 1, number).await;
+        }
+
+        let two_files = database
+            .insert_media_item(item(title_id, Some(1)))
+            .await
+            .expect("the item is inserted");
+        database
+            .insert_media_file(file(two_files, "/media/one-1080.mkv"))
+            .await
+            .expect("the first file is inserted");
+        let preferred = database
+            .insert_media_file(file(two_files, "/media/one-2160.mkv"))
+            .await
+            .expect("the second file is inserted");
+        execute(
+            &path,
+            &format!(
+                "UPDATE media_item SET preferred_file_id = {preferred} WHERE id = {two_files}"
+            ),
+        )
+        .await;
+
+        let provider = database
+            .insert_media_item(item(title_id, Some(2)))
+            .await
+            .expect("the still item is inserted");
+        database
+            .insert_media_file(file(provider, "/media/two.mkv"))
+            .await
+            .expect("the still file is inserted");
+        execute(
+            &path,
+            "UPDATE episode SET still_provider = 'tmdb', still_path = '/still.jpg' WHERE id = 2",
+        )
+        .await;
+
+        let gone = database
+            .insert_media_item(item(title_id, Some(3)))
+            .await
+            .expect("the missing item is inserted");
+        let mut missing = file(gone, "/media/three.mkv");
+        missing.missing_since = Some(at(NOW));
+        database
+            .insert_media_file(missing)
+            .await
+            .expect("the missing file is inserted");
+
+        assert_eq!(
+            database
+                .episodes_missing_still(0, 10)
+                .await
+                .expect("the read answers"),
+            vec![EpisodeStillSource {
+                episode_id: 1,
+                path: text("/media/one-2160.mkv"),
+            }],
+            "only the episode with no still and a present file is a candidate, and the item's choice wins"
+        );
+        assert_eq!(
+            database
+                .episodes_missing_still(1, 10)
+                .await
+                .expect("the keyset read answers"),
+            Vec::new(),
+            "the keyset continues above the last answered episode"
+        );
     }
 }

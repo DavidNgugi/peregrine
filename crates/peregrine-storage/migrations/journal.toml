@@ -118,3 +118,7 @@ sha256 = "a9c76c9bd36b9fa052f3f33d696547e9d861cc962b90be3e4ed71900b8486f67"
 [[migration]]
 file = "0029_playback_preference.sql"
 sha256 = "a2fe0dfda0fb20c08fadd4411a04d8cbe5204eb43d67963a8d7a1d1fcbbf78d1"
+
+[[migration]]
+file = "0030_download_season.sql"
+sha256 = "c2a015bd04cacf743532275f374864a80ea54c9c56ccbf43430e7a595fd2ae29"

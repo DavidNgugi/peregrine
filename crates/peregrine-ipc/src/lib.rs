@@ -42,6 +42,10 @@ pub mod web;
 // on `peregrine-app` directly, so the type that function answers with is named here rather
 // than reached through a second dependency edge (AGENTS R6).
 pub use peregrine_app::ShellStatus;
+// The shell installs the native notification adapter (PG-E1-14) and, for the same reason,
+// may not depend on `peregrine-app` directly. The function is re-exported here so the one
+// edge the shell takes to the core is this crate.
+pub use peregrine_app::notify::install_os_notifier;
 
 #[cfg(test)]
 mod contract_tests;
@@ -136,12 +140,14 @@ pub fn builder() -> Builder<tauri::Wry> {
             indexers::add_indexer,
             indexers::remove_indexer,
             downloads::acquire,
+            downloads::acquire_season,
             downloads::list_downloads,
             downloads::schedule_download,
             downloads::download_schedules,
             downloads::cancel_download_schedule,
             downloads::pause_download,
             downloads::resume_download,
+            downloads::find_download_peers,
             downloads::remove_download,
             downloads::dismiss_download,
             downloads::clear_finished_downloads,
@@ -158,6 +164,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             usenet::test_usenet_server,
             usenet::set_usenet_archives,
             usenet::consent_usenet_download,
+            notifications::notification_preferences,
+            notifications::set_notification_consent,
             notifications::list_notifications,
             notifications::mark_notification_read,
             notifications::mark_all_notifications_read,

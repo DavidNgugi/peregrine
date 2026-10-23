@@ -1,8 +1,15 @@
 import { createI18n } from "@peregrine/i18n";
-import type { EpisodeDto, LibraryTitleDto, RailItemDto, SeasonDto } from "@peregrine/ipc-client";
+import type {
+  DownloadJobDto,
+  EpisodeDto,
+  LibraryTitleDto,
+  RailItemDto,
+  SeasonDto,
+} from "@peregrine/ipc-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AcquireControl } from "../hooks/useAcquire.js";
 import type { TitleDetail } from "../hooks/useTitle.js";
 import type { TitleSeasons } from "../hooks/useSeasons.js";
 import { TitleScreen } from "./TitleScreen.js";
@@ -64,6 +71,36 @@ function episode(overrides: Partial<EpisodeDto> = {}): EpisodeDto {
     missingFiles: 0,
     watched: false,
     progress: null,
+    ...overrides,
+  };
+}
+
+/** One queue row, with the pack shape the plan reads when it names no episode. */
+function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
+  return {
+    id: 1,
+    titleId: 7,
+    title: "Breaking Bad",
+    titleKind: "show",
+    poster: null,
+    seasonNumber: 1,
+    episodeNumber: null,
+    releaseTitle: "Breaking.Bad.S01.1080p",
+    state: "downloading",
+    protocol: "torrent",
+    stage: "downloading",
+    progressPermille: 0,
+    reportedSizeBytes: null,
+    downloadedBytes: 0,
+    downloadRateBps: 0,
+    peersConnected: 0,
+    peersSwarm: 0,
+    etaSeconds: null,
+    addedAt: 0,
+    errorCode: null,
+    errorMessage: null,
+    findings: [],
+    hasMediaFile: false,
     ...overrides,
   };
 }
@@ -146,6 +183,50 @@ function markup(
           loadMore: () => undefined,
         }}
         kind={kind}
+        onNavigate={() => undefined}
+        seasons={seasonState}
+      />
+    </I18nextProvider>,
+  );
+}
+
+/** The acquisition control as a page holds it, with the write recorded rather than performed. */
+function acquireControl(overrides: Partial<AcquireControl> = {}): AcquireControl {
+  return {
+    starting: false,
+    running: false,
+    phase: null,
+    permille: 0,
+    outcome: null,
+    findings: [],
+    failure: null,
+    error: null,
+    titleId: 7,
+    episode: null,
+    start: async () => undefined,
+    ...overrides,
+  };
+}
+
+/** The screen with the acquisition control drawn, which the season button needs. */
+function seasonMarkup(
+  seasonState: TitleSeasons,
+  downloadRows: readonly DownloadJobDto[] = [],
+): string {
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <TitleScreen
+        acquire={acquireControl()}
+        detail={detail()}
+        downloadRows={downloadRows}
+        feed={{
+          items: [],
+          loading: false,
+          failed: null,
+          exhausted: true,
+          loadMore: () => undefined,
+        }}
+        kind="show"
         onNavigate={() => undefined}
         seasons={seasonState}
       />
@@ -595,6 +676,54 @@ describe("TitleScreen", () => {
     const html = markup(detail(), "movie", [recommendation()]);
 
     expect(html.match(/More like this/gu) ?? []).toHaveLength(1);
+  });
+
+  it("offers one season control rather than a download button per episode", () => {
+    // The season request is one command now: the core chooses a pack or the episodes and fans out
+    // inside the job, so the screen must not draw one acquisition per missing episode.
+    const html = seasonMarkup(
+      seasons({
+        episodes: [
+          episode({
+            seasonNumber: 1,
+            episodeNumber: 1,
+            items: 0,
+            files: 0,
+            bytes: 0,
+            missingFiles: 0,
+          }),
+        ],
+      }),
+    );
+
+    expect(html.match(/Download season 1/gu) ?? []).toHaveLength(1);
+  });
+
+  it("shows a live pack's progress on the season control and its cover on every card", () => {
+    // The pack row names no episode. Without reading it as the season's own job, the control kept
+    // offering "Download season 1" and every card kept saying "Not acquired" while it downloaded.
+    const html = seasonMarkup(
+      seasons({
+        episodes: [
+          episode({
+            seasonNumber: 1,
+            episodeNumber: 1,
+            items: 0,
+            files: 0,
+            bytes: 0,
+            missingFiles: 0,
+          }),
+        ],
+      }),
+      [job({ episodeNumber: null, state: "downloading", progressPermille: 450 })],
+    );
+
+    expect(html).toContain("Season 1 · 1 pack · 45%");
+    expect(html).toContain("Downloading with season 1");
+    expect(html).not.toContain("Not acquired");
+    // Neither control is an offer to start a second acquisition.
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Season 1 · 1 pack · 45%<\/button>/u);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Downloading… 45%<\/button>/u);
   });
 });
 

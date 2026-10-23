@@ -478,6 +478,66 @@ pub(crate) async fn episode_id_for(
     Ok(row.map(|row| row.0))
 }
 
+/// The still columns of one episode, exactly as stored.
+///
+/// A raw pair rather than an `ArtworkPath` because the two owners are different: a provider still is
+/// one, and a still this machine captured is not. The caller that decides whether to capture an
+/// episode asks only whether *any* still is recorded, so parsing the provider here would make a
+/// captured still look absent and capture over it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredStill {
+    /// The `still_provider` column.
+    pub provider: String,
+    /// The `still_path` column.
+    pub path: String,
+}
+
+/// The still one episode records, when it records one.
+pub(crate) async fn episode_still(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> Result<Option<StoredStill>, StorageError> {
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT still_provider, still_path FROM episode WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(StorageError::from_sqlx)?;
+    Ok(row.and_then(|(provider, path)| match (provider, path) {
+        (Some(provider), Some(path)) => Some(StoredStill { provider, path }),
+        _ => None,
+    }))
+}
+
+/// Records one episode's still, but only when it has none.
+///
+/// **The condition is the rule** (`AGENTS R5`): a provider's still, once written, is never replaced
+/// by a captured frame that raced it, and the answer says whether this write was the one that
+/// landed. `still_path IS NULL` is the schema's own "no still"; a captured still is therefore
+/// written exactly once, and a re-import finds the column filled and does not touch it.
+pub(crate) async fn set_episode_still(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+    provider: &str,
+    path: &str,
+    at: i64,
+) -> Result<bool, StorageError> {
+    let changed = sqlx::query(
+        "UPDATE episode SET still_provider = ?2, still_path = ?3, updated_at = ?4 \
+          WHERE id = ?1 AND still_path IS NULL",
+    )
+    .bind(id)
+    .bind(provider)
+    .bind(path)
+    .bind(at)
+    .execute(&mut *connection)
+    .await
+    .map_err(StorageError::from_sqlx)?
+    .rows_affected()
+        > 0;
+    Ok(changed)
+}
+
 /// The identity a stub season needs, and nothing more.
 ///
 /// A season is a row the library creates to hang episodes off; a provider sync fills in its name,
@@ -656,6 +716,32 @@ pub(crate) async fn identity(
     .await
     .map_err(StorageError::from_sqlx)?;
     row.map(TryInto::try_into).transpose()
+}
+
+/// The year a title was released or first aired, when the scope may see it.
+///
+/// The acquire job's title match needs the year to tell a short film title from a release that
+/// merely contains its word (`Her` from an anime episode). A list screen does not, so this is a
+/// read of its own rather than another column on every identity query.
+pub(crate) async fn title_year(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    id: i64,
+) -> Result<Option<u32>, StorageError> {
+    let released: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(release_date, first_air_date) FROM title \
+         WHERE id = ?1 AND (?2 = 0 OR (adult = 0 AND content_rating IS NOT NULL))",
+    )
+    .bind(id)
+    .bind(hidden_by_scope(scope))
+    .fetch_optional(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?
+    .flatten();
+    Ok(released
+        .as_deref()
+        .and_then(|date| date.get(..4))
+        .and_then(|year| year.parse().ok()))
 }
 
 /// One cast row to write, with the portrait already cached when it had one.
@@ -1274,7 +1360,7 @@ mod episode_tests {
         Database, NewMatchRule, PageRequest, StubSeason, StubTitle, TitleKind, TitleSubtype,
     };
 
-    use super::StubEpisode;
+    use super::{StoredStill, StubEpisode};
 
     const NOW: i64 = 1_700_000_000_000;
 
@@ -1810,6 +1896,66 @@ mod episode_tests {
             Some(matched)
         );
     }
+
+    /// A still is written once: a second capture is a no-op rather than a replacement.
+    ///
+    /// The episode's `still_path IS NULL` condition is the whole rule, so it is asserted against the
+    /// database rather than against the caller that decided to capture.
+    #[tokio::test]
+    async fn a_recorded_still_is_never_overwritten_by_a_second_capture() {
+        let directory = TempDir::new().unwrap();
+        let (database, title) = database(&directory).await;
+        let season = database
+            .insert_stub_season(StubSeason {
+                title_id: title,
+                season_number: 1,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        let episode = database
+            .insert_stub_episode(StubEpisode {
+                title_id: title,
+                season_id: season,
+                season_number: 1,
+                episode_number: 1,
+                at: NOW,
+            })
+            .await
+            .unwrap();
+        let path = episode.to_string();
+
+        assert_eq!(
+            database.episode_still(episode).await.unwrap(),
+            None,
+            "a fresh episode records no still"
+        );
+        assert!(
+            database
+                .set_episode_still(episode, "capture", &path, NOW)
+                .await
+                .unwrap(),
+            "the first capture is the one that lands"
+        );
+        assert_eq!(
+            database.episode_still(episode).await.unwrap(),
+            Some(StoredStill {
+                provider: "capture".to_owned(),
+                path: path.clone(),
+            })
+        );
+        assert!(
+            !database
+                .set_episode_still(episode, "capture", "another-frame", NOW)
+                .await
+                .unwrap(),
+            "a recorded still is not replaced"
+        );
+        assert_eq!(
+            database.episode_still(episode).await.unwrap().unwrap().path,
+            path
+        );
+    }
 }
 
 /// The row shape of the scoped rule list.
@@ -2084,6 +2230,33 @@ mod tests {
                 .unwrap(),
             None,
             "an id that does not exist reads as nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_titles_year_is_read_from_its_release_date() {
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+        let id = database
+            .insert_stub_title(stub("Her", TitleKind::Movie))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            database.title_year(any_account(), id).await.unwrap(),
+            None,
+            "a title with no date has no year to check"
+        );
+
+        crate::test_support::execute(
+            &directory.path().join("peregrine.sqlite"),
+            &format!("UPDATE title SET release_date = '2013-12-18' WHERE id = {id}"),
+        )
+        .await;
+
+        assert_eq!(
+            database.title_year(any_account(), id).await.unwrap(),
+            Some(2013)
         );
     }
 

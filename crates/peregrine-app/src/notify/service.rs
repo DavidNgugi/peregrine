@@ -740,7 +740,8 @@ fn subject_kind(event: NotificationEvent) -> Option<SubjectKind> {
     match event {
         NotificationEvent::NewEpisodeAvailable
         | NotificationEvent::SubtitleDownloadFinished
-        | NotificationEvent::ReleaseAlternatives => Some(SubjectKind::Title),
+        | NotificationEvent::ReleaseAlternatives
+        | NotificationEvent::AcquisitionFailed => Some(SubjectKind::Title),
         NotificationEvent::DownloadCompleted
         | NotificationEvent::DownloadFailed
         | NotificationEvent::TorrentBlocked => Some(SubjectKind::Download),

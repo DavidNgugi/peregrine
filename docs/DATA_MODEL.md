@@ -628,7 +628,8 @@ CREATE TABLE download_job (
   started_at         INTEGER,
   completed_at       INTEGER,
   seeding_until      INTEGER,
-  removed_at         INTEGER
+  removed_at         INTEGER,
+  season_number      INTEGER          -- the pack's season, or the episode's; NULL on older rows
 );
 CREATE INDEX download_job_active_idx ON download_job (state, priority)
   WHERE state IN ('queued','inspecting','metadata','downloading','paused');

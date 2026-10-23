@@ -49,6 +49,10 @@ use crate::events::{Event, EventBus, WEB_PAIR_REQUESTED};
 mod routes;
 mod transcode;
 
+/// The two transcoder lookups the episode-still capture shares, named here so that module does not
+/// reach into a private submodule for them.
+pub(crate) use transcode::{duration_ms, locate as locate_ffmpeg};
+
 /// How long a pairing code waits for a person, in milliseconds.
 const PAIR_TTL_MS: i64 = 5 * 60 * 1_000;
 /// The window a single address may request pairings in, in milliseconds.
