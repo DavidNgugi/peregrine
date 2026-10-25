@@ -77,6 +77,7 @@ export function useSeasons(
   titleId: number | null,
   kind: TitleKind,
   refreshes: number,
+  preferredSeason: number | null = null,
 ): TitleSeasons {
   const [seasons, setSeasons] = useState<readonly SeasonDto[]>([]);
   const [chosen, setChosen] = useState<number | null>(null);
@@ -94,12 +95,22 @@ export function useSeasons(
   // move to another title clears both, so one title's season four cannot be drawn under the next
   // title's heading.
   const reading = useRef<string | null>(null);
+  // Whether the reader picked a season themselves. A hint that arrives late — the title read and
+  // the season read are separate — must not move them after they have chosen.
+  const chosenByUser = useRef(false);
+  // The hint can change after the season list has already opened on the default; the ref is what
+  // the first read consults, and the effect below handles the late arrival.
+  const preferred = useRef(preferredSeason);
+  useEffect(() => {
+    preferred.current = preferredSeason;
+  }, [preferredSeason]);
 
   // The season list, once per title and again whenever a refresh lands.
   useEffect(() => {
     if (titleId === null || kind === "movie") {
       version.current += 1;
       reading.current = null;
+      chosenByUser.current = false;
       setSeasons([]);
       setChosen(null);
       setEpisodes([]);
@@ -109,6 +120,7 @@ export function useSeasons(
     const visit = `${String(titleId)}:${kind}`;
     if (reading.current !== visit) {
       reading.current = visit;
+      chosenByUser.current = false;
       setSeasons([]);
       setChosen(null);
       setEpisodes([]);
@@ -125,7 +137,7 @@ export function useSeasons(
         // The opening season is the core's answer projected onto a display rule; `null` is a show whose
         // provider named no seasons, which draws no section rather than an empty one. A re-read keeps
         // the one on screen when it is still there.
-        setChosen((current) => seasonAfterRead(found, current));
+        setChosen((current) => seasonAfterRead(found, current, preferred.current));
       } catch (caught: unknown) {
         if (request !== version.current) {
           return;
@@ -136,6 +148,18 @@ export function useSeasons(
       }
     })();
   }, [titleId, kind, refreshes]);
+
+  // The hint usually arrives after the season list: the title read and the season read are
+  // separate requests. Adopt it once, and never after the reader has chosen a season themselves.
+  useEffect(() => {
+    if (preferredSeason === null || chosenByUser.current) {
+      return;
+    }
+    if (!seasons.some((season) => season.seasonNumber === preferredSeason)) {
+      return;
+    }
+    setChosen((current) => (current === preferredSeason ? current : preferredSeason));
+  }, [preferredSeason, seasons]);
 
   // The chosen season's episodes.
   const load = useCallback(
@@ -220,13 +244,18 @@ export function useSeasons(
     [mark, chosen],
   );
 
+  const choose = useCallback((seasonNumber: number) => {
+    chosenByUser.current = true;
+    setChosen(seasonNumber);
+  }, []);
+
   return {
     seasons,
     season: seasons.find((one) => one.seasonNumber === chosen) ?? null,
     episodes,
     loading: state.loading,
     failed: state.failed,
-    choose: setChosen,
+    choose,
     setEpisodeWatched,
     setSeasonWatched,
     markFailed,

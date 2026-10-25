@@ -101,7 +101,9 @@ export function TitleScreen({
   const atEnd = (title?.progress?.percent ?? 0) > 95;
   const startAt = atEnd ? 0 : resume;
   const movie = kind !== "show";
-  const selectedSeason = season ?? seasons[0]?.number ?? episodes[0]?.seasonNumber;
+  // The server names the season it returned; `seasons[0]` is only the fallback before it answers.
+  const selectedSeason = season ?? title?.season ?? seasons[0]?.number ?? episodes[0]?.seasonNumber;
+  const nextUp = title?.nextUp ?? null;
   const seasonWatched = episodes.length > 0 && episodes.every((episode) => episode.watched);
   const seasonUpcoming = episodes.some(
     (episode) => episode.airDate !== null && episode.airDate > today,
@@ -700,11 +702,18 @@ export function TitleScreen({
                   const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
                   const action = downloadAction(episode.downloadState, episode.downloadPercent);
                   const playable = episode.playable || episode.streamable;
+                  const tone = downloadTone(episode.downloadState);
+                  const downloading = tone === "queued" || tone === "active";
+                  const downloadPercent = Math.max(0, Math.min(100, episode.downloadPercent ?? 0));
+                  const isNextUp =
+                    nextUp !== null &&
+                    nextUp.seasonNumber === episode.seasonNumber &&
+                    nextUp.episodeNumber === episode.episodeNumber;
                   // A future episode has nothing to fetch yet; the same rule the desktop's episode
                   // card applies, and the core refuses a future watch mark from either surface.
                   const upcomingEpisode = episode.airDate !== null && episode.airDate > today;
                   return (
-                    <div className="episode" key={key}>
+                    <div className={isNextUp ? "episode next-up" : "episode"} key={key}>
                       <button
                         className="episode-play"
                         data-focus="true"
@@ -716,11 +725,31 @@ export function TitleScreen({
                           {episode.still === null ? null : (
                             <img alt="" decoding="async" loading="lazy" src={episode.still} />
                           )}
-                          {episode.percent <= 0 ? null : (
+                          {downloading ? (
+                            <span className="episode-download-overlay">
+                              <span className="episode-download-label">
+                                {tone === "active"
+                                  ? "Downloading " + String(Math.round(downloadPercent)) + "%"
+                                  : "Queued"}
+                              </span>
+                              {tone === "active" ? (
+                                <span className="episode-download-bar">
+                                  <i style={{ width: String(downloadPercent) + "%" }} />
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : null}
+                          {(episode.watched ? 100 : episode.percent) <= 0 ? null : (
                             <span className="card-progress">
-                              <i style={{ width: Math.min(100, episode.percent) + "%" }} />
+                              <i
+                                style={{
+                                  width:
+                                    Math.min(100, episode.watched ? 100 : episode.percent) + "%",
+                                }}
+                              />
                             </span>
                           )}
+                          {isNextUp ? <span className="episode-next-up">Next up</span> : null}
                         </span>
                         <span className="episode-copy">
                           <span className="episode-number">

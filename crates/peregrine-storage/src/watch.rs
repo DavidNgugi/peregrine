@@ -60,6 +60,25 @@ pub struct EpisodeProgressRow {
     pub position_ms: i64,
 }
 
+/// One episode, named by the numbers a season list draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EpisodeRef {
+    /// The season the episode sits in.
+    pub season_number: u32,
+    /// Its number within that season.
+    pub episode_number: u32,
+}
+
+/// Where a title's watch state leaves the reader: what they last touched and what comes next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TitleWatchState {
+    /// The episode with the most recently written progress row, watched or not.
+    pub last_watched: Option<EpisodeRef>,
+    /// The episode to offer next: the latest row when it is unfinished, else the first
+    /// unwatched episode after it. `None` when every episode is watched.
+    pub next_up: Option<EpisodeRef>,
+}
+
 /// One day's total watched milliseconds, for the history graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchDayRow {
@@ -344,6 +363,75 @@ pub(crate) async fn list_continue(
     .await
     .map_err(StorageError::from_sqlx)?;
     rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Where one title's watch state leaves the reader, across every season.
+///
+/// This is the one read that can choose the season a title page opens on: the latest progress
+/// row names the episode the reader last touched, and the next unwatched episode after it is the
+/// one a Resume or Download control should offer. Files are irrelevant here; deleting a payload
+/// does not delete the fact that the episode was watched.
+pub(crate) async fn title_watch_state(
+    pool: &sqlx::SqlitePool,
+    scope: AccountScope,
+    title_id: i64,
+) -> Result<TitleWatchState, StorageError> {
+    let rows = sqlx::query_as::<_, (i64, i64, i64, Option<i64>)>(
+        "SELECT e.season_number, e.episode_number, COALESCE(p.watched, 0), p.updated_at \
+         FROM episode e JOIN title t ON t.id = e.title_id \
+         LEFT JOIN watch_progress p ON p.episode_id = e.id AND p.account_id = ?2 \
+         WHERE e.title_id = ?1 AND (?3 = 0 OR (t.adult = 0 AND t.content_rating IS NOT NULL)) \
+         ORDER BY e.season_number ASC, e.episode_number ASC",
+    )
+    .bind(title_id)
+    .bind(scope.account().get())
+    .bind(hidden_by_scope(scope))
+    .fetch_all(pool)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+
+    let mut episodes = Vec::with_capacity(rows.len());
+    for (season, episode, watched, updated_at) in rows {
+        let season_number = u32::try_from(season).map_err(|_| StorageError::UnexpectedValue {
+            column: "season_number",
+            found: season.to_string(),
+        })?;
+        let episode_number = u32::try_from(episode).map_err(|_| StorageError::UnexpectedValue {
+            column: "episode_number",
+            found: episode.to_string(),
+        })?;
+        episodes.push((
+            EpisodeRef {
+                season_number,
+                episode_number,
+            },
+            watched != 0,
+            updated_at,
+        ));
+    }
+
+    let Some((latest, _)) = episodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, _, updated_at))| updated_at.map(|at| (index, at)))
+        .max_by_key(|(_, at)| *at)
+    else {
+        return Ok(TitleWatchState::default());
+    };
+
+    let last_watched = Some(episodes[latest].0);
+    let next_up = if episodes[latest].1 {
+        episodes[latest + 1..]
+            .iter()
+            .find(|(_, watched, _)| !*watched)
+            .map(|(episode, _, _)| *episode)
+    } else {
+        last_watched
+    };
+    Ok(TitleWatchState {
+        last_watched,
+        next_up,
+    })
 }
 
 /// Reads a page of everything one account has watched, most recently updated first.
@@ -750,6 +838,112 @@ mod tests {
                 .unwrap()
                 .watched()
         );
+    }
+
+    #[tokio::test]
+    async fn title_watch_state_follows_the_latest_episode_across_seasons() {
+        let directory = TempDir::new().unwrap();
+        let path = path_of(&directory);
+        let (database, title_id, _, _) = populated(&directory).await;
+        crate::test_support::season(&path, 1, title_id, 1).await;
+        crate::test_support::season(&path, 2, title_id, 2).await;
+        for (episode_id, season, number) in [(1, 1, 1), (2, 1, 2), (3, 2, 1), (4, 2, 2)] {
+            crate::test_support::episode(&path, episode_id, title_id, season, season, number).await;
+        }
+
+        assert_eq!(
+            database
+                .title_watch_state(any_account_scope(), title_id)
+                .await
+                .unwrap(),
+            TitleWatchState::default()
+        );
+
+        let mut first = progress(title_id, Some(1), 0, Some(600_000), NOW);
+        first
+            .mark_watched(WatchOrigin::Manual, at(NOW))
+            .expect("a manual mark is exempt from the floor");
+        database.record_watch_progress(first).await.unwrap();
+        assert_eq!(
+            database
+                .title_watch_state(any_account_scope(), title_id)
+                .await
+                .unwrap(),
+            TitleWatchState {
+                last_watched: Some(EpisodeRef {
+                    season_number: 1,
+                    episode_number: 1,
+                }),
+                next_up: Some(EpisodeRef {
+                    season_number: 1,
+                    episode_number: 2,
+                }),
+            },
+            "the first unwatched episode after the latest mark"
+        );
+
+        let mut later = progress(title_id, Some(3), 0, Some(600_000), NOW + 10);
+        later
+            .mark_watched(WatchOrigin::Manual, at(NOW + 10))
+            .expect("a manual mark is exempt from the floor");
+        database.record_watch_progress(later).await.unwrap();
+        assert_eq!(
+            database
+                .title_watch_state(any_account_scope(), title_id)
+                .await
+                .unwrap(),
+            TitleWatchState {
+                last_watched: Some(EpisodeRef {
+                    season_number: 2,
+                    episode_number: 1,
+                }),
+                next_up: Some(EpisodeRef {
+                    season_number: 2,
+                    episode_number: 2,
+                }),
+            },
+            "a later season moves the next-up point with it"
+        );
+
+        database
+            .record_watch_progress(progress(title_id, Some(4), 30_000, Some(600_000), NOW + 20))
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .title_watch_state(any_account_scope(), title_id)
+                .await
+                .unwrap(),
+            TitleWatchState {
+                last_watched: Some(EpisodeRef {
+                    season_number: 2,
+                    episode_number: 2,
+                }),
+                next_up: Some(EpisodeRef {
+                    season_number: 2,
+                    episode_number: 2,
+                }),
+            },
+            "an unfinished latest episode is the resume point"
+        );
+
+        let mut finished = progress(title_id, Some(4), 600_000, Some(600_000), NOW + 30);
+        finished
+            .mark_watched(WatchOrigin::Manual, at(NOW + 30))
+            .expect("a manual mark is exempt from the floor");
+        database.record_watch_progress(finished).await.unwrap();
+        let state = database
+            .title_watch_state(any_account_scope(), title_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.last_watched,
+            Some(EpisodeRef {
+                season_number: 2,
+                episode_number: 2,
+            })
+        );
+        assert_eq!(state.next_up, None, "nothing is left to offer");
     }
 
     #[tokio::test]

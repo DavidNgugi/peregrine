@@ -369,10 +369,15 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
     }
     leavingPlayer.current = route.kind === "player";
   }, [route.kind]);
+  const preferredSeason =
+    route.kind === "title"
+      ? (title.nextUp?.seasonNumber ?? title.lastWatched?.seasonNumber ?? null)
+      : null;
   const seasons = useSeasons(
     route.kind === "title" ? route.id : null,
     titleKind,
     title.refreshes + title.seasonUpdates + acquiredRevision,
+    preferredSeason,
   );
   const openScreen = useCallback(
     (action: string) => {

@@ -4605,6 +4605,21 @@ impl Runtime {
         Ok(())
     }
 
+    /// Where a title's watch state leaves the reader: what they last touched and what comes next.
+    ///
+    /// # Errors
+    ///
+    /// `RuntimeError::Storage` when the read fails.
+    pub async fn title_watch_state(
+        &self,
+        title_id: i64,
+    ) -> Result<peregrine_storage::TitleWatchState, RuntimeError> {
+        Ok(self
+            .database
+            .title_watch_state(installation_scope(), title_id)
+            .await?)
+    }
+
     /// The titles this account has started and not finished, most recent first.
     ///
     /// # Errors

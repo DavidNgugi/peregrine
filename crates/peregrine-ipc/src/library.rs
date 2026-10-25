@@ -245,6 +245,27 @@ pub struct CastMemberDto {
     pub profile: Option<String>,
 }
 
+/// One episode, named by the numbers a season list draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeRefDto {
+    /// The season the episode sits in.
+    #[specta(type = Number)]
+    pub season_number: u32,
+    /// Its number within that season.
+    #[specta(type = Number)]
+    pub episode_number: u32,
+}
+
+impl From<peregrine_app::EpisodeRef> for EpisodeRefDto {
+    fn from(value: peregrine_app::EpisodeRef) -> Self {
+        Self {
+            season_number: value.season_number,
+            episode_number: value.episode_number,
+        }
+    }
+}
+
 /// One title as its own screen reads it: the library's answer, plus what a provider could still add.
 ///
 /// Nested rather than a wider [`LibraryTitleDto`] because the two answer different questions and are
@@ -298,6 +319,14 @@ pub struct TitleDetailDto {
     /// Separate from the per-episode state a season list carries: a film is one row, and marking it
     /// watched is a statement about the title rather than about an episode (`PG-E18-06`).
     pub watched: bool,
+    /// The episode with the most recently written progress row, when the title has one.
+    ///
+    /// This is what lets a page open on the season the reader actually left, even after the
+    /// payload was deleted: progress is per episode and outlives the file.
+    pub last_watched: Option<EpisodeRefDto>,
+    /// The episode to offer next: the latest row when it is unfinished, otherwise the first
+    /// unwatched episode after it. `null` when every episode is watched.
+    pub next_up: Option<EpisodeRefDto>,
     /// What pressing Play would actually do, or `null` when the library holds no copy on disk.
     ///
     /// **The reason Play can say why it will not work** rather than being inert with no explanation: a
@@ -1169,8 +1198,24 @@ pub async fn get_title(
     title: TitleRef,
 ) -> Result<Option<TitleDetailDto>, AppError> {
     let runtime = state.runtime()?;
-    let watched = runtime.title_watched(title.id).await.unwrap_or(false);
-    let title = runtime.library_title(title.id).await?;
+    let detail = title_detail_page(runtime, title.id).await?;
+    Ok(guard_response("library::get_title", detail))
+}
+
+/// The read behind `get_title`, kept out of the command so the command stays a parse-call-map.
+async fn title_detail_page(
+    runtime: &peregrine_app::Runtime,
+    title_id: i64,
+) -> Result<Option<TitleDetailDto>, AppError> {
+    let watched = runtime.title_watched(title_id).await.unwrap_or(false);
+    let title = runtime.library_title(title_id).await?;
+    let watch = match title.as_ref() {
+        Some(detail) => runtime
+            .title_watch_state(detail.entry.row.title.id)
+            .await
+            .unwrap_or_default(),
+        None => peregrine_app::TitleWatchState::default(),
+    };
     let cast = runtime
         .title_cast(
             title.as_ref().map_or(0, |detail| detail.entry.row.title.id),
@@ -1178,15 +1223,16 @@ pub async fn get_title(
         )
         .await
         .unwrap_or_default();
-    Ok(guard_response(
-        "library::get_title",
-        title.map(|detail| {
-            let mut dto = title_detail(detail);
-            dto.cast = cast.into_iter().map(CastMemberDto::from).collect();
-            dto.watched = watched;
-            dto
-        }),
-    ))
+    let last_watched = watch.last_watched.map(EpisodeRefDto::from);
+    let next_up = watch.next_up.map(EpisodeRefDto::from);
+    Ok(title.map(|detail| {
+        let mut dto = title_detail(detail);
+        dto.cast = cast.into_iter().map(CastMemberDto::from).collect();
+        dto.watched = watched;
+        dto.last_watched = last_watched;
+        dto.next_up = next_up;
+        dto
+    }))
 }
 
 /// Enumerates the present media files before the user confirms moving them to the OS trash.
@@ -1352,6 +1398,8 @@ fn title_detail(detail: peregrine_app::LibraryTitleDetail) -> TitleDetailDto {
         // Filled by `get_title`: the mapping has no runtime to ask, and the read that answers it is
         // the same one the page's Play state already needs.
         watched: false,
+        last_watched: None,
+        next_up: None,
         play_support: detail.playback.support.map(LocalPlaybackDto::from),
     }
 }

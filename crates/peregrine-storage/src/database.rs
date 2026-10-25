@@ -2162,6 +2162,15 @@ impl Database {
         crate::watch::list_continue(&self.readers, scope, request).await
     }
 
+    /// Where one title's watch state leaves the reader, across every season.
+    pub async fn title_watch_state(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+    ) -> Result<crate::watch::TitleWatchState, StorageError> {
+        crate::watch::title_watch_state(&self.readers, scope, title_id).await
+    }
+
     /// A page of everything one account has watched, most recently updated first.
     pub async fn list_watch_progress(
         &self,

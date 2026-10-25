@@ -414,7 +414,11 @@ pub struct WebSubtitleTrack {
 /// What one title's download jobs say, keyed the way its page draws them.
 #[derive(Debug, Default)]
 struct TitleDownloads {
+    /// A film's job, or a series job that names no season.
     title: Option<JobDownload>,
+    /// A season pack, keyed by the season it fills. Every episode in that season draws it.
+    seasons: HashMap<u32, JobDownload>,
+    /// A job for one episode, which wins over the season pack it belongs to.
     episodes: HashMap<(u32, u32), JobDownload>,
 }
 
@@ -2179,10 +2183,15 @@ impl WebService {
             return Ok(None);
         };
         let is_show = identity.kind == TitleKind::Show;
+        let watch = if is_show {
+            self.runtime.title_watch_state(id).await?
+        } else {
+            peregrine_storage::TitleWatchState::default()
+        };
         let downloads = self.title_downloads(id).await?;
         let schedules = self.title_schedules(id).await?;
-        let (seasons, episodes) = self
-            .title_seasons_page(id, is_show, season, &downloads, &schedules)
+        let (chosen_season, seasons, episodes) = self
+            .title_seasons_page(id, is_show, season, &downloads, &schedules, watch)
             .await?;
         // A provider fill that never cached its poster (or a series the catalogue only listed)
         // is a page with no main image. The same refresh fills both, and the client already polls
@@ -2225,6 +2234,9 @@ impl WebService {
         let (download_state, download_percent) = downloads.summary(is_show, &episodes);
         Ok(Some(TitleDto {
             id,
+            season: chosen_season,
+            last_watched: watch.last_watched.map(EpisodeRefDto::from),
+            next_up: watch.next_up.map(EpisodeRefDto::from),
             name: identity.name,
             kind: identity.kind.as_str().to_owned(),
             poster,
@@ -2257,9 +2269,10 @@ impl WebService {
         season: Option<u32>,
         downloads: &TitleDownloads,
         schedules: &TitleSchedules,
-    ) -> Result<(Vec<SeasonDto>, Vec<EpisodeDto>), WebError> {
+        watch: peregrine_storage::TitleWatchState,
+    ) -> Result<(Option<u32>, Vec<SeasonDto>, Vec<EpisodeDto>), WebError> {
         if !is_show {
-            return Ok((Vec::new(), Vec::new()));
+            return Ok((None, Vec::new(), Vec::new()));
         }
         let seasons: Vec<SeasonDto> = self
             .runtime
@@ -2273,12 +2286,7 @@ impl WebService {
                 poster: image_url(season.poster.as_deref()),
             })
             .collect();
-        let chosen = season.or_else(|| {
-            seasons
-                .iter()
-                .find(|held| held.episode_count.unwrap_or(0) > 0 || held.number > 0)
-                .map(|held| held.number)
-        });
+        let chosen = season_to_open(&seasons, season, watch);
         let progress = self.runtime.title_watch_progress(id).await?;
         let episodes = episode_dtos(
             self.runtime.title_episodes(id, chosen, 500).await?,
@@ -2286,14 +2294,15 @@ impl WebService {
             downloads,
             schedules,
         );
-        Ok((seasons, episodes))
+        Ok((chosen, seasons, episodes))
     }
 
     /// One read of the title's download jobs, keyed by the numbers a page draws.
     ///
-    /// The queue is read once rather than per episode: the title-level job is the newest that
-    /// names no episode, and an episode's job is the newest that names it. `episode_numbers`
-    /// turns the job's episode id into the season and number the page already has.
+    /// The queue is read once rather than per episode: a job that names no episode and no season
+    /// belongs to the title, one that names a season is a pack, and one that names an episode is
+    /// that episode's. `episode_numbers` turns the job's episode id into the numbers the page
+    /// already has.
     async fn title_downloads(&self, title_id: i64) -> Result<TitleDownloads, WebError> {
         let jobs = self.runtime.download_jobs().await?;
         let mut downloads = TitleDownloads::default();
@@ -2308,11 +2317,16 @@ impl WebService {
                     .unwrap_or(false),
             };
             match job.episode_id {
-                None => {
-                    if downloads.title.is_none() {
-                        downloads.title = Some(download);
+                None => match job.season_number {
+                    Some(season) => {
+                        downloads.seasons.entry(season).or_insert(download);
                     }
-                }
+                    None => {
+                        if downloads.title.is_none() {
+                            downloads.title = Some(download);
+                        }
+                    }
+                },
                 Some(episode_id) => {
                     if let Some(numbers) = self.runtime.episode_numbers(episode_id).await? {
                         downloads.episodes.entry(numbers).or_insert(download);
@@ -2913,6 +2927,25 @@ pub struct LibraryRowDto {
     pub added_at: i64,
 }
 
+/// One episode, named by the numbers a season list draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeRefDto {
+    /// The season the episode sits in.
+    pub season_number: u32,
+    /// Its number within that season.
+    pub episode_number: u32,
+}
+
+impl From<peregrine_storage::EpisodeRef> for EpisodeRefDto {
+    fn from(value: peregrine_storage::EpisodeRef) -> Self {
+        Self {
+            season_number: value.season_number,
+            episode_number: value.episode_number,
+        }
+    }
+}
+
 /// A title as its page draws it.
 // Five independent flags, each a column or a derived answer a screen draws: playable, in the
 // library, on the watchlist, watched, and refreshing. Collapsing them into one state would
@@ -2923,6 +2956,12 @@ pub struct LibraryRowDto {
 pub struct TitleDto {
     /// The title id.
     pub id: i64,
+    /// The season the episodes below belong to; `null` for a film.
+    pub season: Option<u32>,
+    /// The episode with the most recently written progress row.
+    pub last_watched: Option<EpisodeRefDto>,
+    /// The episode to offer next, or `null` when every episode is watched.
+    pub next_up: Option<EpisodeRefDto>,
     /// The display name.
     pub name: String,
     /// movie or show.
@@ -3241,6 +3280,27 @@ fn hero_candidates(rails: &[RailDto], hero: Option<&TileDto>) -> Vec<TileDto> {
     heroes
 }
 
+/// The season a title page opens on: an explicit request, the season of the next-up episode, the
+/// season last watched, then the first numbered season. A hint that names a season the provider no
+/// longer lists is ignored rather than opening an empty page.
+fn season_to_open(
+    seasons: &[SeasonDto],
+    requested: Option<u32>,
+    watch: peregrine_storage::TitleWatchState,
+) -> Option<u32> {
+    let present = |number: u32| seasons.iter().any(|season| season.number == number);
+    let hinted = requested
+        .or_else(|| watch.next_up.map(|episode| episode.season_number))
+        .or_else(|| watch.last_watched.map(|episode| episode.season_number));
+    match hinted {
+        Some(number) if present(number) => Some(number),
+        _ => seasons
+            .iter()
+            .find(|held| held.episode_count.unwrap_or(0) > 0 || held.number > 0)
+            .map(|held| held.number),
+    }
+}
+
 fn episode_dtos(
     episodes: Vec<crate::TitleEpisodeDetail>,
     progress: &[peregrine_storage::EpisodeProgressRow],
@@ -3256,7 +3316,11 @@ fn episode_dtos(
                     && held.episode_number == row.episode_number.get()
             });
             let numbers = (row.season_number.get(), row.episode_number.get());
-            let download = downloads.episodes.get(&numbers);
+            // A season pack is one job for every episode in its season; an episode-specific job,
+            // when one exists, is the more precise answer. Only the specific job can make the
+            // episode streamable, because the pack has not necessarily imported this file yet.
+            let specific = downloads.episodes.get(&numbers);
+            let download = specific.or_else(|| downloads.seasons.get(&row.season_number.get()));
             EpisodeDto {
                 season_number: row.season_number.get(),
                 episode_number: row.episode_number.get(),
@@ -3271,7 +3335,7 @@ fn episode_dtos(
                 position_ms: found.map_or(0, |held| held.position_ms),
                 watched: found.is_some_and(|held| held.watched),
                 playable: row.files > 0,
-                streamable: download.is_some_and(JobDownload::streamable),
+                streamable: specific.is_some_and(JobDownload::streamable),
                 scheduled: schedules.episodes.contains(&numbers),
                 download_state: download.map(|job| job.state.clone()),
                 download_percent: download.map(|job| job.percent),
@@ -3503,9 +3567,9 @@ mod tests {
     use peregrine_domain::{PlaybackPreference, SubtitleMode};
 
     use super::{
-        EpisodeDto, JobDownload, TileDto, TitleDownloads, WebConfig, WebError, WebSubtitleTrack,
-        chosen_subtitle, code_for, hash_token, mark_watchlisted, mime_for, scope_allows,
-        subtitle_dtos, subtitle_url,
+        EpisodeDto, JobDownload, SeasonDto, TileDto, TitleDownloads, WebConfig, WebError,
+        WebSubtitleTrack, chosen_subtitle, code_for, hash_token, mark_watchlisted, mime_for,
+        scope_allows, season_to_open, subtitle_dtos, subtitle_url,
     };
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
@@ -3903,6 +3967,59 @@ mod tests {
             download_state: None,
             download_percent: None,
         }
+    }
+
+    #[test]
+    fn a_title_opens_on_the_season_the_reader_left() {
+        let season = |number: u32| SeasonDto {
+            number,
+            name: None,
+            episode_count: Some(1),
+            poster: None,
+        };
+        let seasons = vec![season(1), season(2)];
+        let watch = peregrine_storage::TitleWatchState {
+            last_watched: Some(peregrine_storage::EpisodeRef {
+                season_number: 2,
+                episode_number: 5,
+            }),
+            next_up: Some(peregrine_storage::EpisodeRef {
+                season_number: 2,
+                episode_number: 6,
+            }),
+        };
+
+        assert_eq!(season_to_open(&seasons, None, watch), Some(2));
+        assert_eq!(
+            season_to_open(&seasons, Some(1), watch),
+            Some(1),
+            "an explicit season wins"
+        );
+
+        let missing = peregrine_storage::TitleWatchState {
+            last_watched: Some(peregrine_storage::EpisodeRef {
+                season_number: 1,
+                episode_number: 10,
+            }),
+            next_up: Some(peregrine_storage::EpisodeRef {
+                season_number: 9,
+                episode_number: 1,
+            }),
+        };
+        assert_eq!(
+            season_to_open(&seasons, None, missing),
+            Some(1),
+            "a hint for a season the provider dropped falls back to the last watched one"
+        );
+        assert_eq!(
+            season_to_open(
+                &seasons,
+                None,
+                peregrine_storage::TitleWatchState::default()
+            ),
+            Some(1),
+            "no progress opens on the first numbered season"
+        );
     }
 
     #[test]

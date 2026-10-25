@@ -123,6 +123,27 @@ export function EpisodeCard({
   // own word, and the pack is what covers the ones still wanted.
   const covering = availability === "wanted" ? seasonPack : undefined;
   const transferring = downloading || covering !== undefined;
+  const downloadPercentNow = downloading
+    ? downloadPercent
+    : covering?.status === "active"
+      ? covering.percent
+      : undefined;
+  const showPlay =
+    onPlay !== undefined &&
+    (availability === "available" || availability === "partial" || (downloading && streamable));
+  const showDownload = onDownload !== undefined && (availability === "wanted" || transferring);
+  const showDelete = onDelete !== undefined && episode.files > 0;
+  const showMark = onToggleWatched !== undefined && !unaired;
+  const showActions = showPlay || showDownload || showDelete || showMark;
+  const downloadLabel = downloading
+    ? downloadPercent === undefined
+      ? t("title.episode.downloadingWaiting")
+      : t("title.episode.downloading", { percent: downloadPercent })
+    : covering === undefined
+      ? t("title.episode.download")
+      : covering.status === "active"
+        ? t("title.episode.downloading", { percent: covering.percent })
+        : t("title.episode.queued");
 
   return (
     <article
@@ -150,6 +171,29 @@ export function EpisodeCard({
             width={STILL_WIDTH}
           />
         )}
+        {/* A transfer belongs on the picture it is filling, not only in the button below it: the
+            still is what the eye lands on, and a season pack has no single row to hang a state on. */}
+        {downloading || covering !== undefined ? (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/55 px-4 text-center text-white"
+          >
+            <span className="text-body font-semibold">{downloadLabel}</span>
+            {downloadPercentNow === undefined ? null : (
+              <span className="h-1 w-24 overflow-hidden rounded-full bg-white/25">
+                <span
+                  className="block h-full bg-accent"
+                  style={{ width: `${String(downloadPercentNow)}%` }}
+                />
+              </span>
+            )}
+          </div>
+        ) : null}
+        {nextUp ? (
+          <span className="absolute left-2 top-2 rounded-full bg-accent px-2 py-0.5 text-caption font-medium text-[var(--text-on-accent)]">
+            {t("title.episode.nextUp")}
+          </span>
+        ) : null}
         {/* The bar Netflix puts along the bottom of a still: filled means finished, partial means
             part-way. It is aria-hidden because the chip already carries the state in words. */}
         {watched || progress > 0 ? (
@@ -172,11 +216,6 @@ export function EpisodeCard({
               <span className="text-text-tertiary">{t("title.unnamedEpisode")}</span>
             )}
           </h3>
-          {nextUp ? (
-            <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-caption font-medium text-[var(--text-on-accent)]">
-              {t("title.episode.nextUp")}
-            </span>
-          ) : null}
           <span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-caption text-text-secondary">
             {covering === undefined
               ? availability === null
@@ -212,12 +251,13 @@ export function EpisodeCard({
           <p className="line-clamp-3 text-caption text-text-secondary">{episode.overview}</p>
         )}
 
-        {/* A card the library already holds offers no Download: the chip says it is here, and a
-            second button would be an offer to fetch what is on disk. While this episode's own
-            transfer is in flight the button stays, saying so. */}
+        {/* One row for every action, so Download and the watch toggle share a baseline instead of
+            living in two stacked containers. A card the library already holds offers no Download:
+            the chip says it is here, and a second button would be an offer to fetch what is on
+            disk. While this episode's own transfer is in flight the button stays, saying so. */}
         {availability === null ? (
           onSchedule === undefined ? null : (
-            <div className="mt-auto flex gap-2 pt-1">
+            <div className="mt-auto flex items-center gap-2 pt-1">
               <Button
                 disabled={scheduled}
                 onClick={() => {
@@ -230,90 +270,74 @@ export function EpisodeCard({
               </Button>
             </div>
           )
-        ) : onPlay === undefined &&
-          (onDownload === undefined || (availability !== "wanted" && !transferring)) ? null : (
-          <div className="mt-auto flex flex-wrap gap-2 pt-1">
-            {onPlay !== undefined &&
-            (availability === "available" ||
-              availability === "partial" ||
-              (downloading && streamable)) ? (
+        ) : showActions ? (
+          <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {showPlay ? (
+                <Button
+                  aria-label={t("title.episode.playLabel", {
+                    number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                    name: episode.name ?? t("title.unnamedEpisode"),
+                  })}
+                  onClick={() => {
+                    onPlay?.(episode);
+                  }}
+                  size="sm"
+                  variant="primary"
+                >
+                  {t("title.episode.play")}
+                </Button>
+              ) : null}
+              {showDownload ? (
+                <Button
+                  aria-label={t("title.episode.downloadLabel", {
+                    number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                    name: episode.name ?? t("title.unnamedEpisode"),
+                  })}
+                  disabled={transferring}
+                  onClick={() => {
+                    onDownload?.(episode);
+                  }}
+                  size="sm"
+                  variant={transferring ? "primary" : "secondary"}
+                >
+                  {downloadLabel}
+                </Button>
+              ) : null}
+              {showDelete ? (
+                <IconButton
+                  icon="trash"
+                  label={t("title.hero.deleteFiles")}
+                  onClick={() => {
+                    onDelete?.(episode);
+                  }}
+                  size="sm"
+                  title={t("title.hero.deleteFiles")}
+                  variant="ghost"
+                />
+              ) : null}
+            </div>
+            {showMark ? (
               <Button
-                aria-label={t("title.episode.playLabel", {
-                  number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
-                  name: episode.name ?? t("title.unnamedEpisode"),
-                })}
+                aria-label={t(
+                  watched ? "title.episode.markUnwatchedLabel" : "title.episode.markWatchedLabel",
+                  {
+                    number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
+                    name: episode.name ?? t("title.unnamedEpisode"),
+                  },
+                )}
+                disabled={marking}
                 onClick={() => {
-                  onPlay(episode);
+                  onToggleWatched?.(episode, !watched);
                 }}
                 size="sm"
-                variant="primary"
+                variant="ghost"
               >
-                {t("title.episode.play")}
+                {watched ? t("title.episode.markUnwatched") : t("title.episode.markWatched")}
               </Button>
             ) : null}
-            {onDownload === undefined || (availability !== "wanted" && !transferring) ? null : (
-              <Button
-                aria-label={t("title.episode.downloadLabel", {
-                  number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
-                  name: episode.name ?? t("title.unnamedEpisode"),
-                })}
-                disabled={transferring}
-                onClick={() => {
-                  onDownload(episode);
-                }}
-                size="sm"
-                variant={transferring ? "primary" : "secondary"}
-              >
-                {downloading
-                  ? downloadPercent === undefined
-                    ? t("title.episode.downloadingWaiting")
-                    : t("title.episode.downloading", { percent: downloadPercent })
-                  : covering === undefined
-                    ? t("title.episode.download")
-                    : covering.status === "active"
-                      ? t("title.episode.downloading", { percent: covering.percent })
-                      : t("title.episode.queued")}
-              </Button>
-            )}
-            {onDelete === undefined || episode.files === 0 ? null : (
-              <IconButton
-                icon="trash"
-                label={t("title.hero.deleteFiles")}
-                onClick={() => {
-                  onDelete(episode);
-                }}
-                size="sm"
-                title={t("title.hero.deleteFiles")}
-                variant="ghost"
-              />
-            )}
           </div>
-        )}
-
-        {/* Offered for what has aired, whatever its availability: marking is a statement about what
-            the reader has seen, not about what is on disk. An unaired episode offers Schedule
-            instead, and the core refuses a future mark from the web surface too. */}
-        {onToggleWatched === undefined || unaired ? null : (
-          <div className="flex justify-end pt-1">
-            <Button
-              aria-label={t(
-                watched ? "title.episode.markUnwatchedLabel" : "title.episode.markWatchedLabel",
-                {
-                  number: `${String(episode.seasonNumber)}×${String(episode.episodeNumber).padStart(2, "0")}`,
-                  name: episode.name ?? t("title.unnamedEpisode"),
-                },
-              )}
-              disabled={marking}
-              onClick={() => {
-                onToggleWatched(episode, !watched);
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              {watched ? t("title.episode.markUnwatched") : t("title.episode.markWatched")}
-            </Button>
-          </div>
-        )}
+        ) : null}
       </div>
     </article>
   );

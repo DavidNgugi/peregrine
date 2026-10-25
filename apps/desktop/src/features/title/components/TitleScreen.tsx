@@ -155,6 +155,20 @@ export function TitleScreen({
           (row) =>
             row.titleId === title.id && row.seasonNumber !== null && row.episodeNumber !== null,
         );
+  // A partially played episode is the resume point; otherwise the core's cross-season next-up
+  // answer is what Play should open. The latest progress row is deliberately not filtered by
+  // files: deleting a payload does not undo the fact that the episode was watched.
+  const resumePoint =
+    resumeEpisode !== undefined &&
+    resumeEpisode.seasonNumber !== null &&
+    resumeEpisode.episodeNumber !== null
+      ? { season: resumeEpisode.seasonNumber, episode: resumeEpisode.episodeNumber }
+      : undefined;
+  const playEpisode =
+    resumePoint ??
+    (detail.nextUp === null
+      ? undefined
+      : { season: detail.nextUp.seasonNumber, episode: detail.nextUp.episodeNumber });
   // A projection of the read, not a rule: whether every episode on screen is already marked. One
   // empty season is not "watched", which is why the length test comes first.
   const seasonWatched =
@@ -438,12 +452,7 @@ export function TitleScreen({
                   kind: "player",
                   id: title.id,
                   titleKind: kind,
-                  ...(resumeEpisode === undefined
-                    ? {}
-                    : {
-                        season: resumeEpisode.seasonNumber as number,
-                        episode: resumeEpisode.episodeNumber as number,
-                      }),
+                  ...(playEpisode === undefined ? {} : playEpisode),
                 });
               }}
               acquiring={
@@ -454,16 +463,7 @@ export function TitleScreen({
                 acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
               }
               scheduled={scheduledKeys.has("t")}
-              playEpisode={
-                resumeEpisode?.seasonNumber === null || resumeEpisode?.episodeNumber === null
-                  ? undefined
-                  : resumeEpisode === undefined
-                    ? undefined
-                    : {
-                        season: resumeEpisode.seasonNumber,
-                        episode: resumeEpisode.episodeNumber,
-                      }
-              }
+              playEpisode={playEpisode}
               onWatchlist={onWatchlist}
               onDelete={title.files > 0 ? () => void planDelete() : undefined}
               watchlisted={watchlisted}
@@ -711,7 +711,6 @@ export function TitleScreen({
                 style={{ gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))" }}
               >
                 {seasons.episodes.map((episode) => {
-                  const nextUp = seasons.episodes.find((row) => !row.watched);
                   const key = episodeKey(episode.seasonNumber, episode.episodeNumber);
                   const job = (downloadRows ?? []).find(
                     (row) =>
@@ -763,8 +762,8 @@ export function TitleScreen({
                           "e" + String(episode.seasonNumber) + "-" + String(episode.episodeNumber),
                         )}
                         nextUp={
-                          nextUp?.seasonNumber === episode.seasonNumber &&
-                          nextUp?.episodeNumber === episode.episodeNumber
+                          detail.nextUp?.seasonNumber === episode.seasonNumber &&
+                          detail.nextUp?.episodeNumber === episode.episodeNumber
                         }
                         progress={episode.progress ?? 0}
                         watched={episode.watched}

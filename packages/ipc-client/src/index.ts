@@ -66,6 +66,7 @@ export type {
   NotificationDto,
   NotificationPreferencesDto,
   TitleDetailDto,
+  EpisodeRefDto,
   TitleMatchDto,
   TitleOfferDto,
   UnmatchedFileDto,

@@ -143,6 +143,8 @@ function detail(state: Partial<TitleDetail> = {}): TitleDetail {
     cast: [],
     playSupport: "webview",
     watched: false,
+    lastWatched: null,
+    nextUp: null,
     poster: null,
     backdrop: null,
     overview: null,
@@ -475,6 +477,29 @@ describe("TitleScreen", () => {
     expect(html).toContain("Schedule");
     expect(html).not.toContain("Mark watched");
     expect(html).not.toContain("Download");
+  });
+
+  it("marks the core's next-up episode even when its file is gone", () => {
+    // Progress outlives the payload: deleting season one's files does not make the viewer a person
+    // who never watched it. The badge follows the core's cross-season answer, not the file counts.
+    const html = markup(
+      detail({
+        lastWatched: { seasonNumber: 2, episodeNumber: 5 },
+        nextUp: { seasonNumber: 2, episodeNumber: 6 },
+      }),
+      "show",
+      [],
+      seasons({
+        season: season({ seasonNumber: 2 }),
+        episodes: [
+          episode({ seasonNumber: 2, episodeNumber: 5, items: 0, files: 0, missingFiles: 0 }),
+          episode({ seasonNumber: 2, episodeNumber: 6, items: 0, files: 0, missingFiles: 0 }),
+        ],
+      }),
+    );
+
+    expect(html).toContain("Next up");
+    expect(html.match(/border-accent ring-1 ring-accent/gu)?.length).toBe(1);
   });
 
   it("plays a film whose download has named its file", () => {

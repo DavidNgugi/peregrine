@@ -847,6 +847,10 @@ button {
   text-align: left;
 }
 
+.episode.next-up {
+  border-color: var(--accent);
+}
+
 .episode-play {
   display: flex;
   flex: 1;
@@ -898,6 +902,54 @@ button {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.episode-download-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+}
+
+.episode-download-label {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.episode-download-bar {
+  display: block;
+  width: 60%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.episode-download-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.episode-next-up {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .episode-copy {

@@ -25,6 +25,7 @@
 import { eventTopics, getTitle, normalizeIpcError, refreshTitle } from "@peregrine/ipc-client";
 import type {
   CastMemberDto,
+  EpisodeRefDto,
   IpcError,
   LibraryTitleDto,
   LocalPlaybackDto,
@@ -60,6 +61,10 @@ export interface TitleDetail {
   readonly playSupport: LocalPlaybackDto | null;
   /** Whether the account has marked or finished this title as a whole. */
   readonly watched: boolean;
+  /** The episode with the most recently written progress row, when there is one. */
+  readonly lastWatched: EpisodeRefDto | null;
+  /** The episode to offer next, or `null` when everything has been watched. */
+  readonly nextUp: EpisodeRefDto | null;
   /** Where its cached poster is, as the core reported it, or `null` when there is none. */
   readonly poster: string | null;
   /** Where its cached backdrop is, or `null` when the cache holds none. */
@@ -115,6 +120,8 @@ interface TitleState {
   /** Carried through from the read; see [`TitleDetail::playSupport`]. */
   readonly playSupport: LocalPlaybackDto | null;
   readonly watched: boolean;
+  readonly lastWatched: EpisodeRefDto | null;
+  readonly nextUp: EpisodeRefDto | null;
   readonly poster: string | null;
   readonly backdrop: string | null;
   readonly overview: string | null;
@@ -131,6 +138,8 @@ const EMPTY: TitleState = {
   cast: [],
   playSupport: null,
   watched: false,
+  lastWatched: null,
+  nextUp: null,
   poster: null,
   backdrop: null,
   overview: null,
@@ -221,6 +230,8 @@ export function useTitle(id: number | null): TitleDetail {
           cast: [],
           playSupport: null,
           watched: false,
+          lastWatched: null,
+          nextUp: null,
           poster: null,
           backdrop: null,
           overview: null,
@@ -238,6 +249,8 @@ export function useTitle(id: number | null): TitleDetail {
         cast: answer.cast,
         playSupport: answer.playSupport,
         watched: answer.watched,
+        lastWatched: answer.lastWatched,
+        nextUp: answer.nextUp,
         // The poster is the read's own row rather than a field beside it: the title the core answered
         // with carries the cached path, so a page and a tile cannot disagree about what there is to draw.
         poster: answer.title.poster,
@@ -265,6 +278,8 @@ export function useTitle(id: number | null): TitleDetail {
         cast: [],
         playSupport: null,
         watched: false,
+        lastWatched: null,
+        nextUp: null,
         poster: null,
         backdrop: null,
         overview: null,

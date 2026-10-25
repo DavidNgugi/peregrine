@@ -63,6 +63,20 @@ describe("seasonAfterRead", () => {
     );
     expect(seasonAfterRead([], null)).toBeNull();
   });
+
+  it("opens on the season the watch hint names when the reader left no season on screen", () => {
+    // The default is the earliest season, which is exactly wrong once season one is finished. The
+    // hint is the season of the latest progress row, so it wins over the default but not over a
+    // season the reader is already looking at.
+    const seasons = [
+      season({ seasonNumber: 1 }),
+      season({ seasonNumber: 2 }),
+      season({ seasonNumber: 3 }),
+    ];
+    expect(seasonAfterRead(seasons, null, 2)).toBe(2);
+    expect(seasonAfterRead(seasons, null, 9)).toBe(1);
+    expect(seasonAfterRead(seasons, 3, 2)).toBe(3);
+  });
 });
 
 describe("episodeAvailability", () => {

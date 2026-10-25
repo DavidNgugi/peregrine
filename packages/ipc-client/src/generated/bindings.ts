@@ -241,6 +241,18 @@ export const commands = {
 	 */
 	watched: boolean,
 	/**
+	 *  The episode with the most recently written progress row, when the title has one.
+	 * 
+	 *  This is what lets a page open on the season the reader actually left, even after the
+	 *  payload was deleted: progress is per episode and outlives the file.
+	 */
+	lastWatched: EpisodeRefDto | null,
+	/**
+	 *  The episode to offer next: the latest row when it is unfinished, otherwise the first
+	 *  unwatched episode after it. `null` when every episode is watched.
+	 */
+	nextUp: EpisodeRefDto | null,
+	/**
 	 *  What pressing Play would actually do, or `null` when the library holds no copy on disk.
 	 * 
 	 *  **The reason Play can say why it will not work** rather than being inert with no explanation: a
@@ -1271,6 +1283,14 @@ export type EpisodeDto = {
 	watched: boolean,
 	/**  How far through the account is, as a fraction in `0.0..=1.0`; `0.0` when unstarted. */
 	progress: number | null,
+};
+
+/**  One episode, named by the numbers a season list draws. */
+export type EpisodeRefDto = {
+	/**  The season the episode sits in. */
+	seasonNumber: number,
+	/**  Its number within that season. */
+	episodeNumber: number,
 };
 
 /**
@@ -2438,6 +2458,18 @@ export type TitleDetailDto = {
 	 *  watched is a statement about the title rather than about an episode (`PG-E18-06`).
 	 */
 	watched: boolean,
+	/**
+	 *  The episode with the most recently written progress row, when the title has one.
+	 * 
+	 *  This is what lets a page open on the season the reader actually left, even after the
+	 *  payload was deleted: progress is per episode and outlives the file.
+	 */
+	lastWatched: EpisodeRefDto | null,
+	/**
+	 *  The episode to offer next: the latest row when it is unfinished, otherwise the first
+	 *  unwatched episode after it. `null` when every episode is watched.
+	 */
+	nextUp: EpisodeRefDto | null,
 	/**
 	 *  What pressing Play would actually do, or `null` when the library holds no copy on disk.
 	 * 

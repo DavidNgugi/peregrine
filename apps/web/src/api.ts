@@ -187,8 +187,19 @@ export interface Episode {
   readonly downloadPercent: number | null;
 }
 
+export interface EpisodeRef {
+  readonly seasonNumber: number;
+  readonly episodeNumber: number;
+}
+
 export interface Title {
   readonly id: number;
+  /** The season the episodes below belong to; null for a film. */
+  readonly season: number | null;
+  /** The episode with the most recently written progress row. */
+  readonly lastWatched: EpisodeRef | null;
+  /** The episode to offer next, or null when every episode is watched. */
+  readonly nextUp: EpisodeRef | null;
   readonly name: string;
   readonly kind: string;
   readonly poster: string | null;

@@ -41,9 +41,15 @@ export function defaultSeason(seasons: readonly SeasonDto[]): SeasonDto | null {
 export function seasonAfterRead(
   seasons: readonly SeasonDto[],
   current: number | null,
+  preferred: number | null = null,
 ): number | null {
   if (current !== null && seasons.some((season) => season.seasonNumber === current)) {
     return current;
+  }
+  // The episode the account last touched is a better opening than the earliest season: a viewer
+  // who finished season one belongs on season two, not back at the season they completed.
+  if (preferred !== null && seasons.some((season) => season.seasonNumber === preferred)) {
+    return preferred;
   }
   return defaultSeason(seasons)?.seasonNumber ?? null;
 }

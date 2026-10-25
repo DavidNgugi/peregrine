@@ -58,6 +58,14 @@ describe("EpisodeCard", () => {
     expect(html).toContain("Downloading… 12%");
   });
 
+  it("draws the transfer's progress over the still as well as in the button", () => {
+    const html = markup(true, false);
+
+    // One in the overlay, one in the button: the picture is what a reader scans first, and a
+    // season pack has no per-episode row for the button to belong to.
+    expect(html.match(/Downloading… 12%/gu)?.length).toBe(2);
+  });
+
   it("says a live season pack covers the episode and offers no second acquisition", () => {
     const html = renderToStaticMarkup(
       <I18nextProvider i18n={i18n}>
