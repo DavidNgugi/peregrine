@@ -26,6 +26,9 @@ librqbit = { workspace = true }
 # metadata fetch awaits the session. `io-util` carries the extension traits and the workspace
 # `tokio` already enables it.
 tokio = { workspace = true }
+# Metadata resolution is a network boundary; the adapter records timeout versus source failure
+# without ever logging the magnet or info-hash (SECURITY T13).
+tracing = { workspace = true }
 
 [lints]
 workspace = true

@@ -72,6 +72,8 @@ use peregrine_domain::id::InfoHash;
 use peregrine_domain::inspect::{EntryKind, PayloadDescription, PayloadEntry};
 use peregrine_domain::text::NonEmptyText;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
+use tokio::time::timeout;
+use tracing::{debug, warn};
 
 use crate::engine::{
     AddRequest, EngineDescriptor, EngineFuture, EngineLimits, EngineState, FetchedMetadata,
@@ -80,6 +82,8 @@ use crate::engine::{
 };
 use crate::error::EngineError;
 use crate::stats::{ByteRate, Bytes, PeerCounts, TorrentHealth, TorrentStats, Transfer};
+
+const METADATA_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// One torrent the session holds, with the identity the port's `TorrentHandle` does not carry.
 struct Held {
@@ -181,10 +185,22 @@ impl TorrentMetadataFetch for LibrqbitEngine {
                 list_only: true,
                 ..AddTorrentOptions::default()
             };
-            let response = session
-                .add_torrent(add_torrent(&source), Some(list_only))
-                .await
-                .map_err(|_| EngineError::Failed)?;
+            let response = match timeout(
+                METADATA_TIMEOUT,
+                session.add_torrent(add_torrent(&source), Some(list_only)),
+            )
+            .await
+            {
+                Ok(Ok(response)) => response,
+                Ok(Err(_error)) => {
+                    warn!("torrent metadata resolution failed");
+                    return Err(EngineError::MetadataUnavailable);
+                }
+                Err(_) => {
+                    debug!("torrent metadata resolution timed out");
+                    return Err(EngineError::MetadataTimeout);
+                }
+            };
             let list = match response {
                 AddTorrentResponse::ListOnly(list) => list,
                 AddTorrentResponse::Added(..) | AddTorrentResponse::AlreadyManaged(..) => {

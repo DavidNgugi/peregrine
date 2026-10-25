@@ -81,6 +81,12 @@ pub enum EngineError {
     /// and the caller is told only that the operation failed.
     #[error("the torrent engine could not complete the operation")]
     Failed,
+    /// The magnet did not yield metadata before the resolver deadline.
+    #[error("the torrent metadata resolver timed out while waiting for peers")]
+    MetadataTimeout,
+    /// The engine received the source but could not resolve its metadata.
+    #[error("the torrent metadata could not be resolved")]
+    MetadataUnavailable,
 }
 
 /// Why an [`AddRequest`](crate::AddRequest) could not be built.
@@ -124,6 +130,8 @@ mod tests {
             },
             EngineError::IdentityMismatch,
             EngineError::Failed,
+            EngineError::MetadataTimeout,
+            EngineError::MetadataUnavailable,
         ]
     }
 
@@ -149,6 +157,10 @@ mod tests {
                     "the torrent at that source is not the one it was added as"
                 }
                 EngineError::Failed => "the torrent engine could not complete the operation",
+                EngineError::MetadataTimeout => {
+                    "the torrent metadata resolver timed out while waiting for peers"
+                }
+                EngineError::MetadataUnavailable => "the torrent metadata could not be resolved",
             };
             assert_eq!(error.to_string(), expected, "{error:?}");
         }

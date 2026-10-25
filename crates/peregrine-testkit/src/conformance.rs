@@ -668,6 +668,8 @@ fn every_engine_error() -> Vec<EngineError> {
         },
         EngineError::IdentityMismatch,
         EngineError::Failed,
+        EngineError::MetadataTimeout,
+        EngineError::MetadataUnavailable,
     ]
 }
 
