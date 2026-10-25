@@ -14,7 +14,7 @@
 
 import type { NotificationDto } from "@peregrine/ipc-client";
 import { Button, IconButton } from "@peregrine/ui";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { Route, TitleKind } from "../../../app/routes.js";
@@ -37,6 +37,7 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState<PanelPlacement | null>(null);
   const anchor = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const toggle = useCallback(() => {
     setOpen((current) => {
@@ -49,6 +50,24 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
   }, [notifications]);
 
   const unread = notifications.rows.filter((row) => !row.read).length;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutsidePointer = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (anchor.current?.contains(target) || panelRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
 
   // Opening a row is reading it: the flag lives in the repository, so the mutation is what
   // clears the count, not the navigation.
@@ -99,6 +118,7 @@ export function NotificationCentre({ onNavigate }: NotificationCentreProps) {
             aria-label={t("shell.notifications.title")}
             className="fixed z-50 flex flex-col overflow-hidden rounded-md border border-border-subtle bg-surface-1 p-2 shadow-lg"
             role="region"
+            ref={panelRef}
             style={{
               top: placement.top,
               left: placement.left,
