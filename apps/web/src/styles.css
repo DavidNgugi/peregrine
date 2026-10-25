@@ -1886,18 +1886,6 @@ button {
     font-size: 11px;
   }
 }
-.download-cta {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-@media (max-width: 720px) {
-  .download-cta {
-    gap: 10px;
-  }
-}
 .notice {
   color: var(--state-ok);
   font-size: 13px;

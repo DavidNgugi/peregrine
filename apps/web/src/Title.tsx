@@ -501,6 +501,13 @@ export function TitleScreen({
             <p className="dim">Reading...</p>
           ) : (
             <>
+              {canPlay ? null : (
+                <p className="note">
+                  {inLibrary
+                    ? "No downloaded file is on disk yet."
+                    : "This title is not in your library yet."}
+                </p>
+              )}
               <div className="hero-actions">
                 {canPlay ? (
                   <div className="actions">
@@ -542,42 +549,33 @@ export function TitleScreen({
                       </button>
                     ) : null}
                   </div>
-                ) : (
-                  <div className="download-cta">
-                    <p className="note">
-                      {inLibrary
-                        ? "No downloaded file is on disk yet."
-                        : "This title is not in your library yet."}
-                    </p>
-                    {canAcquire && (movie || episodes.length === 0) && upcomingTitle ? (
-                      <button
-                        className="secondary"
-                        data-autofocus="true"
-                        data-focus="true"
-                        disabled={pending !== null || title.scheduled}
-                        onClick={() => void scheduleTitle()}
-                        type="button"
-                      >
-                        {pending === "schedule:title"
-                          ? "Scheduling..."
-                          : title.scheduled
-                            ? "Scheduled"
-                            : "Schedule"}
-                      </button>
-                    ) : canAcquire && (movie || episodes.length === 0) && titleDownload !== null ? (
-                      <button
-                        className="secondary"
-                        data-autofocus="true"
-                        data-focus="true"
-                        disabled={pending !== null || titleDownload.disabled}
-                        onClick={() => void downloadTitle()}
-                        type="button"
-                      >
-                        {pending === titleDownloadKey ? "Queuing..." : titleDownload.label}
-                      </button>
-                    ) : null}
-                  </div>
-                )}
+                ) : canAcquire && (movie || episodes.length === 0) && upcomingTitle ? (
+                  <button
+                    className="secondary"
+                    data-autofocus="true"
+                    data-focus="true"
+                    disabled={pending !== null || title.scheduled}
+                    onClick={() => void scheduleTitle()}
+                    type="button"
+                  >
+                    {pending === "schedule:title"
+                      ? "Scheduling..."
+                      : title.scheduled
+                        ? "Scheduled"
+                        : "Schedule"}
+                  </button>
+                ) : canAcquire && (movie || episodes.length === 0) && titleDownload !== null ? (
+                  <button
+                    className="secondary"
+                    data-autofocus="true"
+                    data-focus="true"
+                    disabled={pending !== null || titleDownload.disabled}
+                    onClick={() => void downloadTitle()}
+                    type="button"
+                  >
+                    {pending === titleDownloadKey ? "Queuing..." : titleDownload.label}
+                  </button>
+                ) : null}
                 <div className="actions title-actions">
                   <button
                     aria-pressed={title.watchlisted}
