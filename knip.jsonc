@@ -13,4 +13,8 @@
     "unlisted",
     "binaries",
   ],
+  // `clean-cache.mjs` shells out to the operating system's `du` on purpose: the point is
+  // the same number the filesystem reports, and a Node reimplementation would be a second
+  // accounting of it. The binary is not a package and has no manifest entry to declare.
+  "ignoreBinaries": ["du"],
 }

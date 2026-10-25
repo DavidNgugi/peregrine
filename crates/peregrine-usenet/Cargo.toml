@@ -16,10 +16,8 @@ secrecy = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
-rustls = { workspace = true }
 webpki-roots = { workspace = true }
 crc32fast = { workspace = true }
-sha2 = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true }
 
