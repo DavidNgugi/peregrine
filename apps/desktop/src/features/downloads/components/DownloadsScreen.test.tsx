@@ -202,7 +202,8 @@ describe("DownloadsScreen", () => {
         title: "The Lion King",
       }),
     ]);
-    expect(html).toContain("Resolving torrent metadata");
+    expect(html).toContain("Fetching metadata");
+    expect(html).toContain('data-tone="info"');
     expect(html).not.toContain("More actions");
   });
 
@@ -213,6 +214,23 @@ describe("DownloadsScreen", () => {
     expect(html).toContain("Failed");
     expect(html).toContain("Retry acquisition");
     expect(html).not.toContain("More actions");
+  });
+
+  it("draws every state as an equal-width badge with its own tone", () => {
+    const html = markup([
+      job({ id: 41, state: "downloading" }),
+      job({ id: 42, state: "completed", progressPermille: 1000 }),
+      job({ id: 43, state: "failed" }),
+      job({ id: 44, state: "paused" }),
+      job({ id: 45, state: "queued" }),
+    ]);
+
+    expect(html.match(/class="download-state-badge"/gu)?.length).toBe(5);
+    expect(html).toContain('data-tone="active"');
+    expect(html).toContain('data-tone="ok"');
+    expect(html).toContain('data-tone="danger"');
+    expect(html).toContain('data-tone="warn"');
+    expect(html).toContain('data-tone="neutral"');
   });
 
   it("groups one season's episodes under one header with the floored aggregate", () => {

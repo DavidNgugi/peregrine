@@ -76,6 +76,29 @@ function rateLabel(bytesPerSecond: number, t: Translate): string {
 }
 
 /** A remaining time in the largest whole unit that reads. */
+type StateTone = "neutral" | "info" | "active" | "warn" | "ok" | "danger";
+
+/** The colour a state badge wears; the label always carries the same fact in words. */
+function stateTone(state: string): StateTone {
+  switch (state) {
+    case "downloading":
+      return "active";
+    case "inspecting":
+    case "metadata":
+      return "info";
+    case "paused":
+      return "warn";
+    case "seeding":
+    case "completed":
+      return "ok";
+    case "failed":
+    case "blocked":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 function etaLabel(seconds: number | null, t: Translate): string {
   if (seconds === null || seconds <= 0) {
     return t("downloads.none");
@@ -216,22 +239,28 @@ export function DownloadsScreen({
     {
       id: "state",
       header: t("downloads.column.state"),
-      cell: (row) => (
-        <div className="download-state-cell">
-          <span>
-            {row.state === "failed" || row.stage === "transfer"
-              ? t(`downloads.state.${row.state}`)
-              : t(`downloads.stage.${row.stage}`, { defaultValue: row.stage })}
-          </span>
-          {row.state === "blocked" && row.findings.length > 0 ? (
-            <span className="download-blocked-reason">
-              {t(`downloads.finding.${row.findings[0]?.reason}`, {
-                defaultValue: row.findings[0]?.reason,
-              })}
+      cell: (row) => {
+        const label = t(`downloads.state.${row.state}`);
+        return (
+          <div className="download-state-cell">
+            <span className="download-state-badge" data-tone={stateTone(row.state)} title={label}>
+              {label}
             </span>
-          ) : null}
-        </div>
-      ),
+            {row.stage !== "transfer" && row.state !== "metadata" ? (
+              <span className="download-stage">
+                {t(`downloads.stage.${row.stage}`, { defaultValue: row.stage })}
+              </span>
+            ) : null}
+            {row.state === "blocked" && row.findings.length > 0 ? (
+              <span className="download-blocked-reason">
+                {t(`downloads.finding.${row.findings[0]?.reason}`, {
+                  defaultValue: row.findings[0]?.reason,
+                })}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       id: "reason",
