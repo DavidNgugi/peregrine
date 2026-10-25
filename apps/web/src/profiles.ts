@@ -1,4 +1,6 @@
 /** The colour and initials a profile without a picture falls back to. */
+import { createAvatar } from "@dicebear/core";
+import { initials } from "@dicebear/collection";
 
 /** A hue derived from the name, so the same name always draws the same colour. */
 export function hueFor(name: string): number {
@@ -21,8 +23,10 @@ export function initialsFor(name: string): string {
 }
 
 /** A stored data URL, or null when the profile has no picture and draws initials. */
-export function avatarSrc(avatarRef: string | null): string | null {
-  return avatarRef !== null && avatarRef.startsWith("data:image/") ? avatarRef : null;
+export function avatarSrc(avatarRef: string | null, name?: string): string | null {
+  if (avatarRef !== null && avatarRef.startsWith("data:image/")) return avatarRef;
+  if (name === undefined) return null;
+  return createAvatar(initials, { seed: name, size: 128, radius: 8 }).toDataUri();
 }
 
 /** One profile from the device-local book the earlier web picker wrote. */

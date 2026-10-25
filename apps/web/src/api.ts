@@ -325,8 +325,10 @@ export const api = {
   downloads: (): Promise<Download[]> => request<Download[]>("/api/downloads"),
   me: (): Promise<Me> => request<Me>("/api/me"),
   profiles: (): Promise<Profile[]> => request<Profile[]>("/api/profiles"),
-  createProfile: (name: string, kind: string): Promise<Profile> =>
-    request<Profile>("/api/profiles", "POST", { name, kind }),
+  createProfile: (name: string, kind: string, avatarRef?: string): Promise<Profile> =>
+    request<Profile>("/api/profiles", "POST", { name, kind, avatarRef: avatarRef ?? null }),
+  editProfile: (name: string, avatarRef: string): Promise<void> =>
+    request<void>("/api/profiles/edit", "POST", { name, avatarRef }),
   selectProfile: (id: number): Promise<Profile> =>
     request<Profile>("/api/profiles/select", "POST", { id }),
   host: (): Promise<HostData> => request<HostData>("/api/host"),

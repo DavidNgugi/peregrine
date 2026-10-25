@@ -42,8 +42,10 @@ watchlist, continue-watching, notifications, and history.
 - The active choice is not per-device; two people cannot watch different profiles at the same time
   on two screens without changing the shared setting. Per-device selection is a later refinement of
   this record, not a second profile store.
-- The web client has no avatar editor yet. It draws whatever the desktop stored and creates new
-  profiles with initials.
+- The web client offers the desktop's editor: a profile created or renamed in a browser picks one of
+  the sixteen DiceBear styles or uploads a square 128 px image, and the picture is written to
+  `avatar_ref` through the shared runtime. Remaining E35 work is a dimension cap, a content-level
+  refusal of SVG and animation, and the parental gate.
 - Existing local profile books are not migrated: the account table's seeded `You` is the first
   profile, and profiles created after this change are the shared ones.
 - A kid profile is a usability boundary today, not a security boundary: anyone who can reach the

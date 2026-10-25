@@ -1622,6 +1622,20 @@ impl WebService {
         })
     }
 
+    /// Updates the active profile's name and avatar through the shared profile store.
+    pub async fn edit_active_profile(
+        &self,
+        name: &str,
+        avatar_ref: Option<&str>,
+    ) -> Result<(), WebError> {
+        if let Some(account) = self.runtime.active_profile().await? {
+            self.runtime
+                .update_profile(account.id, name, avatar_ref)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// The device behind a request, with the one capability the client gates its buttons on.
     #[must_use]
     pub fn me(&self, device: &PairedDevice) -> MeDto {
@@ -3662,6 +3676,28 @@ mod tests {
         assert!(still_serving.is_ok(), "the old socket kept serving");
 
         web.stop().await;
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn editing_the_active_profile_renames_it_and_keeps_the_avatar() {
+        let directory = TempDir::new().unwrap();
+        let (web, runtime, _port) = listening(&directory).await;
+        let created = web.create_profile("Ada", "adult", None).await.unwrap();
+        web.select_profile(created.id).await.unwrap();
+        web.edit_active_profile("Grace", Some("data:image/jpeg;base64,AA=="))
+            .await
+            .unwrap();
+        let active = runtime
+            .active_profile()
+            .await
+            .unwrap()
+            .expect("an active profile");
+        assert_eq!(active.name, "Grace");
+        assert_eq!(
+            active.avatar_ref.as_deref(),
+            Some("data:image/jpeg;base64,AA==")
+        );
         runtime.shutdown().await;
     }
 

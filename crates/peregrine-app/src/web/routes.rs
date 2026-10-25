@@ -53,6 +53,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/downloads", get(downloads))
         .route("/api/profiles", get(profiles).post(create_profile))
         .route("/api/profiles/select", post(select_profile))
+        .route("/api/profiles/edit", post(edit_profile))
         .route("/api/me", get(me))
         .route("/api/host", get(host))
         .route("/api/preferences", get(preferences))
@@ -608,6 +609,18 @@ async fn select_profile(
 ) -> Result<Json<ProfileDto>, ApiError> {
     require_read(&device)?;
     Ok(Json(service.select_profile(body.id).await?))
+}
+
+async fn edit_profile(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Json(body): Json<CreateProfileBody>,
+) -> Result<StatusCode, ApiError> {
+    require_read(&device)?;
+    service
+        .edit_active_profile(&body.name, body.avatar_ref.as_deref())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn library(
