@@ -359,7 +359,7 @@ export function DownloadsScreen({
                 {t("downloads.action.play")}
               </Link>
             ) : null}
-            {row.hasMediaFile === false && resumable ? (
+            {resumable ? (
               <Button
                 className="download-primary-action"
                 disabled={busy}
@@ -395,21 +395,10 @@ export function DownloadsScreen({
             <details className="download-action-menu">
               <summary>{t("downloads.action.more")}</summary>
               <div className="download-action-popover">
-                {/* **A playable row keeps Play as its primary action, so Pause and Resume live
-                    here.** A payload that has already named a media file is the one a person is
-                    most likely to want stopped, and hiding the move behind the same row's primary
-                    Play would leave the transfer with no control at all. A row without a media
-                    file draws the same move as its primary button instead, never both. */}
-                {row.hasMediaFile && resumable ? (
-                  <Button
-                    disabled={busy}
-                    onClick={() => actions.resume(row.id)}
-                    size="sm"
-                    variant="secondary"
-                  >
-                    {t("downloads.action.resume")}
-                  </Button>
-                ) : null}
+                {/* **A playable row keeps Play as its primary action, so Pause lives here.**
+                    Resume stays on the row even when Play is present: a paused transfer is the
+                    one thing a person is looking for, and hiding it behind the menu made the row
+                    look stuck with no control. */}
                 {row.hasMediaFile && pausable ? (
                   <Button
                     disabled={busy}

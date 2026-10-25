@@ -316,11 +316,11 @@ describe("DownloadsScreen", () => {
     expect(inActionMenu(html, "Pause download")).toBe(true);
   });
 
-  it("offers Resume instead of Pause in the menu once the playable row is paused", () => {
+  it("offers Resume beside Play once the playable row is paused", () => {
     const html = markup([job({ state: "paused", hasMediaFile: true })]);
     expect(primaryAction(html)).toBe("Play");
     expect(occurrences(html, "Resume download")).toBe(1);
-    expect(inActionMenu(html, "Resume download")).toBe(true);
+    expect(inActionMenu(html, "Resume download")).toBe(false);
     expect(html).not.toContain("Pause download");
   });
 
@@ -350,7 +350,7 @@ describe("DownloadsScreen", () => {
     expect(recorded.pause).toHaveBeenCalledWith(1);
   });
 
-  it("calls the row's resume from its menu control", async () => {
+  it("calls the row's resume from its row control", async () => {
     markup([job({ id: 2, state: "paused", hasMediaFile: true })]);
     const control = recorded.buttons.find((button) => button.children === "Resume download");
     expect(control).toBeDefined();
