@@ -15,6 +15,22 @@
   margin-top: 0;
 }
 
+/* The warning, Download, My List, and Mark watched are siblings in one action row. Give every
+   secondary action one box: the two toggle buttons are inline-flex with a 48 px floor, the
+   Download/Schedule button is a padded secondary, and beside each other those floors disagree. */
+.hero-actions .secondary,
+.hero-actions .watchlist,
+.hero-actions .watch-toggle {
+  display: inline-flex;
+  height: 3.5rem;
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1.75rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .watchlist,
 .watch-toggle {
   display: inline-flex;
