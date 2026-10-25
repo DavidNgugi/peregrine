@@ -697,7 +697,8 @@ button {
 }
 
 .library-count {
-  padding: 8px 48px 0;
+  /* The heading already owns the screen's gutter; this line sits under it, not in its own column. */
+  padding: 8px 0 0;
 }
 
 .topbar-nav {
@@ -1136,10 +1137,14 @@ button {
     -webkit-line-clamp: 3;
   }
 
-  .caption,
-  .library-count {
+  .caption {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  .library-count {
+    padding-right: 0;
+    padding-left: 0;
   }
 }
 
