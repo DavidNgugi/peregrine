@@ -11,11 +11,10 @@
 # `SHA256SUMS` (every published bundle and SBOM), and `CHANGELOG.md`. When
 # signing is configured the manifest also gets a detached minisign signature.
 #
-# The v1.0 release candidate is deliberately unsigned: the four bundles are
-# built and uploaded with no signing secret present, and `SHA256SUMS` is what a
-# downloader verifies. Signing is opt-in, gated on the repository variable
-# below, and a missing secret is a failed release only when that variable says
-# signing is configured — never a silently unsigned one.
+# The v1.0 release candidate is deliberately unsigned until the repository
+# signing variables are enabled. Signing is opt-in, gated on the repository
+# variables below, and a missing secret is a failed release only when that
+# platform is configured — never a silently unsigned one.
 #
 # Required repository secrets only for a signed manifest (never for the
 # unsigned release candidate):
@@ -26,6 +25,18 @@
 #                                the signature before it is published
 # Required repository variable (Settings → Variables) for a signed manifest:
 #   RELEASE_SIGNING_CONFIGURED   the literal string `true`
+# Required macOS secrets when RELEASE_MACOS_SIGNING_CONFIGURED is `true`:
+#   APPLE_CERTIFICATE_P12_BASE64  base64 of a Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD    password protecting that .p12
+#   APPLE_SIGNING_IDENTITY        full certificate name
+# Required macOS notarization secrets when RELEASE_MACOS_NOTARIZATION_CONFIGURED
+# is `true`:
+#   APPLE_API_KEY_ID              App Store Connect API key ID
+#   APPLE_API_ISSUER              App Store Connect issuer ID
+#   APPLE_API_PRIVATE_KEY_BASE64  base64 of the API key's .p8 private key
+# Required repository variables for macOS:
+#   RELEASE_MACOS_SIGNING_CONFIGURED
+#   RELEASE_MACOS_NOTARIZATION_CONFIGURED
 #
 # Tag conventions, since ADR 0009 makes the version a legal statement and not a
 # label: an annotated tag, and `version` in apps/desktop/src-tauri/tauri.conf.json
@@ -167,6 +178,34 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Import and verify macOS signing identity
+        if: startsWith(matrix.label, 'macos') && (vars.RELEASE_MACOS_SIGNING_CONFIGURED == 'true' || vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true')
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::repository secret $name is not set; see the macOS secret list at the top of .github/workflows/release.yml"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          keychain="$RUNNER_TEMP/peregrine-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/peregrine-signing.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 1800 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/peregrine-signing.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security find-identity -v -p codesigning "$keychain" | grep -F "${APPLE_SIGNING_IDENTITY}"
       - name: Build the signed-or-not bundles
         if: matrix.os != 'windows-2022'
         shell: bash
@@ -175,7 +214,42 @@ jobs:
           PEREGRINE_TMDB_TOKEN: ${{ secrets.PEREGRINE_TMDB_TOKEN }}
           # Which pinned mpv to stage; the runner's own arch is not always the target's.
           PEREGRINE_TARGET: ${{ matrix.sidecar }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: pnpm tauri build --target ${{ matrix.target }}
+      - name: Validate and notarize macOS bundle
+        if: startsWith(matrix.label, 'macos') && vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true'
+        shell: bash
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_API_PRIVATE_KEY_BASE64 APPLE_SIGNING_IDENTITY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::repository secret $name is not set; see the macOS secret list at the top of .github/workflows/release.yml"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          app="$(find "target/${{ matrix.target }}/release/bundle" -type d -name '*.app' -print -quit)"
+          dmg="$(find "target/${{ matrix.target }}/release/bundle/dmg" -type f -name '*.dmg' -print -quit)"
+          [ -n "$app" ] || { echo '::error::macOS app bundle was not produced'; exit 1; }
+          [ -n "$dmg" ] || { echo '::error::macOS DMG was not produced'; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=4 "$app" 2>&1 | grep -F "Authority=${APPLE_SIGNING_IDENTITY}"
+          api_key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY_BASE64" | base64 --decode > "$api_key"
+          chmod 600 "$api_key"
+          xcrun notarytool submit "$dmg" --key "$api_key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature "$dmg"
       # **The MSI target refuses a SemVer pre-release identifier** ("rc.1" is not numeric-only),
       # while NSIS accepts one. A release candidate is exactly a pre-release, and the plan ships
       # NSIS; asking for it explicitly keeps the RC buildable without renumbering the version.
