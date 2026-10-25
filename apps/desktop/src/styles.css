@@ -276,13 +276,17 @@ textarea,
 }
 
 .download-action-menu summary {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-tertiary);
   cursor: pointer;
   list-style: none;
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.35rem;
-  padding: 0.35rem 0.55rem;
-  color: var(--text-secondary);
-  font-size: var(--text-caption);
+  place-items: center;
 }
 
 .download-action-menu summary::-webkit-details-marker {
@@ -291,7 +295,7 @@ textarea,
 
 .download-action-menu summary:hover,
 .download-action-menu summary:focus-visible {
-  border-color: var(--accent);
+  background: var(--surface-2);
   color: var(--text-primary);
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;

@@ -204,7 +204,7 @@ describe("DownloadsScreen", () => {
     ]);
     expect(html).toContain("Fetching metadata");
     expect(html).toContain('data-tone="info"');
-    expect(html).not.toContain("More actions");
+    expect(html).not.toContain("download-action-menu");
   });
 
   it("offers retry for a failed metadata preflight", () => {
@@ -213,7 +213,7 @@ describe("DownloadsScreen", () => {
     ]);
     expect(html).toContain("Failed");
     expect(html).toContain("Retry acquisition");
-    expect(html).not.toContain("More actions");
+    expect(html).not.toContain("download-action-menu");
   });
 
   it("draws every state as an equal-width badge with its own tone", () => {
@@ -282,7 +282,7 @@ describe("DownloadsScreen", () => {
     ]);
     expect(html).toContain("2 episodes");
     // Every row under the header keeps its own actions, the pack included.
-    expect(html.match(/More actions/gu)).toHaveLength(3);
+    expect(html.match(/class="download-action-menu"/gu)).toHaveLength(3);
   });
 
   it("says one pack for a lone live pack instead of counting zero episodes", () => {
@@ -323,7 +323,7 @@ describe("DownloadsScreen", () => {
     expect(html).toContain("2 episodes");
     // The first row for an episode is the one the season reads, as seasonDownloadPlan does.
     expect(html).toContain("75%");
-    expect(html.match(/More actions/gu)).toHaveLength(3);
+    expect(html.match(/class="download-action-menu"/gu)).toHaveLength(3);
   });
 
   it("keeps Play primary on a playable row and puts Pause in its menu", () => {

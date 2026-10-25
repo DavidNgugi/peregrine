@@ -422,7 +422,20 @@ export function DownloadsScreen({
               </Button>
             ) : null}
             <details className="download-action-menu">
-              <summary>{t("downloads.action.more")}</summary>
+              <summary aria-label={t("downloads.action.more")} title={t("downloads.action.more")}>
+                <svg
+                  aria-hidden="true"
+                  fill="currentColor"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  width="18"
+                >
+                  <circle cx="12" cy="5" r="1.7" />
+                  <circle cx="12" cy="12" r="1.7" />
+                  <circle cx="12" cy="19" r="1.7" />
+                </svg>
+                <span className="sr-only">{t("downloads.action.more")}</span>
+              </summary>
               <div className="download-action-popover">
                 {/* **A playable row keeps Play as its primary action, so Pause lives here.**
                     Resume stays on the row even when Play is present: a paused transfer is the
