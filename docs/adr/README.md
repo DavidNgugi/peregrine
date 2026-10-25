@@ -38,5 +38,6 @@ One file per decision that constrains the architecture. Each records the context
 | [0032](./0032-shared-profiles.md) | Shared profiles on the account table | Accepted; supersedes 0027 |
 | [0033](./0033-account-backup-and-restore.md) | Account backup and restore: one database file, staged and swapped on the next launch | Accepted |
 | [0034](./0034-tizen-client-distribution.md) | Samsung Tizen client: a shell over the paired LAN surface, signed per television | Accepted |
+| [0035](./0035-integrations-and-markers.md) | Integrations and playback markers: one manifest, keyring fields, cached resolution, one post-play coordinator | Accepted |
 
 Open questions that could change a decision are tracked as spikes in [ARCHITECTURE.md](../ARCHITECTURE.md) §21. Each spike's outcome is written back into the relevant record here.

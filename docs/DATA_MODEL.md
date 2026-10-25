@@ -117,6 +117,65 @@ CREATE TABLE secret_ref (
 
 `settings` holds only user preferences. Anything derivable, cached, or provider-owned lives elsewhere so the database can be reconstructed. The shared profile picker stores its choice under `active_account` as a JSON account id ([ADR 0032](./adr/0032-shared-profiles.md)); the account's own row carries the name, avatar, kind, and capability columns. The library is shared, while watch progress, the watchlist, continue-watching, history, and notifications are keyed by that account id.
 
+### 2.1.1 Integrations and skip markers
+
+```sql
+CREATE TABLE integration_setting (
+  integration        TEXT    PRIMARY KEY,
+  enabled            INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  priority           INTEGER NOT NULL DEFAULT 0 CHECK (priority >= 0),
+  submission_enabled INTEGER NOT NULL DEFAULT 0 CHECK (submission_enabled IN (0,1)),
+  last_test_at       INTEGER,
+  last_outcome       TEXT    CHECK (last_outcome IS NULL OR last_outcome IN
+                     ('working','unauthorized','rateLimited','unreachable','keychainDenied','notConfigured')),
+  last_error_code    TEXT,
+  updated_at         INTEGER NOT NULL
+);
+
+CREATE TABLE playback_marker (
+  id          INTEGER PRIMARY KEY,
+  title_id    INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
+  episode_id  INTEGER REFERENCES episode(id) ON DELETE CASCADE,
+  kind        TEXT    NOT NULL CHECK (kind IN ('intro','recap','credits','preview')),
+  start_ms    INTEGER NOT NULL CHECK (start_ms >= 0),
+  end_ms      INTEGER,
+  source      TEXT    NOT NULL CHECK (source IN ('chapters','introdb','aniskip','introhater')),
+  confidence  INTEGER NOT NULL CHECK (confidence BETWEEN 0 AND 100),
+  fetched_at  INTEGER NOT NULL,
+  suppressed  INTEGER NOT NULL DEFAULT 0 CHECK (suppressed IN (0,1)),
+  CHECK (end_ms IS NULL OR end_ms > start_ms),
+  CHECK (end_ms IS NOT NULL OR kind = 'credits')
+);
+
+CREATE UNIQUE INDEX playback_marker_natural_uq
+  ON playback_marker (title_id, COALESCE(episode_id, -1), kind, source, start_ms);
+
+CREATE TABLE marker_fetch (
+  title_id    INTEGER NOT NULL REFERENCES title(id) ON DELETE CASCADE,
+  episode_id  INTEGER NOT NULL DEFAULT 0,
+  source      TEXT    NOT NULL CHECK (source IN ('chapters','introdb','aniskip','introhater')),
+  fetched_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  etag        TEXT,
+  outcome     TEXT    NOT NULL CHECK (outcome IN ('found','none','failed')),
+  error_code  TEXT,
+  PRIMARY KEY (title_id, episode_id, source)
+);
+```
+
+**The credential is not here.** Every integration field is stored in the OS keyring under
+`integration.<id>.<field>` (TMDB keeps its historical `provider.tmdb` account), and the database
+holds only the choice, the order, submission consent, and the last probe's outcome. A backup is a
+database copy, so it carries no secret; restoring on another machine asks for the key rather than
+presenting a provider that silently cannot answer. A keychain refusal is recorded as
+`keychainDenied`, never as the first-run state.
+
+**A marker is keyed by the subject, not the file.** The same episode has the same intro in every
+copy, and the source is part of the key because two sources can disagree. `marker_fetch` is the
+negative cache as well as the positive one: "the provider answered and held nothing" must not be
+asked again on every play. `episode_id = 0` in that table is the whole-title sentinel, because a
+primary key cannot hold NULL. A suppression is local, survives a refetch, and is never submitted.
+
 ### 2.2 Catalogue
 
 ```sql
@@ -1278,6 +1337,8 @@ These are required invariants. Implemented schema constraints are tested in `per
 | I39 | The search index is derived from `title` and its related tables and rebuilds from them: a rebuild after the index has been made wrong in either direction reproduces the same results for the same query, in the same order. | `a_rebuild_reproduces_identical_search_results` in `peregrine-storage`'s `fts` module, which records the results of several queries, breaks the index by adding a row with no title and removing a title's row, and asserts the rebuild restores them exactly |
 | I41 | A paired LAN device's token exists only as SHA-256, and a revoked device is refused on its next request. | `UNIQUE (token_hash)` and the 64-character check; the pairing repository hashes on issue and the web extractor reads the hash per request, so revocation is effective including mid-stream |
 | I42 | Every acquisition a paired device asks for is attributable: a `web_audit` row names the device and title before the queue is touched, and the journal job is attached when the queue accepts it. | The foreign key to `paired_device`; `an_acquisition_is_audited_against_its_device` in `peregrine-storage`'s `web_audit` module; the default-refusal and acquire-scope cases in `peregrine-app`'s LAN tests |
+| I43 | An integration credential exists only in the keyring; no database column, backup, journal payload, IPC answer, or log line carries a value. A credential read that the OS refused is a distinct state and never becomes "not configured". | `integration_setting` has no value column; the credential job parks candidates under a one-use token and the journal payload carries the token; `integration_credential::payload` cannot take a secret; `peregrine-secrets`'s redaction test scans log paths; `a_denied_keyring_is_a_state_of_its_own` and `a_later_refusal_keeps_the_presence_a_previous_read_learned` in `peregrine-app`'s `integrations` module |
+| I44 | A marker window is bounded by its subject: a start is never negative, an end is after the start, only credits may be open-ended, and a marker that starts past the file's runtime is dropped rather than clamped. Resolution is per kind: chapters outrank network sources, a weak network marker is dropped, overlaps merge, and a suppressed row never reaches a player. | `playback_marker`'s `CHECK` constraints and the domain constructor `PlaybackMarker::new`; `a_marker_past_the_runtime_is_dropped_rather_than_clamped`, `only_credits_may_run_to_the_end`, `chapters_beat_the_network_for_the_same_kind`, `a_source_below_the_floor_is_dropped`, `duplicate_intervals_from_one_source_merge`, and `a_suppressed_marker_never_reaches_the_player` in `peregrine-domain`/`peregrine-app` |
 
 ### What each invariant is enforced by today
 

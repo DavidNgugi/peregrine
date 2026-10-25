@@ -237,7 +237,7 @@ graph TD
 | --- | --- | --- | --- |
 | `peregrine-domain` | Entities, value objects, invariants, quality-profile scoring, release-name and library-name parsing, subtitle-timing math, state machines, domain events. | `serde`, `jiff`, `ulid`, `thiserror` only | No IO, no async, no clock, no randomness. All time and IDs are injected. |
 | `peregrine-storage` | Migrations, **account-scoped** repositories (ports from `app`), FTS5 search, KV settings, job journal, cache tables. | `domain`, `sqlx` | Repositories never contain business rules. Every catalogue and library read takes an `AccountScope`. All writes go through a single writer connection. |
-| `peregrine-providers` | `MetadataProvider`, `SubtitleProvider` adapters; response normalization; matching/scoring; rate limiting; conditional requests. | `domain`, `reqwest`, `governor` | No provider type escapes the adapter module. Every response passes through a size-capped, validating decode. |
+| `peregrine-providers` | `MetadataProvider`, `SubtitleProvider`, and `MarkerProvider` adapters; response normalization; matching/scoring; rate limiting; conditional requests. The marker port is separate from metadata because its question is a playback subject and a runtime, not a catalogue row. | `domain`, `reqwest`, `governor` | No provider type escapes the adapter module. Every response passes through a size-capped, validating decode. A marker adapter returns domain markers and a closed error; it never returns a provider shape. |
 | `peregrine-sync` | Job scheduler, priority queues, resource token buckets, incremental change sync, IMDb dataset ingestion, image cache manager, blurhash generation. | `domain`, `storage`, `providers`, `image` | Cooperative cancellation on every job; no job may hold a write transaction across a network call. |
 | `peregrine-torrent` | `TorrentEngine` port + librqbit adapter; torrent/magnet ingestion; the safety inspection pipeline; piece-priority policy for streaming; per-file selection; seeding policy. | `domain`, `librqbit` | Never touches the filesystem outside the configured download root. Inspection runs before any byte is written. |
 | `peregrine-usenet` | `UsenetEngine` port + NNTP adapter; bounded NZB/yEnc parsing; article assembly; per-provider failover; pause/resume/statistics. | `domain`, `quick-xml`, `tokio-rustls`, `crc32fast` | Implicit TLS except loopback; a message-id with a line break is refused; no byte is written outside the guarded job directory. |
@@ -375,6 +375,8 @@ graph LR
 | `subtitles` | `search_subtitles`, `download_subtitle`, `set_subtitle_offset`, `extract_embedded`, `get_language_prefs` | Title/episode-scoped |
 | `cast` | `discover_devices`, `start_cast`, `stop_cast`, `get_cast_capabilities` | Device-scoped |
 | `watchlist` | `add`, `remove`, `list`, `reorder` | Optimistic |
+| `integrations` | `list_integrations`, `set_integration_enabled`, `set_integration_priority`, `set_integration_submission`, `test_integration`, `set_integration_credentials`, `clear_integration_credentials` | Manifest-driven; the three credential actions are jobs, and no command reads a key back |
+| `markers` | `markers_for_playback`, `refresh_playback_markers` | Cache read, then a background refresh; no provider call from a renderer |
 | `settings` | `get_schema`, `get_values`, `set_value`, `reset_section`, `export_config`, `import_config` | Schema-driven; the UI renders from the registry |
 | `jobs` | `start_hello`, `cancel`, `list` | Job-scoped: a start returns an ID and streams `job://progress` and `job://state`; `cancel` records the request before it trips the token; `list` is a capped page of the journal |
 | `backup` | `create_backup`, `restore_backup` | One file per call. A restore validates and stages the file, then restarts the app; the swap happens before the next launch opens the database ([ADR 0033](./adr/0033-account-backup-and-restore.md)) |
@@ -385,7 +387,7 @@ graph LR
 1. **Payload small.** Commands return IDs and DTOs, never blobs. Images and media bytes travel over the asset protocol or the loopback HTTP server. Any response over 64 KB is a design error.
 2. **Long work returns a job ID** and streams `job://progress` events. No command blocks longer than 100 ms; anything slower is a job.
 3. **Errors are structured**: `{ code, message, detail?, retryable, cause? }` where `code` is a stable enum shared with the UI. `detail` never contains secrets or absolute home paths.
-4. **Events are versioned and namespaced**: `job://progress`, `job://state`, `download://stats`, `library://changed`, `player://state`, `cast://state`, `sync://health`, `notification://raised`.
+4. **Events are versioned and namespaced**: `job://progress`, `job://state`, `download://stats`, `library://changed`, `player://state`, `player://markers`, `cast://state`, `sync://health`, `notification://raised`. `player://markers` carries a count, never the markers: the player re-reads through `markers_for_playback`, so an event cannot become a second, unvalidated cache.
 5. **High-frequency streams are coalesced** in a `tokio::time::interval` batcher with a max rate per stream and a dropped-update counter so the UI can detect starvation.
 6. **Cancellation is explicit**: every job-scoped command has a `cancel` counterpart; dropping the last subscriber does not silently cancel user-visible work.
 
@@ -544,11 +546,14 @@ Five extension points, all compile-time traits with a conformance test suite:
 | Subtitles | `SubtitleProvider` | `search(query) -> Vec<SubtitleCandidate>`, `download(candidate) -> Bytes`, declaring auth and quota | Fixture replay, encoding-detection cases, quota-exhaustion behaviour |
 | Torrent engine | `TorrentEngine` | Session lifecycle, add/select/stream/stats/limits | Local seeder↔leecher integration test over loopback, cancellation, restart recovery |
 | Player backend | `PlayerBackend` | Launch/stop, command channel, state stream, position stream, track enumeration | Fake backend conformance suite; real backend smoke test per OS |
+| Skip markers | `MarkerProvider` | `fetch(MarkerRequest) -> Vec<PlaybackMarker>`, declaring whether a credential is required | Recorded fixture replay; 401/429/5xx/malformed/oversized handling; a title with no identity returns nothing, never a guess |
 | Indexer | `Indexer` | `search(ReleaseQuery) -> Vec<Release>` | Fixture replay, result de-duplication and ranking property tests, disabled-by-default assertion |
 
 The MCP interface ([adr/0017](./adr/0017-mcp-server.md)) is a **consumer** of these ports, not a sixth extension point. It exposes existing services to agents; it cannot add behaviour, load code, or reach past the service layer. Nothing in the extension model may depend on it.
 
 A `conformance` test crate runs each provider's fixtures against shared invariants, so "does this adapter behave like the others" is a test, not a review opinion. Adding a provider should touch exactly three files: the adapter, its fixture directory, and the provider registry manifest.
+
+**Integrations are the same rule at the settings layer.** `peregrine-app`'s `integrations::MANIFEST` is one entry per adapter that exists — category, capabilities, credential fields, submission support, default priority, and probe. The desktop card, the read-only TV status, the credential job, and the marker resolver all read it. An id not in it is refused before a job exists, and adding an integration is a manifest entry plus an adapter rather than a second screen (ADR [0035](./adr/0035-integrations-and-markers.md)).
 
 ---
 

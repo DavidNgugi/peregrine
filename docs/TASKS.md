@@ -834,6 +834,7 @@ graph LR
 - [ ] **PG-E16-08** `L` · deps PG-E16-07 · Timeline interactions: scrub with thumbnails, precise seek, chapter markers
   - Acceptance: Thumbnails generated lazily and cached
 - [ ] **PG-E16-09** `M` · deps PG-E16-04 · Track selection: video quality variants, audio device, audio track, subtitles
+  - **Landed so far:** the account's preferred audio language is passed to mpv as `--alang` and applied once to the in-page element's `audioTracks`; a manual choice afterwards is not undone. The same-picture audio/subtitle menu, per-show memory, and video-quality variants remain.
   - Acceptance: Selections persist per show and per file
 - [ ] **PG-E16-10** `S` · deps PG-E16-07 · Playback speed, aspect, zoom, and audio delay controls
   - Acceptance: All persist per session and optionally per show
@@ -868,6 +869,14 @@ graph LR
 
 - [x] **PG-E16-25** `M` · deps PG-E16-01, PG-E3-08 · Episode-level playback: the player route carries a season/episode pair, and the runtime scopes the playable-file search to that episode's media item
   - Acceptance: Playing 1×02 opens 1×02's file rather than the title's first file; a season without an episode falls back to the title; a torrent stays title-level and refuses the episode rather than serving the wrong file. Route round-trip is pinned in `routes.test.ts` and the evidence filter in `runtime::playable_file`.
+
+- [x] **PG-E16-26** `M` · deps PG-E16-17, PG-E18-05, PG-E16-25 · Skip controls and one post-play coordinator (POST-01)
+  - Acceptance: Skip Intro/Recap/Preview appears only while the corresponding marker contains the position; no marker means no button; a credits marker or the end of media opens one coordinator; a next episode starts exactly once; Cancel starts nothing and does not mark watched; a film ends on a panel with Replay and Back; a prefetch failure falls back to a normal load; Back cancels the timer.
+  - **Landed:** the desktop player and the TV/web player draw the same controls over their own engine; the shared `packages/player-ui` `advance` reducer owns the countdown, and the session/ticket carries the next playable episode. The desktop tests cover a marker-driven skip, a credits countdown, Cancel, Play now, Replay, and the external-session abstention; the web tests cover the same coordinator through its adapter. The external-mpv hand-off has no React overlay; that remains the embedded-libmpv task (`PG-E16-05`).
+
+- [x] **PG-E16-27** `M` · deps PG-E16-02, PG-E16-07 · One player snapshot/command vocabulary (PLY-01)
+  - Acceptance: `PlayerSnapshot`, `PlayerCommand`, and `PlayerEngine` are declared once in `packages/player-ui`; every engine adapter is expected to answer them; no screen reads an engine event to compute a business rule.
+  - **Landed as the contract and its pure reducer.** The desktop and web players consume `activeMarker` and the post-play reducer from the same package. The DOM/hls/AVPlay/mpv adapters themselves remain `PG-E16-03`/`PG-E16-04`/`PG-E16-05`; this task is the vocabulary they will implement.
 
 ## E17 · Subtitles and language
 
@@ -915,6 +924,14 @@ graph LR
   - Acceptance: Added, removed, and unchanged sidecars reconcile; embedded and downloaded tracks are untouched
 - [x] **PG-E17-22** `M` · Sidecar playback: the session registers guarded tracks and serves them over the same loopback listener and token as the media, addressed by track id; the webview player draws the track list and a Subtitle/Off menu
   - Acceptance: A track outside every root is refused; an unregistered id is 404; the webview renders WebVTT. **Remaining:** mpv selection landed — `PlayerBackend::play` takes the guarded sidecar and the spawn carries `--sub-file=`; SRT/ASS may not render in the webview parser
+
+- [x] **PG-E17-23** `M` · deps PG-E4-19, PG-E24-05 · Marker cache, resolution, and the first two network sources (MKR-01..04)
+  - Acceptance: Multiple markers per kind; a null end only for credits; start/end bounds against the file runtime; source priority per kind; confidence floor; duplicate intervals merge; a positive and a negative lookup both cache with a TTL; a suppressed marker never reaches a player; no provider call comes from the browser; chapters map only recognised names; TheIntroDB accepts TVDB/TMDB/IMDb with a public read; AniSkip is asked only with a real MAL id and returns nothing when unmapped.
+  - **Landed:** migration 0031, `peregrine-domain::marker`, `peregrine-providers::{marker,introdb,aniskip}`, `peregrine-app::markers`, and `peregrine-playback::chapters`. TheIntroDB and AniSkip are tested against recorded shapes only; no live call was made. A Kitsu mapping is not implemented because this build carries no Kitsu id, and the adapter refuses rather than guessing.
+
+- [x] **PG-E17-24** `S` · deps PG-E17-23 · Chapter extraction from the file (MKR-02)
+  - Acceptance: A bounded ffprobe child reads `-show_chapters`; a chapter whose name this build does not recognise produces no marker; no chapters produces no marker; a chapter's own name is the only evidence used.
+  - **Landed:** `peregrine-playback::chapters`, with 10 tests and a whole-word name whitelist. The non-zero-exit and timeout branches are inspected but not fixture-tested; the spawn-failure path is.
 
 ## E18 · Watch progress and resume
 
@@ -1015,6 +1032,22 @@ graph LR
   - **Remaining:** both commands wait for the copy, and a large library can exceed the 100 ms command budget; moving them behind the scheduler as jobs with progress is the follow-up that would tick the task. The shell was not relaunched against a restored database in this change.
   - **Fixed after rc.4:** the scrub cleared `paired_device` before `web_audit`, which references it. A library with a paired device and at least one audit row failed the backup with a foreign-key error that surfaced as "The library database could not be copied." The order is now child-before-parent, the regression fixture inserts both rows, and the runtime logs the typed copy failure before mapping it to the IPC error. Found by reproducing against the live database (15 paired devices, 181 audit rows).
   - **Verified:** `cargo test -p peregrine-storage backup::` passes 8 tests (the scrub keeps the household rows, removes the process-local ones, inspection refuses a plain database and a newer schema, a destination is never overwritten, and the four phases are reported once in order); `cargo test -p peregrine-app backup::` passes 6 tests, including a round trip that creates a profile and a wishlist, backs up, removes them, stages a restore with all three phases, restarts the runtime, and reads both back; `cargo test -p peregrine-ipc contract_tests` passes 4 tests with the two new commands registered; `pnpm typecheck`, `pnpm test` (861 tests, including the Button and IconButton busy states), `pnpm lint`, and `xtask check-arch`, `check-determinism`, `check-commands`, `check-todos`, `check-offset`, and `check-migrations` are green; `cargo clippy -p peregrine-storage -p peregrine-app -p peregrine-ipc --all-targets -- -D warnings` is clean.
+
+- [x] **PG-E20-15** `M` · deps PG-E20-04, PG-E5-12 · Integrations registry, settings surface, credential jobs, and last-probe health (INT-01, INT-02)
+  - Acceptance: TheIntroDB and AniSkip can be enabled with no key; TheIntroDB's optional key is labelled optional and is for submissions; TMDB keeps its existing key; a test is a bounded job, not a blocking command; an invalid key is distinguished from an unreachable service and from a keychain denial; no secret is echoed; enablement and priority persist; a missing key is "not configured", not an error.
+  - **Landed:** `peregrine-app::integrations::MANIFEST` and `IntegrationRegistry`, migration 0031's `integration_setting`, `peregrine-ipc::integrations`, `jobs::integration_credential`, and the desktop Integrations section. The registry caches presence only, reads the keyring off the startup path, and keeps a refusal as its own state. The desktop surface groups cards by category, draws manifest order, swaps priorities within a category, writes only non-empty candidates, follows one job at a time, and confirms credential removal. Its tests cover an optional key, a keyless source, a required field, a denied keychain, always-on chapters, and priority ends. **A test, save, or removal shows a fixed toast naming the work in progress and then the result**, rather than a sentence only at the top of a long section: a failure is `role=alert`, a result and a progress line are `role=status`, and a result can be dismissed. The toast is in-app; OS notification is not used for a foreground settings action because it would need the notification consent path and would outlive the screen. OpenSubtitles, Subdl, IntroHater, and Trakt are not in the manifest because no adapter exists; the generic surface is what they will join.
+
+- [x] **PG-E20-16** `S` · deps PG-E20-15, PG-E3-33 · Read-only integration status on the TV/web client (INT-04)
+  - Acceptance: The client can name which sources are configured and which need attention and is told to manage credentials on the desktop; no credential field, write, or secret is reachable.
+  - **Landed:** `GET /api/integrations` answers `WebIntegrationDto` with category, enablement, configured, always-on, last outcome, and `needsAttention` only. It has no field presence and no write route.
+
+- [ ] **PG-E20-18** `S` · deps PG-E20-15 · Integration request counters and cache hit/miss telemetry (the rest of INT-05)
+  - Acceptance: Last test time, last error code, rate-limit state, per-provider request count, and cache hit/miss counts are readable locally, with no telemetry leaving the machine.
+  - **Remaining:** the last test time, outcome, and error code are stored in `integration_setting` and read by the settings screen; request counts and cache hit/miss counts are not recorded yet. `marker_fetch` carries the cache's own timestamps, so the counters are a small follow-up rather than a new table.
+
+- [x] **PG-E20-17** `S` · deps PG-E20-15 · Integration secrets and backup (INT-03)
+  - Acceptance: A backup carries no credential; restoring on another machine reports "key needed" rather than a broken provider; a refused keychain read is never stored as an empty store.
+  - **Landed by construction:** credentials live only in the keyring and `integration_setting` has no value column; the backup path never reads the keyring. A restore therefore starts from `CredentialStore::Unread` and the readiness read answers with what the new machine holds.
 
 ## E21 · Design system and motion
 
@@ -1301,8 +1334,8 @@ graph LR
   - Acceptance: Keyboard alternative exists for every drag action
 - [ ] **PG-E29-07** `M` · deps PG-E29-02, PG-E14-12 · Library sharing view: what other accounts can see, what is duplicated on disk
   - Acceptance: Extra copies surfaced with a cleanup suggestion
-- [ ] **PG-E29-08** `M` · deps PG-E16-17 · Skip-intro support sourced from a maintained public dataset or chapters
-  - Acceptance: Never guesses; off by default
+- [x] **PG-E29-08** `M` · deps PG-E16-17 · Skip-intro support sourced from a maintained public dataset or chapters
+  - Acceptance: Never guesses; off by default. Local chapters and the TheIntroDB/AniSkip adapters answer only for a mapped subject; the network sources are disabled until enabled, and the skip control appears only inside a marker. See PG-E17-23, PG-E17-24, and PG-E16-26 for what shipped and what remains (IntroHater and auto-skip).
 - [ ] **PG-E29-09** `M` · deps PG-E17-08 · Subtitle OCR exploration spike with a written verdict
   - Acceptance: ADR records the decision either way
 - [ ] **PG-E29-10** `M` · deps PG-E28-03 · Plugin-free extension SDK documentation: how to add a provider or engine as a PR
@@ -1568,7 +1601,7 @@ A homelab user's expectation, and the umbrelOS App Store's published standard, i
   - Acceptance: a stream-only token is refused every write; a foreign title or missing episode is a 4xx rather than a 500; a season request queues one job per missing episode, skips an episode already on disk, audits each accepted episode, and survives one failing episode; the title read's download state changes while a job runs and settles when it finishes
 - [ ] **PG-E37-13** `M` · deps PG-E37-05, PG-E37-09, PG-E17-06 · Browser subtitles and next-episode playback: a sidecar subtitle route that converts SRT/ASS/SSA to WebVTT, retimes cues for a transcode's offset, marks the preferred track on the ticket, and a player menu that starts on it; the ticket carries the next playable episode and the player autoplays it when the current one ends. **Landed:** the route resolves the track only through the title's playable file and refuses a bitmap, missing, or unparsable sidecar with 404; the player renders a `<track>` per sidecar, offers Off plus every track, and re-applies the choice on `loadedmetadata` and `addtrack`; the ticket probes a library row's missing duration and the client prefers it to an HLS event playlist's growing length; `ended` is the only autoplay trigger, a late mint after leaving is dropped, and a film or last episode says Finished (ADR 0031)
   - Acceptance: an SRT sidecar plays in a desktop browser and can be switched off and back on; a cue wholly before an HLS start offset is dropped and one spanning it is kept; a DVD bitmap track is refused rather than served as text; the next playable episode starts after the current one ends, and navigating away before the mint lands leaves no session running
-- [ ] **PG-E37-14** `S` · deps PG-E37-04 · Playback language preferences: the singleton `playback_preference` row (audio language, subtitle language, auto/forced/off), the desktop Settings section that writes it, the web read, the preferred subtitle default on a ticket, the preferred audio stream in an HLS transcode, and a release-name preference that ranks a preferred-language or MULTi release above an unnamed one and an explicitly foreign one last. **Landed:** the default is `en`/`en`/`auto`; the settings section reads and writes the row; the ticket marks the matching subtitle track; ffprobe selects the matching audio stream; the language matcher is a domain function with unit and property tests (ADR 0031)
+- [ ] **PG-E37-14** `S` · deps PG-E37-04 · Playback language preferences: the singleton `playback_preference` row (audio language, subtitle language, auto/forced/off), the desktop Settings section that writes it, the web read, the preferred subtitle default on a ticket, the preferred audio stream in an HLS transcode, and a release-name preference that ranks a preferred-language or MULTi release above an unnamed one and an explicitly foreign one last. **Landed:** the default is `en`/`en`/`auto`; the settings section reads and writes the row; the ticket marks the matching subtitle track; ffprobe selects the matching audio stream for HLS; mpv receives the preferred audio language as `--alang`, and the in-page surface applies it once to WebKit's `audioTracks`; the language matcher is a domain function with unit and property tests (ADR 0031)
   - Acceptance: the preference round-trips through storage; the default row exists on a fresh install; a title with an English sidecar and an English audio stream starts on both; an explicit French release ranks below an unnamed one for an English preference; a malformed or blank language is refused
 - [ ] **PG-E37-15** `S` · deps PG-E37-06 · Web client layout and navigation parity: a sticky top navigation with a Back control on every screen but the player, a title detail view that opens at the top, vertical grids instead of horizontal rails, collapsible rails/seasons/episodes/More Like This, a desktop hover preview, and a My List remove action. **Landed:** the shell has one TopBar and one content switch; the title route scrolls to the top on open without fighting its initial focus; every rail and the More Like This feed collapse; the pointer preview is the desktop's 450 ms/1.3× ladder in a pure tested module; My List removes through `POST /api/watchlist` (ADR 0031)
   - Acceptance: the bar and Back are reachable on every non-player screen at desktop and phone widths; opening a title from any screen starts at scroll zero; no rail scrolls horizontally at 1440×900 or 390×844; the hover panel appears only after the dwell and cancels on leave/scroll/hide; removing a title from My List updates the list and survives a reload
@@ -1658,15 +1691,15 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | 0 Foundations | E0–E4 | 93 | 178 |
 | 1 Discovery | E5–E9 | 87 | 208 |
 | 2 Acquisition and library | E10–E15 | 101 | 241 |
-| 3 Playback and subtitles | E16–E18 | 59 | 145 |
-| 4 Platform and distribution | E19–E27 | 133 | 327 |
+| 3 Playback and subtitles | E16–E18 | 63 | 154 |
+| 4 Platform and distribution | E19–E27 | 139 | 338 |
 | 5 1.0 hardening and community | E28–E29 | 24 | 58 |
 | 6 Roadmap: monitoring and agent access | E30–E31 | 22 | 66 |
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
-| 9 Roadmap: homelab deployment | E36–E37 | 32 | 90 |
+| 9 Roadmap: homelab deployment | E36–E37 | 33 | 92 |
 | 10 Roadmap: Usenet acquisition | E38 | 21 | 64 |
-| **Full backlog (phases 0–5)** | | **497** | **1 155** |
+| **Full backlog (phases 0–5)** | | **507** | **1 174** |
 
 Two numbers matter, and they are different by design.
 

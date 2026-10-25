@@ -453,10 +453,77 @@ and the differences are worth stating where the flow is, because they are what a
   waits between attempts; a file that is gone is skipped. The capture is bounded and never fails the
   import — an episode with no frame keeps its NULL still and the card keeps its reserved box.
 
+**The preferred audio language now reaches the external player.** `start_external_playback` reads the account's `playback_preference` and hands it to `PlayerBackend::play`; mpv receives it as `--alang`, so a dual-audio Matroska opens on English when English is preferred and on the container's default only when no track matches. The option is a priority list, not a lock: a manual selection in mpv's own menu still wins for that session. The in-page surface applies the same preference once to `audioTracks` when WebKit exposes the list; a manual choice afterwards is not undone.
+
 The torrent path, the mpv adapter, resume, tracks, subtitles, progress, and next-up are `PG-E16`'s and
 `PG-E10`'s, unchanged.
 
 Tests: resume at 2%, at 50%, at 99% (must not resume 3 s before credits), seek storm during buffering, mpv crash mid-playback (state becomes `failed`, app survives, retry resumes from the last known position), track selection persistence per show, and an EPIPE on the mpv IPC socket (treated as a crash, not a hang).
+
+### F7.1 — Skip markers, credits, and next-up
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Person
+    participant P as Player (React)
+    participant C as Core
+    participant DB as SQLite
+    participant S as Marker sources
+    participant E as Media engine
+
+    U->>P: Play
+    P->>C: start_playback / mint ticket
+    C->>DB: read cached markers
+    C-->>P: session + markers + next episode
+    C->>C: background refresh (after the first frame)
+    C->>DB: chapters for the file
+    C->>S: enabled network sources by priority
+    S-->>C: intro / recap / credits / preview
+    C->>DB: markers + fetch TTL + health
+    C-->>P: player://markers
+    P->>C: markers_for_playback
+    C-->>P: resolved markers
+
+    Note over P: position enters an intro window
+    P->>U: Skip Intro
+    U->>P: press
+    P->>E: seek to marker end
+    Note over P: position enters credits, or media ends
+    P->>P: post-play coordinator opens
+    alt next episode exists
+        P->>U: next in 10 s, Play now, Cancel
+        U->>P: wait (or Play now)
+        P->>C: open the next episode (exactly once)
+    else no next episode
+        P->>U: ended panel, Replay, Back
+    end
+```
+
+Rules:
+
+* **A skip control exists only inside a marker.** A title with no marker has no button; a title whose
+  only marker is a credits window has no intro control. There is no duration-based guess.
+* **Chapters are local and highest trust.** They are read from the file in the background, and an
+  unrecognised chapter name maps to nothing. Network sources are asked only when enabled, and the
+  domain resolves per kind, so chapters can win the intro while AniSkip wins the ending.
+* **The first frame never waits for a source.** The session answers from the cache; the refresh
+  starts afterwards and publishes a count, never the markers themselves. The player re-reads the
+  cache through `markers_for_playback`.
+* **The post-play coordinator starts at most one episode.** A credits marker or the element's
+  `ended` opens it; the countdown calls the open once at zero; Cancel starts nothing and does not
+  mark watched. A film ends on the panel rather than a black screen. A prefetch failure falls back
+  to a normal load.
+* **Back cancels.** Leaving the player unmounts the coordinator and its timer; a late mint is
+  dropped, so a next episode cannot start after the person has left.
+* **The external-mpv hand-off has no React overlay.** A container the webview cannot demux still
+  opens mpv's own window; the same skip/next-up UX there is the embedded-libmpv task, not a claim
+  this flow makes.
+
+Tests: a session with an intro marker draws Skip Intro and one without draws nothing; a credits
+marker with a next episode draws the countdown; Cancel hides it and starts nothing; Play now opens
+exactly one session; a film ends on the panel; a suppressed marker never reaches the player; a
+provider 401/429/5xx leaves the cached markers in place and records the health outcome.
 
 ---
 
@@ -600,7 +667,7 @@ sequenceDiagram
 
 The watched policy is a pure function with the boundary cases pinned by tests: exactly at the threshold, a video shorter than the skip window, a manual "mark unwatched" that must survive the next finalize, and a re-watch that increments `play_count` without clearing `watched_at`.
 
-**What the current build does.** A player session carries the episode id it opened, so `recordProgress` writes a row keyed to that episode and not to the title. The season read merges each episode's `watched` flag and fraction, which draws the bar under the still, marks the first unfinished episode **Next up**, and re-reads when the reader returns from the player. Settings carries the full history from the same rows. The autoplay-next countdown and the Trakt scrobbler in the diagram are still owed.
+**What the current build does.** A player session carries the episode id it opened, so `recordProgress` writes a row keyed to that episode and not to the title. The season read merges each episode's `watched` flag and fraction, which draws the bar under the still, marks the first unfinished episode **Next up**, and re-reads when the reader returns from the player. Settings carries the full history from the same rows. The next-up countdown now lives in the shared post-play coordinator (F7.1): a credits marker or the end of media opens it, one start is admitted, and Cancel is safe. The Trakt scrobbler in the diagram is still owed.
 
 **The threshold above is the policy; the storage floor is lower, and they are not the same number.** The policy marks a title watched at ≥ 0.95, or when the credits are reached. The stored invariant, [DATA_MODEL](./DATA_MODEL.md) I6, is weaker on purpose: a row with `watched = 1` must carry `percent ≥ 0.92`, so that a manual mark and an imported mark — a Trakt row, or a user pressing "mark watched" at 93% — is representable without the database rejecting it. `0.95` is therefore what normal playback writes; `0.92` is the weakest row the database accepts. Neither number decides the other, and both boundaries are tested (`PG-E4-09` owns the policy's, `PG-E4-01` owns the invariant's). The continue-watching index band ends at 0.95 because a `watched = 0` row above it should not exist; the band is a query optimisation, not a rule.
 
