@@ -25,7 +25,7 @@ import {
 import type { TableColumn } from "@peregrine/ui";
 import type { DeletionPlanDto, DownloadJobDto } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { routePath, type Route } from "../../../app/routes.js";
 import { downloadPercentOf } from "../../../lib/download-status.js";
@@ -139,6 +139,24 @@ export function DownloadsScreen({
   // One set of season keys, so collapsing one season leaves every other disclosure where it was.
   // Expanded is the default, and the set holds the exceptions.
   const [collapsedSeasons, setCollapsedSeasons] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    const closeMenusOnOutsidePointer = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      document
+        .querySelectorAll<HTMLDetailsElement>("details.download-action-menu[open]")
+        .forEach((menu) => {
+          if (!menu.contains(target)) {
+            menu.open = false;
+          }
+        });
+    };
+    document.addEventListener("pointerdown", closeMenusOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeMenusOnOutsidePointer);
+  }, []);
 
   const confirm = async (): Promise<void> => {
     const target = confirming;
