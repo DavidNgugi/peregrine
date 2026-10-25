@@ -1690,24 +1690,21 @@ button {
 }
 
 .download-copy {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-auto-rows: min-content;
   gap: 10px;
   min-width: 0;
 }
 
 .download-heading {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 14px;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: start;
 }
 
 .download-title {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
+  display: block;
   min-width: 0;
   color: var(--text-primary);
   font-size: 19px;
@@ -1715,16 +1712,18 @@ button {
 }
 
 .download-episode {
+  margin-left: 8px;
   color: var(--text-tertiary);
   font-size: 12px;
   font-weight: 500;
 }
 
 .download-state-line {
-  display: flex;
-  flex: 0 0 auto;
+  display: grid;
+  grid-auto-flow: column;
   gap: 8px;
   align-items: center;
+  justify-content: start;
 }
 
 .download-state-badge {
@@ -1861,13 +1860,16 @@ button {
   }
 
   .download-heading {
-    gap: 6px 10px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
   }
 
   .download-title {
-    flex-wrap: wrap;
-    gap: 4px;
     font-size: 16px;
+  }
+
+  .download-episode {
+    margin-left: 6px;
   }
 
   .download-stats {
@@ -2522,6 +2524,22 @@ html.tizen {
   user-select: none;
 }
 
+/* The set's web view can under-report 100vh by the height of its own chrome, leaving an
+   uncovered strip at the bottom. The viewport itself is locked to 1920x1080 by the bootstrap;
+   these are the same canvas in CSS pixels, and the screen may still grow past it. */
+html.tizen,
+html.tizen body,
+html.tizen #root,
+html.tizen .screen {
+  min-height: 1080px;
+}
+
+/* Overscan: the panel crops a little of every edge, so the bottom needs the same safe gutter the
+   top bar already gives the top. */
+html.tizen .screen {
+  padding-bottom: 4vw;
+}
+
 /* The television is a ten-foot surface, not a desktop window on a large monitor: fewer, larger
    posters and type that scales with the viewport, so a 1080p set and a 4K set agree. Everything
    here is scoped to the Tizen class the client sets from the user agent; a desktop never sees it. */
@@ -2545,6 +2563,12 @@ html.tizen .brand {
 
 html.tizen .topbar-nav {
   gap: 0.3vw;
+}
+
+/* Chromium before 84 has no flex gap. The probe in the viewport bootstrap sets this class only
+   on those engines, so a later Tizen set that supports gap does not get both. */
+html.tizen.no-flex-gap .topbar-nav > * + * {
+  margin-left: 0.3vw;
 }
 
 html.tizen .nav,
@@ -2802,12 +2826,12 @@ html.tizen .download-heading {
 }
 
 html.tizen .download-title {
-  gap: 0.6vw;
   font-size: 1.5vw;
   overflow-wrap: anywhere;
 }
 
 html.tizen .download-episode {
+  margin-left: 0.6vw;
   font-size: 1vw;
 }
 

@@ -41,6 +41,20 @@ use super::{
 /// The policy the client's own page runs under.
 const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
+/// The viewport the build ships for a normal browser.
+const DEVICE_VIEWPORT: &str = r#"content="width=device-width, initial-scale=1""#;
+
+/// Samsung's web view is a fixed 1920x1080 canvas scaled to the panel. A meta tag is read before
+/// the first layout, so this has to be in the served HTML; changing it from script after the
+/// parser has seen it does not resize the viewport on the engine.
+const TIZEN_VIEWPORT: &str =
+    r#"content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no""#;
+
+/// Rewrites the one meta tag the built client ships for a Tizen request.
+fn with_tizen_viewport(html: &str) -> String {
+    html.replacen(DEVICE_VIEWPORT, TIZEN_VIEWPORT, 1)
+}
+
 /// Builds the router the listener serves.
 pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> Router {
     let api = Router::new()
@@ -97,19 +111,44 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
                         if missing_asset {
                             return StatusCode::NOT_FOUND.into_response();
                         }
-                        let Ok(bytes) = tokio::fs::read(index.as_path()).await else {
+                        let tizen = request
+                            .headers()
+                            .get(header::USER_AGENT)
+                            .and_then(|value| value.to_str().ok())
+                            .is_some_and(|agent| agent.to_ascii_lowercase().contains("tizen"));
+                        let Ok(html) = tokio::fs::read_to_string(index.as_path()).await else {
                             return StatusCode::NOT_FOUND.into_response();
                         };
-                        let mut response = Response::new(Body::from(bytes));
+                        let page = if tizen {
+                            with_tizen_viewport(&html)
+                        } else {
+                            html
+                        };
+                        let mut response = Response::new(Body::from(page));
                         response.headers_mut().insert(
                             header::CONTENT_TYPE,
                             HeaderValue::from_static("text/html; charset=utf-8"),
                         );
+                        // The same URL serves two viewport documents, and the client build is
+                        // replaced while the desktop runs, so neither the browser nor an
+                        // intermediary may keep this answer.
+                        response
+                            .headers_mut()
+                            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+                        response
+                            .headers_mut()
+                            .insert(header::VARY, HeaderValue::from_static("user-agent"));
                         response
                     }
                 }
             });
-            api.fallback_service(ServeDir::new(directory).fallback(fallback))
+            // `/` must reach the fallback so the Tizen request can rewrite the viewport; assets
+            // are still served by `ServeDir`, and a missing one is still a 404.
+            api.fallback_service(
+                ServeDir::new(directory)
+                    .append_index_html_on_directories(false)
+                    .fallback(fallback),
+            )
         }
         None => api.fallback(no_client),
     };
@@ -1222,7 +1261,10 @@ async fn no_client() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_cache_key, parse_range, presented_token};
+    use super::{
+        DEVICE_VIEWPORT, TIZEN_VIEWPORT, is_cache_key, parse_range, presented_token,
+        with_tizen_viewport,
+    };
     use axum::http::{HeaderMap, HeaderValue, header};
 
     #[test]
@@ -1239,6 +1281,16 @@ mod tests {
         assert_eq!(parse_range("bytes=5-1", 1000), Some(Err(())));
         assert_eq!(parse_range("items=0-1", 1000), None);
         assert_eq!(parse_range("bytes=one-two", 1000), None);
+    }
+
+    #[test]
+    fn the_tizen_index_gets_a_fixed_canvas_viewport() {
+        let html = format!(
+            r#"<!doctype html><html><head><meta name="viewport" {DEVICE_VIEWPORT}></head></html>"#
+        );
+        let rewritten = with_tizen_viewport(&html);
+        assert!(rewritten.contains(TIZEN_VIEWPORT));
+        assert!(!rewritten.contains(DEVICE_VIEWPORT));
     }
 
     #[test]
