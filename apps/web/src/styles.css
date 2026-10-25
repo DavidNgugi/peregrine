@@ -1629,22 +1629,41 @@ button {
   padding-top: 8px;
 }
 
+.downloads-inner {
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
+}
+
+.downloads-screen[data-count="1"] .downloads-inner {
+  max-width: 1100px;
+}
+
 .downloads-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 20px 48px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(540px, 1fr));
+  gap: 16px;
+  width: 100%;
+  max-width: 1560px;
+  padding: 20px 48px 28px;
+}
+
+/* One transfer is a card, not a banner stretched across the window, and it stays on the same
+   left edge as the page heading. */
+.downloads-list[data-count="1"] {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1100px;
 }
 
 .download-row {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 18px;
   align-items: center;
   width: 100%;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--surface-1);
   text-align: left;
   cursor: pointer;
@@ -1657,10 +1676,10 @@ button {
 
 .download-poster {
   display: block;
-  width: 96px;
+  width: 110px;
   aspect-ratio: 2 / 3;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-2);
 }
 
@@ -1673,16 +1692,25 @@ button {
 .download-copy {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 10px;
   min-width: 0;
+}
+
+.download-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: flex-start;
+  justify-content: space-between;
 }
 
 .download-title {
   display: flex;
   gap: 8px;
   align-items: baseline;
+  min-width: 0;
   color: var(--text-primary);
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 620;
 }
 
@@ -1694,7 +1722,8 @@ button {
 
 .download-state-line {
   display: flex;
-  gap: 10px;
+  flex: 0 0 auto;
+  gap: 8px;
   align-items: center;
 }
 
@@ -1734,7 +1763,7 @@ button {
 
 .download-percent {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1772,36 +1801,83 @@ button {
   background: linear-gradient(145deg, var(--surface-2), var(--surface-1));
 }
 
-.download-meta {
+.download-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.download-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.download-stat-label {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.download-stat-value {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .download-error {
   color: var(--state-danger);
   font-size: 12px;
+  line-height: 1.4;
 }
 
 @media (max-width: 720px) {
-  .downloads-list {
+  .downloads-list,
+  .downloads-list[data-count="1"] {
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
-    padding: 16px 18px 0;
+    max-width: none;
+    padding: 16px 18px 24px;
   }
 
   .download-row {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: 84px minmax(0, 1fr);
     gap: 12px;
     padding: 10px;
+    border-radius: 12px;
   }
 
   .download-poster {
-    width: 72px;
+    width: 84px;
+  }
+
+  .download-heading {
+    gap: 6px 10px;
   }
 
   .download-title {
     flex-wrap: wrap;
     gap: 4px;
     font-size: 16px;
+  }
+
+  .download-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 8px;
+  }
+
+  .download-stat-value {
+    font-size: 12px;
   }
 
   .tab {
@@ -2684,11 +2760,24 @@ html.tizen .grid .poster.placeholder {
   height: 21vw;
 }
 
+html.tizen .downloads-inner {
+  max-width: none;
+}
+
+html.tizen .downloads-screen[data-count="1"] .downloads-inner {
+  max-width: 1100px;
+}
+
 html.tizen .downloads-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(36vw, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.2vw;
+  max-width: none;
   padding: 1.4vw 3.3vw 2vw;
+}
+
+html.tizen .downloads-list[data-count="1"] {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1100px;
 }
 
 html.tizen .download-row {
@@ -2705,7 +2794,11 @@ html.tizen .download-poster {
 }
 
 html.tizen .download-copy {
-  gap: 0.45vw;
+  gap: 0.55vw;
+}
+
+html.tizen .download-heading {
+  gap: 0.4vw 0.8vw;
 }
 
 html.tizen .download-title {
@@ -2719,7 +2812,7 @@ html.tizen .download-episode {
 }
 
 html.tizen .download-state-line {
-  gap: 0.6vw;
+  gap: 0.5vw;
 }
 
 html.tizen .download-state-badge {
@@ -2728,14 +2821,26 @@ html.tizen .download-state-badge {
 }
 
 html.tizen .download-percent {
-  font-size: 1vw;
+  font-size: 1.05vw;
 }
 
 html.tizen .download-bar {
   height: 0.45vw;
 }
 
-html.tizen .download-meta,
+html.tizen .download-stats {
+  gap: 0.7vw;
+  padding-top: 0.8vw;
+}
+
+html.tizen .download-stat-label {
+  font-size: 0.7vw;
+}
+
+html.tizen .download-stat-value {
+  font-size: 1vw;
+}
+
 html.tizen .download-error {
   font-size: 0.95vw;
 }

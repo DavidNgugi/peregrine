@@ -8,15 +8,18 @@ function percent(download: Download): number {
   return Math.max(0, Math.min(100, Math.round(download.progressPermille / 10)));
 }
 
-function rate(value: number): string {
-  if (value <= 0) return "";
-  return bytes(value) + "/s";
+function speed(value: number): string {
+  return value > 0 ? bytes(value) + "/s" : "—";
 }
 
-function eta(seconds: number | null): string {
-  if (seconds === null || seconds <= 0) return "";
+function remaining(seconds: number | null): string {
+  if (seconds === null || seconds <= 0) return "—";
   const minutes = Math.ceil(seconds / 60);
-  return minutes < 60 ? String(minutes) + " min left" : String(Math.ceil(minutes / 60)) + " h left";
+  return minutes < 60 ? String(minutes) + " min" : String(Math.ceil(minutes / 60)) + " h";
+}
+
+function size(value: number | null): string {
+  return value === null ? "—" : bytes(value);
 }
 
 type StatusTone = "queued" | "info" | "active" | "warn" | "done" | "danger";
@@ -116,86 +119,102 @@ export function DownloadsScreen({ onOpen }: { readonly onOpen: (tile: Tile) => v
   }, []);
 
   return (
-    <main className="screen downloads-screen">
-      <header className="browse-head">
-        <div>
-          <h1>Downloads</h1>
-        </div>
-        <p className="dim">{rows.length === 1 ? "1 transfer" : rows.length + " transfers"}</p>
-      </header>
-      <p className="browse-note">
-        Transfers start on the desktop app; their progress is live here.
-      </p>
-      {error === null ? null : <p className="error">{error}</p>}
-      {loading ? <p className="dim browse-loading">Reading...</p> : null}
-      {!loading && rows.length === 0 ? (
-        <p className="dim browse-empty">Nothing is downloading right now.</p>
-      ) : (
-        <div className="downloads-list">
-          {rows.map((download, index) => {
-            const tile = tileOf(download);
-            return (
-              <button
-                className="download-row"
-                data-autofocus={index === 0 ? "true" : undefined}
-                data-focus="true"
-                data-tone={statusTone(download.state)}
-                disabled={tile === null}
-                key={download.id}
-                onClick={() => {
-                  if (tile !== null) onOpen(tile);
-                }}
-                type="button"
-              >
-                <span className="download-poster">
-                  {download.poster === null ? (
-                    <span className="card-placeholder" />
-                  ) : (
-                    <img alt="" decoding="async" loading="lazy" src={download.poster} />
-                  )}
-                </span>
-                <span className="download-copy">
-                  <span className="download-title">
-                    {download.title ?? "Unknown title"}
-                    {download.seasonNumber === null ? null : (
-                      <span className="download-episode">
-                        {"S" +
-                          String(download.seasonNumber) +
-                          " E" +
-                          String(download.episodeNumber ?? 0)}
-                      </span>
+    <main className="screen downloads-screen" data-count={rows.length}>
+      <div className="downloads-inner">
+        <header className="browse-head">
+          <div>
+            <h1>Downloads</h1>
+          </div>
+          <p className="dim">{rows.length === 1 ? "1 transfer" : rows.length + " transfers"}</p>
+        </header>
+        <p className="browse-note">
+          Transfers start on the desktop app; their progress is live here.
+        </p>
+        {error === null ? null : <p className="error">{error}</p>}
+        {loading ? <p className="dim browse-loading">Reading...</p> : null}
+        {!loading && rows.length === 0 ? (
+          <p className="dim browse-empty">Nothing is downloading right now.</p>
+        ) : (
+          <div className="downloads-list" data-count={rows.length}>
+            {rows.map((download, index) => {
+              const tile = tileOf(download);
+              return (
+                <button
+                  className="download-row"
+                  data-autofocus={index === 0 ? "true" : undefined}
+                  data-focus="true"
+                  data-tone={statusTone(download.state)}
+                  disabled={tile === null}
+                  key={download.id}
+                  onClick={() => {
+                    if (tile !== null) onOpen(tile);
+                  }}
+                  type="button"
+                >
+                  <span className="download-poster">
+                    {download.poster === null ? (
+                      <span className="card-placeholder" />
+                    ) : (
+                      <img alt="" decoding="async" loading="lazy" src={download.poster} />
                     )}
                   </span>
-                  <span className="download-state-line">
-                    <span className={`download-state-badge tone-${statusTone(download.state)}`}>
-                      {label(download.state)}
+                  <span className="download-copy">
+                    <span className="download-heading">
+                      <span className="download-title">
+                        {download.title ?? "Unknown title"}
+                        {download.seasonNumber === null ? null : (
+                          <span className="download-episode">
+                            {"S" +
+                              String(download.seasonNumber) +
+                              " E" +
+                              String(download.episodeNumber ?? 0)}
+                          </span>
+                        )}
+                      </span>
+                      <span className="download-state-line">
+                        <span className={`download-state-badge tone-${statusTone(download.state)}`}>
+                          {label(download.state)}
+                        </span>
+                        {download.state === "downloading" || download.state === "paused" ? (
+                          <span className="download-percent">{percent(download)}%</span>
+                        ) : null}
+                      </span>
                     </span>
-                    {download.state === "downloading" || download.state === "paused" ? (
-                      <span className="download-percent">{percent(download)}%</span>
-                    ) : null}
+                    <span className="download-bar">
+                      <i style={{ width: percent(download) + "%" }} />
+                    </span>
+                    <span className="download-stats">
+                      <span className="download-stat">
+                        <span className="download-stat-label">Downloaded</span>
+                        <span className="download-stat-value">
+                          {bytes(download.downloadedBytes)}
+                        </span>
+                      </span>
+                      <span className="download-stat">
+                        <span className="download-stat-label">Size</span>
+                        <span className="download-stat-value">{size(download.totalBytes)}</span>
+                      </span>
+                      <span className="download-stat">
+                        <span className="download-stat-label">Speed</span>
+                        <span className="download-stat-value">{speed(download.rateBps)}</span>
+                      </span>
+                      <span className="download-stat">
+                        <span className="download-stat-label">Remaining</span>
+                        <span className="download-stat-value">
+                          {remaining(download.etaSeconds)}
+                        </span>
+                      </span>
+                    </span>
+                    {download.error === null ? null : (
+                      <span className="download-error">{download.error}</span>
+                    )}
                   </span>
-                  <span className="download-bar">
-                    <i style={{ width: percent(download) + "%" }} />
-                  </span>
-                  <span className="download-meta">
-                    {[
-                      bytes(download.downloadedBytes) +
-                        (download.totalBytes === null ? "" : " of " + bytes(download.totalBytes)),
-                      rate(download.rateBps),
-                      eta(download.etaSeconds),
-                    ]
-                      .filter((part) => part !== "")
-                      .join("  ·  ")}
-                  </span>
-                  {download.error === null ? null : (
-                    <span className="download-error">{download.error}</span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </main>
   );
 }
