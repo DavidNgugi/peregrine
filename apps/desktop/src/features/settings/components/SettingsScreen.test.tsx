@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
-import type { ProviderSettings } from "../hooks/useProviders.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import type { UsenetSettings } from "../hooks/useUsenet.js";
 import { SettingsScreen } from "./SettingsScreen.js";
@@ -42,23 +41,6 @@ function noLibraries(): LibraryRoots {
     add: () => Promise.resolve(null),
     remove: () => Promise.resolve(false),
     scan: () => Promise.resolve(null),
-  };
-}
-
-/** The provider read as a resolved, empty one: this suite is about the shortcut list. */
-function noProviders(): ProviderSettings {
-  return {
-    providers: [],
-    store: "answered",
-    loading: false,
-    failed: false,
-    busy: false,
-    outcome: null,
-    error: null,
-    saveKey: () => Promise.resolve(),
-    testConnection: () => Promise.resolve(),
-    removeKey: () => Promise.resolve(),
-    reload: () => undefined,
   };
 }
 
@@ -135,7 +117,6 @@ function noProwlarr(): ManagedProwlarr {
 function markup(
   shortcuts: ShortcutRegistry,
   libraries: LibraryRoots = noLibraries(),
-  providers: ProviderSettings = noProviders(),
   indexers: IndexerSettings = noIndexers(),
   usenet: UsenetSettings = noUsenet(),
   prowlarr: ManagedProwlarr = noProwlarr(),
@@ -147,7 +128,6 @@ function markup(
         usenet={usenet}
         libraries={libraries}
         prowlarr={prowlarr}
-        providers={providers}
         shortcuts={shortcuts}
       />
     </I18nextProvider>,
@@ -166,6 +146,28 @@ describe("SettingsScreen", () => {
     expect(html).toContain('href="#settings-data"');
     expect(html).toContain('id="settings-about"');
     expect(html).toContain('aria-current="location"');
+  });
+
+  it("places Integrations between Library and Acquisition", () => {
+    const html = markup(registry([]));
+
+    expect(html).toContain('href="#settings-integrations"');
+    expect(html).toContain('id="settings-integrations"');
+    expect(html.indexOf('href="#settings-library"')).toBeLessThan(
+      html.indexOf('href="#settings-integrations"'),
+    );
+    expect(html.indexOf('href="#settings-integrations"')).toBeLessThan(
+      html.indexOf('href="#settings-acquisition"'),
+    );
+  });
+
+  it("draws the integrations surface instead of the old providers section", () => {
+    const html = markup(registry([]));
+
+    // The provider list is the integrations list now; a second heading for the same keys would be
+    // two editors for one fact, and the TMDB key is the test both paths share.
+    expect(html).not.toContain("Metadata providers");
+    expect(html).toContain("Reading the integrations…");
   });
 
   it("offers a backup and a restore under Data", () => {

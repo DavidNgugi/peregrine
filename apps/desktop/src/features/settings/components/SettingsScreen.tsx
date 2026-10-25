@@ -7,7 +7,7 @@ import {
   ShortcutKeys,
   Switch,
 } from "@peregrine/ui";
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type MouseEvent, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { useAutoStart } from "../hooks/useAutoStart.js";
 import { useNotificationConsent } from "../hooks/useNotificationConsent.js";
@@ -19,19 +19,19 @@ import {
 import type { IndexerSettings } from "../hooks/useIndexers.js";
 import type { LibraryRoots } from "../hooks/useLibraryRoots.js";
 import type { ManagedProwlarr } from "../hooks/useProwlarr.js";
-import type { ProviderSettings } from "../hooks/useProviders.js";
+import { useIntegrations } from "../hooks/useIntegrations.js";
 import type { ShortcutRegistry } from "../hooks/useShortcuts.js";
 import type { UsenetSettings } from "../hooks/useUsenet.js";
 import { AboutSection } from "./AboutSection.js";
 import { BackupSection } from "./BackupSection.js";
 import { IndexersSection } from "./IndexersSection.js";
+import { IntegrationsSection } from "./IntegrationsSection.js";
 import { LibrariesSection } from "./LibrariesSection.js";
 import { ManagedProwlarrSection } from "./ManagedProwlarrSection.js";
 import { NetworkSection } from "./NetworkSection.js";
 import { NotificationsSection } from "./NotificationsSection.js";
 import { PlaybackSection } from "./PlaybackSection.js";
 import { WebAccessSection } from "./WebAccessSection.js";
-import { ProvidersSection } from "./ProvidersSection.js";
 import { UsenetSection } from "./UsenetSection.js";
 
 interface SettingsScreenProps {
@@ -50,14 +50,6 @@ interface SettingsScreenProps {
    * one here could disagree with the list the rest of the app is working from.
    */
   readonly libraries: LibraryRoots;
-
-  /**
-   * The metadata providers, as the shell read them.
-   *
-   * Passed in for the same reason the other two are: the shell owns the read, and a second one
-   * here could disagree with the provider list the rest of the app is working from.
-   */
-  readonly providers: ProviderSettings;
 
   /**
    * The indexer configuration, as the shell read it.
@@ -98,7 +90,6 @@ interface SettingsScreenProps {
 export function SettingsScreen({
   shortcuts,
   libraries,
-  providers,
   indexers,
   usenet,
   prowlarr,
@@ -106,10 +97,41 @@ export function SettingsScreen({
   backLabel,
 }: SettingsScreenProps): ReactElement {
   const { t } = useTranslation();
+  // Read here rather than by the shell: the list is this screen's alone, and a read that lives as
+  // long as the app would keep a keychain prompt in front of every screen.
+  const integrations = useIntegrations();
   const autoStart = useAutoStart();
   const quality = usePreferredQuality();
   const notifications = useNotificationConsent();
   const [activeGroup, setActiveGroup] = useState("settings-general");
+
+  // **The settings rail scrolls the settings pane, never the document.** An anchor's default
+  // navigation scrolls every scrollable ancestor, and `html`/`body`/`#root` are programmatically
+  // scrollable even under `overflow: hidden`: on a short window the whole shell moved up by 104 px
+  // and the sidebar lost its top rows. This computes the same offset in the pane's own coordinate
+  // space and replaces the hash without asking the browser to scroll anything.
+  const jumpTo = (event: MouseEvent<HTMLAnchorElement>, group: string): void => {
+    event.preventDefault();
+    const screen = document.querySelector<HTMLElement>("[data-screen-scroll]");
+    const target = document.getElementById(group);
+    if (screen !== null && target !== null) {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const top =
+        screen.scrollTop +
+        target.getBoundingClientRect().top -
+        screen.getBoundingClientRect().top -
+        20;
+      screen.scrollTo({ top: Math.max(0, top), behavior: reduced ? "auto" : "smooth" });
+    }
+    setActiveGroup(group);
+    window.history.replaceState(window.history.state, "", "#" + group);
+  };
+
+  // A screen opened from a hash left by an older session may arrive with the document already
+  // scrolled; settings owns its pane, so put the shell back at zero before anything is measured.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     const groups = Array.from(document.querySelectorAll<HTMLElement>(".settings-group"));
@@ -151,6 +173,9 @@ export function SettingsScreen({
               aria-current={activeGroup === "settings-general" ? "location" : undefined}
               className={activeGroup === "settings-general" ? "is-active" : undefined}
               href="#settings-general"
+              onClick={(event) => {
+                jumpTo(event, "settings-general");
+              }}
             >
               {t("settings.navigation.general")}
             </a>
@@ -158,13 +183,29 @@ export function SettingsScreen({
               aria-current={activeGroup === "settings-library" ? "location" : undefined}
               className={activeGroup === "settings-library" ? "is-active" : undefined}
               href="#settings-library"
+              onClick={(event) => {
+                jumpTo(event, "settings-library");
+              }}
             >
               {t("settings.navigation.library")}
+            </a>
+            <a
+              aria-current={activeGroup === "settings-integrations" ? "location" : undefined}
+              className={activeGroup === "settings-integrations" ? "is-active" : undefined}
+              href="#settings-integrations"
+              onClick={(event) => {
+                jumpTo(event, "settings-integrations");
+              }}
+            >
+              {t("settings.navigation.integrations", { defaultValue: "Integrations" })}
             </a>
             <a
               aria-current={activeGroup === "settings-acquisition" ? "location" : undefined}
               className={activeGroup === "settings-acquisition" ? "is-active" : undefined}
               href="#settings-acquisition"
+              onClick={(event) => {
+                jumpTo(event, "settings-acquisition");
+              }}
             >
               {t("settings.navigation.acquisition")}
             </a>
@@ -172,6 +213,9 @@ export function SettingsScreen({
               aria-current={activeGroup === "settings-connection" ? "location" : undefined}
               className={activeGroup === "settings-connection" ? "is-active" : undefined}
               href="#settings-connection"
+              onClick={(event) => {
+                jumpTo(event, "settings-connection");
+              }}
             >
               {t("settings.navigation.connection")}
             </a>
@@ -179,6 +223,9 @@ export function SettingsScreen({
               aria-current={activeGroup === "settings-data" ? "location" : undefined}
               className={activeGroup === "settings-data" ? "is-active" : undefined}
               href="#settings-data"
+              onClick={(event) => {
+                jumpTo(event, "settings-data");
+              }}
             >
               {t("settings.navigation.data")}
             </a>
@@ -186,6 +233,9 @@ export function SettingsScreen({
               aria-current={activeGroup === "settings-about" ? "location" : undefined}
               className={activeGroup === "settings-about" ? "is-active" : undefined}
               href="#settings-about"
+              onClick={(event) => {
+                jumpTo(event, "settings-about");
+              }}
             >
               {t("settings.navigation.about")}
             </a>
@@ -269,7 +319,19 @@ export function SettingsScreen({
               <p>{t("settings.group.library")}</p>
             </div>
             <LibrariesSection libraries={libraries} />
-            <ProvidersSection providers={providers} />
+          </div>
+
+          <div className="settings-group" id="settings-integrations">
+            <div className="settings-group-heading">
+              <h2>{t("settings.navigation.integrations", { defaultValue: "Integrations" })}</h2>
+              <p>
+                {t("settings.group.integrations", {
+                  defaultValue:
+                    "Services Peregrine can ask for metadata, skip markers, subtitles, tracking, and releases.",
+                })}
+              </p>
+            </div>
+            <IntegrationsSection integrations={integrations} />
           </div>
 
           <div className="settings-group" id="settings-acquisition">

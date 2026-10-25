@@ -53,6 +53,8 @@ export { Table } from "./Table.js";
 export type { TableColumn, TableProps } from "./Table.js";
 export { TextInput } from "./TextInput.js";
 export type { TextInputProps } from "./TextInput.js";
+export { Toast } from "./Toast.js";
+export type { ToastProps, ToastTone } from "./Toast.js";
 export { CARD_SIZES, TitleCard } from "./TitleCard.js";
 // `posterVisible`, `formatRating`, `previewOverview`, and the `TitlePreviewPanel` the hover preview
 // draws are the card's own decisions rather than primitives, so they are not exported as ones: the

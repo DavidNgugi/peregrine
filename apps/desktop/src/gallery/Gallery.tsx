@@ -45,6 +45,7 @@ import {
   Table,
   TextInput,
   TitleCard,
+  Toast,
   type TableColumn,
 } from "@peregrine/ui";
 import type { ReactElement, ReactNode } from "react";
@@ -91,6 +92,7 @@ export const GALLERY_COMPONENTS: readonly string[] = [
   "Table",
   "TextInput",
   "TitleCard",
+  "Toast",
 ];
 
 /** The two themes the token pipeline ships. */
@@ -804,6 +806,24 @@ export function Gallery(): ReactElement {
           <TextInput label="With help" message="Full titles work better than fragments." />
           <TextInput invalid label="Refused" message="That query is empty." value="" />
         </div>
+      </Section_>
+
+      <Section_
+        component="Toast"
+        description="A result that appears where the eye is rather than at the top of a long section. A failure is role=alert; a result and a progress line are role=status. It floats above the page, so these examples are pinned into the gallery's own flow."
+      >
+        <Toast
+          className="relative inset-auto bottom-auto"
+          onDismiss={() => undefined}
+          title="TheIntroDB works."
+          tone="success"
+        />
+        <Toast
+          className="relative inset-auto bottom-auto"
+          onDismiss={() => undefined}
+          title="TheIntroDB could not be reached."
+          tone="danger"
+        />
       </Section_>
 
       <Section_

@@ -33,7 +33,6 @@ import {
   useIndexers,
   useProwlarr,
   useLibraryRoots,
-  useProviders,
   useUsenet,
   useShortcutDispatch,
   useShortcuts,
@@ -278,7 +277,6 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // the keys this shell acts on, so the two cannot disagree.
   const shortcuts = useShortcuts();
   const libraries = useLibraryRoots();
-  const providers = useProviders();
   const indexers = useIndexers();
   const usenet = useUsenet();
   const prowlarr = useProwlarr();
@@ -608,7 +606,6 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 prowlarr={prowlarr}
                 libraries={libraries}
                 onBack={canBack ? goBack : undefined}
-                providers={providers}
                 shortcuts={shortcuts}
               />
             ) : null}

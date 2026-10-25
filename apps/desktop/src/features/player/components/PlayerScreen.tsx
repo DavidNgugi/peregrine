@@ -21,12 +21,25 @@
  * succeeds. A reader who sees a black rectangle has no way to tell a blocked autoplay from a broken file;
  * a reader who sees a play button knows exactly what to do.
  *
- * **What this screen is not, yet.** No timeline of our own, no track menu, no hover scrub, no next-up:
- * `PG-E16-07` and `PG-E16-08` own those, and they are written against the session rather than against
- * the element. What is here is `controls`, which is the platform's, and a way back.
+ * **Skip markers and the post-play choice are drawn over the picture, never asserted against it.**
+ * The markers arrive on the session and are refreshed through the core; the skip control seeks the
+ * element and the next-up card counts down in one-second ticks. Both are projections of
+ * `@peregrine/player-ui`'s pure machines, so the surface cannot invent a second start, a second
+ * countdown, or a skip window the core did not resolve.
+ *
+ * **What this screen is not, yet.** No timeline of our own, no hover scrub, no chapter list: the
+ * richer overlay is `PG-E16-07`'s and is written against the session rather than the element. What is
+ * here is `controls`, which is the platform's, a way back, and the two end-of-media decisions.
  */
 
 import { Button, EmptyState, ErrorState, Screen } from "@peregrine/ui";
+import {
+  activeMarker,
+  initialPostPlayState,
+  type NextUp,
+  type PostPlayEvent,
+  type PostPlayState,
+} from "@peregrine/player-ui";
 import {
   normalizeIpcError,
   playExternally,
@@ -34,14 +47,24 @@ import {
   type SubtitleTrackDto,
 } from "@peregrine/ipc-client";
 import type { ReactElement } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { messageOf } from "../../../lib/ipc-message.js";
 import { useFrameCapture } from "../hooks/useFrameCapture.js";
 import { usePlayback, type Playback } from "../hooks/usePlayback.js";
 import { usePlaybackProgress } from "../hooks/usePlaybackProgress.js";
+import {
+  nextUpFromSession,
+  startNextEpisode,
+  stepPostPlay,
+  usePlayerMarkers,
+  type PostPlayStep,
+} from "../hooks/usePlayerMarkers.js";
+import { preferredTrackIndex, type AudioTrackListLike } from "../lib/audio-track.js";
 import { initialSubtitleTrack, subtitleTrackLabel } from "../lib/track-selection.js";
+import { PostPlayPanel } from "./PostPlayPanel.js";
+import { SkipButton, isSkippableMarker, type SkippableMarker } from "./SkipButton.js";
 
 /** No tracks, as one stable value so the selection effect does not run on every render. */
 const NO_SUBTITLES: readonly SubtitleTrackDto[] = [];
@@ -71,6 +94,22 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
   // Whether the webview refused to start playing on its own. Set from the promise `play()` returns and
   // cleared by the same element's `playing` event, so the overlay cannot outlive the state it reports.
   const [blocked, setBlocked] = useState(false);
+  // The markers the session carries, replaced when the backend says its cache changed.
+  const markers = usePlayerMarkers(session);
+  const nextUp = useMemo(() => nextUpFromSession(session), [session]);
+  // The media position the skip window and the credits boundary are resolved against. It comes
+  // from the element's own clock, never from wall time.
+  const [positionMs, setPositionMs] = useState(0);
+  const [postPlay, setPostPlay] = useState<PostPlayState>(initialPostPlayState);
+  const postPlayRef = useRef<PostPlayState>(postPlay);
+  // The boundaries already reported in this session. The post-play machine refuses to restart a
+  // visible countdown, but a credits window remains active for minutes, so an unguarded position
+  // tick would ask again and resurrect a panel the viewer cancelled.
+  const boundary = useRef({ credits: false, ended: false });
+  // Whether this screen is mounted, and whether the follow-up was already started. Together they
+  // are the two ways a countdown could outlive the screen that owns it.
+  const live = useRef(true);
+  const startedNext = useRef(false);
   // Seek to the account's stored position on the first frame, and report as the film advances.
   // An external session is not this hook's: the core records mpv's position over its own socket.
   usePlaybackProgress(surface, external ? null : session);
@@ -115,6 +154,47 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
     };
   }, [subtitles, selectedTrack, session?.sessionId]);
 
+  // **The account's language is applied once, to the engine's own track list.** WebKit exposes
+  // audioTracks on the media element; Chromium does not, and a Matroska file never reaches this
+  // surface because mpv owns it. No match leaves the engine's default alone, and a later manual
+  // choice from the platform's menu is not undone. The ref makes the choice once per session.
+  const audioApplied = useRef<number | null>(null);
+  useEffect(() => {
+    const element = surface.current;
+    if (element === null || external || session === null) {
+      return undefined;
+    }
+    const preferred = session.audioLanguage;
+    const apply = (): void => {
+      if (audioApplied.current === session.sessionId) {
+        return;
+      }
+      const list = (element as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
+      if (list === undefined || list.length < 2) {
+        if (list !== undefined) {
+          audioApplied.current = session.sessionId;
+        }
+        return;
+      }
+      const match = preferredTrackIndex(list, preferred);
+      if (match === null) {
+        return;
+      }
+      for (let index = 0; index < list.length; index += 1) {
+        const track = list[index];
+        if (track !== undefined) {
+          track.enabled = index === match;
+        }
+      }
+      audioApplied.current = session.sessionId;
+    };
+    apply();
+    element.addEventListener("loadedmetadata", apply);
+    return () => {
+      element.removeEventListener("loadedmetadata", apply);
+    };
+  }, [external, session]);
+
   const start = (): void => {
     const element = surface.current;
     if (element === null) {
@@ -131,10 +211,156 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
     });
   };
 
+  // A new session is a new boundary, a new countdown, and a new offer. Seeding next-up while the
+  // panel is hidden is what lets the post-play machine decide the outcome from its own credits and
+  // ended events; a cancel clears the offer, and this effect does not run again for a session that
+  // has not changed.
+  useEffect(() => {
+    const seeded: PostPlayState = {
+      ...initialPostPlayState(),
+      nextUp: nextUpFromSession(session),
+    };
+    postPlayRef.current = seeded;
+    setPostPlay(seeded);
+    boundary.current = { credits: false, ended: false };
+    startedNext.current = false;
+    setPositionMs(session?.resumePositionMs ?? 0);
+  }, [session]);
+
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+      // A countdown belongs to a mounted screen: a route that unmounted must not start a follow-up
+      // after the viewer backed out.
+      postPlayRef.current = initialPostPlayState();
+    };
+  }, []);
+
+  const dispatchPostPlay = useCallback((event: PostPlayEvent): PostPlayStep => {
+    const step = stepPostPlay(postPlayRef.current, event);
+    postPlayRef.current = step.state;
+    setPostPlay(step.state);
+    return step;
+  }, []);
+
+  const playNext = useCallback(
+    (next: NextUp): void => {
+      if (!live.current || startedNext.current) {
+        return;
+      }
+      startedNext.current = true;
+      startNextEpisode(next, playback.open);
+    },
+    [playback.open],
+  );
+
+  const playNow = (): void => {
+    const step = dispatchPostPlay({ type: "start-next" });
+    if (step.start !== null) {
+      playNext(step.start);
+    }
+  };
+
+  const cancelPostPlay = (): void => {
+    dispatchPostPlay({ type: "cancel" });
+  };
+
+  const replay = (): void => {
+    const step = dispatchPostPlay({ type: "replay" });
+    if (step.command !== "replay") {
+      return;
+    }
+    const element = surface.current;
+    if (element !== null) {
+      element.currentTime = 0;
+    }
+    setPositionMs(0);
+    // A replay is a second chance at the same boundaries, not a cancelled one: the next credits
+    // marker or end may offer the countdown again.
+    boundary.current = { credits: false, ended: false };
+    startedNext.current = false;
+    const seeded: PostPlayState = {
+      ...initialPostPlayState(),
+      nextUp,
+    };
+    postPlayRef.current = seeded;
+    setPostPlay(seeded);
+    start();
+  };
+
+  const backToTitle = (): void => {
+    dispatchPostPlay({ type: "cancel" });
+    onClose();
+  };
+
+  const skipActiveMarker = (marker: SkippableMarker): void => {
+    const element = surface.current;
+    if (element === null) {
+      return;
+    }
+    const elementDurationMs =
+      Number.isFinite(element.duration) && element.duration > 0
+        ? Math.round(element.duration * 1000)
+        : null;
+    const durationMs = elementDurationMs ?? session?.durationMs ?? null;
+    const endMs = marker.endMs ?? durationMs;
+    if (endMs === null || !Number.isFinite(endMs)) {
+      return;
+    }
+    const targetMs = Math.max(0, durationMs === null ? endMs : Math.min(endMs, durationMs));
+    element.currentTime = targetMs / 1000;
+    setPositionMs(targetMs);
+    // Seeking does not suspend an element that is playing, so this is only the gesture a paused or
+    // autoplay-blocked element needs; it cannot pause a running one.
+    start();
+  };
+
+  // Once a second, never once a frame: the countdown is a number a person reads, and the next
+  // episode is opened from the same transition that reports zero, which is the exactly-one rule.
+  useEffect(() => {
+    if (postPlay.phase !== "countdown") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const step = dispatchPostPlay({ type: "tick", elapsedMs: 1_000 });
+      if (step.start !== null) {
+        playNext(step.start);
+      }
+    }, 1_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [postPlay.phase, dispatchPostPlay, playNext]);
+
+  // The credits marker is a boundary the same way the element's ended event is. Reporting it once
+  // is the guard that keeps a cancelled panel from reopening for the length of the credits.
+  const active = activeMarker(markers, positionMs);
+  useEffect(() => {
+    if (external || session === null || boundary.current.credits) {
+      return;
+    }
+    if (active === null || active.kind !== "credits") {
+      return;
+    }
+    boundary.current.credits = true;
+    dispatchPostPlay({ type: "credits" });
+  }, [active, external, session, dispatchPostPlay]);
+
+  const onEnded = (): void => {
+    if (external || session === null || boundary.current.ended) {
+      return;
+    }
+    boundary.current.ended = true;
+    dispatchPostPlay({ type: "ended" });
+  };
+
+  const skippable = isSkippableMarker(active) ? active : null;
+
   return (
     <Screen
       backLabel={t("player.back")}
-      onBack={onClose}
+      onBack={backToTitle}
       subtitle={session === null ? undefined : t("player.playing")}
       title={t("player.title")}
     >
@@ -201,7 +427,7 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
             />
           ) : null
         ) : (
-          <div className="min-h-0 flex-1" data-player-session="">
+          <div className="relative min-h-0 flex-1" data-player-session="">
             {external ? (
               // The external reader owns the picture; this page says where it went and that its
               // progress is still being kept. No video element, because the platform cannot demux
@@ -215,46 +441,69 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
                 </p>
               </div>
             ) : (
-              // **The element is given the URL the core answered with and nothing else.** `controls` is
-              // deliberate: the platform's own controls are honest about what it can do, and our own
-              // overlay is `PG-E16-07`'s. `playsInline` keeps a fullscreen hand-off from being forced on
-              // a reader who wants the page.
-              <video
-                autoPlay
-                className="h-full max-h-full w-full rounded-md bg-black"
-                controls
-                // The tracks are cross-origin, so the element has to fetch them in CORS mode for the
-                // text to be usable; the session's listener sends `Access-Control-Allow-Origin` for
-                // exactly this reason, and the capture element already sets the same flag.
-                crossOrigin="anonymous"
-                data-player-surface=""
-                // The engine's own account of the autoplay attempt: `canplay` is where `play()` is worth
-                // asking again, and `playing` is what says it worked.
-                onCanPlay={start}
-                onPlaying={() => {
-                  setBlocked(false);
-                }}
-                playsInline
-                ref={surface}
-                src={session.url}
-              >
-                {/* **The sidecars, exactly as the library indexed them.** Each URL comes from the
-                    session, so the webview never builds a route and never sees a path. The container
-                    is the platform's limit: the webview's track parser reads WebVTT, so an SRT, ASS,
-                    or SSA row is listed and served but may not render in this surface. mpv owns those
-                    formats when it is the reader ('PG-E17-07'/'PG-E17-08'); hiding them here would
-                    misreport what the library holds. */}
-                {subtitles.map((track) => (
-                  <track
-                    key={track.id}
-                    kind="subtitles"
-                    label={subtitleTrackLabel(track)}
-                    src={track.url}
-                    srcLang={track.language}
+              <>
+                {/* **The element is given the URL the core answered with and nothing else.** `controls` is
+                    deliberate: the platform's own controls are honest about what it can do, and our own
+                    overlay is `PG-E16-07`'s. `playsInline` keeps a fullscreen hand-off from being forced on
+                    a reader who wants the page. */}
+                <video
+                  autoPlay
+                  className="h-full max-h-full w-full rounded-md bg-black"
+                  controls
+                  // The tracks are cross-origin, so the element has to fetch them in CORS mode for the
+                  // text to be usable; the session's listener sends `Access-Control-Allow-Origin` for
+                  // exactly this reason, and the capture element already sets the same flag.
+                  crossOrigin="anonymous"
+                  data-player-surface=""
+                  // The engine's own account of the autoplay attempt: `canplay` is where `play()` is worth
+                  // asking again, and `playing` is what says it worked.
+                  onCanPlay={start}
+                  // The end of the media is a post-play boundary even when the marker cache never
+                  // resolved a credits window, so the choice is never left to a black rectangle.
+                  onEnded={onEnded}
+                  onPlaying={() => {
+                    setBlocked(false);
+                  }}
+                  onTimeUpdate={(event) => {
+                    const seconds = event.currentTarget.currentTime;
+                    if (Number.isFinite(seconds)) {
+                      setPositionMs(Math.round(seconds * 1000));
+                    }
+                  }}
+                  playsInline
+                  ref={surface}
+                  src={session.url}
+                >
+                  {/* **The sidecars, exactly as the library indexed them.** Each URL comes from the
+                      session, so the webview never builds a route and never sees a path. The container
+                      is the platform's limit: the webview's track parser reads WebVTT, so an SRT, ASS,
+                      or SSA row is listed and served but may not render in this surface. mpv owns those
+                      formats when it is the reader ('PG-E17-07'/'PG-E17-08'); hiding them here would
+                      misreport what the library holds. */}
+                  {subtitles.map((track) => (
+                    <track
+                      key={track.id}
+                      kind="subtitles"
+                      label={subtitleTrackLabel(track)}
+                      src={track.url}
+                      srcLang={track.language}
+                    />
+                  ))}
+                  {t("player.unsupported")}
+                </video>
+                {skippable === null ? null : (
+                  <SkipButton marker={skippable} onSkip={skipActiveMarker} />
+                )}
+                {postPlay.phase === "hidden" ? null : (
+                  <PostPlayPanel
+                    onCancel={cancelPostPlay}
+                    onClose={backToTitle}
+                    onPlayNow={playNow}
+                    onReplay={replay}
+                    state={postPlay}
                   />
-                ))}
-                {t("player.unsupported")}
-              </video>
+                )}
+              </>
             )}
           </div>
         )}

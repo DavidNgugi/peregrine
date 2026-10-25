@@ -1,12 +1,43 @@
 import { createI18n } from "@peregrine/i18n";
 import type { IpcError, PlaybackSessionDto, SubtitleTrackDto } from "@peregrine/ipc-client";
+import { initialPostPlayState, type NextUp, type PostPlayState } from "@peregrine/player-ui";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Playback } from "../hooks/usePlayback.js";
+import { nextUpFromSession, startNextEpisode, stepPostPlay } from "../hooks/usePlayerMarkers.js";
+import { PostPlayPanel } from "./PostPlayPanel.js";
 import { PlayerView } from "./PlayerScreen.js";
 
 const i18n = createI18n();
+
+// The copy this slice adds lands in packages/i18n with the parent's change. Pinning it here keeps
+// these tests about behaviour rather than about the literal key names a missing catalogue renders.
+i18n.addResourceBundle(
+  "en",
+  "translation",
+  {
+    player: {
+      skip: {
+        intro: "Skip Intro",
+        recap: "Skip Recap",
+        preview: "Skip Preview",
+      },
+      nextUp: {
+        title: "Up next",
+        countdown: "Next episode in {{seconds}}s",
+        playNow: "Play now",
+        cancel: "Cancel",
+      },
+      ended: {
+        title: "The end.",
+        replay: "Replay",
+      },
+    },
+  },
+  true,
+  true,
+);
 
 /** One open session as the core answers with it. */
 function session(overrides: Partial<PlaybackSessionDto> = {}): PlaybackSessionDto {
@@ -28,8 +59,67 @@ function session(overrides: Partial<PlaybackSessionDto> = {}): PlaybackSessionDt
     subtitles: [],
     // No stored position: a first watch, which is the ordinary case.
     resumePositionMs: null,
+    // A bound the skip control can clamp to, and the marker cache's answer for a file with none.
+    durationMs: 1_440_000,
+    markers: [],
+    nextEpisode: null,
+    audioLanguage: "en",
     ...overrides,
   };
+}
+
+/** One marker as the session carries it, with only the field under test varying. */
+function marker(
+  overrides: Partial<PlaybackSessionDto["markers"][number]> = {},
+): PlaybackSessionDto["markers"][number] {
+  return {
+    kind: "intro",
+    startMs: 0,
+    endMs: 90_000,
+    source: "chapters",
+    confidence: 90,
+    ...overrides,
+  };
+}
+
+/** The episode the core offers after this one. */
+const NEXT_EPISODE: NextUp = {
+  titleId: 7,
+  seasonNumber: 2,
+  episodeNumber: 3,
+  episodeId: 99,
+  name: "The Long Way Down",
+};
+
+/** The countdown a credits marker opens when the session offered a follow-up. */
+function countdownState(): PostPlayState {
+  const opened = session({
+    markers: [marker({ kind: "credits", startMs: 1_320_000, endMs: null })],
+    nextEpisode: {
+      seasonNumber: NEXT_EPISODE.seasonNumber,
+      episodeNumber: NEXT_EPISODE.episodeNumber,
+      episodeId: NEXT_EPISODE.episodeId,
+      name: NEXT_EPISODE.name,
+    },
+  });
+  return stepPostPlay(
+    { ...initialPostPlayState(), nextUp: nextUpFromSession(opened) },
+    { type: "credits" },
+  ).state;
+}
+
+function postPlayMarkup(state: PostPlayState): string {
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <PostPlayPanel
+        onCancel={() => undefined}
+        onClose={() => undefined}
+        onPlayNow={() => undefined}
+        onReplay={() => undefined}
+        state={state}
+      />
+    </I18nextProvider>,
+  );
 }
 
 /** One sidecar as the core answers it, with only the field under test varying. */
@@ -200,5 +290,117 @@ describe("PlayerView", () => {
     for (const state of [{}, { starting: true }, { session: session() }] as Partial<Playback>[]) {
       expect(markup(state)).toContain("Back to the title");
     }
+  });
+});
+
+describe("PlayerView skip markers", () => {
+  it("draws the skip control for the intro window the position is inside", () => {
+    const html = markup({ session: session({ markers: [marker()] }) });
+
+    expect(html).toContain("Skip Intro");
+    expect(html).toContain('data-player-skip="intro"');
+  });
+
+  it("draws no skip control for a session with no markers", () => {
+    const html = markup({ session: session() });
+
+    expect(html).not.toContain("Skip Intro");
+    expect(html).not.toContain("data-player-skip");
+  });
+
+  it("does not offer to skip the credits", () => {
+    // Credits are the post-play surface's boundary, not a window to jump past.
+    const html = markup({
+      session: session({ markers: [marker({ kind: "credits", endMs: null })] }),
+    });
+
+    expect(html).not.toContain("data-player-skip");
+    expect(html).not.toContain("Skip Intro");
+  });
+
+  it("leaves the skip and post-play controls off the external player's surface", () => {
+    // mpv owns the picture and its own keyboard handling, so a control here would act on nothing.
+    const html = markup({
+      session: session({ support: "externalPlayer", markers: [marker()] }),
+    });
+
+    expect(html).not.toContain("Skip Intro");
+    expect(html).not.toContain("data-player-skip");
+    expect(html).not.toContain("data-player-post-play");
+  });
+});
+
+describe("post-play panel", () => {
+  // The static harness has no DOM or event loop, so Cancel and Play now are exercised through the
+  // same transitions their click handlers call, with the rendered card proving both controls exist.
+  it("draws the countdown and both choices when a credits marker offers a next episode", () => {
+    const state = countdownState();
+
+    expect(state.phase).toBe("countdown");
+    const html = postPlayMarkup(state);
+    expect(html).toContain("Next episode in 10s");
+    expect(html).toContain("Play now");
+    expect(html).toContain("Cancel");
+    expect(html).toContain("The Long Way Down");
+  });
+
+  it("hides the countdown on Cancel without starting anything", () => {
+    const cancelled = stepPostPlay(countdownState(), { type: "cancel" });
+
+    expect(cancelled.state.phase).toBe("hidden");
+    expect(cancelled.start).toBeNull();
+    expect(postPlayMarkup(cancelled.state)).toBe("");
+  });
+
+  it("starts the offered episode exactly once when Play now is chosen", () => {
+    const open = vi.fn(() => Promise.resolve());
+    const chosen = stepPostPlay(countdownState(), { type: "start-next" });
+
+    expect(chosen.start).toEqual(NEXT_EPISODE);
+    if (chosen.start !== null) {
+      startNextEpisode(chosen.start, open);
+    }
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith(7, 2, 3);
+  });
+
+  it("still opens the offer when the prefetch failed", () => {
+    // A cache miss is not a refusal: the same normal open serves the episode.
+    const open = vi.fn(() => Promise.resolve());
+    const chosen = stepPostPlay(
+      { ...countdownState(), prefetch: "failed" },
+      { type: "start-next" },
+    );
+
+    expect(chosen.start).toEqual(NEXT_EPISODE);
+    if (chosen.start !== null) {
+      startNextEpisode(chosen.start, open);
+    }
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws Replay and the way back when the media ended with no next episode", () => {
+    const ended = stepPostPlay(initialPostPlayState(), { type: "ended" });
+
+    expect(ended.state.phase).toBe("ended");
+    const html = postPlayMarkup(ended.state);
+    expect(html).toContain("The end.");
+    expect(html).toContain("Replay");
+    expect(html).toContain("Back to the title");
+  });
+
+  it("draws the ended panel rather than a dead countdown when the offer is missing", () => {
+    const state: PostPlayState = {
+      ...initialPostPlayState(),
+      phase: "countdown",
+      remainingMs: 10_000,
+      nextUp: null,
+    };
+
+    expect(postPlayMarkup(state)).toContain("Replay");
+  });
+
+  it("draws nothing before a boundary", () => {
+    expect(postPlayMarkup(initialPostPlayState())).toBe("");
   });
 });

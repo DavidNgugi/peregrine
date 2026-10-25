@@ -407,6 +407,7 @@ export const en = {
     common: {
       close: "Close",
       cancel: "Cancel",
+      dismiss: "Dismiss",
     },
     // The poster tile's own words, which the kit deliberately does not hold (`AGENTS R7`): a chip's
     // state, a rating's spoken form, a vote count, and one verb. They live here rather than under
@@ -448,6 +449,25 @@ export const en = {
       },
       // What the external branch says when mpv is the reader: no picture in the page, and the reason.
       external: "The film is open in mpv. Watch progress is saved as you go.",
+      // The skip control is drawn only while a marker contains the position; a title with none
+      // has no button at all.
+      skip: {
+        intro: "Skip Intro",
+        recap: "Skip Recap",
+        preview: "Skip Preview",
+      },
+      // One coordinator owns the end of an episode: the countdown, Play now, and Cancel are three
+      // answers to one question, and Cancel starts nothing.
+      nextUp: {
+        title: "Up next",
+        countdown: "Next episode in {{seconds}}s",
+        playNow: "Play now",
+        cancel: "Cancel",
+      },
+      ended: {
+        title: "The end.",
+        replay: "Replay",
+      },
       // The track menu beside the picture. "Off" is the absence of a sidecar, which is the state a
       // session with tracks opens in when the core marks none as default.
       subtitles: {
@@ -925,6 +945,7 @@ export const en = {
         label: "Settings menu",
         general: "General",
         library: "Library",
+        integrations: "Integrations",
         acquisition: "Acquisition",
         connection: "Connection",
         data: "Data",
@@ -933,10 +954,96 @@ export const en = {
       group: {
         general: "Everyday behaviour and playback defaults.",
         library: "Where your media comes from and how it is described.",
+        integrations:
+          "Services Peregrine can ask for metadata, skip markers, subtitles, tracking, and releases.",
         acquisition: "Sources Peregrine can use to find and fetch releases.",
         connection: "Local network access and VPN guidance.",
         data: "A full copy of this installation, and how to put it back.",
         about: "Build details and third-party notices.",
+      },
+      integrations: {
+        loading: "Reading the integrations…",
+        empty: "No integration is built into this build.",
+        retry: "Try again",
+        unavailable: {
+          title: "Your integrations could not be read.",
+          body: "Peregrine's core did not answer, so this list is unknown rather than empty. Reopening Settings tries the read again.",
+        },
+        configured: "Configured",
+        notConfigured: "Not configured",
+        store: {
+          unread: "Checking the keychain…",
+          denied: "Keychain access refused",
+          unavailable: "No keychain available",
+        },
+        noKeyRequired: "No key required",
+        keyOptional: "Key optional",
+        alwaysOn: "Always on",
+        needsAttention: "Needs attention",
+        lastOutcome: {
+          working: "Last test worked",
+          unauthorized: "Last test was refused",
+          rateLimited: "Last test was rate limited",
+          unreachable: "Last test could not reach the service",
+          keychainDenied: "The keychain refused the last test",
+          notConfigured: "The last test found no credential",
+        },
+        capabilities: "Capabilities",
+        capability: {
+          metadata: "Metadata",
+          markers: "Skip markers",
+          subtitles: "Subtitles",
+          scrobble: "Scrobbling",
+          acquisition: "Acquisition",
+        },
+        category: {
+          metadata: "Metadata",
+          skipMarkers: "Skip markers",
+          subtitles: "Subtitles",
+          tracking: "Tracking",
+          acquisition: "Acquisition",
+        },
+        docs: "Documentation",
+        docsNamed: "{{name}} documentation",
+        enabled: "Enabled for {{name}}",
+        enabledDescription: "Turned off, this source is never asked. It stays configured.",
+        priority: "Priority",
+        priorityDescription: "Installation-wide. A source earlier in its category is asked first.",
+        moveUp: "Up",
+        moveDown: "Down",
+        moveUpNamed: "Move {{name}} up",
+        moveDownNamed: "Move {{name}} down",
+        submission: "Allow submissions from {{name}}",
+        submissionDescription: "Sends the timestamps you contribute back to this source.",
+        test: "Test connection",
+        remove: "Remove credentials",
+        removeNamed: "Remove the credentials for {{name}}",
+        save: "Save",
+        replace: "Replace",
+        fieldDescription:
+          "Stored in your operating system's keychain. It is never shown again after saving.",
+        confirm: {
+          title: "Remove the {{name}} credentials?",
+          body: "Peregrine forgets the stored values and stops asking this source with them. Nothing else is removed.",
+        },
+        pending: {
+          tested: "Testing {{name}}…",
+          saved: "Saving credentials for {{name}}…",
+          removed: "Removing credentials for {{name}}…",
+        },
+        outcome: {
+          tested: "The connection to {{name}} works.",
+          saved: "The credentials were stored for {{name}}.",
+          removed: "The credentials were removed. {{name}} is no longer asked with them.",
+          unauthorized: "That credential was refused. Check you copied the right value.",
+          rateLimited: "{{name}} is rate limiting this app; try again in a minute.",
+          unreachable: "{{name}} could not be reached.",
+          notConfigured: "No credential is stored for {{name}}, so there was nothing to test.",
+          store: "Peregrine could not read its credential store, so nothing was saved.",
+          cancelled: "That was cancelled. Nothing was changed.",
+          failed:
+            "The credential could not be confirmed. Try again, and check the service's status if it keeps happening.",
+        },
       },
       quality: {
         title: "Downloads",
@@ -964,7 +1071,7 @@ export const en = {
         modeForced: "Forced only",
         failed: "The playback language preference could not be read.",
         saveFailed: "The playback language preference could not be saved.",
-        note: "Downloads prefer a release that names this audio language. The player switches to it when the file offers it.",
+        note: "Downloads prefer a release that names this audio language. The in-page player and mpv start on it when the file offers it; a manual choice from the player's own menu wins for that session.",
         language: {
           en: "English",
           es: "Español",

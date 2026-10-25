@@ -1,4 +1,5 @@
 export { IndexersSection } from "./components/IndexersSection.js";
+export { IntegrationsSection } from "./components/IntegrationsSection.js";
 export { LibrariesSection } from "./components/LibrariesSection.js";
 export { ProvidersSection } from "./components/ProvidersSection.js";
 export { SettingsScreen } from "./components/SettingsScreen.js";
@@ -8,6 +9,8 @@ export { useIndexers } from "./hooks/useIndexers.js";
 export type { IndexerOutcome, IndexerSettings } from "./hooks/useIndexers.js";
 export { useProviders } from "./hooks/useProviders.js";
 export type { CredentialOutcome, ProviderSettings } from "./hooks/useProviders.js";
+export { useIntegrations } from "./hooks/useIntegrations.js";
+export type { IntegrationOutcome, IntegrationSettings } from "./hooks/useIntegrations.js";
 export { useProwlarr } from "./hooks/useProwlarr.js";
 export type { ManagedProwlarr, ProwlarrOutcome } from "./hooks/useProwlarr.js";
 export { useUsenet } from "./hooks/useUsenet.js";
