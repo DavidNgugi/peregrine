@@ -1692,9 +1692,51 @@ button {
   font-weight: 500;
 }
 
-.download-state {
+.download-state-line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.download-state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: var(--surface-2);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.download-state-badge.tone-info {
+  color: var(--state-info);
+}
+
+.download-state-badge.tone-active {
+  color: var(--accent);
+}
+
+.download-state-badge.tone-warn {
+  color: var(--state-warn);
+}
+
+.download-state-badge.tone-done {
+  color: var(--state-ok);
+}
+
+.download-state-badge.tone-danger {
+  color: var(--state-danger);
+}
+
+.download-percent {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .download-bar {
@@ -1711,6 +1753,23 @@ button {
   border-radius: 999px;
   background: var(--accent);
   transition: width 300ms ease;
+}
+
+.download-row[data-tone="done"] .download-bar i {
+  background: var(--state-ok);
+}
+
+.download-row[data-tone="warn"] .download-bar i {
+  background: var(--state-warn);
+}
+
+.download-row[data-tone="danger"] .download-bar i {
+  background: var(--state-danger);
+}
+
+.download-poster .card-placeholder {
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(145deg, var(--surface-2), var(--surface-1));
 }
 
 .download-meta {
@@ -2625,13 +2684,60 @@ html.tizen .grid .poster.placeholder {
   height: 21vw;
 }
 
+html.tizen .downloads-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(36vw, 1fr));
+  gap: 1.2vw;
+  padding: 1.4vw 3.3vw 2vw;
+}
+
 html.tizen .download-row {
-  grid-template-columns: 8vw minmax(0, 1fr);
+  grid-template-columns: 6.5vw minmax(0, 1fr);
+  gap: 1vw;
+  padding: 1.1vw 1.3vw;
+  border-radius: 0.8vw;
 }
 
 html.tizen .download-poster {
-  width: 8vw;
-  height: 12vw;
+  width: 6.5vw;
+  height: 9.75vw;
+  border-radius: 0.5vw;
+}
+
+html.tizen .download-copy {
+  gap: 0.45vw;
+}
+
+html.tizen .download-title {
+  gap: 0.6vw;
+  font-size: 1.5vw;
+  overflow-wrap: anywhere;
+}
+
+html.tizen .download-episode {
+  font-size: 1vw;
+}
+
+html.tizen .download-state-line {
+  gap: 0.6vw;
+}
+
+html.tizen .download-state-badge {
+  padding: 0.2vw 0.8vw;
+  font-size: 0.95vw;
+}
+
+html.tizen .download-percent {
+  font-size: 1vw;
+}
+
+html.tizen .download-bar {
+  height: 0.45vw;
+}
+
+html.tizen .download-meta,
+html.tizen .download-error {
+  font-size: 0.95vw;
 }
 
 html.tizen .code {

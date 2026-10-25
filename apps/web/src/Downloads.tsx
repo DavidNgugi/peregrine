@@ -19,6 +19,29 @@ function eta(seconds: number | null): string {
   return minutes < 60 ? String(minutes) + " min left" : String(Math.ceil(minutes / 60)) + " h left";
 }
 
+type StatusTone = "queued" | "info" | "active" | "warn" | "done" | "danger";
+
+/** The colour a row's state badge wears; the label still carries the state in words. */
+function statusTone(state: string): StatusTone {
+  switch (state) {
+    case "inspecting":
+    case "metadata":
+      return "info";
+    case "downloading":
+      return "active";
+    case "paused":
+      return "warn";
+    case "seeding":
+    case "completed":
+      return "done";
+    case "failed":
+    case "blocked":
+      return "danger";
+    default:
+      return "queued";
+  }
+}
+
 function label(state: string): string {
   switch (state) {
     case "downloading":
@@ -116,6 +139,7 @@ export function DownloadsScreen({ onOpen }: { readonly onOpen: (tile: Tile) => v
                 className="download-row"
                 data-autofocus={index === 0 ? "true" : undefined}
                 data-focus="true"
+                data-tone={statusTone(download.state)}
                 disabled={tile === null}
                 key={download.id}
                 onClick={() => {
@@ -142,9 +166,13 @@ export function DownloadsScreen({ onOpen }: { readonly onOpen: (tile: Tile) => v
                       </span>
                     )}
                   </span>
-                  <span className="download-state">
-                    {label(download.state)}
-                    {download.state === "downloading" ? " · " + percent(download) + "%" : ""}
+                  <span className="download-state-line">
+                    <span className={`download-state-badge tone-${statusTone(download.state)}`}>
+                      {label(download.state)}
+                    </span>
+                    {download.state === "downloading" || download.state === "paused" ? (
+                      <span className="download-percent">{percent(download)}%</span>
+                    ) : null}
                   </span>
                   <span className="download-bar">
                     <i style={{ width: percent(download) + "%" }} />
