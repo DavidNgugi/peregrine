@@ -6,7 +6,7 @@
  * and a player that writes the same progress row the desktop player writes.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   api,
@@ -608,16 +608,79 @@ function LibraryScreen({
   readonly error: string | null;
   readonly onOpen: (id: number) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<"all" | "movie" | "show">("all");
+  const [sort, setSort] = useState<"newest" | "oldest" | "title">("newest");
+  const visible = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    const filtered = rows.filter((row) => {
+      const matchesQuery = needle === "" || row.name.toLocaleLowerCase().includes(needle);
+      const matchesKind = kind === "all" || row.kind === (kind === "movie" ? "movies" : "shows");
+      return matchesQuery && matchesKind;
+    });
+    if (sort === "title")
+      return filtered.sort((left, right) => left.name.localeCompare(right.name));
+    return sort === "newest" ? filtered : filtered.reverse();
+  }, [kind, query, rows, sort]);
   useAutoFocus(rows.length);
   return (
     <main className="screen">
-      <p className="dim library-count">{rows.length === 1 ? "1 title" : rows.length + " titles"}</p>
+      <header className="browse-head">
+        <div>
+          <h1>Library</h1>
+          <p className="dim library-count">
+            {visible.length === 1 ? "1 title" : visible.length + " titles"}
+          </p>
+        </div>
+        <form className="search-field" onSubmit={(event) => event.preventDefault()} role="search">
+          <SearchIcon />
+          <input
+            aria-label="Search your library"
+            data-focus="true"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search your library"
+            type="search"
+            value={query}
+          />
+        </form>
+      </header>
+      <div className="filter-row">
+        <div aria-label="Kind" className="segmented" role="group">
+          {(["all", "movie", "show"] as const).map((value) => (
+            <button
+              className={kind === value ? "segment current" : "segment"}
+              data-focus="true"
+              key={value}
+              onClick={() => setKind(value)}
+              type="button"
+            >
+              {value === "all" ? "All" : value === "movie" ? "Films" : "Series"}
+            </button>
+          ))}
+        </div>
+        <label className="sort-field">
+          <span>Sort</span>
+          <select
+            data-focus="true"
+            onChange={(event) => setSort(event.target.value as typeof sort)}
+            value={sort}
+          >
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="title">Title</option>
+          </select>
+        </label>
+      </div>
       {error === null ? null : <p className="error">{error}</p>}
-      {rows.length === 0 ? (
-        <p className="dim center-text">The library is empty on this machine.</p>
+      {visible.length === 0 ? (
+        <p className="dim center-text">
+          {rows.length === 0
+            ? "The library is empty on this machine."
+            : "Nothing matched. Try another title or filter."}
+        </p>
       ) : (
         <div className="grid">
-          {rows.map((row, index) => (
+          {visible.map((row, index) => (
             <button
               className="tile"
               data-autofocus={index === 0 ? "true" : undefined}

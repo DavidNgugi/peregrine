@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { api, type Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
+import { SearchIcon } from "./icons.js";
 
 /**
  * The account's watchlist: a title is added or removed from its own page, and this screen offers
@@ -16,7 +17,22 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<"all" | "movie" | "show">("all");
+  const [sort, setSort] = useState<"newest" | "oldest" | "title">("newest");
   useAutoFocus(items[0]?.id);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    const filtered = items.filter((item) => {
+      const matchesQuery = needle === "" || item.name.toLocaleLowerCase().includes(needle);
+      const matchesKind = kind === "all" || item.kind === kind;
+      return matchesQuery && matchesKind;
+    });
+    if (sort === "title")
+      return filtered.sort((left, right) => left.name.localeCompare(right.name));
+    return sort === "newest" ? filtered : filtered.reverse();
+  }, [items, kind, query, sort]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,8 +76,46 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
         <div>
           <h1>Saved for later</h1>
         </div>
-        <p className="dim">{items.length === 1 ? "1 title" : items.length + " titles"}</p>
+        <form className="search-field" onSubmit={(event) => event.preventDefault()} role="search">
+          <SearchIcon />
+          <input
+            aria-label="Search My List"
+            data-focus="true"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search saved titles"
+            type="search"
+            value={query}
+          />
+        </form>
       </header>
+
+      <div className="filter-row">
+        <div aria-label="Kind" className="segmented" role="group">
+          {(["all", "movie", "show"] as const).map((value) => (
+            <button
+              className={kind === value ? "segment current" : "segment"}
+              data-focus="true"
+              key={value}
+              onClick={() => setKind(value)}
+              type="button"
+            >
+              {value === "all" ? "All" : value === "movie" ? "Films" : "Series"}
+            </button>
+          ))}
+        </div>
+        <label className="sort-field">
+          <span>Sort</span>
+          <select
+            data-focus="true"
+            onChange={(event) => setSort(event.target.value as typeof sort)}
+            value={sort}
+          >
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="title">Title</option>
+          </select>
+        </label>
+      </div>
 
       {error === null ? null : <p className="error">{error}</p>}
       {actionError === null ? null : (
@@ -70,13 +124,15 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
         </p>
       )}
       {loading ? <p className="dim browse-loading">Reading...</p> : null}
-      {!loading && items.length === 0 ? (
+      {!loading && visible.length === 0 ? (
         <p className="dim browse-empty">
-          Nothing on My List yet. Add titles on the desktop app and they appear here.
+          {items.length === 0
+            ? "Nothing on My List yet. Add titles on the desktop app and they appear here."
+            : "Nothing matched. Try another title or filter."}
         </p>
       ) : (
         <div className="browse-grid">
-          {items.map((tile, index) => (
+          {visible.map((tile, index) => (
             <div className="card-cell" key={tile.id}>
               <TileCard
                 autofocus={index === 0}

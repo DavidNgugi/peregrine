@@ -20,18 +20,23 @@ export function useSpatialFocus(active: boolean): void {
       ) {
         return;
       }
-      // Text editing and a select's own menu own their arrows; the remote should not steal a
-      // cursor or a choice from a field the person is already using.
+      // A select's own menu owns every arrow. Text fields own horizontal arrows so the cursor can
+      // move, while vertical arrows remain available to leave a search field and reach the screen
+      // controls below it.
       if (
         focused instanceof HTMLTextAreaElement ||
         focused instanceof HTMLSelectElement ||
-        (focused instanceof HTMLInputElement && focused.type !== "range")
+        (focused instanceof HTMLInputElement &&
+          focused.type !== "range" &&
+          (direction === "left" || direction === "right"))
       ) {
         return;
       }
-      const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-focus]")).filter(
-        (element) => element.offsetParent !== null && !element.hasAttribute("disabled"),
-      );
+      const scope =
+        focused instanceof HTMLElement ? focused.closest<HTMLElement>("[data-focus-scope]") : null;
+      const elements = Array.from(
+        (scope ?? document).querySelectorAll<HTMLElement>("[data-focus]"),
+      ).filter((element) => element.offsetParent !== null && !element.hasAttribute("disabled"));
       if (elements.length === 0) return;
       const current = elements.indexOf(focused as HTMLElement);
       if (current === -1) {
@@ -54,6 +59,7 @@ export function useSpatialFocus(active: boolean): void {
 /** Focuses the first control a screen placed as its entry point. */
 export function useAutoFocus(key?: unknown): void {
   useEffect(() => {
+    if (document.querySelector('[aria-modal="true"]') !== null) return;
     const target = document.querySelector<HTMLElement>("[data-autofocus]");
     if (target !== null) target.focus({ preventScroll: false });
   }, [key]);
