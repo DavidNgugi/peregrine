@@ -95,8 +95,9 @@ use jiff::Timestamp;
 use peregrine_domain::{
     AccountScope, Clock, DeletionEntry, DeletionPlan, DownloadEvent, DownloadState, InfoHash,
     InspectionLimits, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, OptIn,
-    PathGuard, PathGuardError, PayloadDescription, PayloadInspector, Protocol, ReleaseName,
-    SafePath, SafetyReport, TransitionRejected, Trash, TrashError, Verdict,
+    PathGuard, PathGuardError, PayloadDescription, PayloadEntry, PayloadInspector, Protocol,
+    ReleaseName, SafePath, SafetyReport, TitleKind, TransitionRejected, Trash, TrashError, Verdict,
+    is_media_extension, release_names_title,
 };
 use peregrine_storage::{
     Database, DownloadFileRow, DownloadJobRow, DownloadSource, DownloadStatistics,
@@ -440,6 +441,49 @@ pub struct AcquisitionService {
 /// The first guard that contains `path`, or `None` when it is outside every configured root.
 fn resolve_media(guards: &[PathGuard], path: &std::path::Path) -> Option<SafePath> {
     guards.iter().find_map(|guard| guard.resolve(path).ok())
+}
+
+/// Drops media entries whose own names belong to a different film.
+///
+/// A torrent's release name can match the requested film while its payload is a multi-title pack;
+/// a pack that carries another film would otherwise import that film under this title. The rule is
+/// deliberately conservative: it only acts when at least one media entry matches, so a release with
+/// unusual naming keeps its selection instead of losing every file.
+fn movie_media_selection(
+    title: &str,
+    year: Option<u32>,
+    entries: &[PayloadEntry],
+    selection: Vec<usize>,
+) -> Vec<usize> {
+    let media = |entry: &PayloadEntry| {
+        std::path::Path::new(entry.path())
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(is_media_extension)
+    };
+    let matched: Vec<usize> = selection
+        .iter()
+        .copied()
+        .filter(|index| {
+            entries.get(*index).is_none_or(|entry| {
+                !media(entry)
+                    || release_names_title(
+                        &ReleaseName::parse(entry.path()),
+                        title,
+                        TitleKind::Movie,
+                        year,
+                    )
+            })
+        })
+        .collect();
+    if matched
+        .iter()
+        .any(|index| entries.get(*index).is_some_and(media))
+    {
+        matched
+    } else {
+        selection
+    }
 }
 
 /// Files belonging to a library title or episode that can be moved to the OS trash.
@@ -901,17 +945,21 @@ impl AcquisitionService {
         } = request;
         // The caller's selection when it narrowed one, otherwise every entry: a single release and
         // a title-wide acquisition have no reason to name one.
-        let selection: Vec<usize> =
+        let narrowed = selection.is_some();
+        let mut selection: Vec<usize> =
             selection.unwrap_or_else(|| (0..description.entries().len()).collect());
         // 1. The scope gate. `None` covers both "no such title" and "not for you", and the refusal
         //    below is one sentence for both (AGENTS R34).
-        if self
-            .database
-            .title_identity(account, job.title_id)
-            .await?
-            .is_none()
-        {
+        let Some(identity) = self.database.title_identity(account, job.title_id).await? else {
             return Err(AcquisitionError::TitleUnavailable);
+        };
+        // A release name can match while its payload is a multi-title pack. For a film, drop media
+        // entries whose own names belong to another film; a season pack's caller selection is
+        // already narrowed and is left alone.
+        if !narrowed && identity.kind == TitleKind::Movie {
+            let year = self.database.title_year(account, job.title_id).await?;
+            selection =
+                movie_media_selection(&identity.name, year, description.entries(), selection);
         }
 
         // 2. The destination, before a row exists to point at it.
@@ -2849,6 +2897,27 @@ mod tests {
     use crate::episode_stills::{CaptureError, EpisodeStills, FrameCapture};
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
+
+    #[test]
+    fn a_multi_title_pack_does_not_select_another_film() {
+        // The Little Mermaid torrent from the indexer carries Aladdin as a second film. The release
+        // name matches, but selecting every media entry would import Aladdin under The Little
+        // Mermaid. The payload text file is not media and stays selected.
+        let entries = vec![
+            PayloadEntry::new(
+                "The Little Mermaid (1989) 1080p.mkv",
+                2_600,
+                EntryKind::File,
+            ),
+            PayloadEntry::new("Aladdin 2019 1080p.mkv", 12_400, EntryKind::File),
+            PayloadEntry::new("readme.txt", 1, EntryKind::File),
+        ];
+
+        assert_eq!(
+            movie_media_selection("The Little Mermaid", Some(1989), &entries, vec![0, 1, 2]),
+            vec![0, 2]
+        );
+    }
 
     #[test]
     fn a_library_root_is_a_second_guard_for_a_scanned_file() {
