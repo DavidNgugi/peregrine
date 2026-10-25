@@ -272,18 +272,6 @@ export function DownloadsScreen({
               />
               <span className="text-text-tertiary">{percent}%</span>
             </div>
-            <span className="download-progress-meta">
-              {row.reportedSizeBytes === null
-                ? sizeLabel(row.downloadedBytes, t)
-                : `${sizeLabel(row.downloadedBytes, t)} / ${sizeLabel(row.reportedSizeBytes, t)}`}
-              {" · "}
-              {rateLabel(row.downloadRateBps, t)}
-              {" · "}
-              {etaLabel(row.etaSeconds, t)}
-              {row.protocol === "torrent"
-                ? ` · ${String(row.peersConnected)}/${String(row.peersSwarm)} peers`
-                : ""}
-            </span>
           </div>
         );
       },

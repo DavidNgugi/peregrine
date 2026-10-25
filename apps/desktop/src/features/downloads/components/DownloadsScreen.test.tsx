@@ -171,6 +171,13 @@ describe("DownloadsScreen", () => {
     expect(html).not.toContain("100%");
   });
 
+  it("leaves size, rate, eta and peers to their own columns", () => {
+    const html = markup([job()]);
+
+    // The progress cell used to repeat the four columns beside it on a second line.
+    expect(html).not.toContain("1/2 peers");
+  });
+
   it("offers a peer search on a live torrent and not on a finished one", () => {
     expect(markup([job()])).toContain("Find peers");
     expect(markup([job({ state: "completed", progressPermille: 1000 })])).not.toContain(
