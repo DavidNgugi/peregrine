@@ -20,8 +20,10 @@ pub mod download;
 pub mod event;
 pub mod id;
 pub mod inspect;
+pub mod integration;
 pub mod language;
 pub mod library;
+pub mod marker;
 pub mod matching;
 pub mod name;
 pub mod notify;
@@ -82,11 +84,19 @@ pub use inspect::{
     EntryKind, Finding, InspectionLimits, OptIn, PayloadDescription, PayloadEntry,
     PayloadInspector, Reason, SafetyReport, Verdict,
 };
+pub use integration::{
+    IntegrationCapability, IntegrationCategory, IntegrationId, IntegrationIdError,
+    IntegrationOutcome, IntegrationPreference, order as integration_order,
+};
 pub use library::{
     LibraryRoot, LibraryRootKind, MediaFile, MediaItem, MediaItemState, MediaOrigin,
     PlaybackPosition, ProgressSource, STORAGE_FLOOR_PERCENT, ScanMode, SmartCollection,
     StoredWatchProgress, SubtitleFormat, SubtitleOrigin, SubtitleOwner, SubtitleTrack,
     UnmatchedFile, WatchOrigin, WatchProgress, WatchProgressError, WatchlistEntry,
+};
+pub use marker::{
+    CONFIDENCE_FLOOR, MERGE_GAP_MS, MarkerCandidate, MarkerConfidence, MarkerError, MarkerKind,
+    MarkerSource, PlaybackMarker, active_at, resolve as resolve_markers,
 };
 pub use name::{LibraryName, NameError, Numbering, UnresolvedReason};
 pub use notify::{

@@ -185,7 +185,7 @@ mod tests {
     ];
 
     /// The tables the migrations create, per `DATA_MODEL` §2.1–§2.8.
-    const DOCUMENTED_TABLES: [&str; 51] = [
+    const DOCUMENTED_TABLES: [&str; 54] = [
         "account",
         "cast_session",
         "company",
@@ -204,15 +204,18 @@ mod tests {
         "image_cache",
         "image_ref",
         "indexer",
+        "integration_setting",
         "job",
         "keyword",
         "library_root",
+        "marker_fetch",
         "match_rule",
         "media_file",
         "media_item",
         "notification",
         "paired_device",
         "person",
+        "playback_marker",
         "playback_preference",
         "provider_cache",
         "quality_profile",
@@ -997,6 +1000,9 @@ mod tests {
         ("external_id", "title", "title_id", "id", "CASCADE"),
         ("indexer", "secret_ref", "api_key_ref", "key", "SET NULL"),
         ("match_rule", "title", "title_id", "id", "CASCADE"),
+        ("playback_marker", "title", "title_id", "id", "CASCADE"),
+        ("playback_marker", "episode", "episode_id", "id", "CASCADE"),
+        ("marker_fetch", "title", "title_id", "id", "CASCADE"),
         ("media_file", "library_root", "root_id", "id", "NO ACTION"),
         ("media_file", "media_item", "media_item_id", "id", "CASCADE"),
         ("media_item", "episode", "episode_id", "id", "CASCADE"),
@@ -1079,7 +1085,7 @@ mod tests {
     ];
 
     /// Every named index the migrations create.
-    const DOCUMENTED_INDICES: [&str; 48] = [
+    const DOCUMENTED_INDICES: [&str; 51] = [
         "credit_person_idx",
         "credit_title_order_idx",
         "discover_rail_title_idx",
@@ -1098,6 +1104,7 @@ mod tests {
         "image_cache_lru_idx",
         "job_dedupe_uq",
         "job_ready_idx",
+        "marker_fetch_expiry_idx",
         "media_file_item_idx",
         "media_file_missing_idx",
         "media_file_usage_idx",
@@ -1109,6 +1116,8 @@ mod tests {
         "notification_unread_idx",
         "person_name_idx",
         "person_provider_idx",
+        "playback_marker_natural_uq",
+        "playback_marker_subject_idx",
         "provider_cache_expiry_idx",
         "provider_cache_resource_idx",
         "provider_cache_size_idx",
@@ -1161,6 +1170,15 @@ mod tests {
         ("external_id_title_idx", "(title_id)"),
         ("external_id_episode_idx", "(episode_id)"),
         ("person_name_idx", "(name)"),
+        ("marker_fetch_expiry_idx", "(expires_at)"),
+        (
+            "playback_marker_natural_uq",
+            "(title_id, COALESCE(episode_id, -1), kind, source, start_ms)",
+        ),
+        (
+            "playback_marker_subject_idx",
+            "(title_id, episode_id, suppressed)",
+        ),
         ("credit_title_order_idx", "(title_id, kind, order_index)"),
         ("credit_person_idx", "(person_id)"),
         ("episode_air_date_idx", "(title_id, air_date)"),
@@ -2323,6 +2341,13 @@ mod tests {
     /// removal changes none of them. The two cache tables get a row in the test itself.
     const USER_DATA_FIXTURES: &[&str] = &[
         "INSERT INTO match_rule (pattern, title_id, created_at) VALUES ('alien', 1, 0)",
+        "INSERT INTO integration_setting (integration, enabled, priority, submission_enabled, updated_at) \
+         VALUES ('theintrodb', 1, 0, 0, 0)",
+        "INSERT INTO playback_marker \
+         (title_id, episode_id, kind, start_ms, end_ms, source, confidence, fetched_at) \
+         VALUES (1, 1, 'intro', 0, 1000, 'chapters', 100, 0)",
+        "INSERT INTO marker_fetch (title_id, episode_id, source, fetched_at, expires_at, outcome) \
+         VALUES (1, 1, 'chapters', 0, 1, 'found')",
         "INSERT INTO settings (key, value_json, updated_at) VALUES ('theme', '\"dark\"', 0)",
         "INSERT INTO secret_ref (key, keyring_service, keyring_account, created_at) \
          VALUES ('tmdb.api_key', 'peregrine', 'tmdb', 0)",
@@ -2431,6 +2456,12 @@ mod tests {
         SELECT 'indexer' AS table_name, COUNT(*) AS n FROM indexer
         UNION ALL
         SELECT 'job' AS table_name, COUNT(*) AS n FROM job
+        UNION ALL
+        SELECT 'integration_setting' AS table_name, COUNT(*) AS n FROM integration_setting
+        UNION ALL
+        SELECT 'playback_marker' AS table_name, COUNT(*) AS n FROM playback_marker
+        UNION ALL
+        SELECT 'marker_fetch' AS table_name, COUNT(*) AS n FROM marker_fetch
         UNION ALL
         SELECT 'keyword' AS table_name, COUNT(*) AS n FROM keyword
         UNION ALL

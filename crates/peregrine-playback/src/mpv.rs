@@ -145,6 +145,7 @@ impl PlayerBackend for MpvPlayer {
         input: PlayerInput<'_>,
         start_ms: Option<i64>,
         subtitle: Option<&SafePath>,
+        audio_language: Option<&str>,
         positions: Arc<dyn PositionSink>,
     ) -> Result<(), PlayerError> {
         // Replacing the player is the same act as stopping the old one, and doing it first means a
@@ -161,6 +162,7 @@ impl PlayerBackend for MpvPlayer {
             &binary,
             input,
             subtitle.map(SafePath::as_path),
+            audio_language,
             &socket,
             start_ms,
         );
@@ -219,12 +221,20 @@ fn command_for(
     binary: &Path,
     input: PlayerInput<'_>,
     subtitle: Option<&Path>,
+    audio_language: Option<&str>,
     socket: &Path,
     start_ms: Option<i64>,
 ) -> Command {
     let mut command = Command::new(binary);
     command.args(HARDENED);
     command.arg(format!("--input-ipc-server={}", socket.display()));
+    // **The account's language is the initial choice, not a lock.** mpv's `--alang` is a
+    // priority list, so the preferred track wins at startup and a manual selection from mpv's
+    // own menu still overrides it for that session. Without this, mpv takes the container's
+    // first/default track, which is how an English profile opened an Italian dub.
+    if let Some(language) = audio_language.filter(|language| !language.is_empty()) {
+        command.arg(format!("--alang={language}"));
+    }
     if let Some(milliseconds) = start_ms.filter(|value| *value > 0) {
         command.arg(format!("--start={:.3}", milliseconds as f64 / 1000.0));
     }
@@ -422,6 +432,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -465,6 +476,50 @@ mod tests {
     }
 
     #[test]
+    fn the_preferred_audio_language_is_the_initial_choice() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
+        let command = command_for(
+            Path::new("/usr/bin/true"),
+            PlayerInput::File(&media),
+            None,
+            Some("en"),
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            None,
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.iter().any(|arg| arg == "--alang=en"),
+            "mpv must be told the account's language before it picks the container's first track"
+        );
+        let terminator = args.iter().position(|arg| arg == "--").expect("terminator");
+        assert!(
+            args.iter()
+                .position(|arg| arg == "--alang=en")
+                .is_some_and(|at| at < terminator),
+            "the language is an option, not the media argument"
+        );
+
+        let without = command_for(
+            Path::new("/usr/bin/true"),
+            PlayerInput::File(&media),
+            None,
+            None,
+            Path::new("/tmp/peregrine-mpv-test.sock"),
+            None,
+        );
+        assert!(
+            !without
+                .get_args()
+                .any(|arg| arg.to_string_lossy().starts_with("--alang=")),
+            "an account with no preference leaves mpv on its own choice"
+        );
+    }
+
+    #[test]
     fn a_selected_sidecar_is_passed_while_autoload_stays_off() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let media = file(&directory);
@@ -473,6 +528,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             Some(&sidecar),
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -503,6 +559,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(90_500),
         );
@@ -520,6 +577,7 @@ mod tests {
         let command = command_for(
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
+            None,
             None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(0),
@@ -539,6 +597,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::Stream(&url),
             Some(Path::new("/tmp/film.en.srt")),
+            None,
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(15_000),
         );
@@ -565,7 +624,7 @@ mod tests {
         let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/token").expect("a loopback URL");
         let player = MpvPlayer::with_binary("/usr/bin/true");
         player
-            .play(PlayerInput::Stream(&url), None, None, Arc::new(Noop))
+            .play(PlayerInput::Stream(&url), None, None, None, Arc::new(Noop))
             .expect("the binary spawns");
         player.stop();
     }
@@ -578,10 +637,10 @@ mod tests {
         // the replacement without a player installed.
         let player = MpvPlayer::with_binary("/usr/bin/true");
         player
-            .play(PlayerInput::File(&safe), None, None, Arc::new(Noop))
+            .play(PlayerInput::File(&safe), None, None, None, Arc::new(Noop))
             .expect("the binary spawns");
         player
-            .play(PlayerInput::File(&safe), None, None, Arc::new(Noop))
+            .play(PlayerInput::File(&safe), None, None, None, Arc::new(Noop))
             .expect("a second press replaces the first");
         player.stop();
     }
@@ -592,7 +651,7 @@ mod tests {
         let media = file(&directory);
         let player = MpvPlayer::with_binary("/nonexistent/peregrine-mpv");
         let error = player
-            .play(PlayerInput::File(&media), None, None, Arc::new(Noop))
+            .play(PlayerInput::File(&media), None, None, None, Arc::new(Noop))
             .expect_err("no such binary");
         assert_eq!(error, PlayerError::Spawn);
     }

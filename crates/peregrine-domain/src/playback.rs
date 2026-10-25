@@ -208,7 +208,10 @@ pub trait PlayerBackend: Send + Sync {
     /// `start_ms` is where the app's own watch progress says to resume, or `None` for the
     /// beginning. `subtitle` is the sidecar the session selected, or `None` for no subtitle; it is a
     /// guarded path for the same reason the media is, because it is handed to another process, and a
-    /// stream has no sidecar row to offer. `positions` is where the player reports its position.
+    /// stream has no sidecar row to offer. `audio_language` is the account's preferred language, or
+    /// `None` when it has expressed none; a backend that can choose an initial track must honour it,
+    /// while a later manual choice belongs to that player session. `positions` is where the player
+    /// reports its position.
     ///
     /// # Errors
     ///
@@ -219,6 +222,7 @@ pub trait PlayerBackend: Send + Sync {
         input: PlayerInput<'_>,
         start_ms: Option<i64>,
         subtitle: Option<&SafePath>,
+        audio_language: Option<&str>,
         positions: Arc<dyn PositionSink>,
     ) -> Result<(), PlayerError>;
 

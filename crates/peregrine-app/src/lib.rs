@@ -11,9 +11,11 @@ mod backup;
 mod episode_stills;
 pub mod events;
 pub mod indexers;
+pub mod integrations;
 pub mod jobs;
 pub mod library;
 mod local_posters;
+pub mod markers;
 mod media_source;
 pub mod notify;
 mod observability;
@@ -81,9 +83,10 @@ pub use peregrine_secrets::DevFileStore;
 // this block already exports, so a caller that must build or destructure the row a command answers
 // with would otherwise have a type it cannot name.
 pub use peregrine_domain::{
-    DeletionPlan, EpisodeNumber, LibraryRoot, LibraryRootKind, LocalPlayback, PlaybackPreference,
-    PreferredQuality, Provider, ScanMode, SeasonNumber, SubtitleMode, TitleOffer, TrashError,
-    WatchProgress,
+    DeletionPlan, EpisodeNumber, IntegrationCapability, IntegrationCategory, IntegrationOutcome,
+    LibraryRoot, LibraryRootKind, LocalPlayback, MarkerKind, MarkerSource, PlaybackMarker,
+    PlaybackPreference, PreferredQuality, Provider, ScanMode, SeasonNumber, SubtitleMode,
+    TitleOffer, TrashError, WatchProgress,
 };
 // The notification centre's rows and severity, for the reason above: the commands that list the
 // centre name them, and `peregrine-ipc` may not take a `peregrine-domain` edge (AGENTS R6).
@@ -101,6 +104,12 @@ pub use peregrine_providers::error::ProviderError;
 // The indexer vocabulary, for the reason the provider one above gives: the command surface answers
 // DTOs built from these and may not depend on `peregrine-indexers` itself (AGENTS R6).
 pub use indexers::{DEFAULT_LIMIT, IndexerConfigError, IndexerStatus, MAX_LIMIT, PROWLARR};
+pub use integrations::{
+    CredentialField, CredentialNamespace, IntegrationManifest, IntegrationRegistry,
+    IntegrationStatus, MANIFEST as INTEGRATION_MANIFEST, PendingCredentials, Probe,
+    find as find_integration,
+};
+pub use markers::MarkerService;
 pub use peregrine_indexers::{
     ConfiguredIndexer, IndexerDefinition, IndexerError, IndexerField, IndexerOption,
     IndexerRelease, NewIndexer, ReleaseSource, TorrentSource, UsenetSource,

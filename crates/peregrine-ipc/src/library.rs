@@ -522,6 +522,44 @@ pub struct PlaybackSessionDto {
     /// value's carrier, and a follow-up call would race the frame it is trying to position.
     #[specta(type = Option<Number>)]
     pub resume_position_ms: Option<i64>,
+    /// The file's runtime, when the library or the probe knows it.
+    ///
+    /// The player uses it to bound markers and to draw a timeline before the element reports its
+    /// own duration.
+    #[specta(type = Option<Number>)]
+    pub duration_ms: Option<i64>,
+    /// The skip markers the cache holds for this subject, suppressions already removed.
+    pub markers: Vec<crate::integrations::MarkerDto>,
+    /// The episode after this one, when a series has a playable file after it.
+    pub next_episode: Option<NextUpDto>,
+    /// The account's preferred audio language, for an engine that can choose an initial track.
+    pub audio_language: String,
+}
+
+/// The episode that follows the one a playback session opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NextUpDto {
+    /// The season the next episode sits in.
+    pub season_number: u32,
+    /// Its number within that season.
+    pub episode_number: u32,
+    /// The episode row id a new session names.
+    #[specta(type = Number)]
+    pub episode_id: i64,
+    /// Its name, when a provider filled one in.
+    pub name: Option<String>,
+}
+
+impl From<peregrine_app::web::NextEpisodeDto> for NextUpDto {
+    fn from(next: peregrine_app::web::NextEpisodeDto) -> Self {
+        Self {
+            season_number: next.season_number,
+            episode_number: next.episode_number,
+            episode_id: next.episode_id,
+            name: next.name,
+        }
+    }
 }
 
 impl From<peregrine_app::StartedPlayback> for PlaybackSessionDto {
@@ -541,6 +579,14 @@ impl From<peregrine_app::StartedPlayback> for PlaybackSessionDto {
                 .collect(),
             needs_poster: started.needs_poster,
             resume_position_ms: started.resume_position_ms,
+            duration_ms: started.duration_ms,
+            markers: started
+                .markers
+                .into_iter()
+                .map(crate::integrations::MarkerDto::from)
+                .collect(),
+            next_episode: started.next_episode.map(NextUpDto::from),
+            audio_language: started.audio_language,
         }
     }
 }
@@ -2073,6 +2119,10 @@ mod tests {
             ],
             needs_poster: false,
             resume_position_ms: None,
+            duration_ms: Some(1_440_000),
+            markers: Vec::new(),
+            next_episode: None,
+            audio_language: "en".to_owned(),
         };
 
         let dto = PlaybackSessionDto::from(started);

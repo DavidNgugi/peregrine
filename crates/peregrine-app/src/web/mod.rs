@@ -330,6 +330,44 @@ pub struct PlaybackTicket {
     pub next_episode: Option<NextEpisodeDto>,
     /// The audio language the host selected for a transcode, when it selected one.
     pub audio_language: Option<String>,
+    /// The skip markers the cache holds, suppressions already removed.
+    ///
+    /// Read from the same table the desktop player reads. A refresh is started after the ticket
+    /// is minted, so a provider is never on the first-frame path.
+    pub markers: Vec<peregrine_domain::PlaybackMarker>,
+}
+
+/// One integration, as the read-only TV/web client may see it.
+///
+/// **No credential field, no present flag, and no secret.** The client can explain which marker
+/// source answered and send the person to the desktop to change it; it cannot edit or reveal
+/// anything (ADR 0028/0033).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)] // A wire DTO, whose bools are the three states a TV draws.
+pub struct WebIntegrationDto {
+    /// The stable id.
+    pub id: String,
+    /// What to call it.
+    pub display_name: String,
+    /// One sentence about it.
+    pub description: String,
+    /// Metadata, skipMarkers, subtitles, tracking, or acquisition.
+    pub category: &'static str,
+    /// Whether it may be asked.
+    pub enabled: bool,
+    /// Whether every required value is present.
+    pub configured: bool,
+    /// Whether a credential is required at all.
+    pub requires_key: bool,
+    /// Whether it accepts a key but works without one.
+    pub key_optional: bool,
+    /// Whether it is available without being enabled.
+    pub always_on: bool,
+    /// What the last probe answered, when one has run.
+    pub last_outcome: Option<&'static str>,
+    /// Whether the last probe is a failure a person should fix on the desktop.
+    pub needs_attention: bool,
 }
 
 /// One sidecar subtitle track, as the player draws and fetches it.
@@ -2604,6 +2642,13 @@ impl WebService {
         };
         // The sidecar timeline is the film's own. A transcode's playlist starts at zero, so the
         // URL carries the start offset and the route retimes the cues onto that timeline.
+        let markers = self
+            .runtime
+            .markers_for_playback(title_id, target.episode_id, target.duration_ms)
+            .await
+            .unwrap_or_default();
+        self.runtime
+            .start_marker_refresh(title_id, target.episode_id, target.duration_ms);
         let subtitles = subtitle_dtos(
             self.runtime
                 .web_subtitles(title_id, target.episode_id)
@@ -2625,7 +2670,55 @@ impl WebService {
             subtitles,
             next_episode,
             audio_language,
+            markers,
         })
+    }
+
+    /// The markers the cache holds for one subject, for a player that reloaded its ticket.
+    ///
+    /// A read: the refresh is started by the ticket mint, so this cannot become a second path
+    /// that calls providers.
+    pub async fn markers_for(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        duration_ms: Option<i64>,
+    ) -> Vec<peregrine_domain::PlaybackMarker> {
+        self.runtime
+            .markers_for_playback(title_id, episode_id, duration_ms)
+            .await
+            .unwrap_or_default()
+    }
+
+    /// The integrations this installation has, for the read-only client.
+    ///
+    /// The desktop is the credential editor (ADR 0028/0033); this answer is deliberately a
+    /// subset of the desktop's, with no field presence and no health code that could name a
+    /// keyring entry.
+    #[must_use]
+    pub fn integration_status(&self) -> Vec<WebIntegrationDto> {
+        self.runtime
+            .integration_status()
+            .into_iter()
+            .map(|status| WebIntegrationDto {
+                id: status.manifest.id.to_owned(),
+                display_name: status.manifest.display_name.to_owned(),
+                description: status.manifest.description.to_owned(),
+                category: status.manifest.category.as_str(),
+                enabled: status.preference.enabled,
+                configured: status.configured,
+                requires_key: status.manifest.requires_key(),
+                key_optional: status.manifest.key_optional(),
+                always_on: status.manifest.always_on,
+                last_outcome: status
+                    .last_outcome
+                    .map(peregrine_domain::IntegrationOutcome::as_str),
+                needs_attention: status
+                    .last_outcome
+                    .is_some_and(peregrine_domain::IntegrationOutcome::needs_attention)
+                    || (status.manifest.requires_key() && !status.configured),
+            })
+            .collect()
     }
 
     /// Finds and caches the one ffmpeg this process will use.

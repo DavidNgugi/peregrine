@@ -19,6 +19,7 @@
 //! future embedded adapter answers the same question with a surface instead of a URL, which is what
 //! keeps a screen from having to know which one is live.
 
+pub mod chapters;
 mod mpv;
 mod session;
 

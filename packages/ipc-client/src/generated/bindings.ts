@@ -613,6 +613,24 @@ export const commands = {
 	 *  [`ErrorCode::Internal`] when the write fails.
 	 */
 	webRevoke: (device: DeviceRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("web_revoke", { device })),
+	/**  Every integration this build knows, with this installation's choices. */
+	listIntegrations: () => typedError<IntegrationDto[], AppError_Serialize>(__TAURI_INVOKE("list_integrations")),
+	/**  Enables or disables one integration. */
+	setIntegrationEnabled: (id: string, enabled: boolean) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_integration_enabled", { id, enabled })),
+	/**  Sets one integration's order within its category. */
+	setIntegrationPriority: (id: string, priority: number) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_integration_priority", { id, priority })),
+	/**  Consents to, or withdraws consent from, one integration's submissions. */
+	setIntegrationSubmission: (id: string, enabled: boolean) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_integration_submission", { id, enabled })),
+	/**  Starts a bounded connection test for one integration. */
+	testIntegration: (id: string) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("test_integration", { id })),
+	/**  Proves and stores one integration's credentials, or clears them when the list is empty. */
+	setIntegrationCredentials: (integration: string, values: CredentialValueDto[]) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("set_integration_credentials", { integration, values })),
+	/**  Removes every stored value for one integration. */
+	clearIntegrationCredentials: (id: string) => typedError<JobStarted, AppError_Serialize>(__TAURI_INVOKE("clear_integration_credentials", { id })),
+	/**  The markers the cache holds for a playback subject. */
+	markersForPlayback: (subject: MarkerSubjectDto) => typedError<MarkerDto[], AppError_Serialize>(__TAURI_INVOKE("markers_for_playback", { subject })),
+	/**  Starts a background refresh of the marker cache for a playback subject. */
+	refreshPlaybackMarkers: (subject: MarkerSubjectDto) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("refresh_playback_markers", { subject })),
 	/**
 	 *  What this installation has configured.
 	 * 
@@ -1111,6 +1129,25 @@ export type ContinueWatchingDto = {
 };
 
 /**
+ *  One credential a person may enter.
+ * 
+ *  `present` is the only thing the UI learns about a stored value: the field is drawn as
+ *  "Replace" when it is true and as empty when it is false.
+ */
+export type CredentialFieldDto = {
+	/**  The stable name the save command takes. */
+	name: string,
+	/**  What the screen calls it. */
+	label: string,
+	/**  Whether the field is a password input. */
+	secret: boolean,
+	/**  Whether the integration works without it. */
+	required: boolean,
+	/**  Whether a value is already stored. */
+	present: boolean,
+};
+
+/**
  *  What the last read of the credential store answered, as the settings screen spells it.
  * 
  *  **A refused read is not an absent key.** The screen that read the two as one thing would tell a
@@ -1127,6 +1164,14 @@ export type CredentialStoreDto =
 "denied" | 
 /**  There is no store this system can use. */
 "unavailable";
+
+/**  One candidate value, moved into the job and never logged. */
+export type CredentialValueDto = {
+	/**  The field name, as the manifest spells it. */
+	field: string,
+	/**  The candidate value. */
+	value: string,
+};
 
 /**  One file a deletion would remove, as the confirmation screen lists it. */
 export type DeletionEntryDto = {
@@ -1510,6 +1555,96 @@ export type IndexerSummaryDto = {
 	name: string,
 };
 
+/**  One thing an integration can be asked for. */
+export type IntegrationCapabilityDto = 
+/**  Search and enrich catalogue rows. */
+"metadata" | 
+/**  Read skip markers. */
+"markers" | 
+/**  Search and download subtitles. */
+"subtitles" | 
+/**  Report playback progress. */
+"scrobble" | 
+/**  Search releases or talk to a download source. */
+"acquisition";
+
+/**  Where an integration's card sits. */
+export type IntegrationCategoryDto = 
+/**  Titles, seasons, episodes, and artwork. */
+"metadata" | 
+/**  Intro, recap, credits, and preview windows. */
+"skipMarkers" | 
+/**  Subtitle search and download. */
+"subtitles" | 
+/**  Watch-history scrobbling. */
+"tracking" | 
+/**  Indexers and download sources. */
+"acquisition";
+
+/**  One integration, as the settings screen and the read-only TV status draw it. */
+export type IntegrationDto = {
+	/**  The stable id the commands take. */
+	id: string,
+	/**  What to call it. */
+	displayName: string,
+	/**  One sentence about it. */
+	description: string,
+	/**  Where its documentation lives. */
+	docs: string,
+	/**  Where its card sits. */
+	category: IntegrationCategoryDto,
+	/**  What it can be asked for. */
+	capabilities: IntegrationCapabilityDto[],
+	/**  Whether a credential is required. */
+	requiresKey: boolean,
+	/**  Whether it accepts a key but works without one. */
+	keyOptional: boolean,
+	/**  Whether it accepts contributed timestamps. */
+	submissionSupport: boolean,
+	/**  Whether it is available without being enabled. */
+	alwaysOn: boolean,
+	/**  Whether it may be asked. */
+	enabled: boolean,
+	/**  Its order within its category; lower runs first. */
+	priority: number,
+	/**  Whether contributions are allowed. */
+	submissionEnabled: boolean,
+	/**  Whether every required field is present. */
+	configured: boolean,
+	/**
+	 *  Whether a person has to fix something before this integration can work.
+	 * 
+	 *  Core's answer rather than a screen's: a denied keychain, a refused credential, a rate
+	 *  limit, and a missing required value are the same question to every client.
+	 */
+	needsAttention: boolean,
+	/**  What the last credential read answered. */
+	store: CredentialStoreDto,
+	/**  What the last probe answered, when one has run. */
+	lastOutcome: IntegrationOutcomeDto | null,
+	/**  When the last probe ran, in Unix milliseconds. */
+	lastTestAt: number | null,
+	/**  The stable code the last failed probe recorded. */
+	lastErrorCode: string | null,
+	/**  The fields a person may enter. */
+	fields: CredentialFieldDto[],
+};
+
+/**  What the last bounded probe answered. */
+export type IntegrationOutcomeDto = 
+/**  The service answered. */
+"working" | 
+/**  The service refused the credential. */
+"unauthorized" | 
+/**  The service asked to be left alone. */
+"rateLimited" | 
+/**  The service could not be reached or answered unusably. */
+"unreachable" | 
+/**  The OS refused to read the keyring. */
+"keychainDenied" | 
+/**  No credential is stored and one is required. */
+"notConfigured";
+
 /**  One row of the job journal. */
 export type JobRecord = JobRecord_Serialize | JobRecord_Deserialize;
 
@@ -1730,6 +1865,52 @@ export type LocalPlaybackDto =
 /**  A name this build does not recognise as a media container at all. */
 "unknown";
 
+/**  One marker window, as the player draws it. */
+export type MarkerDto = {
+	/**  What the window is. */
+	kind: MarkerKindDto,
+	/**  Where it opens, in milliseconds. */
+	startMs: number,
+	/**  Where it closes, or `null` for credits that run to the end. */
+	endMs: number | null,
+	/**  Which source said so. */
+	source: MarkerSourceDto,
+	/**  How much the source is trusted, in whole percent. */
+	confidence: number,
+};
+
+/**  The four marker kinds. */
+export type MarkerKindDto = 
+/**  The opening sequence. */
+"intro" | 
+/**  A previously-on sequence. */
+"recap" | 
+/**  The end credits. */
+"credits" | 
+/**  A next-episode preview. */
+"preview";
+
+/**  The sources a marker can come from. */
+export type MarkerSourceDto = 
+/**  The file's own chapters. */
+"chapters" | 
+/**  `TheIntroDB`. */
+"introDb" | 
+/**  `AniSkip`. */
+"aniSkip" | 
+/**  `IntroHater`. */
+"introHater";
+
+/**  The subject a marker read or refresh is about. */
+export type MarkerSubjectDto = {
+	/**  The title. */
+	titleId: number,
+	/**  The episode, or `null` for a film. */
+	episodeId: number | null,
+	/**  The file's runtime, when the player knows it. */
+	durationMs: number | null,
+};
+
 /**  The two titles an answer can file a parked file under. */
 export type MatchAsDto = 
 /**  What the name read, which is what the row's own values say. */
@@ -1779,6 +1960,18 @@ export type MediaRef = {
 	seasonNumber: number | null,
 	/**  The episode, when targeting one episode. */
 	episodeNumber: number | null,
+};
+
+/**  The episode that follows the one a playback session opened. */
+export type NextUpDto = {
+	/**  The season the next episode sits in. */
+	seasonNumber: number,
+	/**  Its number within that season. */
+	episodeNumber: number,
+	/**  The episode row id a new session names. */
+	episodeId: number,
+	/**  Its name, when a provider filled one in. */
+	name: string | null,
 };
 
 /**
@@ -1965,6 +2158,19 @@ export type PlaybackSessionDto = {
 	 *  value's carrier, and a follow-up call would race the frame it is trying to position.
 	 */
 	resumePositionMs: number | null,
+	/**
+	 *  The file's runtime, when the library or the probe knows it.
+	 * 
+	 *  The player uses it to bound markers and to draw a timeline before the element reports its
+	 *  own duration.
+	 */
+	durationMs: number | null,
+	/**  The skip markers the cache holds for this subject, suppressions already removed. */
+	markers: MarkerDto[],
+	/**  The episode after this one, when a series has a playable file after it. */
+	nextEpisode: NextUpDto | null,
+	/**  The account's preferred audio language, for an engine that can choose an initial track. */
+	audioLanguage: string,
 };
 
 /**  One profile the picker draws. */
@@ -2756,6 +2962,7 @@ export const eventTopics = {
 	downloadStats: { name: "download://stats", version: 1 },
 	notificationRaised: { name: "notification://raised", version: 1 },
 	titleRefreshed: { name: "title://refreshed", version: 1 },
+	playerMarkers: { name: "player://markers", version: 1 },
 	webPairRequested: { name: "web://pair_requested", version: 1 },
 } as const;
 

@@ -9,6 +9,7 @@
 pub mod acquire;
 pub mod discover_rails;
 pub mod hello;
+pub mod integration_credential;
 pub mod library_scan;
 pub mod provider_credential;
 pub mod provider_refresh;

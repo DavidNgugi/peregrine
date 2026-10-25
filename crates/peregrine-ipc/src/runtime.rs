@@ -55,6 +55,25 @@ impl RuntimeState {
         })
     }
 
+    /// The running application as a clonable handle, for a command that starts background work.
+    ///
+    /// The marker refresh outlives the command that asks for it, so it needs an owning handle
+    /// rather than the borrow `runtime()` answers with.
+    ///
+    /// # Errors
+    ///
+    /// The same refusal as [`Self::runtime`].
+    pub fn runtime_arc(&self) -> Result<Arc<Runtime>, AppError> {
+        self.runtime.clone().ok_or_else(|| {
+            AppError::new(ErrorCode::Internal)
+                .with_detail("Peregrine did not finish starting, so it cannot do that.")
+                .with_cause(
+                    self.unavailable
+                        .unwrap_or("the application runtime is not running"),
+                )
+        })
+    }
+
     /// The LAN surface, when the runtime started.
     ///
     /// # Errors

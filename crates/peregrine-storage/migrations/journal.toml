@@ -122,3 +122,7 @@ sha256 = "a2fe0dfda0fb20c08fadd4411a04d8cbe5204eb43d67963a8d7a1d1fcbbf78d1"
 [[migration]]
 file = "0030_download_season.sql"
 sha256 = "c2a015bd04cacf743532275f374864a80ea54c9c56ccbf43430e7a595fd2ae29"
+
+[[migration]]
+file = "0031_integrations_and_markers.sql"
+sha256 = "22869716d061999d31cce832f1099968778e62c868f109c9c8d524438ca78958"

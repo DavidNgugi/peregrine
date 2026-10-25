@@ -505,6 +505,24 @@ pub struct StartedPlayback {
     /// follow-up round trip would race the frame it is trying to position. It is the account's own
     /// row for the title, which is why it is scoped rather than global.
     pub resume_position_ms: Option<i64>,
+    /// The file's runtime, when the library or the probe knows it.
+    ///
+    /// A player uses it to bound markers and to draw a timeline before the element reports a
+    /// duration; a stream without one lets the element answer.
+    pub duration_ms: Option<i64>,
+    /// The markers the cache holds for this subject, suppressed rows already removed.
+    ///
+    /// Read at open time so the first frame has them. A refresh may add more, which the player
+    /// picks up by asking again; a provider is never called from a renderer.
+    pub markers: Vec<peregrine_domain::PlaybackMarker>,
+    /// The episode after this one, when the title is a series and a playable file follows.
+    pub next_episode: Option<crate::web::NextEpisodeDto>,
+    /// The account's preferred audio language, for an engine that can choose a track.
+    ///
+    /// The webview's own audio-track list is non-standard but available in `WebKit`; the player uses
+    /// this to enable the matching track once, while leaving a later manual choice alone. The HLS
+    /// ticket carries the same value, and mpv receives it as `--alang`.
+    pub audio_language: String,
 }
 
 /// A live job's media, ready to be served from the engine.
@@ -986,6 +1004,10 @@ pub struct Runtime {
     _logging: Observability,
     /// Which providers hold a credential, refreshed off the command path (see `providers`).
     providers: Arc<crate::providers::ProviderRegistry>,
+    /// The integrations a person enabled, and whether their credentials are present.
+    integrations: Arc<crate::integrations::IntegrationRegistry>,
+    /// The skip-marker cache and the refresh that fills it.
+    markers: Arc<crate::markers::MarkerService>,
     /// Stubs the matcher has already queued this session.
     ///
     /// A title the provider cannot name stays a stub, and without this the automatic pass would
@@ -1345,6 +1367,30 @@ impl Runtime {
             });
         }
 
+        let stored_integrations = match database.integration_settings().await {
+            Ok(rows) => rows,
+            Err(error) => {
+                warn!(%error, "the integration choices could not be read; the manifest defaults apply");
+                Vec::new()
+            }
+        };
+        let integrations = Arc::new(crate::integrations::IntegrationRegistry::new(
+            stored_integrations,
+        ));
+        // The same rule the provider registry follows: a keyring read is blocking and can prompt,
+        // so it runs once off the start-up path and every screen reads the presence cache.
+        {
+            let integrations = Arc::clone(&integrations);
+            let secrets = Arc::clone(&secrets);
+            tokio::task::spawn_blocking(move || integrations.refresh(secrets.as_ref()));
+        }
+        let markers = Arc::new(crate::markers::MarkerService::new(
+            Arc::clone(&database),
+            Arc::clone(&integrations),
+            Arc::clone(&secrets),
+            Arc::clone(&clock),
+        ));
+
         let artwork = Arc::new(peregrine_sync::ImageCache::new(artwork_root));
         // Built here because it needs the cache, the database, and the clock together, and because the
         // capture route that uses it has no other context to reach them through.
@@ -1528,6 +1574,8 @@ impl Runtime {
             live: Mutex::new(HashMap::new()),
             _logging: logging,
             providers,
+            integrations,
+            markers,
             attempted_matches: Mutex::new(std::collections::HashSet::new()),
             secrets,
             artwork,
@@ -4301,6 +4349,259 @@ impl Runtime {
         }))
     }
 
+    /// Starts a bounded probe, a credential save, or a credential removal for one integration.
+    ///
+    /// The candidate values are parked in the registry under a one-use token; the journal row
+    /// carries the token and never a value. A probe is a job for the same reason the provider
+    /// check is: it leaves the machine, and a settings screen must not block on it.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] for an unknown integration, an unknown field, or an empty
+    /// required value. [`RuntimeError::Scheduler`] when the queue refuses the job.
+    pub async fn start_integration_credential(
+        &self,
+        id: &str,
+        action: crate::jobs::integration_credential::Action,
+        values: Vec<(String, peregrine_secrets::Secret)>,
+    ) -> Result<StartedJob, RuntimeError> {
+        let Some(manifest) = crate::integrations::find(id) else {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "That integration is not one this build knows.".to_owned(),
+            });
+        };
+        for (name, secret) in &values {
+            let Some(field) = manifest
+                .credential_fields
+                .iter()
+                .find(|field| field.name == name)
+            else {
+                return Err(RuntimeError::InvalidRequest {
+                    detail: "That credential field does not belong to this integration.".to_owned(),
+                });
+            };
+            if field.required && secret.expose_secret().trim().is_empty() {
+                return Err(RuntimeError::InvalidRequest {
+                    detail: "Fill in the required credential before saving.".to_owned(),
+                });
+            }
+        }
+        let token = if action == crate::jobs::integration_credential::Action::Replace {
+            Some(
+                self.integrations
+                    .park(crate::integrations::PendingCredentials {
+                        integration: manifest.id(),
+                        values,
+                    }),
+            )
+        } else {
+            None
+        };
+        let now = self.clock.now().as_millisecond();
+        let key = crate::jobs::integration_credential::dedupe_key(id);
+        let journal_id = self
+            .database
+            .insert_job(peregrine_storage::NewJob {
+                kind: crate::jobs::integration_credential::KIND.to_owned(),
+                priority: crate::jobs::integration_credential::PRIORITY,
+                dedupe_key: Some(key.clone()),
+                payload_json: crate::jobs::integration_credential::payload(id, action, token),
+                max_attempts: 1,
+                created_at: now,
+            })
+            .await?;
+        let spec = peregrine_sync::JobSpec {
+            kind: crate::jobs::integration_credential::KIND.to_owned(),
+            priority: crate::jobs::integration_credential::PRIORITY,
+            dedupe_key: Some(key),
+            max_attempts: 1,
+        };
+        let job = crate::jobs::integration_credential::IntegrationCredentialJob::new(
+            Arc::clone(&self.bus),
+            Arc::clone(&self.clock),
+            Arc::clone(&self.database),
+            Arc::clone(&self.secrets),
+            Arc::clone(&self.integrations),
+            journal_id,
+            manifest,
+            action,
+            token,
+        );
+        match self.scheduler.submit(spec, job).await {
+            Ok(handle) => {
+                let started = StartedJob {
+                    job: handle.id(),
+                    journal_id,
+                    coalesced: false,
+                };
+                info!(
+                    job = %started.job,
+                    journal_id,
+                    integration = id,
+                    "accepted the integration credential job"
+                );
+                self.remember(handle, journal_id);
+                Ok(started)
+            }
+            Err(error) => {
+                if let Some(token) = token {
+                    let _ = self.integrations.take(token);
+                }
+                let _ = self
+                    .database
+                    .update_job(
+                        journal_id,
+                        peregrine_storage::JobChange::Finished {
+                            at: now,
+                            phase: peregrine_storage::JobPhase::Failed,
+                            error_code: Some(crate::jobs::INTERNAL_CODE.to_owned()),
+                            error: Some(error.to_string()),
+                        },
+                    )
+                    .await;
+                Err(RuntimeError::Scheduler(error))
+            }
+        }
+    }
+
+    /// What this installation has configured, merged with the manifest defaults.
+    #[must_use]
+    pub fn integration_status(&self) -> Vec<crate::integrations::IntegrationStatus> {
+        self.integrations.status()
+    }
+
+    /// The registry, for the credential job and the settings commands.
+    #[must_use]
+    pub fn integration_registry(&self) -> Arc<crate::integrations::IntegrationRegistry> {
+        Arc::clone(&self.integrations)
+    }
+
+    /// The secrets port, for the credential job.
+    #[must_use]
+    pub fn secrets(&self) -> Arc<dyn peregrine_secrets::SecretStore> {
+        Arc::clone(&self.secrets)
+    }
+
+    /// A clone of the clock, for the credential job.
+    #[must_use]
+    pub fn clock_handle(&self) -> Arc<dyn Clock + Send + Sync> {
+        Arc::clone(&self.clock)
+    }
+
+    /// Changes one integration's enablement, priority, or submission consent.
+    ///
+    /// A local source cannot be disabled: it is the file talking about itself, and the card says so
+    /// rather than offering a switch that would be ignored.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::InvalidRequest`] for an unknown id, a local source, or submission on a
+    /// source that does not accept it. [`RuntimeError::Storage`] when the write fails.
+    pub async fn set_integration_preference(
+        &self,
+        id: &str,
+        enabled: Option<bool>,
+        priority: Option<u32>,
+        submission_enabled: Option<bool>,
+    ) -> Result<peregrine_domain::IntegrationPreference, RuntimeError> {
+        let Some(manifest) = crate::integrations::find(id) else {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "That integration is not one this build knows.".to_owned(),
+            });
+        };
+        if manifest.always_on && enabled == Some(false) {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "Local chapters are always available, so they cannot be turned off."
+                    .to_owned(),
+            });
+        }
+        if submission_enabled == Some(true) && !manifest.submission_support {
+            return Err(RuntimeError::InvalidRequest {
+                detail: "That integration does not accept submissions.".to_owned(),
+            });
+        }
+        let mut preference = self.integrations.preference(manifest);
+        if let Some(enabled) = enabled {
+            preference.enabled = enabled;
+        }
+        if let Some(priority) = priority {
+            preference.priority = priority;
+        }
+        if let Some(submission) = submission_enabled {
+            preference.submission_enabled = submission;
+        }
+        self.database
+            .set_integration(&preference, self.clock.now())
+            .await?;
+        self.integrations.remember(preference.clone());
+        Ok(preference)
+    }
+
+    /// The markers the cache holds for a playback subject.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn markers_for_playback(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        duration_ms: Option<i64>,
+    ) -> Result<Vec<peregrine_domain::PlaybackMarker>, RuntimeError> {
+        self.markers.cached(title_id, episode_id, duration_ms).await
+    }
+
+    /// Refreshes the marker cache in the background and publishes when it has changed.
+    ///
+    /// **After the session opens, never before it.** A play must not wait on a provider; the
+    /// player draws the cache it already has and re-reads when this finishes.
+    pub fn start_marker_refresh(
+        self: &Arc<Self>,
+        title_id: i64,
+        episode_id: Option<i64>,
+        duration_ms: Option<i64>,
+    ) {
+        let runtime = Arc::clone(self);
+        tokio::spawn(async move {
+            let file = match runtime.playable(title_id, episode_id).await {
+                Ok((_, safe)) => Some(safe.as_path().to_path_buf()),
+                Err(_) => None,
+            };
+            let ffmpeg = crate::web::locate_ffmpeg();
+            let ffprobe = ffmpeg.with_file_name(if cfg!(windows) {
+                "ffprobe.exe"
+            } else {
+                "ffprobe"
+            });
+            match runtime
+                .markers
+                .refresh(
+                    title_id,
+                    episode_id,
+                    duration_ms,
+                    file.as_deref(),
+                    Some(ffprobe.as_path()),
+                )
+                .await
+            {
+                Ok(markers) => {
+                    runtime.bus.publish(Event::new(
+                        crate::events::PLAYER_MARKERS,
+                        title_id.to_string(),
+                        serde_json::json!({
+                            "titleId": title_id,
+                            "episodeId": episode_id,
+                            "count": markers.len(),
+                        }),
+                    ));
+                }
+                Err(error) => {
+                    tracing::debug!(%error, title = title_id, "the marker refresh did not finish");
+                }
+            }
+        });
+    }
+
     /// Starts playing one of a title's files, replacing whatever was playing.
     ///
     /// **Four decisions, in the order they matter.** The title is resolved under the installation scope,
@@ -4346,7 +4647,7 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
-        let (media_file_id, support, needs_poster, session, subtitles) =
+        let (media_file_id, support, needs_poster, session, subtitles, duration_ms) =
             match self.playable(title_id, episode_id).await {
                 Ok((file, safe)) => {
                     let support = LocalPlayback::of_name(file.path.as_str());
@@ -4358,7 +4659,14 @@ impl Runtime {
                     let (session, subtitles) = self
                         .open_file_session(media_file_id, title_id, &safe)
                         .await?;
-                    (media_file_id, support, needs_poster, session, subtitles)
+                    (
+                        media_file_id,
+                        support,
+                        needs_poster,
+                        session,
+                        subtitles,
+                        file.duration_ms.and_then(|value| i64::try_from(value).ok()),
+                    )
                 }
                 // A title with nothing on disk may still be downloading: serve it from the engine. The
                 // same arm answers an episode, because the job row names the episode and the payload's
@@ -4375,7 +4683,7 @@ impl Runtime {
                             )
                             .await
                             .map_err(playback_error)?;
-                            (0, source.support, false, session, Vec::new())
+                            (0, source.support, false, session, Vec::new(), None)
                         }
                         None => return Err(RuntimeError::NoPlayableFile),
                     }
@@ -4404,6 +4712,17 @@ impl Runtime {
             .await?
             .map(|progress| progress.position_ms());
 
+        let markers = self
+            .markers
+            .cached(title_id, episode_id, duration_ms)
+            .await?;
+        let next_episode = self.web_next_episode(title_id, episode_id).await?;
+        let audio_language = self
+            .playback_preference()
+            .await?
+            .audio_language()
+            .to_owned();
+
         Ok(StartedPlayback {
             session_id,
             title_id,
@@ -4415,6 +4734,10 @@ impl Runtime {
             subtitles,
             needs_poster,
             resume_position_ms,
+            duration_ms,
+            markers,
+            next_episode,
+            audio_language,
         })
     }
 
@@ -4515,6 +4838,14 @@ impl Runtime {
             .watch_progress(installation_scope(), title_id, episode_id)
             .await?
             .map(|progress| progress.position_ms());
+        // **The account's language is the initial track, not the container's first one.** mpv reads
+        // it as a priority list, so a later manual choice in mpv's own menu still wins for that
+        // session. Without it, an English profile opened the Italian dub of a dual-audio release.
+        let audio_language = self
+            .playback_preference()
+            .await?
+            .audio_language()
+            .to_owned();
 
         // The child reports over its IPC socket; this sink hands each position to a task that writes
         // it through the same progress path the in-page player uses.
@@ -4554,7 +4885,13 @@ impl Runtime {
                 // refusal rather than a panic in a player thread.
                 (None, None) => return Err(peregrine_domain::PlayerError::Spawn),
             };
-            player.play(input, resume_ms, subtitle.as_ref(), positions)
+            player.play(
+                input,
+                resume_ms,
+                subtitle.as_ref(),
+                Some(audio_language.as_str()),
+                positions,
+            )
         })
         .await;
         let launch = match launch {
@@ -6273,7 +6610,13 @@ mod tests {
         let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/token").expect("a loopback URL");
         let player = RecordingPlayer::default();
         player
-            .play(PlayerInput::Stream(&url), None, None, Arc::new(NoPositions))
+            .play(
+                PlayerInput::Stream(&url),
+                None,
+                None,
+                None,
+                Arc::new(NoPositions),
+            )
             .expect("the double records it");
         assert_eq!(player.streams(), vec![url.as_str().to_owned()]);
     }
@@ -6343,6 +6686,7 @@ mod tests {
         streams: Mutex<Vec<String>>,
         start: Mutex<Option<i64>>,
         subtitle: Mutex<Option<PathBuf>>,
+        audio_language: Mutex<Option<String>>,
     }
 
     impl RecordingPlayer {
@@ -6370,6 +6714,13 @@ mod tests {
                 .expect("the player subtitle is not poisoned")
                 .clone()
         }
+
+        fn audio_language(&self) -> Option<String> {
+            self.audio_language
+                .lock()
+                .expect("the player audio language is not poisoned")
+                .clone()
+        }
     }
 
     impl peregrine_domain::PlayerBackend for RecordingPlayer {
@@ -6378,6 +6729,7 @@ mod tests {
             input: peregrine_domain::PlayerInput<'_>,
             start_ms: Option<i64>,
             subtitle: Option<&SafePath>,
+            audio_language: Option<&str>,
             positions: Arc<dyn peregrine_domain::PositionSink>,
         ) -> Result<(), peregrine_domain::PlayerError> {
             match input {
@@ -6398,6 +6750,11 @@ mod tests {
                 .lock()
                 .expect("the player subtitle is not poisoned") =
                 subtitle.map(|path| path.as_path().to_path_buf());
+            *self
+                .audio_language
+                .lock()
+                .expect("the player audio language is not poisoned") =
+                audio_language.map(str::to_owned);
             // The position a real mpv would report over its socket, so the write path runs.
             positions.position(84_000, Some(7_200_000));
             Ok(())
@@ -8664,6 +9021,11 @@ mod tests {
             .await
             .expect("the player is handed the file");
         assert_eq!(player.opened(), vec![film.clone()]);
+        assert_eq!(
+            player.audio_language().as_deref(),
+            Some("en"),
+            "the account's preferred language is handed to mpv, not left to the file's first track"
+        );
         runtime.shutdown().await;
     }
 

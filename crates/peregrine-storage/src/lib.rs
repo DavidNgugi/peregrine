@@ -23,11 +23,13 @@ mod download;
 mod error;
 mod fts;
 mod image_cache;
+mod integrations;
 mod integrity;
 mod jobs;
 mod json;
 mod library;
 mod maintenance;
+mod markers;
 mod migrations;
 mod notify;
 mod offers;
@@ -65,6 +67,7 @@ pub use download::{
 };
 pub use error::StorageError;
 pub use image_cache::ImageCacheEntry;
+pub use integrations::StoredIntegration;
 pub use integrity::Recovery;
 pub use jobs::{JobChange, JobPhase, JobRecord, NewJob};
 pub use library::{
@@ -76,6 +79,7 @@ pub use maintenance::{
     MaintenanceOutcome, MaintenancePlan, MaintenanceRequest, MaintenanceStep, StepOutcome,
     StepRecord,
 };
+pub use markers::{MarkerFetch, MarkerFetchOutcome, MarkerSubject, StoredMarker};
 pub use notify::NotificationRepository;
 pub use page::{Cursor, MAX_PAGE_ROWS, PageRequest};
 pub use pairing::{NewPairedDevice, PairedDevice};

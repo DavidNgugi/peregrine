@@ -28,6 +28,17 @@ impl SecretKey {
         Self(format!("provider.{provider}"))
     }
 
+    /// The key for one field of one integration.
+    ///
+    /// `integration.<id>.<field>` rather than a provider key because an integration can need more
+    /// than one value (`OpenSubtitles` wants a key, a username, and a password), and a provider key
+    /// has one shape by design. The id and field are validated by the manifest before this is
+    /// called; this function only spells the contract.
+    #[must_use]
+    pub fn integration(integration: &str, field: &str) -> Self {
+        Self(format!("integration.{integration}.{field}"))
+    }
+
     /// The key for one provider's endpoint, such as a self-hosted indexer's base URL.
     ///
     /// A separate entry rather than part of a credential because a URL is configuration and a key is
@@ -207,6 +218,10 @@ mod tests {
         // The name is a contract with every previous release: changing it makes stored keys unreachable
         // on users' machines, silently. This test is the shape, written down.
         assert_eq!(SecretKey::provider("tmdb").as_str(), "provider.tmdb");
+        assert_eq!(
+            SecretKey::integration("opensubtitles", "apiKey").as_str(),
+            "integration.opensubtitles.apiKey"
+        );
         assert_eq!(SecretKey::SERVICE, "Peregrine");
     }
 

@@ -600,6 +600,111 @@ fn clear_key_for_an_unknown_provider(harness: &Harness) -> Invocation<'_> {
     })
 }
 
+fn list_integrations_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::list_integrations(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_integration_enabled_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::set_integration_enabled(
+            harness.dead_state(),
+            "theintrodb".to_owned(),
+            true,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn set_integration_priority_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::set_integration_priority(
+            harness.dead_state(),
+            "theintrodb".to_owned(),
+            0,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn set_integration_submission_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::set_integration_submission(
+            harness.dead_state(),
+            "theintrodb".to_owned(),
+            false,
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn test_integration_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::test_integration(harness.dead_state(), "aniskip".to_owned())
+            .await
+            .map(drop)
+    })
+}
+
+fn set_integration_credentials_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::set_integration_credentials(
+            harness.dead_state(),
+            "theintrodb".to_owned(),
+            Vec::new(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn clear_integration_credentials_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::clear_integration_credentials(
+            harness.dead_state(),
+            "theintrodb".to_owned(),
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn markers_for_playback_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::markers_for_playback(
+            harness.dead_state(),
+            crate::integrations::MarkerSubjectDto {
+                title_id: 1,
+                episode_id: None,
+                duration_ms: None,
+            },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn refresh_playback_markers_without_a_runtime(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::integrations::refresh_playback_markers(
+            harness.dead_state(),
+            crate::integrations::MarkerSubjectDto {
+                title_id: 1,
+                episode_id: None,
+                duration_ms: None,
+            },
+        )
+        .await
+        .map(drop)
+    })
+}
+
 /// What a case must observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expected {
@@ -929,6 +1034,7 @@ fn cases() -> Vec<ContractCase> {
     let mut all = cases_by_namespace();
     all.extend(provider_cases());
     all.extend(credential_cases());
+    all.extend(integration_cases());
     all.extend(download_cases());
     all.extend(indexer_cases());
     all.extend(usenet_cases());
@@ -987,6 +1093,85 @@ fn credential_cases() -> Vec<ContractCase> {
                 retryable: false,
             },
             drive: clear_key_for_an_unknown_provider,
+        },
+    ]
+}
+
+/// The integrations and markers namespaces: every command is a read or a write through the
+/// runtime, so a missing runtime is the failure each one must report.
+fn integration_cases() -> Vec<ContractCase> {
+    vec![
+        ContractCase {
+            command: "list_integrations",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: list_integrations_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_integration_enabled",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_integration_enabled_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_integration_priority",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_integration_priority_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_integration_submission",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_integration_submission_without_a_runtime,
+        },
+        ContractCase {
+            command: "test_integration",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: test_integration_without_a_runtime,
+        },
+        ContractCase {
+            command: "set_integration_credentials",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: set_integration_credentials_without_a_runtime,
+        },
+        ContractCase {
+            command: "clear_integration_credentials",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: clear_integration_credentials_without_a_runtime,
+        },
+        ContractCase {
+            command: "markers_for_playback",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: markers_for_playback_without_a_runtime,
+        },
+        ContractCase {
+            command: "refresh_playback_markers",
+            expected: Expected::Fails {
+                code: ErrorCode::Internal,
+                retryable: false,
+            },
+            drive: refresh_playback_markers_without_a_runtime,
         },
     ]
 }

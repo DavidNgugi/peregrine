@@ -2668,6 +2668,219 @@ fn connection_options(path: &Path) -> SqliteConnectOptions {
     )
 }
 
+/// Integration choices and the skip-marker cache.
+///
+/// A small impl block of its own because these are the two surfaces the settings screen and the
+/// player share, and keeping them together makes the cache's lifetime visible next to the health
+/// record that describes it.
+impl Database {
+    /// Every stored integration choice, in no particular order.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails or a stored enum carries a value this build does not
+    /// know.
+    pub async fn integration_settings(
+        &self,
+    ) -> Result<Vec<crate::StoredIntegration>, StorageError> {
+        crate::integrations::read_all(&self.readers).await
+    }
+
+    /// Writes one integration choice.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the writer or the statement fails.
+    pub async fn set_integration(
+        &self,
+        preference: &peregrine_domain::IntegrationPreference,
+        at: jiff::Timestamp,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetIntegration {
+                preference: Box::new(preference.clone()),
+                at: at.as_millisecond(),
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("set_integration", &other)),
+        }
+    }
+
+    /// Records what one bounded probe answered.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the writer or the statement fails.
+    pub async fn record_integration_outcome(
+        &self,
+        id: &peregrine_domain::IntegrationId,
+        outcome: peregrine_domain::IntegrationOutcome,
+        error_code: Option<&str>,
+        at: i64,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordIntegrationOutcome {
+                id: id.clone(),
+                outcome,
+                error_code: error_code.map(str::to_owned),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("record_integration_outcome", &other)),
+        }
+    }
+
+    /// Removes one integration's stored choice and health.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the writer or the statement fails.
+    pub async fn forget_integration(
+        &self,
+        id: &peregrine_domain::IntegrationId,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ForgetIntegration { id: id.clone() })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("forget_integration", &other)),
+        }
+    }
+
+    /// Every marker for a title or episode, suppressed rows included.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails or a stored row cannot be rebuilt into a marker.
+    pub async fn markers_for(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Vec<crate::StoredMarker>, StorageError> {
+        crate::markers::read(&self.readers, title_id, episode_id).await
+    }
+
+    /// Replaces one source's markers for a subject, preserving local suppressions.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the writer or a statement fails.
+    pub async fn replace_markers(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        source: peregrine_domain::MarkerSource,
+        markers: &[peregrine_domain::PlaybackMarker],
+        at: i64,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::ReplaceMarkers {
+                title_id,
+                episode_id,
+                source,
+                markers: markers.to_vec(),
+                at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("replace_markers", &other)),
+        }
+    }
+
+    /// The last lookup for one subject and source.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails.
+    pub async fn marker_fetch(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        source: peregrine_domain::MarkerSource,
+    ) -> Result<Option<crate::MarkerFetch>, StorageError> {
+        crate::markers::fetch(&self.readers, title_id, episode_id, source).await
+    }
+
+    /// Records one lookup, positive or negative.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the writer or the statement fails.
+    #[allow(clippy::too_many_arguments)] // One row, whose columns are the cache policy.
+    pub async fn record_marker_fetch(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        source: peregrine_domain::MarkerSource,
+        outcome: crate::MarkerFetchOutcome,
+        error_code: Option<&str>,
+        etag: Option<&str>,
+        fetched_at: i64,
+        expires_at: i64,
+    ) -> Result<(), StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::RecordMarkerFetch {
+                title_id,
+                episode_id,
+                source,
+                outcome,
+                error_code: error_code.map(str::to_owned),
+                etag: etag.map(str::to_owned),
+                fetched_at,
+                expires_at,
+            })
+            .await?
+        {
+            WriteResponse::Applied => Ok(()),
+            other => Err(unexpected_response("record_marker_fetch", &other)),
+        }
+    }
+
+    /// Hides or restores one marker on this installation.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the writer or the statement fails.
+    pub async fn set_marker_suppressed(
+        &self,
+        id: i64,
+        suppressed: bool,
+    ) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::SetMarkerSuppressed { id, suppressed })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("set_marker_suppressed", &other)),
+        }
+    }
+
+    /// The identity a marker provider needs for a title or episode.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the read fails or a stored enum is unknown.
+    pub async fn marker_subject(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Result<Option<crate::MarkerSubject>, StorageError> {
+        crate::markers::subject(&self.readers, title_id, episode_id).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

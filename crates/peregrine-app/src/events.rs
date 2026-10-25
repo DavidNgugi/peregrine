@@ -140,6 +140,12 @@ pub const NOTIFICATION_RAISED: Topic = Topic::new("notification://raised", 1);
 /// terminal state showed nothing until the last season still had been fetched.
 pub const TITLE_REFRESHED: Topic = Topic::new("title://refreshed", 1);
 
+/// The skip-marker cache changed for a playing subject.
+///
+/// A count rather than the markers themselves: the player re-reads through the command it
+/// already uses, so the event cannot become a second, unvalidated copy of the cache.
+pub const PLAYER_MARKERS: Topic = Topic::new("player://markers", 1);
+
 /// A device asked to pair with the LAN surface (ADR 0028).
 ///
 /// A trigger for the desktop prompt and never a source of truth: the payload carries the code the
@@ -158,6 +164,7 @@ pub const TOPICS: &[Topic] = &[
     DOWNLOAD_STATS,
     NOTIFICATION_RAISED,
     TITLE_REFRESHED,
+    PLAYER_MARKERS,
     WEB_PAIR_REQUESTED,
 ];
 
@@ -467,6 +474,7 @@ mod tests {
                 ("download://stats", 1),
                 ("notification://raised", 1),
                 ("title://refreshed", 1),
+                ("player://markers", 1),
                 ("web://pair_requested", 1),
             ],
             "the event manifest changed; regenerate the bindings in the same commit"

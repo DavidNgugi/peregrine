@@ -128,6 +128,68 @@ pub(crate) enum WriteRequest {
         /// Unix milliseconds the desktop wrote it.
         at: Timestamp,
     },
+    /// Write one integration's installation-level choice.
+    SetIntegration {
+        /// The validated choice.
+        preference: Box<peregrine_domain::IntegrationPreference>,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Record what one bounded probe answered.
+    RecordIntegrationOutcome {
+        /// The integration the probe asked.
+        id: peregrine_domain::IntegrationId,
+        /// The closed outcome.
+        outcome: peregrine_domain::IntegrationOutcome,
+        /// The job's stable code, when it failed.
+        error_code: Option<String>,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Remove one integration's stored choice and health.
+    ForgetIntegration {
+        /// The integration to forget.
+        id: peregrine_domain::IntegrationId,
+    },
+    /// Replace one source's markers for one title or episode.
+    ReplaceMarkers {
+        /// The title the markers are about.
+        title_id: i64,
+        /// The episode, or `None` for a film.
+        episode_id: Option<i64>,
+        /// The source that answered.
+        source: peregrine_domain::MarkerSource,
+        /// The resolved markers.
+        markers: Vec<peregrine_domain::PlaybackMarker>,
+        /// Unix milliseconds.
+        at: i64,
+    },
+    /// Record one provider lookup, positive or negative.
+    RecordMarkerFetch {
+        /// The title the lookup was about.
+        title_id: i64,
+        /// The episode, or `None` for a film.
+        episode_id: Option<i64>,
+        /// The source that was asked.
+        source: peregrine_domain::MarkerSource,
+        /// What it answered.
+        outcome: crate::markers::MarkerFetchOutcome,
+        /// The stable failure code, when it failed.
+        error_code: Option<String>,
+        /// The validator the provider sent, when it sent one.
+        etag: Option<String>,
+        /// Unix milliseconds.
+        fetched_at: i64,
+        /// Unix milliseconds after which asking again is worth it.
+        expires_at: i64,
+    },
+    /// Hide or restore one marker on this installation.
+    SetMarkerSuppressed {
+        /// The marker row.
+        id: i64,
+        /// Whether it is hidden.
+        suppressed: bool,
+    },
     /// Revoke a paired device, which refuses its next request.
     RevokePairedDevice {
         /// The device row.
@@ -1120,7 +1182,84 @@ async fn apply(
         | WriteRequest::TouchPairedDevice { .. }
         | WriteRequest::RenamePairedDevice { .. }
         | WriteRequest::RevokePairedDevice { .. }) => apply_pairing(connection, other).await,
+        other @ (WriteRequest::SetIntegration { .. }
+        | WriteRequest::RecordIntegrationOutcome { .. }
+        | WriteRequest::ForgetIntegration { .. }
+        | WriteRequest::ReplaceMarkers { .. }
+        | WriteRequest::RecordMarkerFetch { .. }
+        | WriteRequest::SetMarkerSuppressed { .. }) => apply_marker_write(connection, other).await,
         other => apply_download_write(connection, other).await,
+    }
+}
+
+/// Applies the requests that write integration choices and the marker cache.
+///
+/// One function because the two are one subject: a marker fetch records the health of the
+/// integration that answered, and splitting them would hide that the settings screen and the
+/// player are reading the same rows.
+async fn apply_marker_write(
+    connection: &mut sqlx::SqliteConnection,
+    request: WriteRequest,
+) -> Result<WriteResponse, StorageError> {
+    match request {
+        WriteRequest::SetIntegration { preference, at } => {
+            crate::integrations::upsert(connection, &preference, at)
+                .await
+                .map(|()| WriteResponse::Applied)
+        }
+        WriteRequest::RecordIntegrationOutcome {
+            id,
+            outcome,
+            error_code,
+            at,
+        } => {
+            crate::integrations::record_outcome(connection, &id, outcome, error_code.as_deref(), at)
+                .await
+                .map(|()| WriteResponse::Applied)
+        }
+        WriteRequest::ForgetIntegration { id } => crate::integrations::forget(connection, &id)
+            .await
+            .map(|changed| WriteResponse::RowChanged { changed }),
+        WriteRequest::ReplaceMarkers {
+            title_id,
+            episode_id,
+            source,
+            markers,
+            at,
+        } => crate::markers::replace(connection, title_id, episode_id, source, &markers, at)
+            .await
+            .map(|()| WriteResponse::Applied),
+        WriteRequest::RecordMarkerFetch {
+            title_id,
+            episode_id,
+            source,
+            outcome,
+            error_code,
+            etag,
+            fetched_at,
+            expires_at,
+        } => crate::markers::record_fetch(
+            connection,
+            title_id,
+            episode_id,
+            source,
+            outcome,
+            error_code.as_deref(),
+            etag.as_deref(),
+            fetched_at,
+            expires_at,
+        )
+        .await
+        .map(|()| WriteResponse::Applied),
+        WriteRequest::SetMarkerSuppressed { id, suppressed } => {
+            crate::markers::set_suppressed(connection, id, suppressed)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
+        }
+        other => Err(StorageError::UnexpectedValue {
+            column: "integration_setting/playback_marker",
+            found: format!("a request that is not a marker or integration write: {other:?}"),
+        }),
     }
 }
 

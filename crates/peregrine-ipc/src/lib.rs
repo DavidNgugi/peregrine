@@ -23,6 +23,7 @@ pub mod downloads;
 mod error;
 pub mod guard;
 pub mod indexers;
+pub mod integrations;
 pub mod jobs;
 pub mod library;
 pub mod network;
@@ -128,6 +129,15 @@ pub fn builder() -> Builder<tauri::Wry> {
             web::web_devices,
             web::web_rename,
             web::web_revoke,
+            integrations::list_integrations,
+            integrations::set_integration_enabled,
+            integrations::set_integration_priority,
+            integrations::set_integration_submission,
+            integrations::test_integration,
+            integrations::set_integration_credentials,
+            integrations::clear_integration_credentials,
+            integrations::markers_for_playback,
+            integrations::refresh_playback_markers,
             providers::status,
             providers::set_key,
             providers::test_connection,

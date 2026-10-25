@@ -35,7 +35,8 @@ use tracing::warn;
 use super::{
     AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, LibraryStorageDto, MeDto,
     MediaGrant, MediaGrantSource, PairOffer, PairStatus, PlaybackTicket, PreferencesDto,
-    ProfileDto, SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
+    ProfileDto, SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebIntegrationDto,
+    WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -56,6 +57,7 @@ fn with_tizen_viewport(html: &str) -> String {
 }
 
 /// Builds the router the listener serves.
+#[allow(clippy::too_many_lines)] // One table of every route, in the order a reader checks them.
 pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> Router {
     let api = Router::new()
         .route("/api/pair", post(pair_request))
@@ -72,6 +74,8 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/me", get(me))
         .route("/api/host", get(host))
         .route("/api/preferences", get(preferences))
+        .route("/api/integrations", get(integrations))
+        .route("/api/markers", get(markers))
         .route("/api/acquire", post(acquire))
         .route("/api/acquire/season", post(acquire_season))
         .route("/api/schedule", post(schedule))
@@ -925,6 +929,40 @@ struct SubtitleQuery {
 /// The client names a track and the title or episode it belongs to, never a path. A bitmap
 /// format, an unreadable sidecar, a parse failure, and a track that belongs to another file all
 /// answer the same 404: the player falls back to no subtitle rather than to a broken VTT file.
+/// The read-only integration status a TV or phone may show.
+///
+/// The route requires the `read` scope like every other read and returns no credential field and
+/// no health code; "Manage on desktop" is the only instruction it can carry.
+async fn integrations(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+) -> Result<Json<Vec<WebIntegrationDto>>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.integration_status()))
+}
+
+/// The skip markers a player should draw, read from the cache the desktop also reads.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MarkerQuery {
+    title_id: i64,
+    episode_id: Option<i64>,
+    duration_ms: Option<i64>,
+}
+
+async fn markers(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+    Query(query): Query<MarkerQuery>,
+) -> Result<Json<Vec<peregrine_domain::PlaybackMarker>>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(
+        service
+            .markers_for(query.title_id, query.episode_id, query.duration_ms)
+            .await,
+    ))
+}
+
 async fn subtitle(
     State(service): State<Arc<WebService>>,
     Device(device): Device,

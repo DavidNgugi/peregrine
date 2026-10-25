@@ -25,19 +25,25 @@
 //! stack (PG-E5-02) nor the conditional-request middleware (PG-E5-04) — and the port's data
 //! operations arrive with the first adapter, for the reason the [`provider`] module records.
 
+pub mod aniskip;
 pub mod capability;
 pub mod descriptor;
 pub mod error;
 pub mod http;
 pub mod hygiene;
+pub mod introdb;
+pub mod marker;
 pub mod provider;
 pub mod rate;
 pub mod tmdb;
 
+pub use aniskip::AniSkip;
 pub use capability::{Capabilities, Capability};
 pub use descriptor::{Attribution, CachePolicy, DescriptorError, ProviderDescriptor, RatePolicy};
 pub use error::{ProviderError, TransportFailure};
 pub use hygiene::{Body, BodyCap};
+pub use introdb::IntroDb;
+pub use marker::{MarkerError, MarkerFuture, MarkerProvider, MarkerRequest};
 pub use provider::{
     BrowseRequest, BrowseSort, GenreRef, MetadataProvider, ProviderFuture, ProviderPage,
     RAIL_PAGE_LIMIT, RailKind, SearchCandidate, SearchQuery,
