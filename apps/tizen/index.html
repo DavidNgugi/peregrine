@@ -15,7 +15,10 @@
       <p class="eyebrow">Peregrine</p>
 
       <section id="connecting" hidden>
-        <h1>Connecting</h1>
+        <div class="connection-status" role="status" aria-live="polite">
+          <span class="connection-spinner" aria-hidden="true"></span>
+          <h1>Connecting<span aria-hidden="true">...</span></h1>
+        </div>
         <p id="connecting-url" class="address"></p>
         <p class="lede">Press BACK within 3 seconds to change the server.</p>
         <button id="change-server" class="secondary" type="button">Change server</button>

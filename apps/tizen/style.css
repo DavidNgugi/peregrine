@@ -53,6 +53,34 @@ h1 {
   letter-spacing: -0.02em;
 }
 
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 1.4vw;
+}
+
+.connection-spinner {
+  width: 3.2vw;
+  height: 3.2vw;
+  flex: 0 0 auto;
+  border: 0.35vw solid #2f3338;
+  border-top-color: #3b9cf6;
+  border-radius: 50%;
+  animation: connection-spin 0.9s linear infinite;
+}
+
+@keyframes connection-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-spinner {
+    animation: none;
+  }
+}
+
 .lede {
   max-width: 62vw;
   margin-top: 2.2vh;
