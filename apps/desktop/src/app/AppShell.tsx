@@ -180,8 +180,19 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
       const previous = viewMemory.current.get(key) ?? { scrollTop: node.scrollTop, focusKey: null };
       viewMemory.current.set(key, { ...previous, focusKey });
     };
+    // WebKit does not always focus an anchor on a mouse click, so record the control that was
+    // clicked as well as the one that received focus; otherwise a pointer user's Back would restore
+    // nothing while a keyboard user's restored the card.
+    const rememberClick = (event: MouseEvent): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      const focusKey = viewFocusKey(target);
+      if (focusKey === null) return;
+      const previous = viewMemory.current.get(key) ?? { scrollTop: node.scrollTop, focusKey: null };
+      viewMemory.current.set(key, { ...previous, focusKey });
+    };
     node.addEventListener("scroll", remember, { passive: true });
     node.addEventListener("focusin", rememberFocus);
+    node.addEventListener("click", rememberClick);
     if (saved?.focusKey) {
       const target = Array.from(
         node.querySelectorAll<HTMLElement>("a[href], button, [data-view-key]"),
@@ -193,6 +204,7 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
     return () => {
       node.removeEventListener("scroll", remember);
       node.removeEventListener("focusin", rememberFocus);
+      node.removeEventListener("click", rememberClick);
     };
   }, [route]);
 
