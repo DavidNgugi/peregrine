@@ -43,9 +43,7 @@ export function NotificationsSection({ control }: NotificationsSectionProps): Re
         </p>
       ) : null}
       {control.failed ? <ErrorState title={t("settings.notifications.failed")} /> : null}
-      {control.saveFailed ? (
-        <ErrorState title={t("settings.notifications.saveFailed")} />
-      ) : null}
+      {control.saveFailed ? <ErrorState title={t("settings.notifications.saveFailed")} /> : null}
     </SettingsSection>
   );
 }

@@ -131,8 +131,7 @@ describe("titlePageActions", () => {
         for (const support of ["webview", "externalPlayer", "unknown", null] as const) {
           const actions = titlePageActions(offer, player, support);
           const playable =
-            player &&
-            (offer === "play" || (offer === "arriving" && support !== null));
+            player && (offer === "play" || (offer === "arriving" && support !== null));
           expect(
             actions.play.kind === "play",
             `${offer}/${String(player)}/${String(support)}`,

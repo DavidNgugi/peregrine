@@ -154,14 +154,7 @@ export function WatchMetricsPanel(): ReactElement {
               </linearGradient>
             </defs>
             {[35, 88, 141, 194].map((y) => (
-              <line
-                className="watch-metrics-grid-line"
-                key={y}
-                x1="0"
-                x2="720"
-                y1={y}
-                y2={y}
-              />
+              <line className="watch-metrics-grid-line" key={y} x1="0" x2="720" y1={y} y2={y} />
             ))}
             {(() => {
               const points = days.map((day, index) => {

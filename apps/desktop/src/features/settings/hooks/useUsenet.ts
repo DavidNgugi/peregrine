@@ -53,7 +53,9 @@ export function useUsenet(): UsenetSettings {
   }, [refresh]);
 
   const act = useCallback(
-    async (operation: () => Promise<{ status: "ok" | "error"; data?: UsenetStatusDto; error?: unknown }>) => {
+    async (
+      operation: () => Promise<{ status: "ok" | "error"; data?: UsenetStatusDto; error?: unknown }>,
+    ) => {
       setBusy(true);
       setError(null);
       try {

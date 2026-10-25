@@ -189,8 +189,22 @@ describe("downloadsFirst", () => {
     const merged = downloadsFirst(
       items,
       [
-        { titleId: 9, title: "nine", titleKind: "movie", poster: null, state: "completed", hasMediaFile: false },
-        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "downloading", hasMediaFile: true },
+        {
+          titleId: 9,
+          title: "nine",
+          titleKind: "movie",
+          poster: null,
+          state: "completed",
+          hasMediaFile: false,
+        },
+        {
+          titleId: 8,
+          title: "eight",
+          titleKind: "movie",
+          poster: null,
+          state: "downloading",
+          hasMediaFile: true,
+        },
       ],
       "movie",
       make,
@@ -201,7 +215,16 @@ describe("downloadsFirst", () => {
   it("keeps the provider row for a title that is both and does not draw it twice", () => {
     const merged = downloadsFirst(
       items,
-      [{ titleId: 2, title: "two", titleKind: "movie", poster: null, state: "downloading", hasMediaFile: true }],
+      [
+        {
+          titleId: 2,
+          title: "two",
+          titleKind: "movie",
+          poster: null,
+          state: "downloading",
+          hasMediaFile: true,
+        },
+      ],
       "movie",
       make,
     );
@@ -213,8 +236,22 @@ describe("downloadsFirst", () => {
     const merged = downloadsFirst(
       items,
       [
-        { titleId: 9, title: "nine", titleKind: "show", poster: null, state: "completed", hasMediaFile: false },
-        { titleId: 8, title: "eight", titleKind: "movie", poster: null, state: "failed", hasMediaFile: false },
+        {
+          titleId: 9,
+          title: "nine",
+          titleKind: "show",
+          poster: null,
+          state: "completed",
+          hasMediaFile: false,
+        },
+        {
+          titleId: 8,
+          title: "eight",
+          titleKind: "movie",
+          poster: null,
+          state: "failed",
+          hasMediaFile: false,
+        },
       ],
       "movie",
       make,

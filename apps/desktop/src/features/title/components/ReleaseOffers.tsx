@@ -89,8 +89,7 @@ export function ReleaseOffers({
               offer.seeders === null
                 ? t("title.offers.noSeeders")
                 : t("title.offers.seeders", { seeders: offer.seeders });
-            const protocol =
-              offer.protocol === "usenet" ? t("downloads.protocol.usenet") : null;
+            const protocol = offer.protocol === "usenet" ? t("downloads.protocol.usenet") : null;
             const facts = [offer.indexer, protocol, size, seeders, reasonLabel(offer.reason, t)]
               .filter((part): part is string => part !== null && part !== "")
               .join(" · ");
