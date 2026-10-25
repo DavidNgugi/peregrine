@@ -5,6 +5,7 @@ import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
 import { SearchIcon } from "./icons.js";
 import { matchesKind as matchesKindOf } from "./library-order.js";
+import { useViewState } from "./view-state.js";
 
 /**
  * The account's watchlist: a title is added or removed from its own page, and this screen offers
@@ -18,9 +19,9 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "movie" | "show">("all");
-  const [sort, setSort] = useState<"newest" | "oldest" | "title">("newest");
+  const [query, setQuery] = useViewState("myList.query", "");
+  const [kind, setKind] = useViewState<"all" | "movie" | "show">("myList.kind", "all");
+  const [sort, setSort] = useViewState<"newest" | "oldest" | "title">("myList.sort", "newest");
   useAutoFocus(items[0]?.id);
 
   const visible = useMemo(() => {

@@ -55,6 +55,7 @@ export function Screen({
   return (
     <section
       aria-labelledby={titleId}
+      data-screen-scroll="true"
       // **`overflow-x-hidden` is load-bearing, and its absence was a bug.** `overflow-y-auto` is not
       // one axis: CSS computes the other from `visible` to `auto`, so a screen holding anything wide —
       // a rail's strip, a grid's spacer, a long table — became horizontally scrollable as a whole, and

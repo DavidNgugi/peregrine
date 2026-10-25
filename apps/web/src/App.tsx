@@ -37,6 +37,7 @@ import { MyListScreen } from "./MyList.js";
 import { Player } from "./Player.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { focusKeyOf, recallRoute, rememberRoute, restoreFocus } from "./route-state.js";
+import { useViewState } from "./view-state.js";
 import { parseRoute, routePath, type Route } from "./routing.js";
 import { backTarget, exitTizenApp, isTizen, useTizenBack, useTizenFocusPlate } from "./tizen.js";
 import { TitleScreen } from "./Title.js";
@@ -718,9 +719,9 @@ function LibraryScreen({
   readonly error: string | null;
   readonly onOpen: (id: number) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "movie" | "show">("all");
-  const [sort, setSort] = useState<"newest" | "oldest" | "title">("newest");
+  const [query, setQuery] = useViewState("library.query", "");
+  const [kind, setKind] = useViewState<"all" | "movie" | "show">("library.kind", "all");
+  const [sort, setSort] = useViewState<"newest" | "oldest" | "title">("library.sort", "newest");
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     const filtered = rows.filter((row) => {

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
 import type { TitleKind } from "../../../app/routes.js";
 import { mayLoad, mergePage, stillHasMore } from "../../../lib/paged-list.js";
+import { useViewState } from "../../../lib/view-state.js";
 
 /** What the reader narrowed the list to. */
 export interface BrowseFilters {
@@ -80,12 +81,20 @@ const EMPTY: BrowseState = { items: [], hasMore: false, loading: true, failed: n
  * of state this hook owns — and a change here restarts the list, because a page of films is not a
  * page of series.
  */
-export function useBrowse(kind: TitleKind, initial?: BrowseFilters): BrowseData {
+export function useBrowse(
+  kind: TitleKind,
+  initial?: BrowseFilters,
+  persistKey?: string,
+): BrowseData {
   // The starting filters are a parameter because a *shelf* is a browse read with the query already
   // decided: a genre shelf under a title's recommendations is this hook with one genre and no control
   // over it, and a hook that always began at `DEFAULT_FILTERS` would spend its first request on the
-  // unfiltered list and its second on the one the caller wanted.
-  const [filters, setFiltersState] = useState<BrowseFilters>(initial ?? DEFAULT_FILTERS);
+  // unfiltered list and its second on the one the caller wanted. A screen passes `persistKey`; a shelf
+  // passes none, so its private read is never written into the screen's stored filters.
+  const [filters, setFiltersState] = useViewState<BrowseFilters>(
+    persistKey,
+    initial ?? DEFAULT_FILTERS,
+  );
   const [state, setState] = useState<BrowseState>(EMPTY);
 
   // The request in flight, so the grid's every-render `loadMore` asks for one page and not twenty.

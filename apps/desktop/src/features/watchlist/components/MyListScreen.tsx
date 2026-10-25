@@ -1,10 +1,11 @@
 import { EmptyState, Grid, Icon, Screen, TextInput, TitleCard } from "@peregrine/ui";
 import type { WatchlistEntryDto } from "@peregrine/ipc-client";
-import { useMemo, useState, type ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route, type TitleKind } from "../../../app/routes.js";
 import { imageUrl } from "../../../lib/media.js";
+import { useViewState } from "../../../lib/view-state.js";
 import type { WatchlistState } from "../hooks/useWatchlist.js";
 
 const TILE_WIDTH = 176;
@@ -25,9 +26,9 @@ export function MyListScreen({
   readonly backLabel?: string | undefined;
 }): ReactElement {
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<TitleKind | "all">("all");
-  const [sort, setSort] = useState<Sort>("newest");
+  const [query, setQuery] = useViewState("myList.query", "");
+  const [kind, setKind] = useViewState<TitleKind | "all">("myList.kind", "all");
+  const [sort, setSort] = useViewState<Sort>("myList.sort", "newest");
 
   const items = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();

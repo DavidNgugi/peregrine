@@ -56,6 +56,26 @@ import { SCREENS } from "./screens.js";
 import { useFullscreen } from "./useFullscreen.js";
 import { useTheme } from "./useTheme.js";
 
+interface ViewMemory {
+  readonly scrollTop: number;
+  readonly focusKey: string | null;
+}
+
+/** A stable identity for a focused control inside a screen, never for the shell chrome. */
+function viewFocusKey(element: Element | null): string | null {
+  if (!(element instanceof HTMLElement) || element.closest("[data-screen-scroll]") === null) {
+    return null;
+  }
+  // The Back button lives in the screen header; a person who used it did not choose it as the place
+  // to return to. Keep the content focus recorded before it.
+  if (element.closest("header") !== null) return null;
+  if (element.dataset.viewKey !== undefined) return element.dataset.viewKey;
+  const link = element.closest<HTMLAnchorElement>("a[href]");
+  if (link !== null) return "href:" + String(link.getAttribute("href"));
+  const label = element.getAttribute("aria-label") ?? element.textContent ?? "";
+  return "label:" + label.trim().replace(/\s+/gu, " ").slice(0, 120);
+}
+
 interface AppShellProps {
   /** Which platform's window chrome to present; `null` when the core could not be asked. */
   readonly platform: Platform | null;
@@ -114,6 +134,9 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   const navigate = useCallback((next: Route) => {
     setHistory((current) => navigateTo(current, next));
   }, []);
+  // The content area is one scroller at a time. Remember where each route was left, and which
+  // content control had focus, so Back returns to the same card rather than the header.
+  const viewMemory = useRef(new Map<string, ViewMemory>());
   const goBack = useCallback(() => {
     setHistory(goBackHistory);
   }, []);
@@ -138,6 +161,39 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   // the one the window happened to open at.
   useEffect(() => {
     writePath(routePath(route));
+  }, [route]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const node = document.querySelector<HTMLElement>("[data-screen-scroll]");
+    if (node === null) return;
+    const key = routePath(route);
+    const saved = viewMemory.current.get(key);
+    node.scrollTop = saved?.scrollTop ?? 0;
+    const remember = (): void => {
+      const previous = viewMemory.current.get(key) ?? { scrollTop: 0, focusKey: null };
+      viewMemory.current.set(key, { ...previous, scrollTop: node.scrollTop });
+    };
+    const rememberFocus = (event: FocusEvent): void => {
+      const focusKey = viewFocusKey(event.target instanceof Element ? event.target : null);
+      if (focusKey === null) return;
+      const previous = viewMemory.current.get(key) ?? { scrollTop: node.scrollTop, focusKey: null };
+      viewMemory.current.set(key, { ...previous, focusKey });
+    };
+    node.addEventListener("scroll", remember, { passive: true });
+    node.addEventListener("focusin", rememberFocus);
+    if (saved?.focusKey) {
+      const target = Array.from(
+        node.querySelectorAll<HTMLElement>("a[href], button, [data-view-key]"),
+      ).find(
+        (element) => !element.hasAttribute("disabled") && viewFocusKey(element) === saved.focusKey,
+      );
+      target?.focus({ preventScroll: true });
+    }
+    return () => {
+      node.removeEventListener("scroll", remember);
+      node.removeEventListener("focusin", rememberFocus);
+    };
   }, [route]);
 
   // The icon and the name describe the same action — what the button would switch *to* —

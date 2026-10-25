@@ -35,7 +35,7 @@ import {
   TitleCard,
 } from "@peregrine/ui";
 import type { BrowseSortDto, GenreDto, RailItemDto } from "@peregrine/ipc-client";
-import { useMemo, type ReactElement } from "react";
+import { useEffect, useMemo, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
 import { routePath, type Route, type TitleKind } from "../../../app/routes.js";
@@ -49,6 +49,7 @@ import {
 import { useDownloadProgress } from "../../../lib/download-progress.js";
 import { imageUrl } from "../../../lib/media.js";
 import { MIN_QUERY_CHARS, useTitleSearch, type TileSearch } from "../../../lib/title-search.js";
+import { readViewState, writeViewState } from "../../../lib/view-state.js";
 import { useBrowse, type BrowseData, type BrowseFilters } from "../hooks/useBrowse.js";
 import { useBrowseGenres } from "../hooks/useBrowseGenres.js";
 
@@ -464,14 +465,20 @@ export function BrowseScreen({
   // and choosing TV shows moves the window to `/browse/show` rather than leaving the URL silent
   // about what is on screen.
   const kind: TitleKind = titleKind ?? "movie";
-  const data = useBrowse(kind);
+  const data = useBrowse(kind, undefined, "browse.filters");
   const genres = useBrowseGenres(kind);
   // **The tile-shaped provider search, unlike Discover's dropdown.** A browse page carries no text
   // parameter, so a hit can only come from the catalogue's index or a provider; the index tokenises
   // "Spider-Man" into two words and cannot match "spiderman", while the provider that published the
   // title can. `Runtime::search_tiles` writes that answer through the list writer before returning
   // it, so a result is a catalogue row carrying the poster a tile draws.
-  const search = useTitleSearch(kind, { tiles: true });
+  const search = useTitleSearch(kind, {
+    tiles: true,
+    initialQuery: readViewState("browse.query", ""),
+  });
+  useEffect(() => {
+    writeViewState("browse.query", search.query);
+  }, [search.query]);
 
   return (
     <BrowseView

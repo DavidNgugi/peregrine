@@ -45,6 +45,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import { messageOf } from "../../../lib/ipc-message.js";
 import { imageUrl } from "../../../lib/media.js";
+import { useViewState } from "../../../lib/view-state.js";
 import { usePosterBackfill } from "../../player/index.js";
 import { routePath, type Route } from "../../../app/routes.js";
 import { downloadCardProps, type DownloadMarks } from "../../../lib/download-status.js";
@@ -420,10 +421,10 @@ export function LibraryScreen({
   const [forgetting, setForgetting] = useState<MatchRuleDto | null>(null);
   // Which parked file the picker is open for, if any.
   const [choosing, setChoosing] = useState<UnmatchedFileDto | null>(null);
-  // The search and the kind are this screen's own: they narrow a list the core already answered,
-  // and neither changes what the library holds.
-  const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "movies" | "shows">("all");
+  // The search and the kind narrow a list the core already answered; neither changes what the
+  // library holds. They outlive this screen so Back returns to the same filtered list.
+  const [query, setQuery] = useViewState("library.query", "");
+  const [kind, setKind] = useViewState<"all" | "movies" | "shows">("library.kind", "all");
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return titles.titles.filter(

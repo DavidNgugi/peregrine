@@ -4,6 +4,7 @@ import { api, type Genre, type Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
 import { SearchIcon } from "./icons.js";
+import { useViewState } from "./view-state.js";
 
 type Kind = "movie" | "show";
 
@@ -23,11 +24,12 @@ const SORTS = [
  */
 export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void }) {
   useAutoFocus();
-  const [kind, setKind] = useState<Kind>("movie");
-  const [sort, setSort] = useState<string>("popularity");
-  const [genre, setGenre] = useState<number | undefined>(undefined);
+  const [kind, setKind] = useViewState<Kind>("browse.kind", "movie");
+  const [sort, setSort] = useViewState<string>("browse.sort", "popularity");
+  const [genreFilter, setGenreFilter] = useViewState<number | null>("browse.genre", null);
+  const genre = genreFilter ?? undefined;
   const [genres, setGenres] = useState<Genre[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useViewState("browse.query", "");
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<Tile[]>([]);
   const [page, setPage] = useState(1);
@@ -172,7 +174,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
               key={value}
               onClick={() => {
                 setKind(value);
-                setGenre(undefined);
+                setGenreFilter(null);
                 setPage(1);
               }}
               type="button"
@@ -206,7 +208,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
             className={genre === undefined ? "genre current" : "genre"}
             data-focus="true"
             onClick={() => {
-              setGenre(undefined);
+              setGenreFilter(null);
               setPage(1);
             }}
             type="button"
@@ -219,7 +221,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
               data-focus="true"
               key={held.id}
               onClick={() => {
-                setGenre(held.id);
+                setGenreFilter(held.id);
                 setPage(1);
               }}
               type="button"

@@ -107,6 +107,8 @@ export interface TitleSearchOptions {
 /** How a caller asks for the tile-shaped answer. */
 export interface TileSearchOptions {
   readonly tiles: true;
+  /** Restores the box after the screen was unmounted for a title visit. */
+  readonly initialQuery?: string;
 }
 
 /** The state of one search, whichever shape its results take. */
@@ -154,7 +156,8 @@ export function useTitleSearch(
 ): TitleSearch | TileSearch {
   const tiles = "tiles" in options && options.tiles === true;
   const providersFirst = !tiles && "providers" in options && options.providers === true;
-  const [query, setQuery] = useState("");
+  const initialQuery = tiles && "initialQuery" in options ? (options.initialQuery ?? "") : "";
+  const [query, setQuery] = useState(initialQuery);
   const [state, setState] = useState<SearchState>({ kind, ...EMPTY });
   // Which request the answers belong to: a read that lands after the text moved on is dropped, and an
   // empty box cancels whatever is in the air rather than letting it fill the panel behind a cleared
