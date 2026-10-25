@@ -208,6 +208,11 @@ export async function dismissDownload(id: number): Promise<boolean> {
   return unwrap(commands.dismissDownload({ id }));
 }
 
+/** Clears one failed acquisition preflight. It never admitted a download or wrote a file. */
+export async function dismissPreflight(id: number): Promise<boolean> {
+  return unwrap(commands.dismissPreflight({ id }));
+}
+
 /** Enumerates what deleting one download would remove, without removing anything. */
 export async function planDownloadDeletion(id: number): Promise<DeletionPlanDto> {
   return unwrap(commands.planDownloadDeletion({ id }));

@@ -300,6 +300,27 @@ pub(crate) async fn fail_unfinished(
     Ok(result.rows_affected())
 }
 
+/// Removes one terminal acquisition row that never admitted a download.
+///
+/// The Downloads screen projects failed acquisition rows as retryable preflights. Dismissing one is
+/// the only way to clear it without retrying; a download row that references the journal entry is
+/// left alone, because that job is no longer just a preflight.
+pub(crate) async fn delete_failed_acquisition(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<bool, StorageError> {
+    let result = sqlx::query(
+        "DELETE FROM job WHERE id = ?1 AND kind = 'acquisition.acquire' \
+         AND state IN ('failed','canceled') \
+         AND NOT EXISTS (SELECT 1 FROM download_job WHERE download_job.job_id = job.id)",
+    )
+    .bind(id)
+    .execute(connection)
+    .await
+    .map_err(StorageError::from_sqlx)?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Reads one row.
 pub(crate) async fn get(
     pool: &sqlx::SqlitePool,
@@ -463,6 +484,53 @@ mod tests {
         assert_eq!(
             database.list_jobs(PageRequest::first(10)).await.unwrap(),
             vec![row]
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_failed_acquisition_can_be_dismissed() {
+        let directory = TempDir::new().unwrap();
+        let database = database(&directory).await;
+        let id = database
+            .insert_job(new_job("acquisition.acquire"))
+            .await
+            .unwrap();
+
+        assert!(
+            !database.dismiss_failed_acquisition(id).await.unwrap(),
+            "a queued job is not a failed preflight"
+        );
+        database
+            .update_job(
+                id,
+                JobChange::Finished {
+                    at: 1_700_000_000_300,
+                    phase: JobPhase::Failed,
+                    error_code: Some("INTERRUPTED".to_owned()),
+                    error: Some("The process ended.".to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(database.dismiss_failed_acquisition(id).await.unwrap());
+        assert_eq!(database.job(id).await.unwrap(), None);
+
+        let other = database.insert_job(new_job("hello")).await.unwrap();
+        database
+            .update_job(
+                other,
+                JobChange::Finished {
+                    at: 1_700_000_000_400,
+                    phase: JobPhase::Failed,
+                    error_code: None,
+                    error: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            !database.dismiss_failed_acquisition(other).await.unwrap(),
+            "a failed job of another kind is not a preflight"
         );
     }
 

@@ -198,6 +198,21 @@ impl Database {
         crate::jobs::get(&self.readers, id).await
     }
 
+    /// Deletes one failed acquisition preflight, answering whether it went.
+    ///
+    /// Only a terminal acquisition row with no download attached is deletable; the statement
+    /// scopes the kind, the phase, and the attachment in SQL.
+    pub async fn dismiss_failed_acquisition(&self, id: i64) -> Result<bool, StorageError> {
+        match self
+            .writer
+            .send(WriteRequest::DeleteFailedAcquisition { id })
+            .await?
+        {
+            WriteResponse::RowChanged { changed } => Ok(changed),
+            other => Err(unexpected_response("dismiss_failed_acquisition", &other)),
+        }
+    }
+
     /// The profile new work uses when the caller names none, or None when none is marked.
     ///
     /// # Errors

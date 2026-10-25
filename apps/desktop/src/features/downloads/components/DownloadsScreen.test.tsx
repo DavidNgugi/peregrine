@@ -39,6 +39,7 @@ const recorded = vi.hoisted(() => ({
   pause: vi.fn(() => Promise.resolve()),
   resume: vi.fn(() => Promise.resolve()),
   retryAcquire: vi.fn(() => Promise.resolve()),
+  dismissPreflight: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@peregrine/ui", async (importOriginal) => {
@@ -64,6 +65,7 @@ vi.mock("../hooks/useDownloadActions.js", () => ({
     pause: recorded.pause,
     resume: recorded.resume,
     retryAcquire: recorded.retryAcquire,
+    dismissPreflight: recorded.dismissPreflight,
     findPeers: () => Promise.resolve(),
     remove: () => Promise.resolve(),
     dismiss: () => Promise.resolve(),
@@ -153,6 +155,7 @@ describe("DownloadsScreen", () => {
     recorded.busyId = null;
     recorded.pause.mockClear();
     recorded.resume.mockClear();
+    recorded.dismissPreflight.mockClear();
   });
 
   it("opens the title a row is filling", () => {
@@ -219,11 +222,28 @@ describe("DownloadsScreen", () => {
     ]);
     expect(html).toContain("Failed");
     expect(html).toContain("Retry acquisition");
+    expect(html).toContain("Dismiss");
     expect(html).not.toContain("download-action-menu");
     // The journal's metadata progress is not a download bar, and the stage is not current once
     // the job has failed. Both used to sit under the Failed badge as if they were.
     expect(html).not.toContain("50%");
     expect(html).not.toContain("Resolving torrent metadata");
+  });
+
+  it("dismisses a failed preflight by its journal id", async () => {
+    markup([
+      job({
+        id: 77,
+        isPreflight: true,
+        state: "failed",
+        stage: "metadata",
+        title: "The Lion King",
+      }),
+    ]);
+    const control = recorded.buttons.find((button) => button.children === "Dismiss");
+    expect(control).toBeDefined();
+    await control?.onClick?.();
+    expect(recorded.dismissPreflight).toHaveBeenCalledWith(77);
   });
 
   it("draws every state as an equal-width badge with its own tone", () => {

@@ -139,6 +139,7 @@ export {
   findDownloadPeers,
   removeDownload,
   dismissDownload,
+  dismissPreflight,
   clearFinishedDownloads,
   planDownloadDeletion,
   deleteDownload,

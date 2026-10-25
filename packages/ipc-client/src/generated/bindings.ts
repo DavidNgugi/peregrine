@@ -745,6 +745,12 @@ export const commands = {
 	 *  finished is refused rather than cleared, and an entry that is already gone answers false.
 	 */
 	dismissDownload: (download: DownloadRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_download", { download })),
+	/**
+	 *  Clears one failed acquisition preflight, which never admitted a download.
+	 *  This removes a retry prompt, not a queue entry or a file. A row that is not a terminal
+	 *  acquisition job — or one that has a download attached — answers false rather than disappearing.
+	 */
+	dismissPreflight: (job: DownloadRef) => typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("dismiss_preflight", { job })),
 	/**  Clears every finished download from the queue, answering how many went. */
 	clearFinishedDownloads: () => typedError<number, AppError_Serialize>(__TAURI_INVOKE("clear_finished_downloads")),
 	/**

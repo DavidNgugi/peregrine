@@ -5606,6 +5606,18 @@ impl Runtime {
         Ok(self.database.list_jobs(request).await?)
     }
 
+    /// Clears one failed acquisition preflight that never admitted a download.
+    ///
+    /// The row is a journal entry, not a queue entry: dismissing it removes the retry prompt
+    /// without touching a file or a live transfer. A row with a download attached is refused by
+    /// the statement, so this cannot erase the history of a job that actually ran.
+    pub async fn dismiss_preflight(&self, id: i64) -> Result<bool, RuntimeError> {
+        self.database
+            .dismiss_failed_acquisition(id)
+            .await
+            .map_err(RuntimeError::from)
+    }
+
     /// The notification consent and the catalogue defaults around it.
     ///
     /// # Errors

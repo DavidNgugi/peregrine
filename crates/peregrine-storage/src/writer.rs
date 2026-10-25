@@ -427,6 +427,11 @@ pub(crate) enum WriteRequest {
     },
     /// Delete every finished `download_job` row.
     DeleteFinishedDownloadJobs,
+    /// Delete one failed acquisition journal row that never admitted a download.
+    DeleteFailedAcquisition {
+        /// The journal row.
+        id: i64,
+    },
     /// A Usenet provider or policy change, applied by the repository that owns it.
     Usenet(crate::usenet::Write),
     /// Replace the offers a search found for one title, keeping anything already acted on.
@@ -1191,6 +1196,11 @@ async fn apply_download_write(
             crate::download::delete_all_finished(connection)
                 .await
                 .map(|removed| WriteResponse::DownloadJobsCleared { removed })
+        }
+        WriteRequest::DeleteFailedAcquisition { id } => {
+            crate::jobs::delete_failed_acquisition(connection, id)
+                .await
+                .map(|changed| WriteResponse::RowChanged { changed })
         }
         WriteRequest::Usenet(write) => crate::usenet::apply(connection, write)
             .await

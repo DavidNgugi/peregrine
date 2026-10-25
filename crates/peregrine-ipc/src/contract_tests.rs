@@ -1092,6 +1092,7 @@ fn download_cases() -> Vec<ContractCase> {
         fails_internal("find_download_peers", find_download_peers_dead),
         fails_internal("remove_download", remove_download_dead),
         fails_internal("dismiss_download", dismiss_download_dead),
+        fails_internal("dismiss_preflight", dismiss_preflight_dead),
         fails_internal("clear_finished_downloads", clear_finished_downloads_dead),
         fails_internal("plan_download_deletion", plan_download_deletion_dead),
         fails_internal("delete_download", delete_download_dead),
@@ -1238,6 +1239,17 @@ fn remove_download_dead(harness: &Harness) -> Invocation<'_> {
 fn dismiss_download_dead(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::downloads::dismiss_download(
+            harness.dead_state(),
+            crate::downloads::DownloadRef { id: 1 },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn dismiss_preflight_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::downloads::dismiss_preflight(
             harness.dead_state(),
             crate::downloads::DownloadRef { id: 1 },
         )

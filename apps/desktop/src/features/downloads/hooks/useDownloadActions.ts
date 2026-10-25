@@ -12,6 +12,7 @@ import {
   commands,
   deleteDownload,
   dismissDownload,
+  dismissPreflight as dismissPreflightCall,
   findDownloadPeers,
   normalizeIpcError,
   pauseDownload,
@@ -40,6 +41,8 @@ export interface DownloadActions {
   readonly remove: (id: number) => Promise<void>;
   /** Clears one finished entry from the queue. */
   readonly dismiss: (id: number) => Promise<void>;
+  /** Clears one failed acquisition preflight that never admitted a download. */
+  readonly dismissPreflight: (id: number) => Promise<void>;
   /** Clears every finished entry from the queue. */
   readonly clearFinished: () => Promise<void>;
   /** Reads what deleting one row would remove, or `null` when the read failed. */
@@ -89,6 +92,10 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
   );
   const remove = useCallback((id: number) => move(id, removeDownload, "removeDownload"), [move]);
   const dismiss = useCallback((id: number) => move(id, dismissDownload, "dismissDownload"), [move]);
+  const dismissPreflight = useCallback(
+    (id: number) => move(id, dismissPreflightCall, "dismissPreflight"),
+    [move],
+  );
   const deleteFiles = useCallback(
     (id: number) => move(id, deleteDownload, "deleteDownload"),
     [move],
@@ -148,6 +155,7 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     findPeers,
     remove,
     dismiss,
+    dismissPreflight,
     clearFinished,
     planDeletion,
     deleteFiles,

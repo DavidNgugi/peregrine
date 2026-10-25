@@ -153,6 +153,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::find_download_peers,
             downloads::remove_download,
             downloads::dismiss_download,
+            downloads::dismiss_preflight,
             downloads::clear_finished_downloads,
             downloads::plan_download_deletion,
             downloads::delete_download,

@@ -132,6 +132,7 @@ export const en = {
         allowArchives: "Allow archives",
         remove: "Remove download",
         dismiss: "Dismiss download",
+        dismissPreflight: "Dismiss",
         delete: "Delete files",
       },
       remove: {

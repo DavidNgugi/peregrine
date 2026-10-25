@@ -346,16 +346,27 @@ export function DownloadsScreen({
       header: t("downloads.column.actions"),
       cell: (row) => {
         if (row.isPreflight) {
+          const busy = actions.busyId === row.id || actions.busyId === row.titleId;
           return row.state === "failed" ? (
-            <Button
-              className="download-primary-action"
-              disabled={actions.busyId === row.titleId}
-              onClick={() => actions.retryAcquire(row.titleId)}
-              size="sm"
-              variant="secondary"
-            >
-              {t("downloads.action.retry")}
-            </Button>
+            <div className="download-actions">
+              <Button
+                className="download-primary-action"
+                disabled={busy}
+                onClick={() => actions.retryAcquire(row.titleId)}
+                size="sm"
+                variant="secondary"
+              >
+                {t("downloads.action.retry")}
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() => actions.dismissPreflight(row.id)}
+                size="sm"
+                variant="ghost"
+              >
+                {t("downloads.action.dismissPreflight")}
+              </Button>
+            </div>
           ) : (
             <span className="text-caption text-text-tertiary">{t("downloads.none")}</span>
           );

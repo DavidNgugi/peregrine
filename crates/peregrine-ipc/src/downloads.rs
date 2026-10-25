@@ -723,6 +723,20 @@ pub async fn dismiss_download(
     Ok(guard_response("downloads::dismiss", removed))
 }
 
+/// Clears one failed acquisition preflight, which never admitted a download.
+/// This removes a retry prompt, not a queue entry or a file. A row that is not a terminal
+/// acquisition job — or one that has a download attached — answers false rather than disappearing.
+#[tauri::command]
+#[specta::specta]
+pub async fn dismiss_preflight(
+    state: State<'_, RuntimeState>,
+    job: DownloadRef,
+) -> Result<bool, AppError> {
+    let runtime = state.runtime()?;
+    let removed = runtime.dismiss_preflight(job.id).await?;
+    Ok(guard_response("downloads::dismiss_preflight", removed))
+}
+
 /// Clears every finished download from the queue, answering how many went.
 #[tauri::command]
 #[specta::specta]
