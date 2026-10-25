@@ -437,6 +437,11 @@ pub struct AcquisitionService {
     pump: Mutex<Option<Pump>>,
 }
 
+/// The first guard that contains `path`, or `None` when it is outside every configured root.
+fn resolve_media(guards: &[PathGuard], path: &std::path::Path) -> Option<SafePath> {
+    guards.iter().find_map(|guard| guard.resolve(path).ok())
+}
+
 /// Files belonging to a library title or episode that can be moved to the OS trash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MediaDeletionPlan {
@@ -569,8 +574,9 @@ impl AcquisitionService {
             None => None,
         };
         let evidence = self.database.title_evidence(scope, title_id).await?;
+        let guards = self.media_guards().await;
         Ok(MediaDeletionPlan::new(
-            self.enumerate_media(&evidence, episode_id).await,
+            self.enumerate_media(&evidence, episode_id, &guards).await,
         ))
     }
 
@@ -590,13 +596,14 @@ impl AcquisitionService {
             None => None,
         };
         let evidence = self.database.title_evidence(scope, title_id).await?;
-        let plan = MediaDeletionPlan::new(self.enumerate_media(&evidence, episode_id).await);
+        let guards = self.media_guards().await;
+        let plan =
+            MediaDeletionPlan::new(self.enumerate_media(&evidence, episode_id, &guards).await);
         for entry in &plan.entries {
             let candidate = std::path::PathBuf::from(entry.path.as_str());
-            let safe = self
-                .destination
-                .resolve(&candidate)
-                .map_err(|source| AcquisitionError::SavePath { source })?;
+            let safe = resolve_media(&guards, &candidate).ok_or(AcquisitionError::SavePath {
+                source: PathGuardError::OutsideRoot,
+            })?;
             let trash = Arc::clone(&self.trash);
             let path = safe.as_path().to_path_buf();
             tokio::task::spawn_blocking(move || trash.move_to_trash(&path))
@@ -2677,10 +2684,33 @@ impl AcquisitionService {
         entries
     }
 
+    /// The download root first, then every configured library root.
+    ///
+    /// A title's files are not all downloads: a scanned library points at folders the user already
+    /// had, and a deletion that only tried the download root answered "no media files" for a film
+    /// sitting in one of them. Each guard proves containment; none of the paths is trusted because it
+    /// came out of the database.
+    async fn media_guards(&self) -> Vec<PathGuard> {
+        let mut guards = vec![self.destination.clone()];
+        if let Ok(roots) = self
+            .database
+            .list_library_roots(PageRequest::first(200))
+            .await
+        {
+            for root in roots {
+                if let Ok(guard) = PathGuard::new(std::path::Path::new(root.root.path.as_str())) {
+                    guards.push(guard);
+                }
+            }
+        }
+        guards
+    }
+
     async fn enumerate_media(
         &self,
         evidence: &peregrine_storage::TitleEvidence,
         episode_id: Option<i64>,
+        guards: &[PathGuard],
     ) -> Vec<DeletionEntry> {
         let mut entries = Vec::new();
         let mut paths = HashSet::new();
@@ -2691,7 +2721,7 @@ impl AcquisitionService {
         {
             for file in &item.files {
                 let candidate = std::path::Path::new(file.path.as_str());
-                let Ok(safe) = self.destination.resolve(candidate) else {
+                let Some(safe) = resolve_media(guards, candidate) else {
                     continue;
                 };
                 let Ok(metadata) = tokio::fs::metadata(safe.as_path()).await else {
@@ -2819,6 +2849,28 @@ mod tests {
     use crate::episode_stills::{CaptureError, EpisodeStills, FrameCapture};
     use crate::events::EventSink;
     use crate::testing::RecordingSink;
+
+    #[test]
+    fn a_library_root_is_a_second_guard_for_a_scanned_file() {
+        // A scanned film lives in the user's folder, not the app's download root. The deletion
+        // plan must try every configured root rather than answering "no media files" for a file
+        // the library is showing.
+        let directory = TempDir::new().unwrap();
+        let downloads = directory.path().join("downloads");
+        let library = directory.path().join("library");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+        let file = library.join("Aladdin.mkv");
+        std::fs::write(&file, b"media").unwrap();
+
+        let download_guard = PathGuard::new(&downloads).unwrap();
+        let library_guard = PathGuard::new(&library).unwrap();
+        assert!(resolve_media(&[download_guard.clone()], &file).is_none());
+        assert!(
+            resolve_media(&[download_guard, library_guard], &file).is_some(),
+            "the library root contains the scanned file"
+        );
+    }
 
     /// A volume whose free space the test decides, including between calls.
     #[derive(Debug)]
