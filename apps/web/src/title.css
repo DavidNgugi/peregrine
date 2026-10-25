@@ -61,6 +61,7 @@
 .watch-toggle:disabled,
 .season-watch:disabled,
 .season-download:disabled,
+.episode-download:disabled,
 .episode-watch:disabled {
   opacity: 0.55;
   cursor: default;
@@ -105,8 +106,7 @@
 }
 
 .season-watch,
-.season-download,
-.episode-watch {
+.season-download {
   flex: 0 0 auto;
   padding: 6px 13px;
   border: 1px solid var(--border-subtle);
@@ -116,6 +116,34 @@
   font-size: 13px;
   font-weight: 620;
   cursor: pointer;
+}
+
+/* **One shape for an episode row's two controls.** They differ in colour, not geometry: download is
+   the accent action, the watch toggle is the quiet one that turns accent when pressed. Two separate
+   rules with different padding and font sizes drew one button taller than its neighbour, and the
+   shorter one aligned to the top. */
+.episode-download,
+.episode-watch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.episode-download {
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
 }
 
 .season-watch[aria-pressed="true"],
@@ -169,6 +197,7 @@
 
   .season-watch,
   .season-download,
+  .episode-download,
   .episode-watch {
     min-height: 40px;
     padding: 8px 12px;

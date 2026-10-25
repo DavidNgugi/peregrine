@@ -874,23 +874,6 @@ button {
   cursor: default;
 }
 
-.episode-download {
-  align-self: flex-start;
-  padding: 4px 10px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.episode-download:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 .episode-still {
   position: relative;
   display: block;
