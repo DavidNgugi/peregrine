@@ -48,7 +48,8 @@ pub use prowlarr::{Installed, ProwlarrError, Supervisor, VERSION as PROWLARR_VER
 pub use backup::{RestorePhase, backup_file_name};
 pub use peregrine_storage::{
     BackupInfo, BackupPhase, BackupReport, Cursor, DownloadJobRow, EpisodeRef, JobPhase, JobRecord,
-    PageRequest, PairedDevice, StorageError, TitleWatchState, WatchProgressRow,
+    LibraryStorageTotal, PageRequest, PairedDevice, StorageError, TitleWatchState,
+    WatchProgressRow,
 };
 pub use runtime::{
     BrowsePage, CredentialRequest, Health, HomeRail, LibraryTitleDetail, LibraryTitleEntry,

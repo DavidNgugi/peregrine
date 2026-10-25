@@ -10,8 +10,13 @@
  * through rather than hiding: the screen can then say what it has without implying it has more.
  */
 
-import { eventTopics, listLibraryTitles, normalizeIpcError } from "@peregrine/ipc-client";
-import type { LibraryTitleDto } from "@peregrine/ipc-client";
+import {
+  eventTopics,
+  libraryStorage,
+  listLibraryTitles,
+  normalizeIpcError,
+} from "@peregrine/ipc-client";
+import type { LibraryStorageDto, LibraryTitleDto } from "@peregrine/ipc-client";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { logUiError } from "../../../lib/error-log.js";
@@ -22,6 +27,8 @@ import { byRecentlyAdded } from "./library-order.js";
 export interface LibraryTitles {
   /** The titles, newest first; empty until the read answers. */
   readonly titles: readonly LibraryTitleDto[];
+  /** The visible library's stored media bytes and file count, or null until it answers. */
+  readonly storage: LibraryStorageDto | null;
   /** The read is still in flight. */
   readonly loading: boolean;
   /** The read failed, so the list is unknown rather than empty. */
@@ -63,17 +70,26 @@ export function providerFillFinished(envelope: unknown): boolean {
 export function useLibraryTitles(): LibraryTitles {
   const [state, setState] = useState<Omit<LibraryTitles, "refresh">>({
     titles: [],
+    storage: null,
     loading: true,
     failed: false,
   });
 
   const read = useCallback(async (): Promise<void> => {
     try {
-      const titles = byRecentlyAdded(await listLibraryTitles());
-      setState({ titles, loading: false, failed: false });
+      const [titles, storage] = await Promise.all([
+        listLibraryTitles(),
+        // The total is an addition to the read, not a precondition: a listener that cannot answer
+        // it still draws the library rather than turning the whole screen into an error.
+        libraryStorage().catch((caught: unknown) => {
+          logUiError("libraryStorage", normalizeIpcError(caught));
+          return null;
+        }),
+      ]);
+      setState({ titles: byRecentlyAdded(titles), storage, loading: false, failed: false });
     } catch (caught: unknown) {
       logUiError("listLibraryTitles", normalizeIpcError(caught));
-      setState({ titles: [], loading: false, failed: true });
+      setState({ titles: [], storage: null, loading: false, failed: true });
     }
   }, []);
 

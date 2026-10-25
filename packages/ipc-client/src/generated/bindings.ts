@@ -173,6 +173,8 @@ export const commands = {
 	 *  in, which the DTO says plainly: a screen can then show what it has without implying it has more.
 	 */
 	listTitles: (limit: number | null) => typedError<LibraryTitleDto[], AppError_Serialize>(__TAURI_INVOKE("list_titles", { limit })),
+	/**  The visible library's stored media bytes and file count. */
+	libraryStorage: () => typedError<LibraryStorageDto, AppError_Serialize>(__TAURI_INVOKE("library_storage")),
 	/**  A page of the files a scan could not place, newest first. */
 	listUnmatched: (limit: number | null) => typedError<UnmatchedFileDto[], AppError_Serialize>(__TAURI_INVOKE("list_unmatched", { limit })),
 	/**  A page of the rules a user's corrections became, newest first. */
@@ -1636,6 +1638,14 @@ export type LibraryRootDto = {
 	lastScanAt: number | null,
 	/**  When it was added, in Unix milliseconds. */
 	createdAt: number,
+};
+
+/**  The visible library's stored media bytes and file count. */
+export type LibraryStorageDto = {
+	/**  The sum of the present media files' recorded sizes. */
+	bytes: number,
+	/**  How many media files are present. */
+	files: number,
 };
 
 /**

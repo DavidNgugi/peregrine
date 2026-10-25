@@ -53,7 +53,14 @@ function title(overrides: Partial<LibraryTitleDto> = {}): LibraryTitleDto {
 }
 
 function library(state: Partial<LibraryTitles> = {}): LibraryTitles {
-  return { titles: [], loading: false, failed: false, refresh: () => Promise.resolve(), ...state };
+  return {
+    titles: [],
+    storage: null,
+    loading: false,
+    failed: false,
+    refresh: () => Promise.resolve(),
+    ...state,
+  };
 }
 
 /** One parked file as the core sends it. */
@@ -188,6 +195,18 @@ describe("LibraryScreen", () => {
     expect(html).toContain("Alien");
     expect(html).toContain("Film");
     expect(html).toContain("8 GB");
+  });
+
+  it("states how much storage the visible library uses", () => {
+    const html = markup(
+      library({
+        titles: [title(), title({ id: 2, name: "Aliens" })],
+        storage: { bytes: 16 * 1024 ** 3, files: 4 },
+      }),
+    );
+
+    expect(html).toContain("2 titles");
+    expect(html).toContain("16 GB used");
   });
 
   it("says a title a provider has not described yet is a stub", () => {

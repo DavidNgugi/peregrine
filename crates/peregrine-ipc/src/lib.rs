@@ -88,6 +88,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             library::remove_root,
             library::scan_now,
             library::list_titles,
+            library::library_storage,
             library::list_unmatched,
             library::list_match_rules,
             library::get_title,

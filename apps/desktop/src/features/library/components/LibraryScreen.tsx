@@ -446,6 +446,17 @@ export function LibraryScreen({
     <Screen backLabel={backLabel} onBack={onBack} title={t("library.title")}>
       <Section description={t("library.description")} title={t("library.section")}>
         <div className="flex flex-col gap-2">
+          {titles.storage === null || titles.titles.length === 0 ? null : (
+            <p className="text-body text-text-secondary">
+              {t("library.storage.summary", {
+                count: titles.titles.length,
+                size:
+                  titles.storage.bytes === 0
+                    ? t("library.storage.none")
+                    : sizeLabel(titles.storage.bytes, t),
+              })}
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             {scan.running ? (
               <Progress label={t("library.scan.running")} value={scan.permille} />

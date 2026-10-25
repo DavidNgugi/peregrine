@@ -245,6 +245,27 @@ pub struct CastMemberDto {
     pub profile: Option<String>,
 }
 
+/// The visible library's stored media bytes and file count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStorageDto {
+    /// The sum of the present media files' recorded sizes.
+    #[specta(type = Number)]
+    pub bytes: u64,
+    /// How many media files are present.
+    #[specta(type = Number)]
+    pub files: u64,
+}
+
+impl From<peregrine_app::LibraryStorageTotal> for LibraryStorageDto {
+    fn from(value: peregrine_app::LibraryStorageTotal) -> Self {
+        Self {
+            bytes: value.bytes,
+            files: value.files,
+        }
+    }
+}
+
 /// One episode, named by the numbers a season list draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1161,6 +1182,19 @@ pub async fn list_titles(
         .await?;
     let titles = titles.into_iter().map(LibraryTitleDto::from).collect();
     Ok(guard_response("library::list_titles", titles))
+}
+
+/// The visible library's stored media bytes and file count.
+#[tauri::command]
+#[specta::specta]
+pub async fn library_storage(
+    state: State<'_, RuntimeState>,
+) -> Result<LibraryStorageDto, AppError> {
+    let total = state.runtime()?.library_storage_total().await?;
+    Ok(guard_response(
+        "library::library_storage",
+        LibraryStorageDto::from(total),
+    ))
 }
 
 /// A page of titles that match the user's own text.

@@ -2,16 +2,10 @@ import { useEffect, useState } from "react";
 
 import { api, type Download, type Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
+import { formatBytes as bytes } from "./format.js";
 
 function percent(download: Download): number {
   return Math.max(0, Math.min(100, Math.round(download.progressPermille / 10)));
-}
-
-function bytes(value: number): string {
-  if (value < 1024) return String(value) + " B";
-  if (value < 1024 ** 2) return (value / 1024).toFixed(0) + " KB";
-  if (value < 1024 ** 3) return (value / 1024 ** 2).toFixed(1) + " MB";
-  return (value / 1024 ** 3).toFixed(2) + " GB";
 }
 
 function rate(value: number): string {

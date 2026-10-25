@@ -84,7 +84,7 @@ pub use retention::{
     RetentionPolicyEntry, RetentionRule, TableRemoval, TimeWindow,
 };
 pub use schedule::{DownloadScheduleRow, NewSchedule};
-pub use usage::{DiskUsage, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
+pub use usage::{DiskUsage, LibraryStorageTotal, LibraryUsageRow, MeasuredFrom, Tier, TierUsage};
 pub use usenet::{NewUsenetServer, UsenetServer, UsenetSetting};
 pub use watch::{
     EpisodeProgressRow, EpisodeRef, TitleWatchState, WatchDayRow, WatchProgressRow, WatchlistRow,

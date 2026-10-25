@@ -246,6 +246,10 @@ async fn the_library_usage_is_grouped_by_root_and_quality() {
     assert_eq!(usage[1].quality_label.as_deref(), Some("2160p"));
     assert_eq!(usage[1].files, 1);
     assert_eq!(usage[1].bytes, 4_000);
+
+    let total = database.library_storage_total(any_account()).await.unwrap();
+    assert_eq!(total.files, 3);
+    assert_eq!(total.bytes, 7_000, "both quality groups are counted once");
 }
 
 /// R34/I25: the storage screen is a library read, so a scope that may not see a title does not

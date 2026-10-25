@@ -688,6 +688,11 @@ export const en = {
         items: "{{count}} item",
         items_other: "{{count}} items",
       },
+      storage: {
+        summary_one: "{{count}} title · {{size}} used",
+        summary_other: "{{count}} titles · {{size}} used",
+        none: "No media on disk",
+      },
       description:
         "Every title the scans have found in your folders, with how many copies and how much space it takes. Nothing here is downloaded or moved.",
       scan: {

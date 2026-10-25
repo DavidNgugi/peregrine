@@ -1653,6 +1653,7 @@ fn watch_cases() -> Vec<ContractCase> {
     vec![
         fails_internal("continue_watching", continue_watching_dead),
         fails_internal("record_progress", record_progress_dead),
+        fails_internal("finalize_progress", finalize_progress_dead),
         fails_internal("add_to_watchlist", add_to_watchlist_dead),
         fails_internal("remove_from_watchlist", remove_from_watchlist_dead),
         fails_internal("viewing_history", viewing_history_dead),
@@ -1724,6 +1725,22 @@ fn continue_watching_dead(harness: &Harness) -> Invocation<'_> {
 fn record_progress_dead(harness: &Harness) -> Invocation<'_> {
     Box::pin(async move {
         crate::watch::record_progress(
+            harness.dead_state(),
+            crate::watch::ProgressReport {
+                title_id: 1,
+                episode_id: None,
+                position_ms: 0,
+                duration_ms: None,
+            },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn finalize_progress_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::watch::finalize_progress(
             harness.dead_state(),
             crate::watch::ProgressReport {
                 title_id: 1,
@@ -1911,9 +1928,52 @@ fn library_cases() -> Vec<ContractCase> {
             },
             drive: remove_root_without_a_runtime,
         },
+        fails_internal("library_storage", library_storage_dead),
+        fails_internal("plan_media_deletion", plan_media_deletion_dead),
+        fails_internal("delete_media", delete_media_dead),
         fails_internal("get_person", get_person_dead),
         fails_internal("person_filmography", person_filmography_dead),
     ]
+}
+
+/// The storage total is a library read through the runtime, so a runtime that never started is
+/// its only failure.
+fn library_storage_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::library_storage(harness.dead_state())
+            .await
+            .map(drop)
+    })
+}
+
+fn plan_media_deletion_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::plan_media_deletion(
+            harness.dead_state(),
+            crate::library::MediaRef {
+                title_id: 1,
+                season_number: None,
+                episode_number: None,
+            },
+        )
+        .await
+        .map(drop)
+    })
+}
+
+fn delete_media_dead(harness: &Harness) -> Invocation<'_> {
+    Box::pin(async move {
+        crate::library::delete_media(
+            harness.dead_state(),
+            crate::library::MediaRef {
+                title_id: 1,
+                season_number: None,
+                episode_number: None,
+            },
+        )
+        .await
+        .map(drop)
+    })
 }
 
 fn get_person_dead(harness: &Harness) -> Invocation<'_> {

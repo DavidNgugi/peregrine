@@ -33,9 +33,9 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::warn;
 
 use super::{
-    AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, MeDto, MediaGrant,
-    MediaGrantSource, PairOffer, PairStatus, PlaybackTicket, PreferencesDto, ProfileDto,
-    SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
+    AcquireDto, BrowseDto, DownloadDto, GenreDto, LibraryRowDto, LibraryStorageDto, MeDto,
+    MediaGrant, MediaGrantSource, PairOffer, PairStatus, PlaybackTicket, PreferencesDto,
+    ProfileDto, SeasonAcquireDto, TOKEN_COOKIE, TileDto, TitleDto, WebError, WebService,
 };
 
 /// The policy the client's own page runs under.
@@ -48,6 +48,7 @@ pub fn router(service: Arc<WebService>, app_dir: Option<std::path::PathBuf>) -> 
         .route("/api/pair/{pair_id}", get(pair_status))
         .route("/api/home", get(home))
         .route("/api/library", get(library))
+        .route("/api/library/storage", get(library_storage))
         .route("/api/watchlist", get(watchlist).post(watchlist_set))
         .route("/api/watched", post(watched_set))
         .route("/api/downloads", get(downloads))
@@ -631,6 +632,14 @@ async fn library(
     require_read(&device)?;
     let limit = query.limit.unwrap_or(60).clamp(1, 100);
     Ok(Json(service.library_page(query.after, limit).await?))
+}
+
+async fn library_storage(
+    State(service): State<Arc<WebService>>,
+    Device(device): Device,
+) -> Result<Json<LibraryStorageDto>, ApiError> {
+    require_read(&device)?;
+    Ok(Json(service.library_storage().await?))
 }
 
 async fn watchlist(

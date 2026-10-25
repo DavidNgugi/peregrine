@@ -19,6 +19,11 @@ export class ApiError extends Error {
 }
 
 /** One title the library holds, as the grid draws it. */
+export interface LibraryStorage {
+  readonly bytes: number;
+  readonly files: number;
+}
+
 export interface LibraryRow {
   readonly id: number;
   readonly name: string;
@@ -365,6 +370,7 @@ export const api = {
   stopPlayback: (url: string): Promise<void> =>
     request<void>("/api/playback/stop", "POST", { url }, true),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),
+  libraryStorage: (): Promise<LibraryStorage> => request<LibraryStorage>("/api/library/storage"),
   title: (id: number, season?: number): Promise<Title> =>
     request<Title>(
       "/api/title/" + String(id) + (season === undefined ? "" : "?season=" + String(season)),

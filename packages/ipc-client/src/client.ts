@@ -47,6 +47,7 @@ import type {
   ProgressReport,
   EpisodeDto,
   SeasonDto,
+  LibraryStorageDto,
   LibraryTitleDto,
   MatchAsDto,
   PlaybackSessionDto,
@@ -453,6 +454,11 @@ export async function addLibraryRoot(
  */
 export async function listLibraryTitles(limit?: number): Promise<LibraryTitleDto[]> {
   return unwrap(commands.listTitles(limit ?? null));
+}
+
+/** The visible library's stored media bytes and file count. */
+export async function libraryStorage(): Promise<LibraryStorageDto> {
+  return unwrap(commands.libraryStorage());
 }
 
 /** Every household profile, with the active one marked. */

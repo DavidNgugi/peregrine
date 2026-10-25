@@ -1354,6 +1354,15 @@ impl WebService {
         }
     }
 
+    /// The visible library's stored media bytes and file count.
+    ///
+    /// # Errors
+    ///
+    /// [`WebError::Runtime`] when the read fails.
+    pub async fn library_storage(&self) -> Result<LibraryStorageDto, WebError> {
+        Ok(self.runtime.library_storage_total().await?.into())
+    }
+
     /// The library page a client draws, newest first.
     ///
     /// # Errors
@@ -2925,6 +2934,25 @@ pub struct LibraryRowDto {
     pub items: i64,
     /// Unix milliseconds.
     pub added_at: i64,
+}
+
+/// The visible library's stored media bytes and file count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStorageDto {
+    /// The sum of the present media files' recorded sizes.
+    pub bytes: u64,
+    /// How many media files are present.
+    pub files: u64,
+}
+
+impl From<peregrine_storage::LibraryStorageTotal> for LibraryStorageDto {
+    fn from(value: peregrine_storage::LibraryStorageTotal) -> Self {
+        Self {
+            bytes: value.bytes,
+            files: value.files,
+        }
+    }
 }
 
 /// One episode, named by the numbers a season list draws.

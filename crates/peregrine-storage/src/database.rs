@@ -25,7 +25,7 @@ use crate::maintenance::{MaintenanceOutcome, MaintenancePlan, MaintenanceRequest
 use crate::page::PageRequest;
 use crate::pragmas;
 use crate::retention::{RetentionOutcome, RetentionPlan};
-use crate::usage::{DiskUsage, LibraryUsageRow};
+use crate::usage::{DiskUsage, LibraryStorageTotal, LibraryUsageRow};
 use crate::writer::{NewEvent, WriteRequest, WriteResponse, WriterHandle};
 use crate::{CastRow, CastWrite, DownloadScheduleRow, NewSchedule};
 
@@ -1095,6 +1095,14 @@ impl Database {
         scope: AccountScope,
     ) -> Result<Vec<LibraryUsageRow>, StorageError> {
         crate::usage::library_storage_usage(&self.readers, scope).await
+    }
+
+    /// The visible library's stored media bytes and file count.
+    pub async fn library_storage_total(
+        &self,
+        scope: AccountScope,
+    ) -> Result<LibraryStorageTotal, StorageError> {
+        crate::usage::library_storage_total(&self.readers, scope).await
     }
 
     /// Inserts one library root and reports the id `SQLite` assigned.

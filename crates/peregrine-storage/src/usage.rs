@@ -140,6 +140,15 @@ pub struct LibraryUsageRow {
     pub bytes: u64,
 }
 
+/// The library's stored bytes and file count, over every visible root and quality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LibraryStorageTotal {
+    /// How many media files the library records as present.
+    pub files: u64,
+    /// The sum of their recorded sizes.
+    pub bytes: u64,
+}
+
 /// The cache tier's sum, as one statement so a test can explain its plan.
 pub(crate) const CACHE_SUM_SQL: &str =
     "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM provider_cache";
@@ -244,6 +253,18 @@ pub(crate) async fn library_storage_usage(
             })
         })
         .collect()
+}
+
+/// The whole visible library's stored bytes, from the same scoped rows the storage screen uses.
+pub(crate) async fn library_storage_total(
+    pool: &SqlitePool,
+    scope: AccountScope,
+) -> Result<LibraryStorageTotal, StorageError> {
+    let rows = library_storage_usage(pool, scope).await?;
+    Ok(LibraryStorageTotal {
+        files: rows.iter().map(|row| row.files).sum(),
+        bytes: rows.iter().map(|row| row.bytes).sum(),
+    })
 }
 
 /// The columns the library-usage statement reads.

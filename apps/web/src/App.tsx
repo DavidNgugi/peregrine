@@ -12,6 +12,7 @@ import {
   api,
   ApiError,
   type LibraryRow,
+  type LibraryStorage,
   type PairOffer,
   type PlaybackTicket,
   type Tile,
@@ -20,6 +21,7 @@ import { BrowseScreen } from "./Browse.js";
 import { describeDevice } from "./device.js";
 import { DownloadsScreen } from "./Downloads.js";
 import { useAutoFocus, useSpatialFocus } from "./focus.js";
+import { formatBytes } from "./format.js";
 import { HomeScreen } from "./Home.js";
 import { byRecentlyAdded } from "./library-order.js";
 import {
@@ -60,6 +62,7 @@ export function App() {
   const [homeLoading, setHomeLoading] = useState(true);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [rows, setRows] = useState<readonly LibraryRow[]>([]);
+  const [libraryStorage, setLibraryStorage] = useState<LibraryStorage | null>(null);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canAcquire, setCanAcquire] = useState(false);
@@ -85,8 +88,14 @@ export function App() {
 
   const loadLibrary = useCallback(async (): Promise<void> => {
     try {
-      const library = await api.library();
+      const [library, storage] = await Promise.all([
+        api.library(),
+        // The total is a separate read; a client that reaches a listener too old to answer it still
+        // draws the grid rather than an error over the whole screen.
+        api.libraryStorage().catch(() => null),
+      ]);
       setRows(byRecentlyAdded(library));
+      setLibraryStorage(storage);
       setLibraryError(null);
       setScreen({ name: "library" });
     } catch (caught) {
@@ -432,7 +441,12 @@ export function App() {
         return (
           <>
             {error === null ? null : <p className="error">{error}</p>}
-            <LibraryScreen error={libraryError} onOpen={openId} rows={rows} />
+            <LibraryScreen
+              error={libraryError}
+              onOpen={openId}
+              rows={rows}
+              storage={libraryStorage}
+            />
           </>
         );
     }
@@ -601,10 +615,12 @@ function TabBar({
 
 function LibraryScreen({
   rows,
+  storage,
   error,
   onOpen,
 }: {
   readonly rows: readonly LibraryRow[];
+  readonly storage: LibraryStorage | null;
   readonly error: string | null;
   readonly onOpen: (id: number) => void;
 }) {
@@ -629,7 +645,8 @@ function LibraryScreen({
         <div>
           <h1>Library</h1>
           <p className="dim library-count">
-            {visible.length === 1 ? "1 title" : visible.length + " titles"}
+            {rows.length === 1 ? "1 title" : rows.length + " titles"}
+            {storage === null ? "" : " · " + formatBytes(storage.bytes) + " used"}
           </p>
         </div>
         <form className="search-field" onSubmit={(event) => event.preventDefault()} role="search">

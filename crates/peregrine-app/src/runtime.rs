@@ -3968,6 +3968,23 @@ impl Runtime {
         Ok(account)
     }
 
+    /// The visible library's stored media bytes and file count.
+    ///
+    /// The same scoped rows the storage screen reads, so a missing file is not counted and a
+    /// restricted account does not see bytes it may not see.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Storage`] when the read fails.
+    pub async fn library_storage_total(
+        &self,
+    ) -> Result<peregrine_storage::LibraryStorageTotal, RuntimeError> {
+        Ok(self
+            .database
+            .library_storage_total(installation_scope())
+            .await?)
+    }
+
     /// A page of the titles the library holds, newest first.
     ///
     /// Read under [`installation_scope`], which is the whole of this build's account story: the
