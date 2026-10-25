@@ -6,6 +6,7 @@ export type Route =
   | { readonly kind: "myList" }
   | { readonly kind: "downloads" }
   | { readonly kind: "library" }
+  | { readonly kind: "integrations" }
   | { readonly kind: "title"; readonly id: number }
   | { readonly kind: "watch"; readonly id: number };
 
@@ -22,6 +23,8 @@ export function routePath(route: Route): string {
       return "/downloads";
     case "library":
       return "/library";
+    case "integrations":
+      return "/integrations";
     case "title":
       return "/title/" + String(route.id);
     case "watch":
@@ -38,6 +41,7 @@ export function parseRoute(pathname: string): Route {
   if (head === "my-list") return { kind: "myList" };
   if (head === "downloads") return { kind: "downloads" };
   if (head === "library") return { kind: "library" };
+  if (head === "integrations") return { kind: "integrations" };
   if ((head === "title" || head === "watch") && second !== undefined) {
     const id = Number(second);
     if (Number.isSafeInteger(id) && id > 0) {

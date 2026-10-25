@@ -1,0 +1,476 @@
+/* The read-only integrations screen, plus the player's skip and post-play surfaces.
+ *
+ * This is the ticket's one new stylesheet; the shell imports it from styles.css. Everything here is
+ * ten-foot first: large type, generous hit areas, a visible ring on the focused card, no horizontal
+ * overflow at any viewport, and no motion beyond a colour change. */
+
+/* The extra navigation entry must never push the top bar past the viewport. Wrapping only happens
+   when the row is already full, so wide screens are unchanged. */
+.topbar-nav {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tab {
+  min-width: 0;
+}
+
+.tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integrations-screen {
+  padding-bottom: 64px;
+  overflow-x: hidden;
+}
+
+.integrations-body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 8px 48px 0;
+}
+
+.integrations-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.integrations-head h1 {
+  margin: 4px 0 0;
+  font-size: clamp(30px, 4vw, 44px);
+  letter-spacing: -0.03em;
+}
+
+.integrations-subtitle {
+  margin: 10px 0 0;
+  font-size: 18px;
+}
+
+.integrations-note {
+  max-width: 78ch;
+  margin: 18px 0 0;
+  color: var(--text-tertiary);
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.integration-group {
+  margin-top: 36px;
+}
+
+.integration-group h2 {
+  margin: 0 0 14px;
+  font-size: clamp(20px, 2.4vw, 28px);
+  letter-spacing: -0.015em;
+}
+
+.integration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+  min-width: 0;
+}
+
+.integration-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  transition:
+    background var(--dur-2) var(--ease-standard),
+    border-color var(--dur-2) var(--ease-standard);
+}
+
+.integration-card:hover {
+  background: var(--surface-2);
+}
+
+.integration-card:focus-visible {
+  outline: 4px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.integration-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.integration-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.integration-status {
+  flex: none;
+  padding: 3px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.integration-status.tone-ok {
+  border-color: var(--state-ok);
+  color: var(--state-ok);
+}
+
+.integration-status.tone-warn {
+  border-color: var(--state-warn);
+  color: var(--state-warn);
+}
+
+.integration-status.tone-danger {
+  border-color: var(--state-danger);
+  color: var(--state-danger);
+}
+
+.integration-status.tone-neutral {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.integration-description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.integration-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.integration-fact {
+  padding: 3px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.integration-detail {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.integration-manage {
+  margin: auto 0 0;
+  padding-top: 4px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.integration-empty,
+.integration-error {
+  margin: 28px 0 0;
+  padding: 20px 22px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.integration-error {
+  border-color: var(--state-danger);
+}
+
+.integration-error p {
+  margin: 0 0 14px;
+}
+
+.integration-error .secondary {
+  min-height: 44px;
+}
+
+.integration-error .secondary:focus-visible {
+  outline: 4px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+/* ---- Player: skip and post-play ---- */
+
+.player-skip {
+  position: absolute;
+  right: 28px;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  z-index: 3;
+  min-height: 44px;
+  padding: 12px 24px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 18px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.player-skip:focus-visible {
+  outline: 4px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.post-play {
+  position: absolute;
+  right: 28px;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  z-index: 4;
+  box-sizing: border-box;
+  width: 520px;
+  max-width: calc(100vw - 56px);
+  padding: 20px 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  box-shadow: var(--elev-3, 0 18px 48px -24px oklch(0 0 0 / 0.85));
+}
+
+.post-play-heading {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.post-play-title {
+  margin: 6px 0 0;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+}
+
+.post-play-countdown {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.post-play-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.post-play .control {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.post-play .control.post-play-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.post-play .control:focus-visible {
+  outline: 4px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+@media (max-width: 900px) {
+  .integration-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  /* Six tabs share a phone's width; the label needs the room the old padding spent. */
+  .tabbar .tab {
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
+  .integrations-body {
+    padding: 4px 20px 0;
+  }
+
+  .integrations-screen {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .integration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .integration-card {
+    padding: 18px;
+  }
+
+  .player-skip {
+    right: 14px;
+    bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 16px;
+    font-size: 16px;
+  }
+
+  .post-play {
+    right: 14px;
+    left: 14px;
+    bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-width: none;
+    padding: 16px;
+  }
+
+  .post-play-title {
+    font-size: 19px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .player-skip {
+    right: 16px;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .post-play {
+    right: 16px;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    width: 420px;
+    max-width: calc(100vw - 32px);
+    padding: 14px 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .integration-card,
+  .post-play,
+  .player-skip {
+    transition: none;
+  }
+}
+
+html.tizen .integrations-body {
+  padding: 2vw 4vw 0;
+}
+
+html.tizen .integrations-head h1 {
+  font-size: 3vw;
+}
+
+html.tizen .integrations-subtitle,
+html.tizen .integrations-note {
+  font-size: 1.2vw;
+}
+
+html.tizen .integration-group {
+  margin-top: 2.4vw;
+}
+
+html.tizen .integration-group h2 {
+  margin-bottom: 1vw;
+  font-size: 1.9vw;
+}
+
+html.tizen .integration-grid {
+  grid-template-columns: repeat(auto-fill, minmax(26vw, 1fr));
+  gap: 1.2vw;
+}
+
+html.tizen .integration-card {
+  gap: 0.8vw;
+  padding: 1.4vw;
+  border-radius: 0.7vw;
+}
+
+html.tizen .integration-name {
+  font-size: 1.5vw;
+}
+
+html.tizen .integration-status,
+html.tizen .integration-fact,
+html.tizen .integration-manage {
+  font-size: 1vw;
+}
+
+html.tizen .integration-description {
+  font-size: 1.2vw;
+}
+
+html.tizen .integration-detail {
+  font-size: 1.05vw;
+}
+
+html.tizen .player-skip {
+  right: 2vw;
+  bottom: 6vw;
+  min-height: 3vw;
+  padding: 0.7vw 1.5vw;
+  border-radius: 0.6vw;
+  font-size: 1.35vw;
+}
+
+html.tizen .post-play {
+  right: 2vw;
+  bottom: 6vw;
+  width: 34vw;
+  max-width: 34vw;
+  padding: 1.4vw;
+  border-radius: 0.8vw;
+}
+
+html.tizen .post-play-heading {
+  font-size: 1.2vw;
+}
+
+html.tizen .post-play-title {
+  font-size: 1.7vw;
+}
+
+html.tizen .post-play-countdown {
+  font-size: 1.3vw;
+}
+
+html.tizen .post-play .control {
+  min-height: 2.8vw;
+  padding: 0.8vw 1.4vw;
+  border-radius: 0.6vw;
+  font-size: 1.2vw;
+}

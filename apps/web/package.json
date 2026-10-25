@@ -12,8 +12,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@dicebear/core": "^9.4.2",
     "@dicebear/collection": "^9.4.2",
+    "@dicebear/core": "^9.4.2",
+    "@peregrine/player-ui": "workspace:*",
     "@peregrine/theme": "workspace:*",
     "hls.js": "1.7.3",
     "react": "19.3.0",

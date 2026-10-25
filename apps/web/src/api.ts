@@ -249,6 +249,35 @@ export interface PairStatus {
   readonly expiresAtMs: number | null;
 }
 
+/** One skip window the marker sources resolved for a title or episode. */
+export interface Marker {
+  readonly kind: "intro" | "recap" | "credits" | "preview";
+  readonly startMs: number;
+  /** `null` only for credits, which may run to the end of the media. */
+  readonly endMs: number | null;
+  readonly source: string;
+  /** Whole percent, 0 through 100. */
+  readonly confidence: number;
+}
+
+/** One integration as the read-only client may see it: no credential field and no secret. */
+export interface IntegrationStatus {
+  readonly id: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly category: "metadata" | "skipMarkers" | "subtitles" | "tracking" | "acquisition";
+  readonly enabled: boolean;
+  readonly configured: boolean;
+  /** Whether a credential is required at all. */
+  readonly requiresKey: boolean;
+  /** Whether it accepts a key but works without one. */
+  readonly keyOptional: boolean;
+  /** True only for a source that is available without being enabled, such as local chapters. */
+  readonly alwaysOn: boolean;
+  readonly lastOutcome: string | null;
+  readonly needsAttention: boolean;
+}
+
 /** A playback URL the listener minted for this device. */
 export interface PlaybackTicket {
   readonly kind: "direct" | "hls";
@@ -267,6 +296,8 @@ export interface PlaybackTicket {
   readonly nextEpisode: NextEpisode | null;
   /** The audio language the host selected for a transcode, when it selected one. */
   readonly audioLanguage: string | null;
+  /** Skip windows the marker cache held at mint time; refreshed through {@link api.markers}. */
+  readonly markers: Marker[];
 }
 
 async function request<T>(
@@ -367,6 +398,8 @@ export const api = {
   watchedSet: (change: WatchedChange): Promise<void> =>
     request<void>("/api/watched", "POST", change),
   preferences: (): Promise<PlaybackPreferences> => request<PlaybackPreferences>("/api/preferences"),
+  integrations: (): Promise<IntegrationStatus[]> =>
+    request<IntegrationStatus[]>("/api/integrations"),
   stopPlayback: (url: string): Promise<void> =>
     request<void>("/api/playback/stop", "POST", { url }, true),
   library: (): Promise<LibraryRow[]> => request<LibraryRow[]>("/api/library?limit=100"),
@@ -392,6 +425,23 @@ export const api = {
       episodeNumber: episodeNumber ?? null,
       episodeId: episodeId ?? null,
     }),
+  /**
+   * The marker cache as it stands now.
+   *
+   * The ticket's markers are the first read; a marker source that answers after the mint fills
+   * this cache, so the player asks again. A null episode or duration is omitted rather than sent
+   * as the string "null", which the listener's query would refuse.
+   */
+  markers: (
+    titleId: number,
+    episodeId: number | null,
+    durationMs: number | null,
+  ): Promise<Marker[]> => {
+    let path = "/api/markers?titleId=" + String(titleId);
+    if (episodeId !== null) path += "&episodeId=" + String(episodeId);
+    if (durationMs !== null) path += "&durationMs=" + String(durationMs);
+    return request<Marker[]>(path);
+  },
   progress: (
     titleId: number,
     episodeId: number | null,

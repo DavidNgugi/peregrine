@@ -23,6 +23,7 @@ import { DownloadsScreen } from "./Downloads.js";
 import { useAutoFocus, useSpatialFocus } from "./focus.js";
 import { formatBytes } from "./format.js";
 import { HomeScreen } from "./Home.js";
+import { IntegrationsScreen } from "./Integrations.js";
 import { byRecentlyAdded, matchesKind as matchesKindOf } from "./library-order.js";
 import {
   BookmarkIcon,
@@ -50,6 +51,7 @@ type Screen =
   | { readonly name: "myList" }
   | { readonly name: "downloads" }
   | { readonly name: "library" }
+  | { readonly name: "integrations" }
   | { readonly name: "title"; readonly id: number; readonly preview?: Tile }
   | {
       readonly name: "player";
@@ -78,7 +80,8 @@ export function App() {
     const current = screenRef.current.name;
     // A title and its player are entered at the top by design; the place worth remembering is the
     // list behind them, where the next Back is the action a remote user makes.
-    if (!["home", "browse", "myList", "downloads", "library"].includes(current)) return;
+    if (!["home", "browse", "myList", "downloads", "library", "integrations"].includes(current))
+      return;
     const active = document.activeElement;
     // A topbar or tab-bar control is the way out, not the place the person was reading. Save a
     // content focus only, so returning from a nav click is not restored to the nav button.
@@ -167,6 +170,9 @@ export function App() {
         case "library":
           setScreen({ name: "library" });
           void loadLibrary();
+          break;
+        case "integrations":
+          setScreen({ name: "integrations" });
           break;
         case "title":
           setScreen(
@@ -267,6 +273,11 @@ export function App() {
     setScreen({ name: "downloads" });
   }, [push]);
 
+  const goIntegrations = useCallback((): void => {
+    push({ kind: "integrations" });
+    setScreen({ name: "integrations" });
+  }, [push]);
+
   const goBack = useCallback((): void => {
     saveRoute();
     if ((window.history.state as { fromApp?: boolean } | null)?.fromApp === true) {
@@ -316,7 +327,10 @@ export function App() {
   // The Tizen shell navigates away, so the remote's hardware Back key is this client's to handle.
   // At the root there is no earlier screen to show, and Back leaves the app rather than bouncing.
   useTizenBack(tizen, () => {
-    const target = backTarget(screenRef.current.name);
+    // The back rule is about history, which integrations shares with every tab; naming it
+    // separately avoids widening the shared screen type for the one screen this ticket adds.
+    const name = screenRef.current.name;
+    const target = name === "integrations" ? "back" : backTarget(name);
     if (target === "exit") return exitTizenApp();
     if (target === "player") {
       const current = screenRef.current;
@@ -343,7 +357,8 @@ export function App() {
   useEffect(() => {
     const returning = restoreNext.current;
     restoreNext.current = false;
-    if (!["home", "browse", "myList", "downloads", "library"].includes(screen.name)) return;
+    if (!["home", "browse", "myList", "downloads", "library", "integrations"].includes(screen.name))
+      return;
     const saved = returning ? recallRoute(window.location.pathname) : null;
     if (saved === null) {
       window.scrollTo(0, 0);
@@ -510,6 +525,8 @@ export function App() {
         return <MyListScreen onOpen={(tile) => openTile(tile)} />;
       case "downloads":
         return <DownloadsScreen onOpen={(tile) => openTile(tile)} />;
+      case "integrations":
+        return <IntegrationsScreen />;
       case "home":
         return (
           <>
@@ -547,6 +564,7 @@ export function App() {
         onBrowse={() => goBrowse()}
         onDownloads={goDownloads}
         onHome={goHome}
+        onIntegrations={goIntegrations}
         onLibrary={goLibrary}
         onMyList={goMyList}
         onSearch={() => goBrowse(true)}
@@ -557,6 +575,7 @@ export function App() {
         onBrowse={() => goBrowse()}
         onDownloads={goDownloads}
         onHome={goHome}
+        onIntegrations={goIntegrations}
         onLibrary={goLibrary}
         onMyList={goMyList}
       />
@@ -564,7 +583,7 @@ export function App() {
   );
 }
 
-type Tab = "home" | "browse" | "myList" | "downloads" | "library";
+type Tab = "home" | "browse" | "myList" | "downloads" | "library" | "integrations";
 
 function TopBar({
   active,
@@ -574,6 +593,7 @@ function TopBar({
   onMyList,
   onDownloads,
   onLibrary,
+  onIntegrations,
   onSearch,
 }: {
   readonly active: Tab | null;
@@ -583,6 +603,7 @@ function TopBar({
   readonly onMyList: () => void;
   readonly onDownloads: () => void;
   readonly onLibrary: () => void;
+  readonly onIntegrations: () => void;
   readonly onSearch: () => void;
 }) {
   return (
@@ -608,6 +629,7 @@ function TopBar({
             ["myList", "My List", onMyList],
             ["downloads", "Downloads", onDownloads],
             ["library", "Library", onLibrary],
+            ["integrations", "Integrations", onIntegrations],
           ] as const
         ).map(([id, label, action]) => (
           <button
@@ -644,6 +666,7 @@ function TabBar({
   onMyList,
   onDownloads,
   onLibrary,
+  onIntegrations,
 }: {
   readonly active: Tab | null;
   readonly onHome: () => void;
@@ -651,6 +674,7 @@ function TabBar({
   readonly onMyList: () => void;
   readonly onDownloads: () => void;
   readonly onLibrary: () => void;
+  readonly onIntegrations: () => void;
 }) {
   return (
     <nav className="tabbar">
@@ -703,6 +727,15 @@ function TabBar({
       >
         <LibraryIcon />
         <span>Library</span>
+      </button>
+      <button
+        className={active === "integrations" ? "tab current" : "tab"}
+        data-focus="true"
+        data-focus-key="tab:integrations"
+        onClick={onIntegrations}
+        type="button"
+      >
+        <span>Integrations</span>
       </button>
     </nav>
   );
