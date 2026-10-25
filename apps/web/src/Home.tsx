@@ -151,6 +151,7 @@ export function TileCard({
       className="card"
       data-autofocus={autofocus ? "true" : undefined}
       data-focus="true"
+      data-focus-key={"tile:" + String(tile.id)}
       data-panel={showsPanel ? "true" : undefined}
       data-preview={settling ? "settling" : preview.phase}
       onClick={() => onOpen(tile)}

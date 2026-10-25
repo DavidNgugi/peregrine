@@ -143,6 +143,7 @@ export function DownloadsScreen({ onOpen }: { readonly onOpen: (tile: Tile) => v
                   className="download-row"
                   data-autofocus={index === 0 ? "true" : undefined}
                   data-focus="true"
+                  data-focus-key={"download:" + String(download.id)}
                   data-tone={statusTone(download.state)}
                   disabled={tile === null}
                   key={download.id}

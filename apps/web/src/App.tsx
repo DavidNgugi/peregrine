@@ -36,6 +36,7 @@ import {
 import { MyListScreen } from "./MyList.js";
 import { Player } from "./Player.js";
 import { ProfileMenu } from "./ProfileMenu.js";
+import { focusKeyOf, recallRoute, rememberRoute, restoreFocus } from "./route-state.js";
 import { parseRoute, routePath, type Route } from "./routing.js";
 import { backTarget, exitTizenApp, isTizen, useTizenBack, useTizenFocusPlate } from "./tizen.js";
 import { TitleScreen } from "./Title.js";
@@ -68,6 +69,26 @@ export function App() {
   const [canAcquire, setCanAcquire] = useState(false);
   const screenRef = useRef(screen);
   screenRef.current = screen;
+  const routeKey = useRef(window.location.pathname);
+  // Only a popstate is a return; an explicit tab or card opens a fresh screen at the top.
+  const restoreNext = useRef(false);
+
+  const saveRoute = useCallback((): void => {
+    const current = screenRef.current.name;
+    // A title and its player are entered at the top by design; the place worth remembering is the
+    // list behind them, where the next Back is the action a remote user makes.
+    if (!["home", "browse", "myList", "downloads", "library"].includes(current)) return;
+    const active = document.activeElement;
+    // A topbar or tab-bar control is the way out, not the place the person was reading. Save a
+    // content focus only, so returning from a nav click is not restored to the nav button.
+    const focusKey =
+      active instanceof HTMLElement &&
+      active.matches("[data-focus]") &&
+      active.closest("main") !== null
+        ? focusKeyOf(active)
+        : null;
+    rememberRoute(routeKey.current, { scrollY: window.scrollY, focusKey });
+  }, []);
 
   const loadHome = useCallback(async (): Promise<void> => {
     setHomeLoading(true);
@@ -108,12 +129,17 @@ export function App() {
     }
   }, []);
 
-  const push = useCallback((route: Route): void => {
-    const path = routePath(route);
-    if (window.location.pathname + window.location.search !== path) {
+  const push = useCallback(
+    (route: Route): void => {
+      const path = routePath(route);
+      if (window.location.pathname + window.location.search === path) return;
+      saveRoute();
+      restoreNext.current = false;
       window.history.pushState({ fromApp: true }, "", path);
-    }
-  }, []);
+      routeKey.current = path;
+    },
+    [saveRoute],
+  );
 
   const showRoute = useCallback(
     (route: Route, preview?: Tile): void => {
@@ -155,6 +181,7 @@ export function App() {
           break;
         }
       }
+      routeKey.current = window.location.pathname;
     },
     [loadHome, loadLibrary],
   );
@@ -240,20 +267,27 @@ export function App() {
   }, [push]);
 
   const goBack = useCallback((): void => {
+    saveRoute();
     if ((window.history.state as { fromApp?: boolean } | null)?.fromApp === true) {
       window.history.back();
     } else {
       // A directly-opened page has no earlier app entry; replace it with home so Back does not
       // bounce between the same two screens.
+      restoreNext.current = false;
       window.history.replaceState(null, "", "/");
+      routeKey.current = "/";
       setScreen({ name: "home" });
       void loadHome();
     }
-  }, [loadHome]);
+  }, [loadHome, saveRoute]);
 
   // Back, forward, and a phone's edge swipe all arrive as `popstate`; the URL is the route.
   useEffect(() => {
     const onPop = (): void => {
+      // The URL has already changed, but the DOM still belongs to the screen being left. Remember
+      // it before `showRoute` swaps the screen.
+      saveRoute();
+      restoreNext.current = true;
       const previous = screenRef.current;
       if (previous.name === "player") {
         void api.stopPlayback(previous.ticket.url).catch(() => {});
@@ -262,7 +296,7 @@ export function App() {
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [showRoute]);
+  }, [showRoute, saveRoute]);
 
   const closePlayer = useCallback((id: number): void => {
     if ((window.history.state as { fromApp?: boolean } | null)?.fromApp === true) {
@@ -302,6 +336,58 @@ export function App() {
     if (titleId === null) return;
     window.scrollTo(0, 0);
   }, [titleId]);
+
+  // A return to a list restores the place it was left at; a first visit starts at the top. The
+  // first attempt runs after the screen's own entry autofocus, so the remembered card wins.
+  useEffect(() => {
+    const returning = restoreNext.current;
+    restoreNext.current = false;
+    if (!["home", "browse", "myList", "downloads", "library"].includes(screen.name)) return;
+    const saved = returning ? recallRoute(window.location.pathname) : null;
+    if (saved === null) {
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    let retry = 0;
+    const abort = (): void => {
+      cancelled = true;
+      window.clearTimeout(retry);
+      window.removeEventListener("keydown", abort);
+      window.removeEventListener("pointerdown", abort);
+    };
+    const tryFocus = (): void => {
+      if (cancelled) return;
+      if (saved.focusKey === null) return;
+      if (restoreFocus(saved.focusKey)) {
+        abort();
+        return;
+      }
+      attempts += 1;
+      // The list may still be fetching after a fresh mount. Give it a short window, but stop as
+      // soon as the person touches the remote so a late fetch cannot steal the focus back.
+      if (attempts < 8) retry = window.setTimeout(tryFocus, 80);
+      else abort();
+    };
+
+    const start = window.setTimeout(() => {
+      window.scrollTo(0, saved.scrollY);
+      if (saved.focusKey === null) return;
+      window.addEventListener("keydown", abort, { once: true });
+      window.addEventListener("pointerdown", abort, { once: true });
+      tryFocus();
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(start);
+      window.clearTimeout(retry);
+      window.removeEventListener("keydown", abort);
+      window.removeEventListener("pointerdown", abort);
+    };
+  }, [screen]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -505,6 +591,7 @@ function TopBar({
           aria-label="Back"
           className="nav topbar-back"
           data-focus="true"
+          data-focus-key="nav:back"
           onClick={onBack}
           type="button"
         >
@@ -525,6 +612,7 @@ function TopBar({
           <button
             className={active === id ? "nav current" : "nav"}
             data-focus="true"
+            data-focus-key={"nav:" + id}
             key={id}
             onClick={action}
             type="button"
@@ -537,6 +625,7 @@ function TopBar({
         aria-label="Search"
         className="nav search-toggle"
         data-focus="true"
+        data-focus-key="nav:search"
         onClick={onSearch}
         type="button"
       >
@@ -567,6 +656,7 @@ function TabBar({
       <button
         className={active === "home" ? "tab current" : "tab"}
         data-focus="true"
+        data-focus-key="tab:home"
         onClick={onHome}
         type="button"
       >
@@ -576,6 +666,7 @@ function TabBar({
       <button
         className={active === "browse" ? "tab current" : "tab"}
         data-focus="true"
+        data-focus-key="tab:browse"
         onClick={onBrowse}
         type="button"
       >
@@ -585,6 +676,7 @@ function TabBar({
       <button
         className={active === "myList" ? "tab current" : "tab"}
         data-focus="true"
+        data-focus-key="tab:myList"
         onClick={onMyList}
         type="button"
       >
@@ -594,6 +686,7 @@ function TabBar({
       <button
         className={active === "downloads" ? "tab current" : "tab"}
         data-focus="true"
+        data-focus-key="tab:downloads"
         onClick={onDownloads}
         type="button"
       >
@@ -603,6 +696,7 @@ function TabBar({
       <button
         className={active === "library" ? "tab current" : "tab"}
         data-focus="true"
+        data-focus-key="tab:library"
         onClick={onLibrary}
         type="button"
       >
@@ -702,6 +796,7 @@ function LibraryScreen({
               className="tile"
               data-autofocus={index === 0 ? "true" : undefined}
               data-focus="true"
+              data-focus-key={"library:" + String(row.id)}
               key={row.id}
               onClick={() => onOpen(row.id)}
               type="button"
