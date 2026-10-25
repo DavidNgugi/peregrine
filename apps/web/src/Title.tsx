@@ -501,107 +501,109 @@ export function TitleScreen({
             <p className="dim">Reading...</p>
           ) : (
             <>
-              {canPlay ? (
-                <div className="actions">
-                  <button
-                    className="play"
-                    data-autofocus="true"
-                    data-focus="true"
-                    disabled={busy || (movie ? false : nextEpisode === undefined)}
-                    onClick={() => void primary()}
-                    type="button"
-                  >
-                    {busy
-                      ? "Opening..."
-                      : movie
-                        ? startAt > 5_000
-                          ? "Resume"
-                          : "Play"
-                        : nextEpisode === undefined
-                          ? "No episode on disk"
-                          : nextEpisode.percent > 0
-                            ? "Resume S" +
-                              String(nextEpisode.seasonNumber) +
-                              " E" +
-                              String(nextEpisode.episodeNumber)
-                            : "Play S" +
-                              String(nextEpisode.seasonNumber) +
-                              " E" +
-                              String(nextEpisode.episodeNumber)}
-                  </button>
-                  {movie && resume > 5_000 && !atEnd ? (
+              <div className="hero-actions">
+                {canPlay ? (
+                  <div className="actions">
                     <button
-                      className="secondary"
+                      className="play"
+                      data-autofocus="true"
                       data-focus="true"
-                      disabled={busy}
-                      onClick={() => void playMovie(0)}
+                      disabled={busy || (movie ? false : nextEpisode === undefined)}
+                      onClick={() => void primary()}
                       type="button"
                     >
-                      Start over
+                      {busy
+                        ? "Opening..."
+                        : movie
+                          ? startAt > 5_000
+                            ? "Resume"
+                            : "Play"
+                          : nextEpisode === undefined
+                            ? "No episode on disk"
+                            : nextEpisode.percent > 0
+                              ? "Resume S" +
+                                String(nextEpisode.seasonNumber) +
+                                " E" +
+                                String(nextEpisode.episodeNumber)
+                              : "Play S" +
+                                String(nextEpisode.seasonNumber) +
+                                " E" +
+                                String(nextEpisode.episodeNumber)}
+                    </button>
+                    {movie && resume > 5_000 && !atEnd ? (
+                      <button
+                        className="secondary"
+                        data-focus="true"
+                        disabled={busy}
+                        onClick={() => void playMovie(0)}
+                        type="button"
+                      >
+                        Start over
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="download-cta">
+                    <p className="note">
+                      {inLibrary
+                        ? "No downloaded file is on disk yet."
+                        : "This title is not in your library yet."}
+                    </p>
+                    {canAcquire && (movie || episodes.length === 0) && upcomingTitle ? (
+                      <button
+                        className="secondary"
+                        data-autofocus="true"
+                        data-focus="true"
+                        disabled={pending !== null || title.scheduled}
+                        onClick={() => void scheduleTitle()}
+                        type="button"
+                      >
+                        {pending === "schedule:title"
+                          ? "Scheduling..."
+                          : title.scheduled
+                            ? "Scheduled"
+                            : "Schedule"}
+                      </button>
+                    ) : canAcquire && (movie || episodes.length === 0) && titleDownload !== null ? (
+                      <button
+                        className="secondary"
+                        data-autofocus="true"
+                        data-focus="true"
+                        disabled={pending !== null || titleDownload.disabled}
+                        onClick={() => void downloadTitle()}
+                        type="button"
+                      >
+                        {pending === titleDownloadKey ? "Queuing..." : titleDownload.label}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+                <div className="actions title-actions">
+                  <button
+                    aria-pressed={title.watchlisted}
+                    className="watchlist"
+                    data-autofocus={!canPlay && !heroDownload ? "true" : undefined}
+                    data-focus="true"
+                    disabled={watchlistBusy}
+                    onClick={() => void toggleWatchlist()}
+                    type="button"
+                  >
+                    <BookmarkIcon />
+                    {title.watchlisted ? "In My List" : "My List"}
+                  </button>
+                  {movie && !upcomingTitle ? (
+                    <button
+                      aria-pressed={title.watched}
+                      className="watch-toggle"
+                      data-focus="true"
+                      disabled={marking !== null}
+                      onClick={() => void toggleTitleWatched()}
+                      type="button"
+                    >
+                      {title.watched ? "Mark unwatched" : "Mark watched"}
                     </button>
                   ) : null}
                 </div>
-              ) : (
-                <div className="download-cta">
-                  <p className="note">
-                    {inLibrary
-                      ? "No downloaded file is on disk yet."
-                      : "This title is not in your library yet."}
-                  </p>
-                  {canAcquire && (movie || episodes.length === 0) && upcomingTitle ? (
-                    <button
-                      className="secondary"
-                      data-autofocus="true"
-                      data-focus="true"
-                      disabled={pending !== null || title.scheduled}
-                      onClick={() => void scheduleTitle()}
-                      type="button"
-                    >
-                      {pending === "schedule:title"
-                        ? "Scheduling..."
-                        : title.scheduled
-                          ? "Scheduled"
-                          : "Schedule"}
-                    </button>
-                  ) : canAcquire && (movie || episodes.length === 0) && titleDownload !== null ? (
-                    <button
-                      className="secondary"
-                      data-autofocus="true"
-                      data-focus="true"
-                      disabled={pending !== null || titleDownload.disabled}
-                      onClick={() => void downloadTitle()}
-                      type="button"
-                    >
-                      {pending === titleDownloadKey ? "Queuing..." : titleDownload.label}
-                    </button>
-                  ) : null}
-                </div>
-              )}
-              <div className="actions title-actions">
-                <button
-                  aria-pressed={title.watchlisted}
-                  className="watchlist"
-                  data-autofocus={!canPlay && !heroDownload ? "true" : undefined}
-                  data-focus="true"
-                  disabled={watchlistBusy}
-                  onClick={() => void toggleWatchlist()}
-                  type="button"
-                >
-                  <BookmarkIcon />
-                  {title.watchlisted ? "In My List" : "My List"}
-                </button>
-                {movie && !upcomingTitle ? (
-                  <button
-                    aria-pressed={title.watched}
-                    className="watch-toggle"
-                    data-focus="true"
-                    disabled={marking !== null}
-                    onClick={() => void toggleTitleWatched()}
-                    type="button"
-                  >
-                    {title.watched ? "Mark unwatched" : "Mark watched"}
-                  </button>
-                ) : null}
               </div>
             </>
           )}

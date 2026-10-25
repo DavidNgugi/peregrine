@@ -1217,6 +1217,7 @@ button {
   gap: 16px;
   align-items: center;
   padding: 18px 48px 0;
+  margin-bottom: 22px;
 }
 
 .segmented {
@@ -1244,6 +1245,7 @@ button {
 }
 
 .sort-field {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -1254,12 +1256,30 @@ button {
 
 .sort-field select {
   height: 38px;
-  padding: 0 10px;
+  padding: 0 34px 0 14px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   background: var(--surface-1);
   color: var(--text-primary);
   font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+/* A native arrow sits on the font baseline and drifts with the platform's control styling.
+   This one is centred against the select itself, on the same geometry everywhere. */
+.sort-field::after {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--text-secondary);
+  border-bottom: 1.5px solid var(--text-secondary);
+  content: "";
+  pointer-events: none;
+  transform: translateY(-58%) rotate(45deg);
 }
 
 .genre-row {
@@ -1762,24 +1782,17 @@ button {
 /* ---- Profile selector (device-local, like the desktop's) ---- */
 
 .profile-button {
-  display: inline-flex;
+  display: grid;
   flex: none;
-  gap: 8px;
-  align-items: center;
-  padding: 4px 12px 4px 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  background: var(--surface-1);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
   color: var(--text-primary);
   cursor: pointer;
-}
-
-.profile-button-name {
-  max-width: 120px;
-  overflow: hidden;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  place-items: center;
 }
 
 .profile-avatar {
@@ -1788,6 +1801,7 @@ button {
   place-items: center;
   width: 34px;
   height: 34px;
+  overflow: hidden;
   border-radius: 50%;
   color: white;
   font-size: 13px;
@@ -2271,14 +2285,6 @@ button {
 }
 
 @media (max-width: 720px) {
-  .profile-button {
-    padding: 4px;
-  }
-
-  .profile-button-name {
-    display: none;
-  }
-
   .profile-dialog {
     padding: 18px;
   }

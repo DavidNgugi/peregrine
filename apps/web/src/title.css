@@ -1,7 +1,18 @@
 /* The title page: hero actions, seasons, episodes, and downloads; loaded after home.css. */
 
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.hero-actions .actions {
+  flex: 0 0 auto;
+}
+
 .title-actions {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .watchlist,
@@ -117,6 +128,11 @@
 }
 
 @media (max-width: 720px) {
+  .hero-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .watchlist,
   .watch-toggle {
     width: 100%;

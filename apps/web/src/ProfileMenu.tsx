@@ -185,7 +185,6 @@ export function ProfileMenu(): ReactElement {
         type="button"
       >
         <Avatar profile={active} />
-        <span className="profile-button-name">{active?.name ?? "Profile"}</span>
       </button>
       {open
         ? createPortal(
