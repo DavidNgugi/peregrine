@@ -1375,6 +1375,26 @@ impl AcquisitionService {
             engine.pause(handle).await?;
             return Ok(state);
         }
+        let row = self
+            .database
+            .download_job(unrestricted(), id)
+            .await?
+            .ok_or(AcquisitionError::NotLive)?;
+        // A restart loses the handle. A row that is `downloading` but could not be reattached has
+        // no transfer to stop, so the state change is the whole pause; refusing it left a row that
+        // looked live but ignored every pause. A row with no handle and no live state (blocked,
+        // metadata) is still not live.
+        if matches!(
+            row.state,
+            DownloadState::Downloading | DownloadState::Seeding
+        ) && self.handle(id).is_err()
+        {
+            warn!(
+                job = id,
+                "pausing a row this process holds no engine handle for"
+            );
+            return self.apply(id, DownloadEvent::Paused).await;
+        }
         let handle = self.handle(id).map_err(|_| AcquisitionError::NotLive)?;
         let state = self.apply(id, DownloadEvent::Paused).await?;
         self.engine.pause(handle).await?;
@@ -5135,6 +5155,43 @@ mod tests {
                 "episode {episode_id} has its own blob"
             );
         }
+    }
+
+    /// A restart loses every handle. A downloading row that could not be reattached has no
+    /// transfer left to stop, so Pause must still move it to `paused` instead of refusing and
+    /// leaving a row that ignores the control.
+    #[tokio::test]
+    async fn a_downloading_row_that_lost_its_handle_can_be_paused() {
+        let harness = harness().await;
+        let started = harness
+            .start(8, description())
+            .await
+            .expect("the fixture starts a torrent");
+        harness
+            .service
+            .handles
+            .lock()
+            .expect("the handle map is not poisoned")
+            .remove(&started.job.id);
+
+        assert_eq!(
+            harness
+                .service
+                .pause(started.job.id)
+                .await
+                .expect("a row with no transfer can still be paused"),
+            DownloadState::Paused
+        );
+        assert_eq!(
+            harness
+                .database
+                .download_job(unrestricted(), started.job.id)
+                .await
+                .expect("the row is read")
+                .expect("the row exists")
+                .state,
+            DownloadState::Paused
+        );
     }
 
     /// A job this process does not hold has no handle, which is a different answer from a state
