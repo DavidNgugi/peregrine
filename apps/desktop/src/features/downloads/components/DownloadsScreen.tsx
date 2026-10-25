@@ -332,6 +332,10 @@ export function DownloadsScreen({
         // Pause has no meaning there (the state machine refuses it).
         const resumable = paused || row.state === "metadata";
         const pausable = row.state === "downloading" || row.state === "seeding";
+        // A live transfer that is reading no bytes is the one a person needs a control for. Leave
+        // it in the More menu and the row looks stuck with no way to ask its swarm again.
+        const stalledDownload =
+          row.protocol === "torrent" && row.state === "downloading" && row.downloadRateBps === 0;
         const play: Route =
           row.seasonNumber !== null && row.episodeNumber !== null
             ? {
@@ -377,6 +381,17 @@ export function DownloadsScreen({
                 {t("downloads.action.pause")}
               </Button>
             ) : null}
+            {stalledDownload ? (
+              <Button
+                className="download-primary-action"
+                disabled={busy}
+                onClick={() => actions.findPeers(row.id)}
+                size="sm"
+                variant="secondary"
+              >
+                {t("downloads.action.findPeers")}
+              </Button>
+            ) : null}
             <details className="download-action-menu">
               <summary>{t("downloads.action.more")}</summary>
               <div className="download-action-popover">
@@ -407,7 +422,8 @@ export function DownloadsScreen({
                 ) : null}
                 {/* The core re-announces a stalled transfer on its own; this is the same move on
                     demand, for a person who does not want to wait out the grace period. */}
-                {row.protocol === "torrent" &&
+                {!stalledDownload &&
+                row.protocol === "torrent" &&
                 (row.state === "downloading" ||
                   row.state === "seeding" ||
                   row.state === "metadata") ? (
