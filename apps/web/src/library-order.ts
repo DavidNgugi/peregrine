@@ -12,6 +12,13 @@ export interface RecentlyAdded {
   readonly addedAt: number;
 }
 
+/** Whether a row's spelling of its kind matches the library tab. */
+// The core spells a kind `movie`/`show`; the desktop's library DTO spells it `movies`/`shows`.
+// Accepting both is the difference between a tab that filters and one that hides every row.
+export function matchesKind(rowKind: string, filter: "all" | "movie" | "show"): boolean {
+  return filter === "all" || rowKind === filter || rowKind === filter + "s";
+}
+
 /** The rows, newest addition first; the id breaks a same-millisecond tie. */
 export function byRecentlyAdded<T extends RecentlyAdded>(rows: readonly T[]): T[] {
   return [...rows].sort((left, right) => right.addedAt - left.addedAt || right.id - left.id);

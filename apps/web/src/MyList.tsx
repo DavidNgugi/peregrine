@@ -4,6 +4,7 @@ import { api, type Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
 import { SearchIcon } from "./icons.js";
+import { matchesKind as matchesKindOf } from "./library-order.js";
 
 /**
  * The account's watchlist: a title is added or removed from its own page, and this screen offers
@@ -26,7 +27,7 @@ export function MyListScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
     const needle = query.trim().toLocaleLowerCase();
     const filtered = items.filter((item) => {
       const matchesQuery = needle === "" || item.name.toLocaleLowerCase().includes(needle);
-      const matchesKind = kind === "all" || item.kind === kind;
+      const matchesKind = matchesKindOf(item.kind, kind);
       return matchesQuery && matchesKind;
     });
     if (sort === "title")

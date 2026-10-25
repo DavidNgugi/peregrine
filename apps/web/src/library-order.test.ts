@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { byRecentlyAdded } from "./library-order.js";
+import { byRecentlyAdded, matchesKind } from "./library-order.js";
 
 describe("byRecentlyAdded", () => {
   it("puts the newest addition first and keeps the id order for a tie", () => {
@@ -25,5 +25,18 @@ describe("byRecentlyAdded", () => {
     ];
     byRecentlyAdded(rows);
     expect(rows.map((row) => row.id)).toEqual([1, 2]);
+  });
+});
+
+describe("matchesKind", () => {
+  it("accepts both spellings the two library reads use", () => {
+    // The LAN route answers `movie`/`show`; the desktop DTO answers `movies`/`shows`. The tab
+    // filtered on one spelling and hid every row from the other.
+    expect(matchesKind("movie", "movie")).toBe(true);
+    expect(matchesKind("movies", "movie")).toBe(true);
+    expect(matchesKind("show", "show")).toBe(true);
+    expect(matchesKind("shows", "show")).toBe(true);
+    expect(matchesKind("movie", "show")).toBe(false);
+    expect(matchesKind("shows", "all")).toBe(true);
   });
 });

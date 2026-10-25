@@ -23,7 +23,7 @@ import { DownloadsScreen } from "./Downloads.js";
 import { useAutoFocus, useSpatialFocus } from "./focus.js";
 import { formatBytes } from "./format.js";
 import { HomeScreen } from "./Home.js";
-import { byRecentlyAdded } from "./library-order.js";
+import { byRecentlyAdded, matchesKind as matchesKindOf } from "./library-order.js";
 import {
   BookmarkIcon,
   ChevronLeftIcon,
@@ -631,7 +631,7 @@ function LibraryScreen({
     const needle = query.trim().toLocaleLowerCase();
     const filtered = rows.filter((row) => {
       const matchesQuery = needle === "" || row.name.toLocaleLowerCase().includes(needle);
-      const matchesKind = kind === "all" || row.kind === (kind === "movie" ? "movies" : "shows");
+      const matchesKind = matchesKindOf(row.kind, kind);
       return matchesQuery && matchesKind;
     });
     if (sort === "title")
