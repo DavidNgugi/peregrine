@@ -27,6 +27,7 @@ pub mod usenet_post;
 mod volume;
 pub mod web;
 
+pub use acquisition::MediaDeletionPlan;
 pub use events::{Event, EventBus, EventSink, EventSinkError, EventStats, Topic};
 pub use library::{
     IndexError, LibraryError, LibraryService, MatchAs, ScanError, ScanOutcome, Scanner,

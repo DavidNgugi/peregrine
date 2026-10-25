@@ -24,10 +24,17 @@ export interface SeasonSwitcherProps {
   /** The season on screen, which is the one chip drawn as pressed. */
   readonly current: number;
   readonly onChoose: (seasonNumber: number) => void;
+  /** Seasons with a future download schedule. */
+  readonly scheduled?: ReadonlySet<number> | undefined;
 }
 
 /** The season chips. */
-export function SeasonSwitcher({ seasons, current, onChoose }: SeasonSwitcherProps): ReactElement {
+export function SeasonSwitcher({
+  seasons,
+  current,
+  onChoose,
+  scheduled,
+}: SeasonSwitcherProps): ReactElement {
   const { t } = useTranslation();
 
   return (
@@ -53,7 +60,9 @@ export function SeasonSwitcher({ seasons, current, onChoose }: SeasonSwitcherPro
             }}
             type="button"
           >
-            {seasonLabel(season, t)}
+            {scheduled?.has(season.seasonNumber)
+              ? `${seasonLabel(season, t)} · ${t("title.episode.scheduled")}`
+              : seasonLabel(season, t)}
           </button>
         );
       })}

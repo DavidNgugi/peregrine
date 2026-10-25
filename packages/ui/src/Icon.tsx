@@ -144,6 +144,8 @@ const PATHS = {
   ),
   /** Copied: a tick, kept in the same stroke so it pairs with the mark it replaces. */
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  /** Destructive media action: a lidded bin, whose confirmation keeps the action reversible. */
+  trash: <path d="M5 7h14M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" />,
 } as const;
 
 /** The geometry of one icon, as elements inside the shared `svg`. */

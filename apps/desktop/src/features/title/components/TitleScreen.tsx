@@ -20,14 +20,22 @@
  * `PG-E5`, and `PG-E16` for the player itself.
  */
 
-import { Button, EmptyState, ErrorState, Screen, Section, Skeleton } from "@peregrine/ui";
+import { Button, Dialog, EmptyState, ErrorState, Screen, Section, Skeleton } from "@peregrine/ui";
 import {
+  deleteMedia,
   normalizeIpcError,
+  planMediaDeletion,
   playExternally,
   scheduleDownload,
   setTitleWatched as markTitleWatched,
 } from "@peregrine/ipc-client";
-import type { DownloadJobDto, IpcError, LibraryTitleDto } from "@peregrine/ipc-client";
+import type {
+  DownloadJobDto,
+  IpcError,
+  LibraryTitleDto,
+  ScheduledDownloadDto,
+  MediaDeletionPlanDto,
+} from "@peregrine/ipc-client";
 import { useEffect, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { CastRail } from "./CastRail.js";
@@ -45,6 +53,7 @@ import type { TitleFeed } from "../hooks/useTitleFeed.js";
 import { TitleFeedList } from "./TitleFeedList.js";
 import { WatchProviders } from "./WatchProviders.js";
 import { useWatchAvailability } from "../hooks/useWatchAvailability.js";
+import type { ContinueWatchingDto } from "@peregrine/ipc-client";
 import type { Route, TitleKind } from "../../../app/routes.js";
 import {
   downloadPercentOf,
@@ -85,6 +94,10 @@ interface TitleScreenProps {
   readonly downloads?: DownloadMarks | undefined;
   /** The queue rows, so each episode can read its own transfer rather than one page-wide job. */
   readonly downloadRows?: readonly DownloadJobDto[] | undefined;
+  /** The account's current episode, when Continue Watching has one for this title. */
+  readonly continueWatching?: readonly ContinueWatchingDto[] | undefined;
+  /** Schedules held by the account, used to show scheduled state on this title. */
+  readonly scheduledDownloads?: readonly ScheduledDownloadDto[] | undefined;
   /** Titles on the account's watchlist, forwarded to the feed's tiles. */
   readonly watchlistIds?: ReadonlySet<number> | undefined;
   /** Whether this title is on the watchlist. */
@@ -125,6 +138,8 @@ export function TitleScreen({
   onNavigate,
   downloads,
   downloadRows,
+  continueWatching = [],
+  scheduledDownloads = [],
   watchlistIds,
   watchlisted = false,
   onWatchlist,
@@ -133,6 +148,13 @@ export function TitleScreen({
 }: TitleScreenProps): ReactElement {
   const { t } = useTranslation();
   const title: LibraryTitleDto | null = detail.title;
+  const resumeEpisode =
+    title === null
+      ? undefined
+      : continueWatching.find(
+          (row) =>
+            row.titleId === title.id && row.seasonNumber !== null && row.episodeNumber !== null,
+        );
   // A projection of the read, not a rule: whether every episode on screen is already marked. One
   // empty season is not "watched", which is why the length test comes first.
   const seasonWatched =
@@ -154,10 +176,62 @@ export function TitleScreen({
   const [titleWatched, setTitleWatched] = useState(detail.watched);
   const [watchMarking, setWatchMarking] = useState(false);
   const [watchMarkFailed, setWatchMarkFailed] = useState(false);
+  const [mediaDelete, setMediaDelete] = useState<{
+    readonly season?: number;
+    readonly episode?: number;
+    readonly plan: MediaDeletionPlanDto;
+  } | null>(null);
+  const [mediaDeleteError, setMediaDeleteError] = useState<string | null>(null);
+
+  const planDelete = async (season?: number, episode?: number): Promise<void> => {
+    if (title === null) return;
+    try {
+      setMediaDeleteError(null);
+      const plan = await planMediaDeletion(title.id, season, episode);
+      if (plan.entries.length === 0) {
+        setMediaDeleteError(t("title.hero.deleteFilesNone"));
+        return;
+      }
+      setMediaDelete({
+        plan,
+        ...(season === undefined ? {} : { season }),
+        ...(episode === undefined ? {} : { episode }),
+      });
+    } catch (caught: unknown) {
+      const error = normalizeIpcError(caught);
+      setMediaDeleteError(error.message);
+      logUiError("title.planMediaDeletion", error);
+    }
+  };
+
+  const confirmMediaDelete = async (): Promise<void> => {
+    if (title === null || mediaDelete === null) return;
+    try {
+      await deleteMedia(title.id, mediaDelete.season, mediaDelete.episode);
+      setMediaDelete(null);
+      await detail.refresh();
+      if (mediaDelete.season !== undefined) seasons.choose(mediaDelete.season);
+    } catch (caught: unknown) {
+      const error = normalizeIpcError(caught);
+      setMediaDeleteError(error.message);
+      logUiError("title.deleteMedia", error);
+    }
+  };
   useEffect(() => {
     setTitleWatched(detail.watched);
   }, [detail.watched]);
   const [scheduled, setScheduled] = useState<ReadonlySet<string>>(() => new Set());
+  const scheduledKeys = new Set(scheduled);
+  for (const row of scheduledDownloads) {
+    if (row.titleId !== title?.id || row.state !== "scheduled") continue;
+    scheduledKeys.add(
+      row.seasonNumber === null
+        ? "t"
+        : row.episodeNumber === null
+          ? `s${String(row.seasonNumber)}`
+          : `e${String(row.seasonNumber)}-${String(row.episodeNumber)}`,
+    );
+  }
   // **A click is not the queue yet.** The acquire job searches before it creates a download row, and
   // one page-wide acquire state would drop the previous episode's label the moment a second one was
   // clicked. The requested set bridges that gap; the queue row takes over as soon as it exists.
@@ -360,7 +434,17 @@ export function TitleScreen({
                   });
                   return;
                 }
-                onNavigate({ kind: "player", id: title.id, titleKind: kind });
+                onNavigate({
+                  kind: "player",
+                  id: title.id,
+                  titleKind: kind,
+                  ...(resumeEpisode === undefined
+                    ? {}
+                    : {
+                        season: resumeEpisode.seasonNumber as number,
+                        episode: resumeEpisode.episodeNumber as number,
+                      }),
+                });
               }}
               acquiring={
                 acquire?.titleId === title.id &&
@@ -369,8 +453,19 @@ export function TitleScreen({
               acquiringPercent={
                 acquire?.titleId === title.id ? Math.floor(acquire.permille / 10) : 0
               }
-              scheduled={scheduled.has("t")}
+              scheduled={scheduledKeys.has("t")}
+              playEpisode={
+                resumeEpisode?.seasonNumber === null || resumeEpisode?.episodeNumber === null
+                  ? undefined
+                  : resumeEpisode === undefined
+                    ? undefined
+                    : {
+                        season: resumeEpisode.seasonNumber,
+                        episode: resumeEpisode.episodeNumber,
+                      }
+              }
               onWatchlist={onWatchlist}
+              onDelete={title.files > 0 ? () => void planDelete() : undefined}
               watchlisted={watchlisted}
               watched={titleWatched}
               watchMarkBusy={watchMarking}
@@ -536,6 +631,13 @@ export function TitleScreen({
               current={seasons.season?.seasonNumber ?? 0}
               onChoose={seasons.choose}
               seasons={seasons.seasons}
+              scheduled={
+                new Set(
+                  seasons.seasons
+                    .map((season) => season.seasonNumber)
+                    .filter((number) => scheduledKeys.has(`s${String(number)}`)),
+                )
+              }
             />
 
             {seasons.episodes.length === 0 ? null : (
@@ -657,7 +759,7 @@ export function TitleScreen({
                                 );
                               }
                         }
-                        scheduled={scheduled.has(
+                        scheduled={scheduledKeys.has(
                           "e" + String(episode.seasonNumber) + "-" + String(episode.episodeNumber),
                         )}
                         nextUp={
@@ -669,6 +771,9 @@ export function TitleScreen({
                         marking={seasons.marking}
                         onToggleWatched={(chosen, watched) => {
                           void seasons.setEpisodeWatched(chosen, watched);
+                        }}
+                        onDelete={(chosen) => {
+                          void planDelete(chosen.seasonNumber, chosen.episodeNumber);
                         }}
                         onPlay={(chosen) => {
                           onNavigate({
@@ -710,7 +815,40 @@ export function TitleScreen({
           </div>
         </Section>
       )}
-
+      {mediaDeleteError === null ? null : (
+        <p className="text-caption text-state-danger" role="status">
+          {mediaDeleteError}
+        </p>
+      )}
+      {mediaDelete === null ? null : (
+        <Dialog
+          closeLabel={t("title.hero.deleteFilesCancel")}
+          description={t("title.hero.deleteFilesBody", {
+            files: mediaDelete.plan.entries.length,
+            size: sizeLabel(mediaDelete.plan.totalBytes, t),
+          })}
+          onClose={() => {
+            setMediaDelete(null);
+          }}
+          title={t("title.hero.deleteFilesTitle")}
+        >
+          <ul className="mb-3 flex max-h-60 flex-col gap-1 overflow-auto text-caption text-text-tertiary">
+            {mediaDelete.plan.entries.map((entry) => (
+              <li className="truncate" key={entry.path} title={entry.path}>
+                {entry.path}
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setMediaDelete(null)} variant="ghost">
+              {t("title.hero.deleteFilesCancel")}
+            </Button>
+            <Button onClick={() => void confirmMediaDelete()} variant="danger">
+              {t("title.hero.deleteFilesConfirm")}
+            </Button>
+          </div>
+        </Dialog>
+      )}
       <TitleFeedList
         downloads={downloads}
         feed={feed}

@@ -34,6 +34,7 @@ import type {
   LibraryRootDto,
   CaptureSessionDto,
   DeletionPlanDto,
+  MediaDeletionPlanDto,
   DownloadJobDto,
   ReleaseOfferDto,
   NotificationDto,
@@ -389,6 +390,11 @@ export async function recordProgress(report: ProgressReport): Promise<void> {
   await unwrap(commands.recordProgress(report));
 }
 
+/** Finalizes a playback that reached the media end. */
+export async function finalizeProgress(report: ProgressReport): Promise<void> {
+  await unwrap(commands.finalizeProgress(report));
+}
+
 /** Marks one episode watched or unwatched, on the user's authority. */
 export async function setEpisodeWatched(
   titleId: number,
@@ -596,6 +602,34 @@ export async function recommendations(titleId: number): Promise<RecommendationsD
  */
 export async function getTitle(id: number): Promise<TitleDetailDto | null> {
   return unwrap(commands.getTitle({ id }));
+}
+
+export async function planMediaDeletion(
+  titleId: number,
+  seasonNumber?: number,
+  episodeNumber?: number,
+): Promise<MediaDeletionPlanDto> {
+  return unwrap(
+    commands.planMediaDeletion({
+      titleId,
+      seasonNumber: seasonNumber ?? null,
+      episodeNumber: episodeNumber ?? null,
+    }),
+  );
+}
+
+export async function deleteMedia(
+  titleId: number,
+  seasonNumber?: number,
+  episodeNumber?: number,
+): Promise<MediaDeletionPlanDto> {
+  return unwrap(
+    commands.deleteMedia({
+      titleId,
+      seasonNumber: seasonNumber ?? null,
+      episodeNumber: episodeNumber ?? null,
+    }),
+  );
 }
 
 /**

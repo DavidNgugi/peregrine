@@ -13,7 +13,7 @@
  * they were trying to leave.
  */
 
-import { normalizeIpcError, recordProgress } from "@peregrine/ipc-client";
+import { finalizeProgress, normalizeIpcError, recordProgress } from "@peregrine/ipc-client";
 import type { PlaybackSessionDto } from "@peregrine/ipc-client";
 import type { RefObject } from "react";
 import { useEffect, useRef } from "react";
@@ -86,14 +86,29 @@ export function usePlaybackProgress(
       }
       report(element.currentTime, element.duration);
     };
+    const onEnded = (): void => {
+      if (!loaded.current) {
+        return;
+      }
+      void finalizeProgress({
+        titleId,
+        episodeId: session.episodeId,
+        positionMs: Math.max(0, Math.round(element.currentTime * 1000)),
+        durationMs: Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : null,
+      }).catch((caught: unknown) => {
+        logUiError("finalizeProgress", normalizeIpcError(caught));
+      });
+    };
 
     element.addEventListener("loadedmetadata", onLoadedMetadata);
     element.addEventListener("timeupdate", onTimeUpdate);
     element.addEventListener("pause", onPause);
+    element.addEventListener("ended", onEnded);
     return () => {
       element.removeEventListener("loadedmetadata", onLoadedMetadata);
       element.removeEventListener("timeupdate", onTimeUpdate);
       element.removeEventListener("pause", onPause);
+      element.removeEventListener("ended", onEnded);
       // The final position, but only from a film that actually played. A file the webview could
       // not decode is not a viewer who went back to the beginning.
       if (loaded.current && element.currentTime > 0) {

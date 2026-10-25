@@ -28,6 +28,7 @@ use peregrine_domain::catalogue::{ImageKind, Region, WatchCategory, watch_brand}
 use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _, NotificationId};
 use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
 use peregrine_domain::text::NonEmptyText;
+use peregrine_domain::watch::finalize as finalize_watch;
 use peregrine_domain::{
     AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, LoopbackUrl,
     PlaybackPosition, PlaybackPreference, PlayerInput, PreferredQuality, ProgressSource, SafePath,
@@ -5112,6 +5113,48 @@ impl Runtime {
             position,
         )
         .await?;
+        Ok(())
+    }
+
+    /// Finalizes a playback that reached the media end and marks its progress watched.
+    pub async fn finalize_progress(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        position_ms: i64,
+        duration_ms: Option<i64>,
+    ) -> Result<(), RuntimeError> {
+        let position = PlaybackPosition::new(position_ms, duration_ms).map_err(|error| {
+            RuntimeError::InvalidRequest {
+                detail: error.to_string(),
+            }
+        })?;
+        let now = self.clock.now();
+        let existing = self
+            .database
+            .watch_progress(installation_scope(), title_id, episode_id)
+            .await?;
+        let mut progress = match existing {
+            Some(mut progress) => {
+                progress.set_position(position, now);
+                progress
+            }
+            None => WatchProgress::record(
+                installation_scope().account(),
+                title_id,
+                episode_id,
+                position,
+                ProgressSource::Local,
+                now,
+                None,
+            ),
+        };
+        progress
+            .apply_finalize(finalize_watch(position, true, now), now)
+            .map_err(|error| RuntimeError::InvalidRequest {
+                detail: error.to_string(),
+            })?;
+        self.database.record_watch_progress(progress).await?;
         Ok(())
     }
 

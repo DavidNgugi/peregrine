@@ -437,6 +437,25 @@ pub struct AcquisitionService {
     pump: Mutex<Option<Pump>>,
 }
 
+/// Files belonging to a library title or episode that can be moved to the OS trash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaDeletionPlan {
+    /// The files named by the confirmation step.
+    pub entries: Vec<DeletionEntry>,
+    /// The total size of those files.
+    pub total_bytes: u64,
+}
+
+impl MediaDeletionPlan {
+    fn new(entries: Vec<DeletionEntry>) -> Self {
+        let total_bytes = entries.iter().map(|entry| entry.bytes).sum();
+        Self {
+            entries,
+            total_bytes,
+        }
+    }
+}
+
 /// Told when a download reaches a state a person would want to hear about.
 ///
 /// The port exists so acquisition never reaches for the notification service: the service owns the
@@ -534,6 +553,62 @@ struct Pump {
 }
 
 impl AcquisitionService {
+    /// Plans removal of the present files for a title, optionally narrowed to one episode.
+    pub async fn media_deletion_plan(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        episode: Option<(u32, u32)>,
+    ) -> Result<MediaDeletionPlan, AcquisitionError> {
+        let episode_id = match episode {
+            Some((season, number)) => {
+                self.database
+                    .episode_id_for(title_id, season, number)
+                    .await?
+            }
+            None => None,
+        };
+        let evidence = self.database.title_evidence(scope, title_id).await?;
+        Ok(MediaDeletionPlan::new(
+            self.enumerate_media(&evidence, episode_id).await,
+        ))
+    }
+
+    /// Moves title or episode files to the OS trash after re-enumerating them.
+    pub async fn delete_media_files(
+        &self,
+        scope: AccountScope,
+        title_id: i64,
+        episode: Option<(u32, u32)>,
+    ) -> Result<MediaDeletionPlan, AcquisitionError> {
+        let episode_id = match episode {
+            Some((season, number)) => {
+                self.database
+                    .episode_id_for(title_id, season, number)
+                    .await?
+            }
+            None => None,
+        };
+        let evidence = self.database.title_evidence(scope, title_id).await?;
+        let plan = MediaDeletionPlan::new(self.enumerate_media(&evidence, episode_id).await);
+        for entry in &plan.entries {
+            let candidate = std::path::PathBuf::from(entry.path.as_str());
+            let safe = self
+                .destination
+                .resolve(&candidate)
+                .map_err(|source| AcquisitionError::SavePath { source })?;
+            let trash = Arc::clone(&self.trash);
+            let path = safe.as_path().to_path_buf();
+            tokio::task::spawn_blocking(move || trash.move_to_trash(&path))
+                .await
+                .map_err(|_| TrashError::Refused)??;
+            self.database
+                .delete_media_file_by_path(safe.as_path().to_string_lossy().as_ref())
+                .await?;
+        }
+        Ok(plan)
+    }
+
     /// Builds the service over its ports.
     ///
     /// `destination` is the guard for the configured download root, and `free_space_floor` is the
@@ -2598,6 +2673,38 @@ impl AcquisitionService {
                 continue;
             };
             entries.push(DeletionEntry::new(path, metadata.len()));
+        }
+        entries
+    }
+
+    async fn enumerate_media(
+        &self,
+        evidence: &peregrine_storage::TitleEvidence,
+        episode_id: Option<i64>,
+    ) -> Vec<DeletionEntry> {
+        let mut entries = Vec::new();
+        let mut paths = HashSet::new();
+        for item in evidence
+            .items
+            .iter()
+            .filter(|item| episode_id.is_none() || item.item.episode_id == episode_id)
+        {
+            for file in &item.files {
+                let candidate = std::path::Path::new(file.path.as_str());
+                let Ok(safe) = self.destination.resolve(candidate) else {
+                    continue;
+                };
+                let Ok(metadata) = tokio::fs::metadata(safe.as_path()).await else {
+                    continue;
+                };
+                if !metadata.is_file() || !paths.insert(safe.as_path().to_path_buf()) {
+                    continue;
+                }
+                let Ok(path) = NonEmptyText::new(safe.as_path().to_string_lossy().as_ref()) else {
+                    continue;
+                };
+                entries.push(DeletionEntry::new(path, metadata.len()));
+            }
         }
         entries
     }

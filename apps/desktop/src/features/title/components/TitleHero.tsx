@@ -25,7 +25,7 @@
  * genre from a stated one.
  */
 
-import { Button, Icon } from "@peregrine/ui";
+import { Button, Icon, IconButton } from "@peregrine/ui";
 import type { LocalPlaybackDto, TitleOfferDto } from "@peregrine/ipc-client";
 import { useState, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -78,6 +78,8 @@ export interface TitleHeroProps {
    * demux opens in mpv, and this is what tells the two apart.
    */
   readonly onPlay?: (reader: "webview" | "external") => void;
+  /** The episode Continue Watching says Play should open, when this is a series. */
+  readonly playEpisode?: { readonly season: number; readonly episode: number } | undefined;
   /** What Download does when it can. Absent means this build has no acquisition path to give. */
   readonly onAcquire?: (() => void) | undefined;
   /** A start is in flight, so the control waits rather than offering a second. */
@@ -98,6 +100,8 @@ export interface TitleHeroProps {
   readonly onSchedule?: (() => void) | undefined;
   /** Whether this title is already scheduled. */
   readonly scheduled?: boolean | undefined;
+  /** Opens the confirmation flow for this title's local media. */
+  readonly onDelete?: (() => void) | undefined;
   /**
    * What belongs under the actions, in this column rather than in a section of its own.
    *
@@ -122,11 +126,13 @@ export function TitleHero({
   offer,
   playSupport,
   onPlay,
+  playEpisode,
   onAcquire,
   acquiring,
   acquiringPercent,
   onSchedule,
   scheduled = false,
+  onDelete,
   onWatchlist,
   watchlisted = false,
   onToggleWatched,
@@ -216,7 +222,12 @@ export function TitleHero({
               variant="primary"
             >
               <Icon name="play" size={20} />
-              {t("title.hero.play")}
+              {playEpisode === undefined
+                ? t("title.hero.play")
+                : t("title.hero.playEpisode", {
+                    season: playEpisode.season,
+                    episode: String(playEpisode.episode).padStart(2, "0"),
+                  })}
             </Button>
             {/* Drawn only when the core says acquisition is what is left. A title the library holds —
                 or one whose transfer is running, or whose file is recorded and absent — gets no
@@ -226,6 +237,15 @@ export function TitleHero({
               <Button onClick={onWatchlist} variant="secondary">
                 {watchlisted ? t("title.hero.watchlisted") : t("title.hero.watchlist")}
               </Button>
+            )}
+            {onDelete === undefined ? null : (
+              <IconButton
+                icon="trash"
+                label={t("title.hero.deleteFiles")}
+                onClick={onDelete}
+                size="md"
+                variant="ghost"
+              />
             )}
             {/* Nothing that has not come out can have been watched; the schedule control is the
                 action a future title has. The core refuses the mark too, for the web surface. */}

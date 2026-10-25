@@ -6,13 +6,13 @@
 //! depend on `specta` (AGENTS R6) and the wire shape is a contract of its own — a domain field
 //! renamed should not silently rename a field the webview reads.
 
-use peregrine_app::{LibraryRootKind, ScanMode, Timestamp};
+use peregrine_app::{LibraryRootKind, MediaDeletionPlan, ScanMode, Timestamp};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Number;
 use tauri::State;
 
-use crate::error::AppError;
+use crate::error::{AppError, ErrorCode};
 use crate::guard::guard_response;
 use crate::jobs::JobStarted;
 use crate::runtime::RuntimeState;
@@ -567,6 +567,59 @@ pub struct TitleRef {
     /// The title's id, as a listing returned it.
     #[specta(type = Number)]
     pub id: i64,
+}
+
+/// The title or episode whose local media is being managed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaRef {
+    /// The catalogue title.
+    #[specta(type = Number)]
+    pub title_id: i64,
+    /// The season, when targeting one episode.
+    #[specta(type = Option<Number>)]
+    pub season_number: Option<u32>,
+    /// The episode, when targeting one episode.
+    #[specta(type = Option<Number>)]
+    pub episode_number: Option<u32>,
+}
+
+/// One filesystem entry shown before moving media to the OS trash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaDeletionEntryDto {
+    /// The validated absolute path shown in the confirmation.
+    pub path: String,
+    /// The current file size in bytes.
+    #[specta(type = Number)]
+    pub bytes: u64,
+}
+
+/// The exact files a title or episode deletion will move.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaDeletionPlanDto {
+    /// The files that will be moved.
+    pub entries: Vec<MediaDeletionEntryDto>,
+    /// The sum of the listed file sizes.
+    #[specta(type = Number)]
+    pub total_bytes: u64,
+}
+
+impl MediaDeletionPlanDto {
+    fn of(plan: &MediaDeletionPlan) -> Self {
+        Self {
+            entries: plan
+                .entries
+                .iter()
+                .map(|entry| MediaDeletionEntryDto {
+                    path: entry.path.as_str().to_owned(),
+                    bytes: entry.bytes,
+                })
+                .collect(),
+            total_bytes: plan.total_bytes,
+        }
+    }
 }
 
 /// One episode of a title, as its card draws it.
@@ -1133,6 +1186,54 @@ pub async fn get_title(
             dto.watched = watched;
             dto
         }),
+    ))
+}
+
+/// Enumerates the present media files before the user confirms moving them to the OS trash.
+#[tauri::command]
+#[specta::specta]
+pub async fn plan_media_deletion(
+    state: State<'_, RuntimeState>,
+    media: MediaRef,
+) -> Result<MediaDeletionPlanDto, AppError> {
+    let runtime = state.runtime()?;
+    let episode = media.season_number.zip(media.episode_number);
+    let plan = runtime
+        .acquisition()?
+        .media_deletion_plan(
+            peregrine_app::runtime::installation_scope(),
+            media.title_id,
+            episode,
+        )
+        .await
+        .map_err(|error| AppError::new(ErrorCode::Internal).with_detail(error.to_string()))?;
+    Ok(guard_response(
+        "library::plan_media_deletion",
+        MediaDeletionPlanDto::of(&plan),
+    ))
+}
+
+/// Re-enumerates and moves the confirmed title or episode files to the OS trash.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_media(
+    state: State<'_, RuntimeState>,
+    media: MediaRef,
+) -> Result<MediaDeletionPlanDto, AppError> {
+    let runtime = state.runtime()?;
+    let episode = media.season_number.zip(media.episode_number);
+    let plan = runtime
+        .acquisition()?
+        .delete_media_files(
+            peregrine_app::runtime::installation_scope(),
+            media.title_id,
+            episode,
+        )
+        .await
+        .map_err(|error| AppError::new(ErrorCode::Internal).with_detail(error.to_string()))?;
+    Ok(guard_response(
+        "library::delete_media",
+        MediaDeletionPlanDto::of(&plan),
     ))
 }
 

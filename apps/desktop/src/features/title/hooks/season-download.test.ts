@@ -41,6 +41,7 @@ function episode(overrides: Partial<EpisodeDto> = {}): EpisodeDto {
 function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
   return {
     id: 1,
+    isPreflight: false,
     titleId: 1,
     title: null,
     titleKind: null,

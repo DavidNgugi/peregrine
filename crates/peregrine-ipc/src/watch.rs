@@ -339,6 +339,26 @@ pub async fn record_progress(
     Ok(())
 }
 
+/// Marks the playback watched when the media element reaches its natural end.
+#[tauri::command]
+#[specta::specta]
+pub async fn finalize_progress(
+    state: State<'_, RuntimeState>,
+    report: ProgressReport,
+) -> Result<(), AppError> {
+    state
+        .runtime()?
+        .finalize_progress(
+            report.title_id,
+            report.episode_id,
+            report.position_ms,
+            report.duration_ms,
+        )
+        .await?;
+    let () = guard_response("watch::finalize_progress", ());
+    Ok(())
+}
+
 /// Marks a whole title watched or unwatched, on the user's authority.
 #[tauri::command]
 #[specta::specta]

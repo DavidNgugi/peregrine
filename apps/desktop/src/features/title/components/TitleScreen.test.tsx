@@ -79,6 +79,7 @@ function episode(overrides: Partial<EpisodeDto> = {}): EpisodeDto {
 function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
   return {
     id: 1,
+    isPreflight: false,
     titleId: 7,
     title: "Breaking Bad",
     titleKind: "show",
@@ -443,7 +444,7 @@ describe("TitleScreen", () => {
     expect(absent).toContain("holds no file");
     expect(absent).toContain("Download");
     expect(absent).toContain("will find the best release");
-    expect(absent.match(/<button[^>]*disabled/gu)?.length).toBe(2);
+    expect(absent.match(/<button[^>]*disabled=""/gu)?.length).toBe(2);
   });
 
   it("says a recorded file is not on disk rather than claiming the library never had one", () => {
@@ -465,7 +466,7 @@ describe("TitleScreen", () => {
 
     expect(arriving).toContain("in flight");
     expect(arriving).not.toContain("Download");
-    expect(arriving.match(/<button[^>]*disabled/gu)?.length).toBe(1);
+    expect(arriving.match(/<button[^>]*disabled=""/gu)?.length).toBe(1);
   });
 
   it("offers Schedule and no watch mark for a film that is not out", () => {

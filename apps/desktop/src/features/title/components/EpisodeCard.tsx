@@ -26,7 +26,7 @@
  */
 
 import type { EpisodeDto } from "@peregrine/ipc-client";
-import { Button } from "@peregrine/ui";
+import { Button, IconButton } from "@peregrine/ui";
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -86,6 +86,8 @@ export interface EpisodeCardProps {
   readonly onToggleWatched?: ((episode: EpisodeDto, watched: boolean) => void) | undefined;
   /** A watch-state write is in flight, so the control waits rather than sending a second. */
   readonly marking?: boolean | undefined;
+  /** Opens the confirmation flow for this episode's local media. */
+  readonly onDelete?: ((episode: EpisodeDto) => void) | undefined;
 }
 
 /** One episode's card. */
@@ -104,6 +106,7 @@ export function EpisodeCard({
   scheduled = false,
   onToggleWatched,
   marking = false,
+  onDelete,
 }: EpisodeCardProps): ReactElement {
   const { t } = useTranslation();
   // The reference that failed rather than a flag: moving to another season has to give the next still
@@ -271,6 +274,18 @@ export function EpisodeCard({
                       ? t("title.episode.downloading", { percent: covering.percent })
                       : t("title.episode.queued")}
               </Button>
+            )}
+            {onDelete === undefined || episode.files === 0 ? null : (
+              <IconButton
+                icon="trash"
+                label={t("title.hero.deleteFiles")}
+                onClick={() => {
+                  onDelete(episode);
+                }}
+                size="sm"
+                title={t("title.hero.deleteFiles")}
+                variant="ghost"
+              />
             )}
           </div>
         )}
