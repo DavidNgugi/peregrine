@@ -25,6 +25,7 @@ export const SCREENS: readonly ScreenEntry[] = [
   // Second, because it is the screen Discover cannot be: a rail is a fixed list a provider
   // publishes, and this is the queried grid a person narrows — by kind, genre, score, and order.
   { route: { kind: "browse" }, labelKey: "browse.title", icon: "grid" },
+  { route: { kind: "my-list" }, labelKey: "discover.rail.watchlist", icon: "bookmark" },
   // After the two catalogue reads, because it is the one screen that works without a provider: what
   // is on this machine is known as soon as a scan has run, while the two above wait on the metadata
   // road.

@@ -8,6 +8,7 @@ const ROUTES: readonly Route[] = [
   { kind: "browse" },
   { kind: "browse", titleKind: "movie" },
   { kind: "browse", titleKind: "show" },
+  { kind: "my-list" },
   { kind: "library" },
   { kind: "history" },
   { kind: "diagnostics" },

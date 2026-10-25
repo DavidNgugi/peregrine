@@ -6,11 +6,12 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrowseScreen } from "../features/browse/index.js";
-import { DiscoverScreen } from "../features/discover/index.js";
-import { DownloadsScreen, useDownloads } from "../features/downloads/index.js";
+import { DiscoverScreen, useContinueWatching } from "../features/discover/index.js";
+import { DownloadsScreen, useDownloads, useSchedules } from "../features/downloads/index.js";
 import { HistoryScreen } from "../features/history/index.js";
 import { JobsScreen, useJobsBridge } from "../features/jobs/index.js";
 import { PlayerScreen } from "../features/player/index.js";
+import { MyListScreen } from "../features/watchlist/index.js";
 import {
   TitleScreen,
   useAcquire,
@@ -246,6 +247,8 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
   }, [managedProwlarrRunning, configuredIndexers, refreshIndexers]);
   const library = useLibraryTitles();
   const downloads = useDownloads();
+  const schedules = useSchedules();
+  const continueWatching = useContinueWatching();
   const watchlist = useWatchlist();
   const watchlistedIds = useMemo(
     () => new Set(watchlist.rows.map((row) => row.titleId)),
@@ -495,6 +498,14 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 view={libraryView.view}
               />
             ) : null}
+            {route.kind === "my-list" ? (
+              <MyListScreen
+                backLabel={t("shell.back")}
+                onBack={canBack ? goBack : undefined}
+                onNavigate={navigate}
+                watchlist={watchlist}
+              />
+            ) : null}
             {route.kind === "person" ? (
               <PersonScreen
                 backLabel={t("shell.back")}
@@ -565,6 +576,8 @@ export function AppShell({ platform, route: initialRoute }: AppShellProps): Reac
                 acquire={acquire}
                 backLabel={t("shell.back")}
                 downloadRows={downloads.downloads}
+                continueWatching={continueWatching.rows}
+                scheduledDownloads={schedules.rows}
                 downloads={marks}
                 onBack={canBack ? goBack : undefined}
                 onNavigate={navigate}

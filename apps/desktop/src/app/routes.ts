@@ -30,6 +30,7 @@ export type Route =
    * category is a place a person links to: `/browse/movie` says what it is with no query parsing.
    */
   | { readonly kind: "browse"; readonly titleKind?: TitleKind }
+  | { readonly kind: "my-list" }
   | { readonly kind: "library" }
   | { readonly kind: "downloads" }
   | { readonly kind: "history" }
@@ -81,6 +82,7 @@ type StaticRouteKind = Exclude<RouteKind, "title" | "player" | "person">;
 const PATHS: Readonly<Record<StaticRouteKind, string>> = {
   discover: "/",
   browse: "/browse",
+  "my-list": "/my-list",
   library: "/library",
   downloads: "/downloads",
   history: "/history",
