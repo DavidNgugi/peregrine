@@ -7,6 +7,7 @@
  */
 
 import {
+  acquire,
   clearFinishedDownloads,
   commands,
   deleteDownload,
@@ -47,6 +48,8 @@ export interface DownloadActions {
   readonly deleteFiles: (id: number) => Promise<void>;
   /** Lifts a Usenet archive block by granting the standing opt-in. */
   readonly consent: (id: number) => Promise<void>;
+  /** Re-runs acquisition for a failed metadata preflight, using the row's title id. */
+  readonly retryAcquire: (titleId: number) => Promise<void>;
 }
 
 /** The moves, each re-reading the queue through `onChanged`. */
@@ -122,6 +125,10 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
       ),
     [move],
   );
+  const retryAcquire = useCallback(
+    (titleId: number) => move(titleId, (id) => acquire(id), "retryAcquire"),
+    [move],
+  );
 
   const clearFinished = useCallback(async (): Promise<void> => {
     setState({ busyId: null, clearing: true, planningId: null, error: null });
@@ -145,5 +152,6 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     planDeletion,
     deleteFiles,
     consent,
+    retryAcquire,
   };
 }

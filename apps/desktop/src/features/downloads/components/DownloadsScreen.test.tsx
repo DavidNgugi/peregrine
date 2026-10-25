@@ -38,6 +38,7 @@ const recorded = vi.hoisted(() => ({
   busyId: null as number | null,
   pause: vi.fn(() => Promise.resolve()),
   resume: vi.fn(() => Promise.resolve()),
+  retryAcquire: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@peregrine/ui", async (importOriginal) => {
@@ -62,6 +63,7 @@ vi.mock("../hooks/useDownloadActions.js", () => ({
     error: null,
     pause: recorded.pause,
     resume: recorded.resume,
+    retryAcquire: recorded.retryAcquire,
     findPeers: () => Promise.resolve(),
     remove: () => Promise.resolve(),
     dismiss: () => Promise.resolve(),
@@ -75,6 +77,7 @@ vi.mock("../hooks/useDownloadActions.js", () => ({
 function job(overrides: Partial<DownloadJobDto> = {}): DownloadJobDto {
   return {
     id: 1,
+    isPreflight: false,
     titleId: 7,
     title: "The Matrix",
     titleKind: "movie",
@@ -180,6 +183,29 @@ describe("DownloadsScreen", () => {
       job({ state: "failed", errorMessage: "no peers answered after 3 attempts" }),
     ]);
     expect(html).toContain("no peers answered after 3 attempts");
+  });
+
+  it("shows metadata preflight state without offering transfer actions", () => {
+    const html = markup([
+      job({
+        isPreflight: true,
+        state: "metadata",
+        stage: "metadata",
+        releaseTitle: "Resolving release metadata",
+        title: "The Lion King",
+      }),
+    ]);
+    expect(html).toContain("Resolving torrent metadata");
+    expect(html).not.toContain("More actions");
+  });
+
+  it("offers retry for a failed metadata preflight", () => {
+    const html = markup([
+      job({ isPreflight: true, state: "failed", stage: "metadata", title: "The Lion King" }),
+    ]);
+    expect(html).toContain("Failed");
+    expect(html).toContain("Retry acquisition");
+    expect(html).not.toContain("More actions");
   });
 
   it("groups one season's episodes under one header with the floored aggregate", () => {

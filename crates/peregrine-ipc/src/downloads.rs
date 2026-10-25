@@ -66,6 +66,8 @@ pub struct DownloadJobDto {
     /// The row id, which every move command takes.
     #[specta(type = Number)]
     pub id: i64,
+    /// Whether this is the acquisition preflight before a download row exists.
+    pub is_preflight: bool,
     /// The title this download fills.
     #[specta(type = Number)]
     pub title_id: i64,
@@ -143,6 +145,7 @@ impl DownloadJobDto {
     ) -> Self {
         Self {
             id: row.id,
+            is_preflight: false,
             title_id: row.title_id,
             title,
             title_kind,
@@ -177,6 +180,55 @@ impl DownloadJobDto {
                         .collect()
                 })
                 .unwrap_or_default(),
+            has_media_file: false,
+        }
+    }
+
+    /// A journal row before metadata inspection has produced a download row.
+    fn preflight(
+        job: &peregrine_app::JobRecord,
+        title_id: i64,
+        title: Option<String>,
+        title_kind: Option<DownloadTitleKind>,
+        poster: Option<String>,
+    ) -> Self {
+        let (state, error_code, error_message) = match job.state {
+            peregrine_app::JobPhase::Failed => (
+                "failed",
+                job.last_error_code.clone(),
+                job.last_error.clone(),
+            ),
+            peregrine_app::JobPhase::Canceled => (
+                "failed",
+                Some("CANCELED".to_owned()),
+                Some("The acquisition was canceled before a download was admitted.".to_owned()),
+            ),
+            _ => ("metadata", None, None),
+        };
+        Self {
+            id: job.id,
+            is_preflight: true,
+            title_id,
+            title,
+            title_kind,
+            poster,
+            season_number: None,
+            episode_number: None,
+            release_title: "Resolving release metadata".to_owned(),
+            state: state.to_owned(),
+            protocol: "torrent".to_owned(),
+            stage: "metadata".to_owned(),
+            progress_permille: job.progress_permille,
+            reported_size_bytes: None,
+            downloaded_bytes: 0,
+            download_rate_bps: 0,
+            peers_connected: 0,
+            peers_swarm: 0,
+            eta_seconds: None,
+            added_at: job.created_at,
+            error_code,
+            error_message,
+            findings: Vec::new(),
             has_media_file: false,
         }
     }
@@ -416,12 +468,38 @@ pub async fn list_downloads(
     state: State<'_, RuntimeState>,
 ) -> Result<Vec<DownloadJobDto>, AppError> {
     let runtime = state.runtime()?;
+    let downloads = download_rows(runtime).await?;
+    Ok(guard_response("downloads::list", downloads))
+}
+
+/// The queue rows plus the metadata handoffs that have not admitted a download yet.
+async fn download_rows(
+    runtime: &peregrine_app::runtime::Runtime,
+) -> Result<Vec<DownloadJobDto>, AppError> {
     let rows = runtime.download_jobs().await?;
     let mut downloads = Vec::with_capacity(rows.len());
     for row in &rows {
         downloads.push(row_dto(runtime, row).await);
     }
-    Ok(guard_response("downloads::list", downloads))
+    let download_titles: std::collections::HashSet<i64> =
+        rows.iter().map(|row| row.title_id).collect();
+    for job in runtime.jobs(None, 200).await? {
+        if job.kind != "acquisition.acquire" {
+            continue;
+        }
+        let Some(title_id) = job.related_title_id else {
+            continue;
+        };
+        if download_titles.contains(&title_id) {
+            continue;
+        }
+        let (title, title_kind, poster) = title_ref(runtime, title_id).await;
+        downloads.push(DownloadJobDto::preflight(
+            &job, title_id, title, title_kind, poster,
+        ));
+    }
+    downloads.sort_by_key(|row| std::cmp::Reverse(row.added_at));
+    Ok(downloads)
 }
 
 /// One scheduled download, as the queue draws it.

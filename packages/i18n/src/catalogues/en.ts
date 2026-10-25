@@ -127,6 +127,7 @@ export const en = {
         play: "Play",
         more: "More actions",
         resume: "Resume download",
+        retry: "Retry acquisition",
         findPeers: "Find peers",
         allowArchives: "Allow archives",
         remove: "Remove download",
@@ -159,6 +160,7 @@ export const en = {
         cancel: "Cancel",
       },
       stage: {
+        metadata: "Resolving torrent metadata",
         repairing: "Repairing",
         extracting: "Extracting",
         importing: "Importing",
@@ -206,6 +208,18 @@ export const en = {
         extension_not_allowed: "The file's type is not one Peregrine downloads.",
         file_count_capped: "The torrent has more files than the limit allows.",
         total_size_capped: "The torrent is larger than the size limit allows.",
+      },
+    },
+    myList: {
+      search: { label: "Search My list", placeholder: "Search saved titles" },
+      filter: { all: "All" },
+      sort: { label: "Sort", title: "Title" },
+      grid: { label: "My list titles" },
+      unknown: "Unknown title",
+      empty: { title: "Your list is empty", body: "Save titles from Discover to find them here." },
+      failed: {
+        title: "My list could not be read",
+        body: "The saved titles did not load. Try again.",
       },
     },
     discover: {
@@ -502,6 +516,7 @@ export const en = {
       // offer the core derives, and each names the thing a reader can act on.
       hero: {
         released: "{{date}}",
+        playEpisode: "Play S{{season}}E{{episode}}",
         schedule: "Schedule",
         scheduled: "Scheduled",
         releases: "Releases {{date}}",
@@ -531,6 +546,13 @@ export const en = {
         // system's own decoder may well take it. Saying nothing would make a failure look like a bug.
         unnamedContainer:
           "Peregrine does not recognise this file's format. Playing it may not work.",
+        deleteFiles: "Move media files to Trash",
+        deleteFilesTitle: "Move media files to Trash?",
+        deleteFilesBody:
+          "{{files}} file(s) using {{size}} will be moved to the operating system Trash. Your title, watch history, and download option will remain.",
+        deleteFilesConfirm: "Move to Trash",
+        deleteFilesCancel: "Cancel",
+        deleteFilesNone: "There are no media files available to remove.",
         acquire:
           "Peregrine will find the best release for this title and add it to your downloads.",
       },

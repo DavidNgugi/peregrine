@@ -11,6 +11,7 @@ const i18n = createI18n();
 const job: JobRecord = {
   id: 7,
   kind: "hello",
+  relatedTitleId: null,
   state: "running",
   priority: 0,
   progressPermille: 250,

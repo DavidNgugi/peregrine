@@ -83,6 +83,9 @@ pub struct JobRecord {
     pub id: i64,
     /// The job kind.
     pub kind: String,
+    /// The title named by an acquisition job, when the job payload carries one.
+    #[specta(type = Option<Number>)]
+    pub related_title_id: Option<i64>,
     /// The stored phase.
     pub state: JobState,
     /// Scheduling priority.
@@ -127,6 +130,7 @@ impl From<StoredJobRecord> for JobRecord {
         Self {
             id: row.id,
             kind: row.kind,
+            related_title_id: row.related_title_id,
             state: row.state.into(),
             priority: row.priority,
             progress_permille: row.progress_permille,
@@ -477,6 +481,7 @@ mod tests {
         let stored = StoredJobRecord {
             id: 7,
             kind: "hello".to_owned(),
+            related_title_id: None,
             state: JobPhase::Deferred,
             priority: 100,
             dedupe_key: Some("ignored-by-the-dto".to_owned()),

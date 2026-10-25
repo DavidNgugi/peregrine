@@ -219,7 +219,7 @@ export function DownloadsScreen({
       cell: (row) => (
         <div className="download-state-cell">
           <span>
-            {row.stage === "transfer"
+            {row.state === "failed" || row.stage === "transfer"
               ? t(`downloads.state.${row.state}`)
               : t(`downloads.stage.${row.stage}`, { defaultValue: row.stage })}
           </span>
@@ -322,6 +322,21 @@ export function DownloadsScreen({
       id: "actions",
       header: t("downloads.column.actions"),
       cell: (row) => {
+        if (row.isPreflight) {
+          return row.state === "failed" ? (
+            <Button
+              className="download-primary-action"
+              disabled={actions.busyId === row.titleId}
+              onClick={() => actions.retryAcquire(row.titleId)}
+              size="sm"
+              variant="secondary"
+            >
+              {t("downloads.action.retry")}
+            </Button>
+          ) : (
+            <span className="text-caption text-text-tertiary">{t("downloads.none")}</span>
+          );
+        }
         const busy = actions.busyId === row.id;
         const paused = row.state === "paused";
         // **A metadata row is a handoff that has not finished, not a transfer to pause.** After a

@@ -251,6 +251,10 @@ export const commands = {
 	 */
 	playSupport: LocalPlaybackDto | null,
 } | null, AppError_Serialize>(__TAURI_INVOKE("get_title", { title })),
+	/**  Enumerates the present media files before the user confirms moving them to the OS trash. */
+	planMediaDeletion: (media: MediaRef) => typedError<MediaDeletionPlanDto, AppError_Serialize>(__TAURI_INVOKE("plan_media_deletion", { media })),
+	/**  Re-enumerates and moves the confirmed title or episode files to the OS trash. */
+	deleteMedia: (media: MediaRef) => typedError<MediaDeletionPlanDto, AppError_Serialize>(__TAURI_INVOKE("delete_media", { media })),
 	/**
 	 *  Where one title can be watched in one region, as the provider last answered.
 	 * 
@@ -838,6 +842,8 @@ export const commands = {
 	continueWatching: () => typedError<ContinueWatchingDto[], AppError_Serialize>(__TAURI_INVOKE("continue_watching")),
 	/**  Records where the player is in a title or episode. */
 	recordProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("record_progress", { report })),
+	/**  Marks the playback watched when the media element reaches its natural end. */
+	finalizeProgress: (report: ProgressReport) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("finalize_progress", { report })),
 	/**  Marks a whole title watched or unwatched, on the user's authority. */
 	setTitleWatched: (title: TitleRef, watched: boolean) => typedError<null, AppError_Serialize>(__TAURI_INVOKE("set_title_watched", { title, watched })),
 	/**  Marks one episode watched or unwatched, on the user's authority. */
@@ -1130,6 +1136,8 @@ export type DeviceRef = {
 export type DownloadJobDto = {
 	/**  The row id, which every move command takes. */
 	id: number,
+	/**  Whether this is the acquisition preflight before a download row exists. */
+	isPreflight: boolean,
 	/**  The title this download fills. */
 	titleId: number,
 	/**  The title's display name, when the library can answer it. */
@@ -1483,6 +1491,8 @@ export type JobRecord_Deserialize = {
 	id: number,
 	/**  The job kind. */
 	kind: string,
+	/**  The title named by an acquisition job, when the job payload carries one. */
+	relatedTitleId: number | null,
 	/**  The stored phase. */
 	state: JobState,
 	/**  Scheduling priority. */
@@ -1515,6 +1525,8 @@ export type JobRecord_Serialize = {
 	id: number,
 	/**  The job kind. */
 	kind: string,
+	/**  The title named by an acquisition job, when the job payload carries one. */
+	relatedTitleId: number | null,
 	/**  The stored phase. */
 	state: JobState,
 	/**  Scheduling priority. */
@@ -1705,6 +1717,32 @@ export type MatchRuleDto = {
 export type MatchRuleRef = {
 	/**  The row id, as the list returned it. */
 	id: number,
+};
+
+/**  One filesystem entry shown before moving media to the OS trash. */
+export type MediaDeletionEntryDto = {
+	/**  The validated absolute path shown in the confirmation. */
+	path: string,
+	/**  The current file size in bytes. */
+	bytes: number,
+};
+
+/**  The exact files a title or episode deletion will move. */
+export type MediaDeletionPlanDto = {
+	/**  The files that will be moved. */
+	entries: MediaDeletionEntryDto[],
+	/**  The sum of the listed file sizes. */
+	totalBytes: number,
+};
+
+/**  The title or episode whose local media is being managed. */
+export type MediaRef = {
+	/**  The catalogue title. */
+	titleId: number,
+	/**  The season, when targeting one episode. */
+	seasonNumber: number | null,
+	/**  The episode, when targeting one episode. */
+	episodeNumber: number | null,
 };
 
 /**

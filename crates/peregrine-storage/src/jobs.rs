@@ -137,6 +137,8 @@ pub struct JobRecord {
     pub id: i64,
     /// The job kind.
     pub kind: String,
+    /// The title named by acquisition jobs, when the payload carries one.
+    pub related_title_id: Option<i64>,
     /// The stored phase.
     pub state: JobPhase,
     /// Scheduling priority.
@@ -304,7 +306,7 @@ pub(crate) async fn get(
     id: i64,
 ) -> Result<Option<JobRecord>, StorageError> {
     let row = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, state, priority, dedupe_key, progress_permille, attempts, \
+        "SELECT id, kind, json_extract(payload_json, '$.titleId') AS related_title_id, state, priority, dedupe_key, progress_permille, attempts, \
          max_attempts, next_attempt_at, last_error_code, last_error, created_at, \
          started_at, finished_at, cancel_requested FROM job WHERE id = ?1",
     )
@@ -325,7 +327,7 @@ pub(crate) async fn list(
     request: PageRequest,
 ) -> Result<Vec<JobRecord>, StorageError> {
     let rows = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, state, priority, dedupe_key, progress_permille, attempts, \
+        "SELECT id, kind, json_extract(payload_json, '$.titleId') AS related_title_id, state, priority, dedupe_key, progress_permille, attempts, \
          max_attempts, next_attempt_at, last_error_code, last_error, created_at, \
          started_at, finished_at, cancel_requested FROM job \
          WHERE (?1 IS NULL OR id < ?1) ORDER BY id DESC LIMIT ?2",
@@ -343,6 +345,7 @@ pub(crate) async fn list(
 struct JobRow {
     id: i64,
     kind: String,
+    related_title_id: Option<i64>,
     state: String,
     priority: i64,
     dedupe_key: Option<String>,
@@ -369,6 +372,7 @@ impl TryFrom<JobRow> for JobRecord {
         Ok(Self {
             id: row.id,
             kind: row.kind,
+            related_title_id: row.related_title_id,
             state,
             priority: row.priority,
             dedupe_key: row.dedupe_key,
