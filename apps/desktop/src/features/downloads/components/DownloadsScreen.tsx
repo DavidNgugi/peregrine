@@ -246,7 +246,7 @@ export function DownloadsScreen({
             <span className="download-state-badge" data-tone={stateTone(row.state)} title={label}>
               {label}
             </span>
-            {row.stage !== "transfer" && row.state !== "metadata" ? (
+            {row.stage !== "transfer" && row.state === "downloading" ? (
               <span className="download-stage">
                 {t(`downloads.stage.${row.stage}`, { defaultValue: row.stage })}
               </span>
@@ -291,6 +291,12 @@ export function DownloadsScreen({
       id: "progress",
       header: t("downloads.column.progress"),
       cell: (row) => {
+        // A failed preflight never admitted a transfer: its journal progress is how far the
+        // acquisition got, not how much of a file exists. A bar at 100% beside "Failed" reads as
+        // a completed download that somehow failed.
+        if (row.isPreflight && (row.state === "failed" || row.state === "blocked")) {
+          return <span className="text-text-tertiary">{t("downloads.none")}</span>;
+        }
         const percent = downloadPercentOf(row.progressPermille);
         return (
           <div className="download-progress-cell">

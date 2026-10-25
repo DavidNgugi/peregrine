@@ -207,13 +207,23 @@ describe("DownloadsScreen", () => {
     expect(html).not.toContain("download-action-menu");
   });
 
-  it("offers retry for a failed metadata preflight", () => {
+  it("offers retry for a failed metadata preflight, without a fake transfer", () => {
     const html = markup([
-      job({ isPreflight: true, state: "failed", stage: "metadata", title: "The Lion King" }),
+      job({
+        isPreflight: true,
+        state: "failed",
+        stage: "metadata",
+        progressPermille: 500,
+        title: "The Lion King",
+      }),
     ]);
     expect(html).toContain("Failed");
     expect(html).toContain("Retry acquisition");
     expect(html).not.toContain("download-action-menu");
+    // The journal's metadata progress is not a download bar, and the stage is not current once
+    // the job has failed. Both used to sit under the Failed badge as if they were.
+    expect(html).not.toContain("50%");
+    expect(html).not.toContain("Resolving torrent metadata");
   });
 
   it("draws every state as an equal-width badge with its own tone", () => {
