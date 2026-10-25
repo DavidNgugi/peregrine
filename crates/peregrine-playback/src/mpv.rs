@@ -145,7 +145,7 @@ impl PlayerBackend for MpvPlayer {
         input: PlayerInput<'_>,
         start_ms: Option<i64>,
         subtitle: Option<&SafePath>,
-        audio_language: Option<&str>,
+        tracks: peregrine_domain::playback::PlayerTracks<'_>,
         positions: Arc<dyn PositionSink>,
     ) -> Result<(), PlayerError> {
         // Replacing the player is the same act as stopping the old one, and doing it first means a
@@ -162,7 +162,7 @@ impl PlayerBackend for MpvPlayer {
             &binary,
             input,
             subtitle.map(SafePath::as_path),
-            audio_language,
+            tracks,
             &socket,
             start_ms,
         );
@@ -221,7 +221,7 @@ fn command_for(
     binary: &Path,
     input: PlayerInput<'_>,
     subtitle: Option<&Path>,
-    audio_language: Option<&str>,
+    tracks: peregrine_domain::playback::PlayerTracks<'_>,
     socket: &Path,
     start_ms: Option<i64>,
 ) -> Command {
@@ -232,8 +232,43 @@ fn command_for(
     // priority list, so the preferred track wins at startup and a manual selection from mpv's
     // own menu still overrides it for that session. Without this, mpv takes the container's
     // first/default track, which is how an English profile opened an Italian dub.
-    if let Some(language) = audio_language.filter(|language| !language.is_empty()) {
+    if let Some(language) = tracks
+        .audio_language
+        .filter(|language| !language.is_empty())
+    {
         command.arg(format!("--alang={language}"));
+    }
+    // **The subtitle preference is the initial choice, and Off means off.** mpv's `--slang` is a
+    // priority list for embedded tracks; an explicit `--sid=no` disables both embedded and any
+    // sidecar, so the caller passes no sidecar for Off. Forced keeps the selected track's forced
+    // events when there is no sidecar to select directly.
+    match tracks.subtitle_mode {
+        peregrine_domain::preferences::SubtitleMode::Off => {
+            command.arg("--sid=no");
+        }
+        peregrine_domain::preferences::SubtitleMode::Forced => {
+            if let Some(language) = tracks
+                .subtitle_language
+                .filter(|language| !language.is_empty())
+            {
+                command.arg(format!("--slang={language}"));
+                // **Do not fall back to another language.** The account asked for this one; an
+                // unrelated default is the defect this change removes, not a safety net.
+                command.arg("--subs-fallback=no");
+            }
+            if subtitle.is_none() {
+                command.arg("--sub-forced-events-only=yes");
+            }
+        }
+        peregrine_domain::preferences::SubtitleMode::Auto => {
+            if let Some(language) = tracks
+                .subtitle_language
+                .filter(|language| !language.is_empty())
+            {
+                command.arg(format!("--slang={language}"));
+                command.arg("--subs-fallback=no");
+            }
+        }
     }
     if let Some(milliseconds) = start_ms.filter(|value| *value > 0) {
         command.arg(format!("--start={:.3}", milliseconds as f64 / 1000.0));
@@ -432,7 +467,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
-            None,
+            peregrine_domain::playback::PlayerTracks::none(),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -483,7 +518,10 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
-            Some("en"),
+            peregrine_domain::playback::PlayerTracks {
+                audio_language: Some("en"),
+                ..peregrine_domain::playback::PlayerTracks::none()
+            },
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -507,7 +545,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
-            None,
+            peregrine_domain::playback::PlayerTracks::none(),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -520,6 +558,59 @@ mod tests {
     }
 
     #[test]
+    fn the_subtitle_preference_is_the_initial_choice() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let media = file(&directory);
+        let args = |mode, subtitle| {
+            command_for(
+                Path::new("/usr/bin/true"),
+                PlayerInput::File(&media),
+                subtitle,
+                peregrine_domain::playback::PlayerTracks {
+                    subtitle_language: Some("en"),
+                    subtitle_mode: mode,
+                    ..peregrine_domain::playback::PlayerTracks::none()
+                },
+                Path::new("/tmp/peregrine-mpv-test.sock"),
+                None,
+            )
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+        };
+
+        let auto = args(peregrine_domain::preferences::SubtitleMode::Auto, None);
+        assert!(auto.iter().any(|arg| arg == "--slang=en"));
+        assert!(!auto.iter().any(|arg| arg == "--sid=no"));
+        assert!(!auto.iter().any(|arg| arg == "--sub-forced-events-only=yes"));
+        assert!(auto.iter().any(|arg| arg == "--subs-fallback=no"));
+
+        let forced = args(peregrine_domain::preferences::SubtitleMode::Forced, None);
+        assert!(forced.iter().any(|arg| arg == "--slang=en"));
+        assert!(forced.iter().any(|arg| arg == "--subs-fallback=no"));
+        assert!(
+            forced
+                .iter()
+                .any(|arg| arg == "--sub-forced-events-only=yes")
+        );
+
+        let forced_with_sidecar = args(
+            peregrine_domain::preferences::SubtitleMode::Forced,
+            Some(Path::new("/tmp/film.en.srt")),
+        );
+        assert!(
+            !forced_with_sidecar
+                .iter()
+                .any(|arg| arg == "--sub-forced-events-only=yes")
+        );
+
+        let off = args(peregrine_domain::preferences::SubtitleMode::Off, None);
+        assert!(off.iter().any(|arg| arg == "--sid=no"));
+        assert!(!off.iter().any(|arg| arg.starts_with("--slang=")));
+        assert!(!off.iter().any(|arg| arg == "--subs-fallback=no"));
+    }
+
+    #[test]
     fn a_selected_sidecar_is_passed_while_autoload_stays_off() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let media = file(&directory);
@@ -528,7 +619,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             Some(&sidecar),
-            None,
+            peregrine_domain::playback::PlayerTracks::none(),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             None,
         );
@@ -559,7 +650,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
-            None,
+            peregrine_domain::playback::PlayerTracks::none(),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(90_500),
         );
@@ -578,7 +669,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::File(&media),
             None,
-            None,
+            peregrine_domain::playback::PlayerTracks::none(),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(0),
         );
@@ -597,7 +688,7 @@ mod tests {
             Path::new("/usr/bin/true"),
             PlayerInput::Stream(&url),
             Some(Path::new("/tmp/film.en.srt")),
-            None,
+            peregrine_domain::playback::PlayerTracks::none(),
             Path::new("/tmp/peregrine-mpv-test.sock"),
             Some(15_000),
         );
@@ -624,7 +715,13 @@ mod tests {
         let url = LoopbackUrl::parse("http://127.0.0.1:43123/media/token").expect("a loopback URL");
         let player = MpvPlayer::with_binary("/usr/bin/true");
         player
-            .play(PlayerInput::Stream(&url), None, None, None, Arc::new(Noop))
+            .play(
+                PlayerInput::Stream(&url),
+                None,
+                None,
+                peregrine_domain::playback::PlayerTracks::none(),
+                Arc::new(Noop),
+            )
             .expect("the binary spawns");
         player.stop();
     }
@@ -637,10 +734,22 @@ mod tests {
         // the replacement without a player installed.
         let player = MpvPlayer::with_binary("/usr/bin/true");
         player
-            .play(PlayerInput::File(&safe), None, None, None, Arc::new(Noop))
+            .play(
+                PlayerInput::File(&safe),
+                None,
+                None,
+                peregrine_domain::playback::PlayerTracks::none(),
+                Arc::new(Noop),
+            )
             .expect("the binary spawns");
         player
-            .play(PlayerInput::File(&safe), None, None, None, Arc::new(Noop))
+            .play(
+                PlayerInput::File(&safe),
+                None,
+                None,
+                peregrine_domain::playback::PlayerTracks::none(),
+                Arc::new(Noop),
+            )
             .expect("a second press replaces the first");
         player.stop();
     }
@@ -651,7 +760,13 @@ mod tests {
         let media = file(&directory);
         let player = MpvPlayer::with_binary("/nonexistent/peregrine-mpv");
         let error = player
-            .play(PlayerInput::File(&media), None, None, None, Arc::new(Noop))
+            .play(
+                PlayerInput::File(&media),
+                None,
+                None,
+                peregrine_domain::playback::PlayerTracks::none(),
+                Arc::new(Noop),
+            )
             .expect_err("no such binary");
         assert_eq!(error, PlayerError::Spawn);
     }

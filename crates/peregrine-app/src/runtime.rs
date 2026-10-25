@@ -27,12 +27,13 @@ use crate::notify::{
 use peregrine_domain::catalogue::{ImageKind, Region, WatchCategory, watch_brand};
 use peregrine_domain::centre::{CentreEntry, CentreError, NotificationCentre as _, NotificationId};
 use peregrine_domain::notify::{Focus, NotificationEvent, Platform};
+use peregrine_domain::preferences::tag_matches;
 use peregrine_domain::text::NonEmptyText;
 use peregrine_domain::watch::finalize as finalize_watch;
 use peregrine_domain::{
     AccountScope, Clock, IdGenerator, LibraryRoot, LibraryRootKind, LocalPlayback, LoopbackUrl,
     PlaybackPosition, PlaybackPreference, PlayerInput, PreferredQuality, ProgressSource, SafePath,
-    ScanMode, SubtitleFormat, SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
+    ScanMode, SubtitleFormat, SubtitleMode, SubtitleTrack, TokenSource, WatchOrigin, WatchProgress,
 };
 use peregrine_platform::{SystemClock, SystemTrash, TokenMinter, UlidGenerator};
 use peregrine_secrets::{Secret, SecretStore};
@@ -919,6 +920,39 @@ fn playable_file(
             .flat_map(|item| item.files.iter())
             .find(|file| file.missing_since.is_none())
     })
+}
+
+/// The sidecar mpv should open, or none when the account asked for no subtitles.
+///
+/// The same rules the web ticket uses: Off passes no sidecar; Forced prefers a forced track in the
+/// preferred language and falls back to the first forced one; Auto prefers the language, then the
+/// row's default, then a lone `und` sidecar (the common shape of a downloaded subtitle). A file
+/// with several tracks and no match stays off rather than showing an unrelated language.
+fn external_sidecar<'a>(
+    tracks: &'a [(SubtitleTrack, SafePath)],
+    preference: &PlaybackPreference,
+) -> Option<&'a SafePath> {
+    let wanted = preference.subtitle_language();
+    match preference.subtitles() {
+        SubtitleMode::Off => None,
+        SubtitleMode::Forced => {
+            let forced = || tracks.iter().filter(|(track, _)| track.is_forced);
+            forced()
+                .find(|(track, _)| tag_matches(track.language.as_str(), wanted))
+                .or_else(|| forced().next())
+                .map(|(_, path)| path)
+        }
+        SubtitleMode::Auto => tracks
+            .iter()
+            .find(|(track, _)| tag_matches(track.language.as_str(), wanted))
+            .or_else(|| tracks.iter().find(|(track, _)| track.is_default))
+            .or_else(|| {
+                let only = tracks.first()?;
+                (tracks.len() == 1 && only.0.language.as_str().eq_ignore_ascii_case("und"))
+                    .then_some(only)
+            })
+            .map(|(_, path)| path),
+    }
 }
 
 /// The one selected media entry a job's payload supplies for the play asked for.
@@ -4767,6 +4801,12 @@ impl Runtime {
             self.stop_playback(held).await;
         }
 
+        // The language preference is read once for this launch, and it chooses both the sidecar
+        // and mpv's initial embedded track.
+        let preference = self.playback_preference().await?;
+        let audio_language = preference.audio_language().to_owned();
+        let subtitle_language = preference.subtitle_language().to_owned();
+        let subtitle_mode = preference.subtitles();
         // Resolve the episode before the file: an external play opened from an episode card must
         // hand mpv that episode's file, not the first file the title happens to hold.
         let episode_id = match episode {
@@ -4785,11 +4825,7 @@ impl Runtime {
                 // The sidecar the webview would have offered, chosen by the same default flag. A
                 // sidecar that cannot be read is not allowed to take the film down with it.
                 let subtitle = match self.playable_subtitles(file.id).await {
-                    Ok(tracks) => tracks
-                        .iter()
-                        .find(|(track, _)| track.is_default)
-                        .or_else(|| tracks.first())
-                        .map(|(_, path)| path.clone()),
+                    Ok(tracks) => external_sidecar(&tracks, &preference).cloned(),
                     Err(error) => {
                         warn!(%error, title = title_id, "the selected subtitle could not be offered to mpv");
                         None
@@ -4838,14 +4874,6 @@ impl Runtime {
             .watch_progress(installation_scope(), title_id, episode_id)
             .await?
             .map(|progress| progress.position_ms());
-        // **The account's language is the initial track, not the container's first one.** mpv reads
-        // it as a priority list, so a later manual choice in mpv's own menu still wins for that
-        // session. Without it, an English profile opened the Italian dub of a dual-audio release.
-        let audio_language = self
-            .playback_preference()
-            .await?
-            .audio_language()
-            .to_owned();
 
         // The child reports over its IPC socket; this sink hands each position to a task that writes
         // it through the same progress path the in-page player uses.
@@ -4889,7 +4917,11 @@ impl Runtime {
                 input,
                 resume_ms,
                 subtitle.as_ref(),
-                Some(audio_language.as_str()),
+                peregrine_domain::playback::PlayerTracks {
+                    audio_language: Some(audio_language.as_str()),
+                    subtitle_language: Some(subtitle_language.as_str()),
+                    subtitle_mode,
+                },
                 positions,
             )
         })
@@ -6614,7 +6646,7 @@ mod tests {
                 PlayerInput::Stream(&url),
                 None,
                 None,
-                None,
+                peregrine_domain::playback::PlayerTracks::none(),
                 Arc::new(NoPositions),
             )
             .expect("the double records it");
@@ -6687,6 +6719,8 @@ mod tests {
         start: Mutex<Option<i64>>,
         subtitle: Mutex<Option<PathBuf>>,
         audio_language: Mutex<Option<String>>,
+        subtitle_language: Mutex<Option<String>>,
+        subtitle_mode: Mutex<Option<SubtitleMode>>,
     }
 
     impl RecordingPlayer {
@@ -6721,6 +6755,20 @@ mod tests {
                 .expect("the player audio language is not poisoned")
                 .clone()
         }
+
+        fn subtitle_language(&self) -> Option<String> {
+            self.subtitle_language
+                .lock()
+                .expect("the player subtitle language is not poisoned")
+                .clone()
+        }
+
+        fn subtitle_mode(&self) -> Option<SubtitleMode> {
+            *self
+                .subtitle_mode
+                .lock()
+                .expect("the player subtitle mode is not poisoned")
+        }
     }
 
     impl peregrine_domain::PlayerBackend for RecordingPlayer {
@@ -6729,7 +6777,7 @@ mod tests {
             input: peregrine_domain::PlayerInput<'_>,
             start_ms: Option<i64>,
             subtitle: Option<&SafePath>,
-            audio_language: Option<&str>,
+            tracks: peregrine_domain::playback::PlayerTracks<'_>,
             positions: Arc<dyn peregrine_domain::PositionSink>,
         ) -> Result<(), peregrine_domain::PlayerError> {
             match input {
@@ -6754,7 +6802,16 @@ mod tests {
                 .audio_language
                 .lock()
                 .expect("the player audio language is not poisoned") =
-                audio_language.map(str::to_owned);
+                tracks.audio_language.map(str::to_owned);
+            *self
+                .subtitle_language
+                .lock()
+                .expect("the player subtitle language is not poisoned") =
+                tracks.subtitle_language.map(str::to_owned);
+            *self
+                .subtitle_mode
+                .lock()
+                .expect("the player subtitle mode is not poisoned") = Some(tracks.subtitle_mode);
             // The position a real mpv would report over its socket, so the write path runs.
             positions.position(84_000, Some(7_200_000));
             Ok(())
@@ -9026,6 +9083,8 @@ mod tests {
             Some("en"),
             "the account's preferred language is handed to mpv, not left to the file's first track"
         );
+        assert_eq!(player.subtitle_language().as_deref(), Some("en"));
+        assert_eq!(player.subtitle_mode(), Some(SubtitleMode::Auto));
         runtime.shutdown().await;
     }
 

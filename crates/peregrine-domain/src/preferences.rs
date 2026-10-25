@@ -95,6 +95,19 @@ impl PlaybackPreference {
     }
 }
 
+/// Whether a track's tag names the wanted language, case-insensitively and by prefix.
+///
+/// A prefix either way makes `en` match a container's `eng` and a provider's `en-US`, without
+/// requiring the two sides to agree on how much of the tag they wrote. It is deliberately not a
+/// full language table: an unknown tag that shares no prefix does not match, which is the honest
+/// answer for a track whose language this build cannot establish.
+#[must_use]
+pub fn tag_matches(tag: &str, wanted: &str) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    let wanted = wanted.trim().to_ascii_lowercase();
+    !tag.is_empty() && !wanted.is_empty() && (tag.starts_with(&wanted) || wanted.starts_with(&tag))
+}
+
 impl Default for PlaybackPreference {
     fn default() -> Self {
         Self {
@@ -123,7 +136,18 @@ fn language_tag(raw: &str) -> Result<String, PlaybackPreferenceError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PlaybackPreference, PlaybackPreferenceError, SubtitleMode};
+    use super::{PlaybackPreference, PlaybackPreferenceError, SubtitleMode, tag_matches};
+
+    #[test]
+    fn a_tag_matches_by_case_and_prefix() {
+        assert!(tag_matches("ENG", "en"));
+        assert!(tag_matches("en", "eng"));
+        assert!(tag_matches("en-GB", "en"));
+        assert!(tag_matches("en", "en-US"));
+        assert!(!tag_matches("ita", "en"));
+        assert!(!tag_matches("", "en"));
+        assert!(!tag_matches("und", ""));
+    }
 
     #[test]
     fn the_default_is_english_english_and_automatic() {

@@ -23,6 +23,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::path::SafePath;
+use crate::preferences::SubtitleMode;
 use thiserror::Error;
 
 /// What this build will do with a file, from the container its name states.
@@ -189,6 +190,33 @@ pub enum PlayerInput<'a> {
     Stream(&'a LoopbackUrl),
 }
 
+/// The account's initial audio and subtitle choices.
+///
+/// Grouped because they are one preference read at one moment: a player that honours one and
+/// ignores the other is the defect this type prevents. `None` means the account expressed no
+/// language; `subtitle_mode` still applies, so Off can be honoured without a tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerTracks<'a> {
+    /// The preferred audio language, when one is set.
+    pub audio_language: Option<&'a str>,
+    /// The preferred subtitle language, when one is set.
+    pub subtitle_language: Option<&'a str>,
+    /// How the subtitle list should start: off, preferred language, or forced narrative.
+    pub subtitle_mode: SubtitleMode,
+}
+
+impl PlayerTracks<'_> {
+    /// A player with no language preference, for a test that only exercises a file.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self {
+            audio_language: None,
+            subtitle_language: None,
+            subtitle_mode: SubtitleMode::Auto,
+        }
+    }
+}
+
 /// Where a player reports how far it has got.
 ///
 /// The same pair the in-page player sends the progress write: a position in milliseconds and the
@@ -208,10 +236,9 @@ pub trait PlayerBackend: Send + Sync {
     /// `start_ms` is where the app's own watch progress says to resume, or `None` for the
     /// beginning. `subtitle` is the sidecar the session selected, or `None` for no subtitle; it is a
     /// guarded path for the same reason the media is, because it is handed to another process, and a
-    /// stream has no sidecar row to offer. `audio_language` is the account's preferred language, or
-    /// `None` when it has expressed none; a backend that can choose an initial track must honour it,
-    /// while a later manual choice belongs to that player session. `positions` is where the player
-    /// reports its position.
+    /// stream has no sidecar row to offer. `tracks` is the account's initial audio and subtitle
+    /// choice; a backend that can choose a track must honour it, while a later manual choice belongs
+    /// to that player session. `positions` is where the player reports its position.
     ///
     /// # Errors
     ///
@@ -222,7 +249,7 @@ pub trait PlayerBackend: Send + Sync {
         input: PlayerInput<'_>,
         start_ms: Option<i64>,
         subtitle: Option<&SafePath>,
-        audio_language: Option<&str>,
+        tracks: PlayerTracks<'_>,
         positions: Arc<dyn PositionSink>,
     ) -> Result<(), PlayerError>;
 

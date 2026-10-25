@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use peregrine_domain::catalogue::TitleKind;
+use peregrine_domain::preferences::tag_matches;
 use peregrine_domain::{
     Clock, DownloadState, LocalPlayback, PlaybackPreference, SafePath, SessionToken,
     SubtitleFormat, SubtitleMode, TokenSource,
@@ -3516,16 +3517,6 @@ fn chosen_subtitle(tracks: &[WebSubtitleTrack], preference: &PlaybackPreference)
             })
             .map(|track| track.id),
     }
-}
-
-/// Whether a track's tag names the wanted language: a case-insensitive prefix either way.
-///
-/// The either-way comparison is what makes `en` match a provider's `eng` and a row's `en-US`,
-/// without requiring the preference and the row to agree on how much of the tag they wrote.
-fn tag_matches(tag: &str, wanted: &str) -> bool {
-    let tag = tag.trim().to_ascii_lowercase();
-    let wanted = wanted.trim().to_ascii_lowercase();
-    !tag.is_empty() && !wanted.is_empty() && (tag.starts_with(&wanted) || wanted.starts_with(&tag))
 }
 
 /// The URL a track is fetched from, with the offset that puts its cues on the session's timeline.

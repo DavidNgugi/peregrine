@@ -1071,7 +1071,7 @@ export const en = {
         modeForced: "Forced only",
         failed: "The playback language preference could not be read.",
         saveFailed: "The playback language preference could not be saved.",
-        note: "Downloads prefer a release that names this audio language. The in-page player and mpv start on it when the file offers it; a manual choice from the player's own menu wins for that session.",
+        note: "Downloads prefer a release that names this audio language. mpv and the in-page player start on the preferred audio and subtitle languages, and respect Off or Forced; a manual choice from the player's own menu wins for that session.",
         language: {
           en: "English",
           es: "Español",
