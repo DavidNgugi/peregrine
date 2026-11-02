@@ -2435,6 +2435,20 @@ html.tizen.no-flex-gap .topbar-nav > * + * {
   margin-left: 0.3vw;
 }
 
+/* Chromium before 83 cannot make a <button> a grid container: `display: grid` falls back and
+   `place-items` does nothing, so the icon sits in the top-left corner. A flex button centres on
+   every engine; the <div> and <span> grids elsewhere are unaffected. */
+html.tizen .player-icon-button,
+html.tizen .topbar-back,
+html.tizen .search-toggle,
+html.tizen .topbar-integrations,
+html.tizen .profile-button,
+html.tizen .profile-edit-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 html.tizen .nav,
 html.tizen .tab {
   padding: 0.5vw 1vw;
