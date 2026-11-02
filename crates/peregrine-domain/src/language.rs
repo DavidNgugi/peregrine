@@ -45,6 +45,31 @@ fn family(token: &str) -> Option<&'static str> {
     }
 }
 
+/// The English name of a language tag, for a track menu, or `None` for a tag this build does not
+/// know.
+///
+/// A container tags its streams with ISO 639-2 codes (`eng`, `ger`, `fre`), which a person should
+/// not have to decode; the names cover the same families the release ranking recognises.
+#[must_use]
+pub fn display_name(tag: &str) -> Option<&'static str> {
+    let name = match family(tag.trim().to_ascii_lowercase().as_str())? {
+        "en" => "English",
+        "fr" => "French",
+        "de" => "German",
+        "es" => "Spanish",
+        "it" => "Italian",
+        "pt" => "Portuguese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "zh" => "Chinese",
+        "ru" => "Russian",
+        "ar" => "Arabic",
+        "hi" => "Hindi",
+        _ => return None,
+    };
+    Some(name)
+}
+
 /// Whether a token says the release carries more than one audio language.
 fn is_multi(token: &str) -> bool {
     matches!(token, "multi" | "dual")
@@ -93,8 +118,20 @@ pub fn rank(release_name: &str, preferred: &str) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{RANK_MATCH, RANK_OTHER, RANK_UNNAMED, rank};
+    use super::{RANK_MATCH, RANK_OTHER, RANK_UNNAMED, display_name, rank};
     use proptest::prelude::*;
+
+    #[test]
+    fn a_container_code_reads_as_a_language_name() {
+        assert_eq!(display_name("eng"), Some("English"));
+        assert_eq!(display_name(" GER "), Some("German"));
+        assert_eq!(display_name("fre"), Some("French"));
+        assert_eq!(display_name("pt"), Some("Portuguese"));
+        assert_eq!(display_name("und"), None);
+        assert_eq!(display_name(""), None);
+        // A release vocabulary word is a family alias, not a language a track is labelled with.
+        assert_eq!(display_name("multi"), None);
+    }
 
     #[test]
     fn a_release_naming_the_preferred_language_wins() {

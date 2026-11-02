@@ -3617,6 +3617,18 @@ impl Runtime {
             .collect()
     }
 
+    /// The guarded file the core would play for a title or episode, or `None` when none is on disk.
+    pub async fn web_playable_path(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+    ) -> Option<SafePath> {
+        self.playable(title_id, episode_id)
+            .await
+            .ok()
+            .map(|(_, path)| path)
+    }
+
     /// The guarded sidecar and its container for one track of one title or episode.
     ///
     /// The title and episode are resolved to the file the core would play, and the track is looked

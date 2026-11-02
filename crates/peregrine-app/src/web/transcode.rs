@@ -472,7 +472,7 @@ fn language_matches(tag: &str, preferred: &str) -> bool {
         && (tag.starts_with(&preferred) || preferred.starts_with(&tag))
 }
 
-fn locate_probe() -> PathBuf {
+pub(crate) fn locate_probe() -> PathBuf {
     if let Ok(explicit) = std::env::var("PEREGRINE_FFPROBE") {
         let path = PathBuf::from(explicit);
         if path.is_file() {

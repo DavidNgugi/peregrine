@@ -38,6 +38,8 @@ as `text/vtt`. The route resolves the track only through the title and episode's
 
 A transcode's HLS timeline starts at zero while the sidecar's timestamps are absolute in the file, so an HLS ticket passes the start offset and the route drops cues that end before it and clamps the rest. A direct ticket passes zero. The response is `no-store`.
 
+A text subtitle stream inside the media file is offered the same way. The mint asks ffprobe for the playable file's subtitle streams and lists the text ones (SubRip, ASS/SSA, WebVTT, `mov_text`) beside the sidecars under negative ids, `-(n + 1)` for the file's `n`th subtitle stream, which no storage row can collide with. A stream is named by its language (`eng` reads "English"), not its title, which is often a release group's banner; a title that says Forced or SDH still sets those flags. The same route reverses the id, has ffmpeg write that one stream as WebVTT, and retimes it like a sidecar; the last eight extractions are held in memory because a seek restart asks for the same track at a new offset and extraction demuxes the whole file. Bitmap streams (PGS, VobSub) are not offered: they need burning in, which is PG-E17-08. A live torrent is not probed, for the same reason its duration is not.
+
 The playback ticket carries the subtitle track metadata and URLs, and marks exactly one track as the default according to the account's preference (English by default). The player offers Off plus every track; the menu is a real control on a desktop browser, not a hidden platform affordance.
 
 ### 4. One playback preference row, used by the player and the acquire job

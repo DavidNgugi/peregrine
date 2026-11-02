@@ -970,17 +970,26 @@ async fn subtitle(
     Query(query): Query<SubtitleQuery>,
 ) -> Result<Response, ApiError> {
     require_read(&device)?;
-    let Some((path, format)) = service
-        .subtitle_track(query.title_id, query.episode_id, track_id)
-        .await
-    else {
-        return Err(ApiError::not_found());
+    // A negative id names a stream inside the media file rather than a sidecar row.
+    let document = if let Some(ordinal) = super::embedded::ordinal_of(track_id) {
+        let text = service
+            .embedded_subtitle(query.title_id, query.episode_id, ordinal)
+            .await
+            .ok_or_else(ApiError::not_found)?;
+        SubtitleDocument::parse(SubtitleFormat::Vtt, &text).map_err(|_| ApiError::not_found())?
+    } else {
+        let Some((path, format)) = service
+            .subtitle_track(query.title_id, query.episode_id, track_id)
+            .await
+        else {
+            return Err(ApiError::not_found());
+        };
+        let bytes = tokio::fs::read(path.as_path())
+            .await
+            .map_err(|_| ApiError::not_found())?;
+        let text = String::from_utf8_lossy(&bytes);
+        SubtitleDocument::parse(format, &text).map_err(|_| ApiError::not_found())?
     };
-    let bytes = tokio::fs::read(path.as_path())
-        .await
-        .map_err(|_| ApiError::not_found())?;
-    let text = String::from_utf8_lossy(&bytes);
-    let document = SubtitleDocument::parse(format, &text).map_err(|_| ApiError::not_found())?;
     let offset_ms = query.offset_ms.unwrap_or(0).max(0);
     let rendered = document
         .retimed_for_offset(offset_ms)

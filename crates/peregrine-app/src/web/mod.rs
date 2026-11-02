@@ -47,12 +47,17 @@ use tracing::{info, warn};
 use crate::Runtime;
 use crate::events::{Event, EventBus, WEB_PAIR_REQUESTED};
 
+mod embedded;
 mod routes;
 mod transcode;
 
 /// The two transcoder lookups the episode-still capture shares, named here so that module does not
 /// reach into a private submodule for them.
 pub(crate) use transcode::{duration_ms, locate as locate_ffmpeg};
+
+/// How many extracted embedded subtitle documents are held. A seek restart re-requests the same
+/// track at a new offset, and extraction demuxes the whole file, so the last few are kept.
+const EMBEDDED_CACHE: usize = 8;
 
 /// How long a pairing code waits for a person, in milliseconds.
 const PAIR_TTL_MS: i64 = 5 * 60 * 1_000;
@@ -728,6 +733,8 @@ pub struct WebService {
     power_state: Mutex<PowerState>,
     running: tokio::sync::Mutex<Option<Running>>,
     refresh_started: Mutex<HashSet<i64>>,
+    /// Extracted embedded subtitles by file and stream, newest last.
+    embedded: Mutex<Vec<(PathBuf, usize, Arc<str>)>>,
 }
 
 impl WebService {
@@ -762,6 +769,7 @@ impl WebService {
             power_state: Mutex::new(PowerState::default()),
             running: tokio::sync::Mutex::new(None),
             refresh_started: Mutex::new(HashSet::new()),
+            embedded: Mutex::new(Vec::new()),
         }
     }
 
@@ -2650,10 +2658,32 @@ impl WebService {
             .unwrap_or_default();
         self.runtime
             .start_marker_refresh(title_id, target.episode_id, target.duration_ms);
+        let mut tracks = self
+            .runtime
+            .web_subtitles(title_id, target.episode_id)
+            .await;
+        // A live torrent is not probed for the same reason its duration is not: the streams are
+        // not all on disk yet.
+        if let WebSource::File(path) = &target.source {
+            tracks.extend(embedded::probe(path)
+                    .await
+                    .into_iter()
+                    // A stream title is often a release group's banner; the language is the name
+                    // a person chooses by, and forced and SDH are flags the menu spells out.
+                    .map(|stream| WebSubtitleTrack {
+                        id: embedded::track_id(stream.ordinal),
+                        label: peregrine_domain::language::display_name(&stream.language)
+                            .map(str::to_owned)
+                            .or(stream.title),
+                        language: stream.language,
+                        format: stream.codec,
+                        forced: stream.forced,
+                        sdh: stream.sdh,
+                        is_default: stream.is_default,
+                    }));
+        }
         let subtitles = subtitle_dtos(
-            self.runtime
-                .web_subtitles(title_id, target.episode_id)
-                .await,
+            tracks,
             &preference,
             title_id,
             target.episode_id,
@@ -2999,6 +3029,52 @@ impl WebService {
         self.runtime
             .web_subtitle_path(title_id, episode_id, track_id)
             .await
+    }
+
+    /// One embedded text stream of the title's playable file, as `WebVTT`.
+    ///
+    /// The file is the one the core would play for this title and episode, so a client names a
+    /// stream ordinal, never a path. `None` covers an unknown title, no playable file, and a
+    /// stream ffmpeg could not extract; the route answers all of them with one 404.
+    pub async fn embedded_subtitle(
+        &self,
+        title_id: i64,
+        episode_id: Option<i64>,
+        ordinal: usize,
+    ) -> Option<Arc<str>> {
+        let path = self
+            .runtime
+            .web_playable_path(title_id, episode_id)
+            .await?
+            .as_path()
+            .to_path_buf();
+        if let Some(found) = self
+            .embedded
+            .lock()
+            .expect("the subtitle cache lock is not poisoned")
+            .iter()
+            .find(|(held, held_ordinal, _)| *held == path && *held_ordinal == ordinal)
+            .map(|(_, _, text)| Arc::clone(text))
+        {
+            return Some(found);
+        }
+        let Some(text) = embedded::extract(&path, ordinal).await else {
+            warn!(
+                title_id,
+                ordinal, "an embedded subtitle stream could not be extracted"
+            );
+            return None;
+        };
+        let text: Arc<str> = Arc::from(text);
+        let mut cache = self
+            .embedded
+            .lock()
+            .expect("the subtitle cache lock is not poisoned");
+        if cache.len() >= EMBEDDED_CACHE {
+            cache.remove(0);
+        }
+        cache.push((path, ordinal, Arc::clone(&text)));
+        Some(text)
     }
 
     /// The cache root, which is the only directory image requests may read.
@@ -3479,8 +3555,12 @@ fn subtitle_dtos(
         .into_iter()
         .map(|track| SubtitleTrackDto {
             id: track.id,
+            // A container's `eng` is a code, not a name; the menu shows "English" when nothing
+            // better was recorded.
+            label: track.label.or_else(|| {
+                peregrine_domain::language::display_name(&track.language).map(str::to_owned)
+            }),
             language: track.language,
-            label: track.label,
             format: track.format,
             forced: track.forced,
             sdh: track.sdh,
