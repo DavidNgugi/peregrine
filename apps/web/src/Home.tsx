@@ -11,6 +11,7 @@ import {
   type PreviewEvent,
   type PreviewState,
 } from "./hover-preview.js";
+import { useCardMark } from "./download-marks.js";
 import { useAutoFocus } from "./focus.js";
 import { BookmarkIcon, StarIcon } from "./icons.js";
 import { isTizen } from "./tizen.js";
@@ -139,6 +140,7 @@ export function TileCard({
   const settling = preview.phase === "idle" && preview.animating;
   const facts = tileFacts(tile);
   const overview = panelOverview(tile);
+  const mark = useCardMark(tile.id);
 
   const onTransitionEnd = (event: TransitionEvent<HTMLButtonElement>): void => {
     // The name's opacity and the panel's own animation end here too; neither is the tile settling.
@@ -174,6 +176,14 @@ export function TileCard({
       type="button"
     >
       <span className="card-art">
+        {mark === undefined ? null : (
+          <span aria-hidden="true" className="card-download" data-tone={mark.tone} />
+        )}
+        {mark === undefined || mark.percent === null ? null : (
+          <span aria-hidden="true" className="card-download-overlay">
+            {String(mark.percent) + "%"}
+          </span>
+        )}
         {tile.poster === null ? (
           <span className="card-placeholder" />
         ) : (

@@ -52,3 +52,49 @@ export function downloadLabel(state: string | null | undefined): string {
       return "Try again";
   }
 }
+
+/** What a poster card wears for its title's downloads: a colour, and a percent while it moves. */
+export interface CardMark {
+  readonly tone: "active" | "done" | "failed";
+  /** Whole percent of the running transfer, or null when nothing is transferring yet. */
+  readonly percent: number | null;
+}
+
+/** The subset of a download row a card mark reads. */
+export interface CardMarkSource {
+  readonly titleId: number;
+  readonly state: string;
+  readonly progressPermille: number;
+}
+
+/** The mark a card keeps when a title has several jobs: a running one, then a failure, then done. */
+const URGENCY: Readonly<Record<CardMark["tone"], number>> = { active: 0, failed: 1, done: 2 };
+
+/**
+ * One mark per title, as the desktop's poster card draws it.
+ *
+ * A queued job is already the title's download in flight, so it reads as active without a
+ * percent. The percent is floored, not rounded: a job stalled on its last piece at 999 permille
+ * has not finished, and 100 would say it had.
+ */
+export function cardMarks(rows: readonly CardMarkSource[]): ReadonlyMap<number, CardMark> {
+  const marks = new Map<number, CardMark>();
+  for (const row of rows) {
+    const tone = downloadTone(row.state);
+    if (tone === "none") continue;
+    const mark: CardMark =
+      tone === "queued"
+        ? { tone: "active", percent: null }
+        : tone === "active"
+          ? {
+              tone: "active",
+              percent: Math.min(100, Math.max(0, Math.floor(row.progressPermille / 10))),
+            }
+          : { tone, percent: null };
+    const held = marks.get(row.titleId);
+    if (held === undefined || URGENCY[mark.tone] < URGENCY[held.tone]) {
+      marks.set(row.titleId, mark);
+    }
+  }
+  return marks;
+}
