@@ -72,11 +72,17 @@ export function useAutoFocus(key?: unknown): void {
  * right edge would move focus to an off-screen tile and leave the rail still. `scrollIntoView`
  * with `nearest` scrolls the rail horizontally and the page vertically, and does nothing when the
  * tile is already visible.
+ *
+ * A control in the top bar reveals the whole bar instead. On the television the bar scrolls with
+ * the page, and `nearest` stopped as soon as the link's own box was in view, with the bar's top
+ * gutter still above the screen. The desktop's bar is sticky and always in view, so it is a no-op
+ * there.
  */
 export function focusAndReveal(element: HTMLElement | undefined): void {
   if (element === undefined) return;
   element.focus({ preventScroll: true });
-  element.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const bar = element.closest<HTMLElement>(".topbar");
+  (bar ?? element).scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function directionOf(key: string): Direction | null {
