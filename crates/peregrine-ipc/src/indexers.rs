@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use peregrine_app::indexers;
 use peregrine_app::{
-    ConfiguredIndexer, IndexerConfigError, IndexerDefinition, IndexerField, IndexerOption,
-    IndexerRelease, IndexerStatus, MAX_LIMIT, ReleaseSource, Secret, TorrentSource, UsenetSource,
+    ConfiguredIndexer, IndexerConfigError, IndexerDefinition, IndexerError, IndexerField,
+    IndexerOption, IndexerRelease, IndexerStatus, MAX_LIMIT, ReleaseSource, Secret, TorrentSource,
+    UsenetSource,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -260,7 +261,22 @@ fn map_config(error: IndexerConfigError) -> AppError {
     match error {
         IndexerConfigError::Unconfigured => AppError::new(ErrorCode::InvalidInput)
             .with_detail("No indexer is configured yet. Add your Prowlarr URL and API key first."),
-        other => AppError::new(ErrorCode::Internal).with_detail(other.to_string()),
+        // The bundled Prowlarr takes a few seconds to come up after launch, and a screen that
+        // reads in that window must hear "try again", not "this is a bug".
+        IndexerConfigError::Indexer(
+            ref cause @ (IndexerError::Transport
+            | IndexerError::Status(500..=599)
+            | IndexerError::Rejected {
+                status: 500..=599, ..
+            }),
+        ) => {
+            tracing::warn!(error = %cause, "the indexer could not be reached");
+            AppError::new(ErrorCode::ProviderUnavailable).with_detail(cause.to_string())
+        }
+        other => {
+            tracing::warn!(error = %other, "an indexer call failed");
+            AppError::new(ErrorCode::Internal).with_detail(other.to_string())
+        }
     }
 }
 
@@ -454,4 +470,45 @@ pub async fn remove_indexer(
         "indexers::remove",
         rows.into_iter().map(ConfiguredIndexerDto::from).collect(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Prowlarr that is still starting, or answering `5xx`, is a retryable outage; a 4xx
+    /// refusal or a decode failure is not, because the same call would fail the same way.
+    #[test]
+    fn an_unreachable_indexer_is_retryable_and_a_refusal_is_not() {
+        for unreachable in [
+            IndexerError::Transport,
+            IndexerError::Status(500),
+            IndexerError::Status(599),
+            IndexerError::Rejected {
+                status: 503,
+                detail: "starting".to_owned(),
+            },
+        ] {
+            let mapped = map_config(IndexerConfigError::Indexer(unreachable));
+            assert_eq!(mapped.code, ErrorCode::ProviderUnavailable);
+            assert!(mapped.retryable);
+        }
+        for refused in [
+            IndexerError::Status(499),
+            IndexerError::Status(600),
+            IndexerError::Rejected {
+                status: 400,
+                detail: "bad".to_owned(),
+            },
+            IndexerError::SchemaDrift,
+        ] {
+            let mapped = map_config(IndexerConfigError::Indexer(refused));
+            assert_eq!(mapped.code, ErrorCode::Internal);
+            assert!(!mapped.retryable);
+        }
+        assert_eq!(
+            map_config(IndexerConfigError::Unconfigured).code,
+            ErrorCode::InvalidInput
+        );
+    }
 }

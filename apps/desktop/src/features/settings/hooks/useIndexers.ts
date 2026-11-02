@@ -79,6 +79,36 @@ export interface IndexerSettings {
   readonly refresh: () => Promise<void>;
 }
 
+/**
+ * The pauses before each retry of a read the core called retryable.
+ *
+ * The bundled Prowlarr takes a few seconds to start after launch, and a screen opened in that
+ * window would otherwise settle on "failed" for an indexer that answers moments later.
+ */
+export const RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000] as const;
+
+/** Runs one read, retrying it while the core says another attempt may succeed. */
+export async function retrying<T>(
+  read: () => Promise<T>,
+  sleep: (ms: number) => Promise<void>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await read();
+    } catch (caught: unknown) {
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !normalizeIpcError(caught).retryable) {
+        throw caught;
+      }
+      await sleep(delay);
+    }
+  }
+}
+
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** The configured indexer, and the things a person does about it. */
 export function useIndexers(): IndexerSettings {
   const [status, setStatus] = useState<IndexerStatusDto | null>(null);
@@ -94,10 +124,10 @@ export function useIndexers(): IndexerSettings {
 
   const read = useCallback(async (): Promise<void> => {
     try {
-      const answer = await indexerStatus();
+      const answer = await retrying(indexerStatus, pause);
       setStatus(answer);
       setFailed(false);
-      setRows(answer.configured ? await listIndexers() : []);
+      setRows(answer.configured ? await retrying(listIndexers, pause) : []);
     } catch (caught: unknown) {
       const normalized = normalizeIpcError(caught);
       logUiError("indexers.status", normalized);
