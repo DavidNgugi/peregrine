@@ -58,8 +58,14 @@ The only Peregrine-side additions are the ones a remote needs and a browser page
 - One floating focus plate for the remote, moved with `transform` and `opacity` and resized only
   when the target changes. The reference set measured a per-tile focus class at roughly 5 fps and
   a single moved plate at 60 fps; the client follows that recipe and does not draw the per-tile
-  outline while the plate is present. Hidden pointer, no text selection, and the pairing code at
-  96px sit alongside it.
+  outline while the plate is present. The plate is white and jumps rather than glides, and the
+  focused tile has no lift and no transitions (2026-11-03, measured on the set with a 16-move
+  benchmark): the plate's transform transition ran on the main thread, the tile's scale and
+  z-index cost 15-46ms per `focus()`, and every card's transform and opacity transitions
+  repainted for their whole length, together 3-26 fps on Home. After: 52-61 fps on Home,
+  Browse and Title. Chromium 76 has no `:focus-visible`, so the TV rules use `:focus` and never
+  list the two together. Hidden pointer, no text selection, and the pairing code at 96px sit
+  alongside it.
 - A ten-foot layout scoped to the Tizen class: six viewport-scaled poster columns, larger type, a
   top bar that scrolls instead of covering the Browse controls, hover lift and the pointer preview
   removed, entry controls autofocused (Home hero, Browse search, Title Play/Resume), and the first

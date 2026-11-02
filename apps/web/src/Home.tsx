@@ -72,7 +72,8 @@ export function TileCard({
   // The television has no pointer: the focus panel is the only reveal, and a hover-preview
   // transform on a tile the remote just left is the "stuck highlight" the reference guide warns
   // about. This is evaluated once per grid, not per focus move.
-  const [hoverable] = useState(() => finePointer() && !isTizen(navigator.userAgent));
+  const [television] = useState(() => isTizen(navigator.userAgent));
+  const [hoverable] = useState(() => finePointer() && !television);
   const [node, setNode] = useState<HTMLElement | null>(null);
 
   const dispatch = useCallback((event: PreviewEvent) => {
@@ -135,7 +136,9 @@ export function TileCard({
     return () => observer.disconnect();
   }, [active, node, dispatch]);
 
-  const showsPanel = panelVisible(preview, focused);
+  // The set shows no panel: drawing one meant a render, a new layer and a gradient paint on every
+  // D-pad move, and the name under the poster already says what the panel would.
+  const showsPanel = !television && panelVisible(preview, focused);
   const scale = hoverable ? previewScale(preview) : 1;
   const settling = preview.phase === "idle" && preview.animating;
   const facts = tileFacts(tile);
@@ -157,8 +160,8 @@ export function TileCard({
       data-panel={showsPanel ? "true" : undefined}
       data-preview={settling ? "settling" : preview.phase}
       onClick={() => onOpen(tile)}
-      onBlur={() => setFocused(false)}
-      onFocus={() => setFocused(true)}
+      onBlur={television ? undefined : () => setFocused(false)}
+      onFocus={television ? undefined : () => setFocused(true)}
       onPointerEnter={
         hoverable
           ? (event) => {

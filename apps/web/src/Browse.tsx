@@ -4,6 +4,7 @@ import { api, type Genre, type Tile } from "./api.js";
 import { useAutoFocus } from "./focus.js";
 import { TileCard } from "./Home.js";
 import { SearchIcon } from "./icons.js";
+import { isTizen } from "./tizen.js";
 import { useViewState } from "./view-state.js";
 
 type Kind = "movie" | "show";
@@ -23,6 +24,9 @@ const SORTS = [
  * same way a browse page is.
  */
 export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void }) {
+  // A focused text field raises the television's on-screen keyboard, so the set enters on the kind
+  // switch and the field is something the remote moves to on purpose.
+  const [tizen] = useState(() => isTizen(navigator.userAgent));
   useAutoFocus();
   const [kind, setKind] = useViewState<Kind>("browse.kind", "movie");
   const [sort, setSort] = useViewState<string>("browse.sort", "popularity");
@@ -155,7 +159,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
           <input
             aria-label="Search films and series"
             id="browse-search"
-            data-autofocus="true"
+            data-autofocus={tizen ? undefined : "true"}
             data-focus="true"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search films and series"
@@ -170,6 +174,7 @@ export function BrowseScreen({ onOpen }: { readonly onOpen: (tile: Tile) => void
           {(["movie", "show"] as const).map((value) => (
             <button
               className={kind === value ? "segment current" : "segment"}
+              data-autofocus={tizen && kind === value ? "true" : undefined}
               data-focus="true"
               key={value}
               onClick={() => {
