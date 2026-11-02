@@ -329,7 +329,9 @@ fn timestamp(millis: Millis, separator: char) -> String {
 /// Parses a timestamp written as `[-]HH:MM:SS{separator}mmm`.
 ///
 /// The hours field is capped at three digits, which is where [`super::timing::MAX_MILLIS`]
-/// stops; a longer one is refused rather than wrapped.
+/// stops; a longer one is refused rather than wrapped. `WebVTT` (the `.` separator) makes the
+/// hours optional, and ffmpeg's `WebVTT` muxer omits them below an hour, so `MM:SS.mmm` is read
+/// there; `SubRip` always writes them, and a two-field `SubRip` time is refused.
 fn parse_timestamp(token: &str, separator: char) -> Option<Millis> {
     let (negative, rest) = match token.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -339,11 +341,17 @@ fn parse_timestamp(token: &str, separator: char) -> Option<Millis> {
     if rest.matches(separator).count() != 1 {
         return None;
     }
-    let mut parts = clock.split(':');
-    let hours: i64 = parts.next()?.parse().ok()?;
-    let minutes: i64 = parts.next()?.parse().ok()?;
-    let seconds: i64 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() || hours > 999 || minutes > 59 || seconds > 59 {
+    let fields: Vec<&str> = clock.split(':').collect();
+    let (hours, minutes, seconds): (i64, i64, i64) = match fields.as_slice() {
+        [hours, minutes, seconds] => (
+            hours.parse().ok()?,
+            minutes.parse().ok()?,
+            seconds.parse().ok()?,
+        ),
+        [minutes, seconds] if separator == '.' => (0, minutes.parse().ok()?, seconds.parse().ok()?),
+        _ => return None,
+    };
+    if hours > 999 || minutes > 59 || seconds > 59 {
         return None;
     }
     if fraction.len() != 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -1534,6 +1542,35 @@ Dialogue: 1,0:00:04.00,0:00:06.25,Default,,0000,0000,0000,fx,{\\an8}{\\pos(960,8
             source,
             "a NOTE and a STYLE block round-trip as text"
         );
+    }
+
+    #[test]
+    fn a_webvtt_time_without_hours_is_read_and_an_srt_one_is_not() {
+        // The shape ffmpeg's WebVTT muxer writes for anything under an hour.
+        let vtt = "WEBVTT\n\n00:05.797 --> 00:06.840\nWhat you need\n\n59:59.999 --> 01:00:00.500\nEdge\n\n";
+        let document = SubtitleDocument::parse(SubtitleFormat::Vtt, vtt).expect("parses");
+        assert_eq!(document.cues.len(), 2);
+        assert_eq!(document.cues[0].timing.start().as_millis(), 5_797);
+        assert_eq!(document.cues[0].timing.end().as_millis(), 6_840);
+        assert_eq!(document.cues[1].timing.start().as_millis(), 3_599_999);
+        assert_eq!(document.cues[1].timing.end().as_millis(), 3_600_500);
+        assert!(
+            document
+                .render(SubtitleFormat::Vtt)
+                .expect("renders")
+                .contains("00:00:05.797 --> 00:00:06.840"),
+            "the writer always spells the hours"
+        );
+
+        for bad in ["60:00.000", "00:05.79", ":05.797", "05.797"] {
+            let line = format!("WEBVTT\n\n{bad} --> 01:00:00.000\nx\n\n");
+            let parsed = SubtitleDocument::parse(SubtitleFormat::Vtt, &line).expect("parses");
+            assert!(parsed.cues.is_empty(), "{bad} is not a time");
+        }
+
+        let srt = "1\n00:05,797 --> 00:06,840\nNo hours\n\n";
+        let document = SubtitleDocument::parse(SubtitleFormat::Srt, srt).expect("parses");
+        assert_eq!(document.cues.len(), 0, "SubRip always writes the hours");
     }
 
     #[test]
