@@ -790,7 +790,7 @@ CREATE INDEX download_schedule_due_idx
   WHERE state = 'scheduled';
 ```
 
-A schedule is a request without an attempt. `entity_key` collapses the two shapes into one spelling because SQLite treats NULLs in a `UNIQUE` constraint as distinct, which would otherwise allow two whole-title schedules. The ticker reads only the partial index, claims a due row by moving it to `started`, and records an acquisition failure on the row instead of losing it. Cancelling deletes the row; a job already started is the queue's to cancel.
+A schedule is a request, and its row lives until that request is answered. `entity_key` collapses the two shapes into one spelling because SQLite treats NULLs in a `UNIQUE` constraint as distinct, which would otherwise allow two whole-title schedules. The ticker reads only the partial index and claims a due row by moving it to `started` so overlapping passes cannot start one download twice; the acquire job carries the row id, so a failure or a blocked release is written on it even when no download row exists. The row is deleted when the payload is imported. A failed or removed transfer that is cleared from the queue sets its row back to `scheduled`, because dismissing the attempt is not cancelling the request; a `started` row with no transfer behind it is put back to `scheduled` by the next pass. Cancelling the request deletes the row.
 
 ### 2.8 Caches, jobs, operations
 

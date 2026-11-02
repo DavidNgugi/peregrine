@@ -312,7 +312,7 @@ Tests: hostile fixtures (traversal path, absolute path, `..%2f` encoded, symlink
 
 An episode or title whose date has not arrived offers **Schedule** instead of Download. The request
 is stored in `download_schedule` with the first date it may be fetched; a ticker on the app's own
-thread runs once at startup and every five minutes.
+thread runs once at startup and once a minute.
 
 ```mermaid
 sequenceDiagram
@@ -325,28 +325,42 @@ sequenceDiagram
     UI->>DB: upsert download_schedule(title, episode?, release_on)
     DB-->>UI: state = scheduled
 
-    loop every five minutes, and once at startup
+    loop once a minute, and once at startup
+        Tick->>DB: a started row with no transfer goes back to scheduled
         Tick->>DB: due_schedules(today)
         DB-->>Tick: rows with release_on <= today and state = scheduled
         Tick->>DB: set state = started
-        Tick->>Acq: start_acquire(title, episode?)
+        Tick->>Acq: start_acquire(title, episode?, schedule id)
         alt acquire accepted
             Acq-->>Tick: job queued
         else acquire refused
             Tick->>DB: set state = failed, error = reason
         end
+        Acq->>DB: a failure or a blocked release is written on the row it was given
     end
 
-    opt Cancel while still scheduled
+    opt Imported into the library
+        Acq->>DB: delete download_schedule
+    end
+
+    opt Failed or removed transfer cleared from the queue
+        UI->>DB: set state = scheduled, error = NULL
+    end
+
+    opt Cancel the request
         UI->>DB: delete download_schedule
     end
 ```
 
-Three properties are deliberate. A due row is claimed **before** the acquire runs, so a tick that
+Five properties are deliberate. A due row is claimed **before** the acquire runs, so a tick that
 overlaps another cannot start the same download twice. A failure is written on the row rather than
-dropped, so the Scheduled list can say why nothing arrived. And a row already `started` is history,
-not a retry: cancelling its job is the Transfer queue's Cancel, which is a different act from
-deleting the request.
+dropped, so the Scheduled list can say why nothing arrived — and the acquire job carries the row id,
+because a search that finds nothing writes no download row for the queue to show. The row **is the
+request**, so it stays `started` while its transfer runs and is deleted when that payload lands in
+the library. A transfer that failed or was removed and is then cleared from the queue puts the
+request back in the waiting list, because dismissing the attempt is not cancelling the request; the
+next pass tries again. A `started` row with no transfer behind it is the process dying between the
+claim and the submission, and it goes back to `scheduled` for the same reason.
 
 ## F6.2 — Usenet acquisition and post-processing
 

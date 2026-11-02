@@ -62,14 +62,15 @@ export const en = {
       episode: "S{{season}}E{{episode}}",
       scheduled: {
         title: "Scheduled",
-        description: "Downloads waiting for their release date.",
+        description: "Waiting for their release date, downloading, or failed.",
         failed: "The schedules could not be read.",
         unknown: "Unknown title",
         from: "from {{date}}",
         cancel: "Cancel",
+        retry: "Retry",
         state: {
           scheduled: "Waiting",
-          started: "Started",
+          started: "Downloading",
           failed: "Failed",
         },
       },

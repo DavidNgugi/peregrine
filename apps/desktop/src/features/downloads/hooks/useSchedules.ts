@@ -4,16 +4,26 @@ import {
   cancelDownloadSchedule,
   downloadSchedules,
   normalizeIpcError,
+  scheduleDownload,
 } from "@peregrine/ipc-client";
 import type { IpcError, ScheduledDownloadDto } from "@peregrine/ipc-client";
 
 import { logUiError } from "../../../lib/error-log.js";
 
-/** The schedules this account holds, and the one move the section offers. */
+/** How often the list is re-read while the screen is open.
+ *
+ * The ticker is the only writer, and it can fire at any moment, so a list read once on mount
+ * would keep showing a request the ticker has already answered. The read is one indexed query
+ * against SQLite and touches no provider. */
+const REFRESH_INTERVAL_MS = 30_000;
+
+/** The schedules this account holds, and the two moves the section offers. */
 export interface SchedulesView {
   readonly rows: readonly ScheduledDownloadDto[];
   readonly failed: IpcError | null;
   readonly cancel: (id: number) => void;
+  /** Puts a failed request back in the waiting list, unchanged, for the ticker to try again. */
+  readonly retry: (row: ScheduledDownloadDto) => void;
 }
 
 export function useSchedules(): SchedulesView {
@@ -35,6 +45,8 @@ export function useSchedules(): SchedulesView {
 
   useEffect(() => {
     load();
+    const timer = setInterval(load, REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [load]);
 
   const cancel = useCallback((id: number) => {
@@ -47,5 +59,16 @@ export function useSchedules(): SchedulesView {
       });
   }, []);
 
-  return { rows, failed, cancel };
+  const retry = useCallback(
+    (row: ScheduledDownloadDto) => {
+      void scheduleDownload(row.titleId, row.seasonNumber, row.episodeNumber, row.releaseOn)
+        .then(load)
+        .catch((caught: unknown) => {
+          logUiError("scheduleDownload", normalizeIpcError(caught));
+        });
+    },
+    [load],
+  );
+
+  return { rows, failed, cancel, retry };
 }

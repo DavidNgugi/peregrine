@@ -1163,6 +1163,9 @@ impl AcquisitionService {
                         .finished(id, state == DownloadState::Failed)
                         .await;
                 }
+                if state == DownloadState::Failed {
+                    self.fail_schedule(id).await;
+                }
                 Ok(state)
             }
             Ok(None) => Err(AcquisitionError::NotFound),
@@ -1684,6 +1687,7 @@ impl AcquisitionService {
     /// is [`AcquisitionError::NotFinished`], and an id nothing holds is `Ok(false)`, so a double
     /// click on an entry that is already gone is harmless.
     pub async fn dismiss(&self, id: i64) -> Result<bool, AcquisitionError> {
+        let row = self.database.download_job(unrestricted(), id).await?;
         if self.database.delete_download_job(id).await? {
             self.handles
                 .lock()
@@ -1693,11 +1697,14 @@ impl AcquisitionService {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(&id);
+            if let Some(row) = row {
+                self.rearm_schedule(&row).await;
+            }
             return Ok(true);
         }
         // Nothing went: either the row is not there, or it is not finished. The two are different
         // answers to the caller, so a live row is a refusal rather than a silent no-op.
-        match self.database.download_job(unrestricted(), id).await? {
+        match row {
             None => Ok(false),
             Some(_) => Err(AcquisitionError::NotFinished),
         }
@@ -1705,7 +1712,89 @@ impl AcquisitionService {
 
     /// Clears every finished queue entry, answering how many went.
     pub async fn clear_finished(&self) -> Result<u64, AcquisitionError> {
-        Ok(self.database.clear_finished_download_jobs().await?)
+        // Read the rows before the delete, so a failed or removed attempt that came from a
+        // schedule can put that request back in the waiting list. A completed row has already
+        // answered its request, so it is not re-armed.
+        let refused = self
+            .database
+            .list_download_jobs(
+                unrestricted(),
+                &[DownloadState::Failed, DownloadState::Removed],
+                PageRequest::first(10_000),
+            )
+            .await?;
+        let cleared = self.database.clear_finished_download_jobs().await?;
+        for row in refused {
+            self.rearm_schedule(&row).await;
+        }
+        Ok(cleared)
+    }
+
+    /// Records a failed transfer on the schedule it answers, when one is still claimed.
+    ///
+    /// The acquire job records a search that found nothing; this is the other half, a payload
+    /// that was admitted and then failed. A request that is still waiting for a future date is
+    /// left alone, because this transfer is not its attempt.
+    async fn fail_schedule(&self, id: i64) {
+        let Ok(Some(row)) = self.database.download_job(unrestricted(), id).await else {
+            return;
+        };
+        let scope = crate::runtime::installation_scope();
+        let Ok(schedules) = self.database.list_schedules(scope).await else {
+            return;
+        };
+        for schedule in schedules {
+            if schedule.title_id != row.title_id
+                || schedule.episode_id != row.episode_id
+                || schedule.state != "started"
+            {
+                continue;
+            }
+            if let Err(error) = self
+                .database
+                .set_schedule_state(
+                    schedule.id,
+                    "failed",
+                    Some("the download failed"),
+                    self.clock.now(),
+                )
+                .await
+            {
+                debug!(%error, schedule = schedule.id, "a failed download could not reach its schedule");
+            }
+        }
+    }
+
+    /// Puts a schedule whose attempt was dismissed back in the waiting list.
+    ///
+    /// Clearing a failed queue row is how a person says "not this one, try again": the request it
+    /// came from is still unanswered, so the row returns to `scheduled` and the next pass runs
+    /// it. A completed or running transfer is not re-armed, and a schedule that is already
+    /// waiting is left alone.
+    async fn rearm_schedule(&self, row: &DownloadJobRow) {
+        if !matches!(row.state, DownloadState::Failed | DownloadState::Removed) {
+            return;
+        }
+        let scope = crate::runtime::installation_scope();
+        let now = self.clock.now();
+        let Ok(schedules) = self.database.list_schedules(scope).await else {
+            return;
+        };
+        for schedule in schedules {
+            if schedule.title_id != row.title_id
+                || schedule.episode_id != row.episode_id
+                || schedule.state == "scheduled"
+            {
+                continue;
+            }
+            if let Err(error) = self
+                .database
+                .set_schedule_state(schedule.id, "scheduled", None, now)
+                .await
+            {
+                debug!(%error, schedule = schedule.id, "a schedule could not be re-armed");
+            }
+        }
     }
 
     /// Persists one coalesced statistics tick and publishes it at the same budget.
@@ -2518,11 +2607,13 @@ impl AcquisitionService {
     /// nothing that re-syncs it; the bytes are here, so a frame is. It is attempted once per episode
     /// even when a pack carries several files for one, and a capture that fails is a logged warning
     /// rather than a failed import (`crate::episode_stills` owns the rule).
+    #[allow(clippy::too_many_lines)] // The per-file checks only mean anything in the order they run.
     async fn import_completed(&self, row: &DownloadJobRow) -> Result<(), AcquisitionError> {
         let files = self.database.download_files(unrestricted(), row.id).await?;
         let at = self.clock.now();
         let folder = std::path::Path::new(row.save_path.as_str());
         let mut captured: HashSet<i64> = HashSet::new();
+        let mut landed = false;
 
         for file in files.iter().filter(|file| file.selected && file.is_media) {
             let candidate = folder.join(file.path.as_str());
@@ -2537,6 +2628,7 @@ impl AcquisitionService {
             if !metadata.is_file() {
                 continue;
             }
+            landed = true;
             // **A pack's files belong to their own episodes.** A job that named one episode owns
             // every file it wrote; one that named none — a season pack — carries the episode in
             // each file's own name, and a file that names no single episode stays on the title
@@ -2626,7 +2718,33 @@ impl AcquisitionService {
                     .await;
             }
         }
+        self.settle_schedules(row.title_id, row.episode_id, landed)
+            .await;
         Ok(())
+    }
+
+    /// Answers every schedule a landed download satisfies.
+    ///
+    /// A completed download is the end of the request whether the ticker or a person's Download
+    /// started it, so a manual acquisition also clears the schedule that would otherwise fire
+    /// again on the next pass. Only a file that is actually on disk counts: a payload the engine
+    /// called whole but has not flushed leaves the request waiting for the next attempt.
+    async fn settle_schedules(&self, title_id: i64, episode_id: Option<i64>, landed: bool) {
+        if !landed {
+            return;
+        }
+        let scope = crate::runtime::installation_scope();
+        let Ok(schedules) = self.database.list_schedules(scope).await else {
+            return;
+        };
+        for schedule in schedules {
+            if schedule.title_id != title_id || schedule.episode_id != episode_id {
+                continue;
+            }
+            if let Err(error) = self.database.delete_schedule(schedule.id).await {
+                debug!(%error, schedule = schedule.id, "a satisfied schedule could not be removed");
+            }
+        }
     }
 
     /// Fills one downloaded episode's missing still, at most once per episode in one import.
@@ -4622,6 +4740,74 @@ mod tests {
                 .state,
             DownloadState::Failed
         );
+    }
+
+    /// A failed transfer marks its schedule, and clearing it puts the request back to waiting.
+    ///
+    /// The failure is recorded where the request is, not only in the queue, and dismissing the
+    /// attempt is not cancelling the request: it waits again on the next pass. A schedule that is
+    /// already waiting is left alone, which keeps a dismissal from resetting a future date.
+    #[tokio::test]
+    async fn clearing_a_failed_transfer_rearms_the_schedule_it_answered() {
+        let harness = harness().await;
+        let started = harness.start(11, description()).await.expect("it starts");
+
+        let scope = crate::runtime::installation_scope();
+        harness
+            .database
+            .upsert_schedule(peregrine_storage::NewSchedule {
+                account_id: scope.account().get(),
+                title_id: harness.title_id,
+                episode_id: None,
+                release_on: "2026-10-27".to_owned(),
+                created_at: harness.clock.now(),
+            })
+            .await
+            .expect("the schedule is written");
+        let schedule = harness
+            .database
+            .list_schedules(scope)
+            .await
+            .expect("the list answers")
+            .pop()
+            .expect("one schedule");
+        harness
+            .database
+            .set_schedule_state(schedule.id, "started", None, harness.clock.now())
+            .await
+            .expect("the schedule is claimed");
+
+        harness
+            .service
+            .apply(started.job.id, DownloadEvent::EngineFailed)
+            .await
+            .expect("the engine failed");
+        let claimed = harness
+            .database
+            .list_schedules(scope)
+            .await
+            .expect("the list answers");
+        assert_eq!(
+            claimed[0].state, "failed",
+            "the request records the failure"
+        );
+        assert_eq!(claimed[0].error.as_deref(), Some("the download failed"));
+
+        assert!(
+            harness
+                .service
+                .dismiss(started.job.id)
+                .await
+                .expect("a failed row is dismissable")
+        );
+        let rows = harness
+            .database
+            .list_schedules(scope)
+            .await
+            .expect("the list answers");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].state, "scheduled");
+        assert_eq!(rows[0].error, None);
     }
 
     /// Every way the engine can refuse the add leaves the row consistent and answers with a typed

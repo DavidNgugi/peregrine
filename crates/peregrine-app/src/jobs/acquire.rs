@@ -465,6 +465,11 @@ pub struct AcquireJob {
     clock: Arc<dyn Clock + Send + Sync>,
     account: AccountScope,
     journal_id: i64,
+    /// The schedule row this attempt answers, when the ticker started it.
+    ///
+    /// The job records its own failure here, because a selection that found nothing writes no
+    /// download row and the request would otherwise wait for ever on a queue that never saw it.
+    schedule: Option<i64>,
     target: Target,
     min_seeders: u32,
     /// The audio language the account prefers, which orders the ranked candidates.
@@ -493,6 +498,7 @@ impl AcquireJob {
         clock: Arc<dyn Clock + Send + Sync>,
         account: AccountScope,
         journal_id: i64,
+        schedule: Option<i64>,
         target: Target,
         min_seeders: u32,
         preferred_audio_language: String,
@@ -508,6 +514,7 @@ impl AcquireJob {
             clock,
             account,
             journal_id,
+            schedule,
             target,
             min_seeders,
             preferred_audio_language,
@@ -566,6 +573,42 @@ impl AcquireJob {
             .await
         {
             debug!(%update, "the acquire job's failure could not be journalled");
+        }
+        // A cancellation is the person's own decision, so it leaves the request waiting on
+        // whatever comes next; only a failure says the request could not be answered.
+        if !cancelled && let Some(schedule) = self.schedule {
+            let at = self.clock.now();
+            if let Err(update) = self
+                .database
+                .set_schedule_state(schedule, "failed", Some(&error.to_string()), at)
+                .await
+            {
+                debug!(%update, schedule, "the acquire failure could not reach its schedule");
+            }
+        }
+    }
+
+    /// Records a release the safety gate refused, which the job itself treats as a success.
+    ///
+    /// A blocked download is still a row the person can consent to, so the job's outcome stays
+    /// `Ok`; the request it came from is not satisfied until that payload is imported, and a
+    /// refusal the queue shows is also the reason the Scheduled list should show.
+    async fn record_blocked(&self) {
+        let Some(schedule) = self.schedule else {
+            return;
+        };
+        let at = self.clock.now();
+        if let Err(error) = self
+            .database
+            .set_schedule_state(
+                schedule,
+                "failed",
+                Some("the release was blocked by the safety inspection"),
+                at,
+            )
+            .await
+        {
+            debug!(%error, schedule, "a blocked release could not reach its schedule");
         }
     }
 
@@ -1733,6 +1776,11 @@ impl AcquireJob {
             Prepared::Usenet(request) => self.acquisition.start_usenet(*request).await,
         }
         .map_err(|error| JobError::failed(error.to_string()))?;
+        // A gate refusal is not this job's failure — the queue's row waits for consent — but it
+        // is the request's, until that payload is imported.
+        if started.state == DownloadState::Blocked {
+            self.record_blocked().await;
+        }
         Ok(started)
     }
 }
@@ -2723,6 +2771,7 @@ mod tests {
                 Arc::clone(&self.clock) as Arc<dyn Clock + Send + Sync>,
                 fixture_account(),
                 self.journal_id,
+                None,
                 target,
                 1,
                 "en".to_owned(),

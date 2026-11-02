@@ -5,11 +5,12 @@ import type { ReactElement } from "react";
 import { useSchedules } from "../hooks/useSchedules.js";
 
 /**
- * The downloads waiting for their date.
+ * The scheduled requests: waiting for their date, downloading, or failed.
  *
- * Hidden when empty, because an empty heading over nothing is a promise. Cancelling deletes the
- * schedule; a job it already started is the Transfer queue's to cancel, which is why the row's
- * state says whether it is still waiting.
+ * Hidden when empty, because an empty heading over nothing is a promise. The row is the request,
+ * so it stays while its transfer runs and disappears once the download lands in the library.
+ * A failed request offers Retry, which puts it back in the waiting list as it was; dismissing the
+ * failed transfer in the queue does the same. Cancelling deletes the request outright.
  */
 export function ScheduledTransfers(): ReactElement | null {
   const { t } = useTranslation();
@@ -54,7 +55,18 @@ export function ScheduledTransfers(): ReactElement | null {
               {row.error === null ? null : (
                 <span className="text-caption text-state-danger">{row.error}</span>
               )}
-              <span className="ms-auto">
+              <span className="ms-auto flex gap-2">
+                {row.state === "failed" ? (
+                  <Button
+                    onClick={() => {
+                      schedules.retry(row);
+                    }}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {t("downloads.scheduled.retry")}
+                  </Button>
+                ) : null}
                 <Button
                   onClick={() => {
                     schedules.cancel(row.id);

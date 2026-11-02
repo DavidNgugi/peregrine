@@ -2474,6 +2474,23 @@ impl Runtime {
         episode: Option<crate::jobs::acquire::EpisodePick>,
         min_seeders: u32,
     ) -> Result<StartedJob, RuntimeError> {
+        self.start_acquire_with_schedule(None, account, title_id, episode, min_seeders)
+            .await
+    }
+
+    /// The same acquisition, carrying the schedule row it answers.
+    ///
+    /// The job needs the row id rather than the ticker needing to watch it: only the job knows
+    /// whether the attempt found a release, and a request that could not run is the schedule's
+    /// failure to record. A manual Download passes `None`, because there is no request behind it.
+    async fn start_acquire_with_schedule(
+        &self,
+        schedule: Option<i64>,
+        account: peregrine_domain::AccountScope,
+        title_id: i64,
+        episode: Option<crate::jobs::acquire::EpisodePick>,
+        min_seeders: u32,
+    ) -> Result<StartedJob, RuntimeError> {
         self.submit_acquire(
             account,
             crate::jobs::acquire::Target {
@@ -2483,6 +2500,7 @@ impl Runtime {
                 chosen: None,
             },
             min_seeders,
+            schedule,
         )
         .await
     }
@@ -2515,6 +2533,7 @@ impl Runtime {
                 chosen: None,
             },
             min_seeders,
+            None,
         )
         .await
     }
@@ -2565,6 +2584,7 @@ impl Runtime {
                 }),
             },
             min_seeders,
+            None,
         )
         .await
     }
@@ -2609,6 +2629,7 @@ impl Runtime {
         account: peregrine_domain::AccountScope,
         target: crate::jobs::acquire::Target,
         min_seeders: u32,
+        schedule: Option<i64>,
     ) -> Result<StartedJob, RuntimeError> {
         let title_id = target.title_id;
         let key = crate::jobs::acquire::dedupe_key(title_id, target.season, target.episode);
@@ -2658,6 +2679,7 @@ impl Runtime {
             Arc::clone(&self.clock),
             account,
             journal_id,
+            schedule,
             target,
             min_seeders,
             preferred_audio_language,
@@ -5429,7 +5451,18 @@ impl Runtime {
         Ok(())
     }
 
-    /// Starts every schedule whose date has arrived and marks the outcome on its row.
+    /// Starts every schedule whose date has arrived and keeps its row until the request is
+    /// answered.
+    ///
+    /// A schedule is the request, not the attempt. The row stays `started` for as long as its
+    /// download is alive, and the acquire job carries the row id so a failure is recorded where
+    /// the request is, not only in a queue the person may have cleared. The row is deleted when
+    /// the payload is imported, and a failed or removed transfer that is dismissed returns it to
+    /// `scheduled` for the next pass.
+    ///
+    /// The one state a pass repairs is a `started` row with nothing behind it: the process died
+    /// between the claim and the submission. Nothing is answering that request, so it waits again
+    /// rather than sitting in the Scheduled list as a transfer that no longer exists.
     ///
     /// # Errors
     ///
@@ -5440,10 +5473,59 @@ impl Runtime {
         let now = self.clock.now();
         let stamp = now.to_string();
         let today = stamp.get(..10).unwrap_or(stamp.as_str()).to_owned();
-        let due = self
-            .database
-            .due_schedules(installation_scope(), &today)
-            .await?;
+        let scope = installation_scope();
+        let schedules = self.database.list_schedules(scope).await?;
+        // The queue is read only when a claim needs checking: most passes have nothing started,
+        // and a full download list is the largest read this tick could make.
+        let jobs = if schedules.iter().any(|row| row.state == "started") {
+            self.database
+                .list_download_jobs(
+                    scope,
+                    peregrine_domain::DownloadState::ALL,
+                    PageRequest::first(10_000),
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        for schedule in schedules.iter().filter(|row| row.state == "started") {
+            let episode = match schedule.episode_id {
+                Some(id) => self
+                    .database
+                    .episode_numbers(id)
+                    .await?
+                    .map(|(season, episode)| crate::jobs::acquire::EpisodePick { season, episode }),
+                None => None,
+            };
+            // A search that is still running owns the claim, even before it has written the
+            // download row it may produce.
+            let key = crate::jobs::acquire::dedupe_key(schedule.title_id, None, episode);
+            if self.live_job_for(&key).await?.is_some() {
+                continue;
+            }
+            let attempt = jobs
+                .iter()
+                .filter(|job| {
+                    job.title_id == schedule.title_id && job.episode_id == schedule.episode_id
+                })
+                .max_by_key(|job| job.id);
+            match attempt.map(|job| job.state) {
+                // Nothing is answering the request, so it waits again.
+                None => {
+                    self.database
+                        .set_schedule_state(schedule.id, "scheduled", None, now)
+                        .await?;
+                }
+                // The payload is whole. The import is what normally removes the row; one whose
+                // import did not run is still a download that happened.
+                Some(peregrine_domain::DownloadState::Completed) => {
+                    self.database.delete_schedule(schedule.id).await?;
+                }
+                // A live or failed transfer is the queue's: running, or waiting to be dismissed.
+                Some(_) => {}
+            }
+        }
+        let due = self.database.due_schedules(scope, &today).await?;
         for schedule in due {
             self.database
                 .set_schedule_state(schedule.id, "started", None, now)
@@ -5457,9 +5539,17 @@ impl Runtime {
                 None => None,
             };
             match self
-                .start_acquire(installation_scope(), schedule.title_id, episode, 1)
+                .start_acquire_with_schedule(
+                    Some(schedule.id),
+                    scope,
+                    schedule.title_id,
+                    episode,
+                    1,
+                )
                 .await
             {
+                // The row stays `started` while the job it now owns runs; the import or the
+                // job's own failure is what moves it.
                 Ok(_) => {}
                 Err(error) => {
                     let message = error.to_string();
@@ -10309,5 +10399,57 @@ mod tests {
         );
 
         service.stop().await;
+    }
+
+    /// A claim with nothing behind it is a request that still needs an attempt.
+    ///
+    /// The process died between writing `started` and submitting the job, so no transfer exists
+    /// and nothing will ever answer the request. Leaving the row as it is made it sit in the
+    /// Scheduled list as a download that was never real; the pass repairs it by waiting again.
+    /// The date is deliberately in the future, so the recovered row cannot start inside this pass.
+    #[tokio::test]
+    async fn a_started_schedule_with_no_transfer_goes_back_to_waiting() {
+        let directory = TempDir::new().unwrap();
+        let (runtime, _sink) = runtime(&directory).await;
+        let title_id = runtime
+            .database
+            .insert_stub_title(peregrine_storage::StubTitle {
+                kind: peregrine_domain::catalogue::TitleKind::Show,
+                subtype: peregrine_domain::catalogue::TitleSubtype::Standard,
+                name: "VisionQuest".to_owned(),
+                original_name: None,
+                sort_name: "visionquest".to_owned(),
+                at: 0,
+            })
+            .await
+            .unwrap();
+        let at = runtime.clock.now();
+        runtime
+            .database
+            .upsert_schedule(peregrine_storage::NewSchedule {
+                account_id: installation_scope().account().get(),
+                title_id,
+                episode_id: None,
+                release_on: "2999-01-01".to_owned(),
+                created_at: at,
+            })
+            .await
+            .unwrap();
+        let row = runtime.download_schedules().await.unwrap().pop().unwrap();
+        runtime
+            .database
+            .set_schedule_state(row.id, "started", None, at)
+            .await
+            .unwrap();
+
+        runtime.run_due_schedules().await.unwrap();
+
+        let rows = runtime.download_schedules().await.unwrap();
+        assert_eq!(rows.len(), 1, "the request is kept, not deleted");
+        assert_eq!(
+            rows[0].state, "scheduled",
+            "a claim with no transfer behind it waits again"
+        );
+        runtime.shutdown().await;
     }
 }
