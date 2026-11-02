@@ -624,8 +624,9 @@ graph LR
   - Acceptance: Spoofed `.exe` fixtures rejected
 - [ ] **PG-E11-04** `S` · deps PG-E11-01 · Caps: file count, total size, single-file size, free-space floor, plus **parser bounds applied before decoding untrusted bytes** — bencode nesting depth and token ceilings and a hard torrent-file size cap, following qBittorrent's proven limits (depth 100, 10 M tokens, 100 MiB file)
   - Acceptance: Each cap boundary tested at and one below the limit; a deeply nested or token-flooding bencode fixture is rejected before allocation, not after
-- [ ] **PG-E11-05** `M` · deps PG-E11-01 · Archive and disk-image policy: blocked by default, advanced opt-in with warnings
-  - Acceptance: Default build blocks; opt-in path logs an audit event
+- [ ] **PG-E11-05** `M` · deps PG-E11-01 · Archive and disk-image policy: archives opt-in with warnings, disk images refused outright
+  - Acceptance: The default build blocks archives; the opt-in path logs an audit event; a disk image is a hard block with no override on every path
+  - **Amended:** a disk image moved off the opt-in. The opt-in buys a listing step over an archive's contents; a mounted volume has no such step, so `PayloadInspector` answers `blocked` with or without `OptIn::Granted` and the mount path never exists.
 - [ ] **PG-E11-06** `M` · deps PG-E11-04, PG-E3-08 · `SafetyReport` construction, persistence, and rendering in the UI
   - Acceptance: Report survives restart and explains each finding
 - [ ] **PG-E11-07** `M` · deps PG-E11-06, PG-E13-06 · Blocked and warned UI flows with per-file reasoning and no override for hard blocks

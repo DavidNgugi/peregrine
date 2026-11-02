@@ -205,7 +205,8 @@ export const en = {
         executable_payload: "The torrent contains a program or a script.",
         unicode_spoofing: "The name uses invisible characters that change how it reads.",
         nested_archive: "The torrent contains an archive whose contents were not inspected.",
-        disk_image: "The torrent contains a disk image, which mounts another filesystem.",
+        disk_image:
+          "The download contains a disk image; disk images are refused because they mount an uninspected filesystem.",
         extension_not_allowed: "The file's type is not one Peregrine downloads.",
         file_count_capped: "The torrent has more files than the limit allows.",
         total_size_capped: "The torrent is larger than the size limit allows.",

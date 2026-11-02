@@ -61,9 +61,10 @@ const ARCHIVE_EXTENSIONS: &[&str] = &[
     "zst", "zstd", "lz", "lzma", "lz4", "cab", "arj", "ace", "sit", "sitx",
 ];
 
-// Disk images. Opening one hands the operating system a second, uninspected
-// filesystem with a mount point attached — the same opaque-content problem as an
-// archive, so the same advanced opt-in (SECURITY.md T4).
+// Disk images. An archive can be listed by `7zz` before anything is extracted, so
+// its opt-in buys a real inspection step. A disk image mounts a second,
+// uninspected filesystem that no listing step can see into, so it is refused
+// outright (SECURITY.md T4) and the mount path does not exist at all.
 const DISK_IMAGE_EXTENSIONS: &[&str] = &[
     "dmg",
     "iso",
@@ -288,7 +289,8 @@ stored_enum! {
         UnicodeSpoofing => "unicode_spoofing",
         /// An archive whose contents never met this inspector (T4).
         NestedArchive => "nested_archive",
-        /// A disk image, which mounts a second uninspected filesystem (T4).
+        /// A disk image, which mounts a second uninspected filesystem (T4);
+        /// refused outright.
         DiskImage => "disk_image",
         /// An extension that is absent or not on the allowlist (T2).
         ExtensionNotAllowed => "extension_not_allowed",
@@ -302,11 +304,12 @@ stored_enum! {
 impl Reason {
     /// True when an explicit advanced opt-in lets the download proceed anyway.
     ///
-    /// A path or executable finding never returns true. That is the line this
-    /// module exists to hold: the opt-in is a risk the user may take on opaque
-    /// content, not a permission to write outside the root or to land a program.
+    /// A path, executable, or disk-image finding never returns true. That is the
+    /// line this module exists to hold: the opt-in is a risk the user may take on
+    /// opaque *file* content, not a permission to write outside the root, land a
+    /// program, or hand the operating system a second filesystem to mount.
     pub const fn requires_opt_in(self) -> bool {
-        matches!(self, Self::NestedArchive | Self::DiskImage)
+        matches!(self, Self::NestedArchive)
     }
 }
 
@@ -959,18 +962,21 @@ mod tests {
     }
 
     #[test]
-    fn a_disk_image_requires_the_advanced_opt_in() {
+    fn a_disk_image_is_refused_outright() {
         for path in ["image.iso", "image.dmg", "image.img", "image.vhd"] {
-            let refused = inspected(vec![file(path, 10)], OptIn::NotGranted);
-            assert_eq!(
-                findings(&refused),
-                [(Reason::DiskImage, Some(path))],
-                "`{path}`"
-            );
-            assert_eq!(refused.verdict(), Verdict::OptInRequired, "`{path}`");
-
-            let accepted = inspected(vec![file(path, 10)], OptIn::Granted);
-            assert_eq!(accepted.verdict(), Verdict::Allowed, "`{path}`");
+            for opt_in in [OptIn::NotGranted, OptIn::Granted] {
+                let report = inspected(vec![file(path, 10)], opt_in);
+                assert_eq!(
+                    findings(&report),
+                    [(Reason::DiskImage, Some(path))],
+                    "`{path}` with {opt_in:?}"
+                );
+                assert_eq!(
+                    report.verdict(),
+                    Verdict::Blocked,
+                    "`{path}` with {opt_in:?}"
+                );
+            }
         }
     }
 
@@ -1214,7 +1220,7 @@ mod tests {
             .copied()
             .filter(|reason| reason.requires_opt_in())
             .collect();
-        assert_eq!(overridable, [Reason::NestedArchive, Reason::DiskImage]);
+        assert_eq!(overridable, [Reason::NestedArchive]);
     }
 
     #[test]
