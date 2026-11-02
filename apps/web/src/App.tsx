@@ -31,6 +31,7 @@ import {
   CompassIcon,
   DownloadIcon,
   HomeIcon,
+  IntegrationsIcon,
   LibraryIcon,
   SearchIcon,
 } from "./icons.js";
@@ -575,7 +576,6 @@ export function App() {
         onBrowse={() => goBrowse()}
         onDownloads={goDownloads}
         onHome={goHome}
-        onIntegrations={goIntegrations}
         onLibrary={goLibrary}
         onMyList={goMyList}
       />
@@ -654,6 +654,18 @@ function TopBar({
       >
         <SearchIcon />
       </button>
+      <button
+        aria-label="Integrations"
+        className={
+          active === "integrations" ? "nav topbar-integrations current" : "nav topbar-integrations"
+        }
+        data-focus="true"
+        data-focus-key="nav:integrations-phone"
+        onClick={onIntegrations}
+        type="button"
+      >
+        <IntegrationsIcon />
+      </button>
       <ProfileMenu />
     </header>
   );
@@ -666,7 +678,6 @@ function TabBar({
   onMyList,
   onDownloads,
   onLibrary,
-  onIntegrations,
 }: {
   readonly active: Tab | null;
   readonly onHome: () => void;
@@ -674,7 +685,6 @@ function TabBar({
   readonly onMyList: () => void;
   readonly onDownloads: () => void;
   readonly onLibrary: () => void;
-  readonly onIntegrations: () => void;
 }) {
   return (
     <nav className="tabbar">
@@ -727,15 +737,6 @@ function TabBar({
       >
         <LibraryIcon />
         <span>Library</span>
-      </button>
-      <button
-        className={active === "integrations" ? "tab current" : "tab"}
-        data-focus="true"
-        data-focus-key="tab:integrations"
-        onClick={onIntegrations}
-        type="button"
-      >
-        <span>Integrations</span>
       </button>
     </nav>
   );

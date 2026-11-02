@@ -321,12 +321,6 @@
 }
 
 @media (max-width: 720px) {
-  /* Six tabs share a phone's width; the label needs the room the old padding spent. */
-  .tabbar .tab {
-    padding-right: 2px;
-    padding-left: 2px;
-  }
-
   .integrations-body {
     padding: 4px 20px 0;
   }

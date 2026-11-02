@@ -255,7 +255,9 @@
   margin-left: auto;
 }
 
-@media (max-width: 960px) {
+/* The wrap layout is still a row, so the field's basis is a width. Below 720px the header is a
+   column, where the same basis becomes a height and the pill grows into an ellipse. */
+@media (min-width: 721px) and (max-width: 960px) {
   .browse-head {
     flex-wrap: wrap;
   }
