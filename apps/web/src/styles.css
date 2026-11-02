@@ -360,9 +360,7 @@ button {
     font-size: clamp(40px, 13vw, 76px);
     letter-spacing: 0.08em;
   }
-
 }
-
 
 /* ---- Home, rails, and the title page ---- */
 
@@ -549,6 +547,43 @@ button {
   height: 100%;
   border-radius: 2px;
   background: var(--accent);
+}
+
+/* The desktop card's download mark: a strip in the state's colour, and the percent while the
+   transfer runs. Both sit above the poster and below nothing a person needs to read. */
+.card-download {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 6px;
+  background: var(--accent);
+}
+
+.card-download[data-tone="done"] {
+  background: var(--state-ok);
+}
+
+.card-download[data-tone="failed"] {
+  background: var(--state-danger);
+}
+
+.card-download-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .card-rating {
@@ -2415,10 +2450,39 @@ html.tizen body {
   font-size: 1.25vw;
 }
 
+/* The bar floats over the page as a dark translucent strip, so the Home and title heroes run to
+   the top edge under it. Chromium 76 has no `:has()` to ask which screen follows, so the bar takes a fixed
+   height and every other screen moves down by it. The base rule's `color-mix()` over an
+   `oklch()` token is transparent on this engine, hence the plain rgba. It still scrolls away with
+   the page rather than sticking: a sticky bar over a ten-foot grid is a strip of lost screen. */
 html.tizen .topbar {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  box-sizing: border-box;
+  height: 5.4vw;
   gap: 1.2vw;
-  padding: 1.5vw 3.3vw;
+  padding: 0 3.3vw;
+  background: rgba(10, 12, 15, 0.55);
+}
+
+html.tizen .topbar + .screen {
+  margin-top: 5.4vw;
+}
+
+html.tizen .topbar + .home,
+html.tizen .topbar + .title-screen {
+  margin-top: 0;
+}
+
+/* Beside Back the brand is a second, unpressable thing at the left edge; Home keeps it. */
+html.tizen .topbar-back + .brand {
+  display: none;
+}
+
+html.tizen.no-flex-gap .topbar > * + *:not(.topbar-nav) {
+  margin-left: 0.8vw;
 }
 
 html.tizen .brand {
@@ -2455,12 +2519,20 @@ html.tizen .tab {
   font-size: 1.15vw;
 }
 
-html.tizen .topbar-back {
+/* These icon buttons also carry `.nav`, whose padding above is wider than the button itself: it
+   left the icon a 0-6px content box. */
+html.tizen .topbar-back,
+html.tizen .search-toggle,
+html.tizen .topbar-integrations {
   width: 2.3vw;
   height: 2.3vw;
+  padding: 0;
 }
 
-html.tizen .topbar-back svg {
+html.tizen .topbar-back svg,
+html.tizen .search-toggle svg,
+html.tizen .topbar-integrations svg {
+  flex: none;
   width: 1.15vw;
   height: 1.15vw;
 }
@@ -2624,17 +2696,93 @@ html.tizen .card-art::before {
   display: none;
 }
 
-/* With the content box at zero height, a percentage height on the absolutely positioned image
-   can resolve to zero on an old engine. The top/bottom offsets against the padding box are the
-   reliable stretch; `height: auto` lets them do it. */
+/* An <img> is a replaced element: with `auto` it takes its natural size whatever the offsets
+   say, so a 640x360 still overflowed a 279px poster box. A percentage on an absolutely
+   positioned box resolves against the padding box, which is the reserved 2:3, not the zero-height
+   content box. */
 html.tizen .card-art img {
   top: 0;
   right: 0;
   bottom: 0;
   left: 0;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
+}
+
+html.tizen.no-flex-gap .card > * + * {
+  margin-top: 0.4vw;
+}
+
+/* The overlays on the poster were still desktop pixels on a 1920 canvas: a 12px rating under a
+   20px name. */
+html.tizen .card-rating {
+  top: 0.5vw;
+  left: 0.5vw;
+  padding: 0.15vw 0.5vw;
+  font-size: 0.85vw;
+}
+
+html.tizen .card-rating svg,
+html.tizen .card-preview-rating svg {
+  width: 0.8vw;
+  height: 0.8vw;
+}
+
+html.tizen.no-flex-gap .card-rating svg,
+html.tizen.no-flex-gap .card-preview-rating svg {
+  margin-right: 0.2vw;
+}
+
+html.tizen .card-bookmark {
+  top: 0.5vw;
+  right: 0.5vw;
+  width: 1.8vw;
+  height: 1.8vw;
+}
+
+html.tizen .card-bookmark svg {
+  width: 1vw;
+  height: 1vw;
+}
+
+/* The focus panel's gradient has literal `oklch()` stops, which this engine drops whole, leaving
+   the panel's words on the bare poster. */
+html.tizen .card-preview {
+  padding: 2.4vw 0.7vw 0.7vw;
+  background: linear-gradient(
+    to top,
+    var(--surface-1) 0%,
+    var(--surface-1) 44%,
+    rgba(0, 0, 0, 0.5) 74%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+html.tizen.no-flex-gap .card-preview > * + * {
+  margin-top: 0.15vw;
+}
+
+html.tizen .card-preview-name {
+  font-size: 1.1vw;
+}
+
+html.tizen .card-preview-meta,
+html.tizen .card-preview-rating,
+html.tizen .card-preview-overview {
+  font-size: 0.85vw;
+}
+
+html.tizen .card-download {
+  height: 0.35vw;
+}
+
+html.tizen .card-download-overlay {
+  font-size: 1.6vw;
+}
+
+html.tizen .episode-download-label {
+  font-size: 1vw;
 }
 
 html.tizen .episode-still {
@@ -2652,8 +2800,8 @@ html.tizen .episode-still img {
   right: 0;
   bottom: 0;
   left: 0;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
 }
 
