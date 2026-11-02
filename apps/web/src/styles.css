@@ -2628,8 +2628,47 @@ html.tizen .genre {
   font-size: 0.95vw;
 }
 
+/* The backdrop is 16:9, and a 63vh box cropped over a third of it away. At 56.25vw the box is the
+   image's own shape, so `cover` shows the whole frame under the floating bar, and the rails
+   start on the next screenful. */
 html.tizen .hero {
-  min-height: 63vh;
+  min-height: 56.25vw;
+}
+
+/* The scrim's `oklch()` stops are dropped whole on this engine, leaving the title on bare art. */
+html.tizen .hero::after {
+  background: linear-gradient(
+    to top,
+    var(--surface-0) 0%,
+    rgba(0, 0, 0, 0.45) 45%,
+    rgba(0, 0, 0, 0.05) 100%
+  );
+}
+
+/* The dots sit on the copy's baseline at the right edge, sized for a remote: an 8px dot was a
+   speck for the plate to ring. The width change is instant, since a transition on it is a
+   layout per frame. */
+html.tizen .hero-dots {
+  top: auto;
+  right: 3.3vw;
+  bottom: 2.6vw;
+  gap: 0.7vw;
+}
+
+html.tizen.no-flex-gap .hero-dots > * + * {
+  margin-left: 0.7vw;
+}
+
+html.tizen .hero-dot {
+  width: 0.7vw;
+  height: 0.7vw;
+  background: rgba(255, 255, 255, 0.4);
+  transition: none;
+}
+
+html.tizen .hero-dot.current {
+  width: 2vw;
+  background: var(--text-primary);
 }
 
 html.tizen .title-hero {
