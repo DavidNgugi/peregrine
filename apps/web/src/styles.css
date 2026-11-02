@@ -222,68 +222,6 @@ video:focus-visible {
   font-size: 17px;
 }
 
-.player {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  padding: 0;
-  background: #000;
-}
-
-.player video {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-  height: auto;
-  background: #000;
-  object-fit: contain;
-}
-
-.player-controls {
-  flex: 0 0 auto;
-}
-
-.player-controls {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 28px;
-  background: var(--surface-0);
-}
-
-.player-controls .control {
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  padding: 10px 18px;
-  background: var(--surface-2);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.seek {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.time {
-  min-width: 132px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
-}
-
-.player-title {
-  max-width: 28ch;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text-tertiary);
-}
-
 .player-message {
   position: absolute;
   top: 24px;
@@ -325,8 +263,8 @@ video:focus-visible {
   cursor: pointer;
 }
 
-/* Touch and small screens: the same screens, a two-to-three column grid, and a player whose
-   controls wrap into two rows rather than overflowing a phone. */
+/* Touch and small screens: the same screens and a two-to-three column grid. The player's own
+   phone layout is in player.css. */
 button {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -423,67 +361,8 @@ button {
     letter-spacing: 0.08em;
   }
 
-  .player {
-    height: 100dvh;
-  }
-
-  .player video {
-    object-fit: contain;
-  }
-
-  .player-controls {
-    flex-wrap: wrap;
-    gap: 10px;
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .player-controls .control,
-  .player-controls .back {
-    min-height: 44px;
-    padding: 8px 13px;
-  }
-
-  .time {
-    min-width: 0;
-    font-size: 14px;
-  }
-
-  .seek {
-    order: 10;
-    flex-basis: 100%;
-    height: 36px;
-  }
-
-  .player-title {
-    display: none;
-  }
 }
 
-@media (orientation: landscape) and (max-height: 560px) {
-  .player-controls {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(to top, oklch(0 0 0 / 0.8), transparent);
-    z-index: 2;
-  }
-
-  .player-controls .control,
-  .player-controls .back {
-    min-height: 40px;
-    padding: 6px 12px;
-  }
-
-  .player video {
-    height: 100dvh;
-  }
-
-  .player-title {
-    display: none;
-  }
-}
 
 /* ---- Home, rails, and the title page ---- */
 
@@ -1422,11 +1301,6 @@ button {
 .back-icon svg {
   width: 22px;
   height: 22px;
-}
-
-.player-back {
-  top: calc(14px + env(safe-area-inset-top, 0px));
-  left: 14px;
 }
 
 /* ---- Route and hover motion ---- */
@@ -2463,11 +2337,6 @@ button {
   #root,
   .screen {
     min-height: 100vh;
-  }
-
-  .player,
-  .player video {
-    height: 100vh;
   }
 
   .hero {

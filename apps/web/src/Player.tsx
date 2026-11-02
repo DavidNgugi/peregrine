@@ -3,15 +3,20 @@
  * and one progress writer either way.
  *
  * The timestamp the person sees is absolute in the title, while the media element's clock starts at
- * whatever offset the transcode was started at. Seeking is therefore a request for a new session at
- * the target offset, not a call to `currentTime`: a transcode cannot seek backwards, and a seek
- * beyond what the encoder has produced would stall. The debounce turns a held arrow key into one
- * restart.
+ * whatever offset the transcode was started at. A seek is therefore resolved first against what the
+ * current session already holds — the whole file for a direct play, the encoded window for a
+ * transcode — and only a target outside it becomes a new session at that offset. A scrub is held
+ * as a pending position and committed once the keys go quiet, so a held arrow is one seek.
+ *
+ * **The remote has a grammar while the controls are hidden** (see `player-controls.ts`): OK pauses
+ * or takes the on-screen skip, left and right scrub, up and down reveal the controls. Once they are
+ * showing, spatial focus owns the arrows again, except on the timeline, where left and right
+ * scrub. Back closes the track panel or abandons a scrub before it leaves the player.
  *
  * **The sidecars are served by the listener, never built here.** Every subtitle URL in the ticket
- * already answers WebVTT and, for an HLS session, already carries the transcode's offset. The
- * element's own `textTracks` are the only source of truth for what is loaded, because a direct
- * file and an hls.js attachment populate them at different times.
+ * already answers WebVTT and, for an HLS session, already carries the transcode's offset. A track
+ * is chosen by its id rather than its position in `textTracks`, because hls.js may add caption
+ * tracks of its own ahead of or between the sidecars.
  *
  * **The shared post-play coordinator owns what follows an ending.** A credits marker or the
  * `ended` event opens it; a countdown for the next episode starts only when the ticket offered
@@ -26,6 +31,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type RefObject,
 } from "react";
@@ -40,7 +46,28 @@ import {
 } from "@peregrine/player-ui";
 
 import { api, type Marker, type PlaybackTicket } from "./api.js";
-import { ChevronLeftIcon } from "./icons.js";
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  ForwardIcon,
+  FullscreenIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  RewindIcon,
+  SubtitlesIcon,
+} from "./icons.js";
+import {
+  CONTROLS_IDLE_MS,
+  SCRUB_COMMIT_MS,
+  inSessionSeconds,
+  nextScrubRun,
+  playerKey,
+  progressPercent,
+  scrubStepMs,
+  scrubTarget,
+  type ScrubRun,
+} from "./player-controls.js";
 import {
   absolutePositionMs,
   hiddenPostPlay,
@@ -56,7 +83,7 @@ import {
   subtitleLabel,
   totalDurationMs,
 } from "./player-tracks.js";
-import { transportAction } from "./tizen.js";
+import { isTizen, transportAction, useBackInterceptor } from "./tizen.js";
 
 export interface PlayerProps {
   readonly titleId: number;
@@ -91,6 +118,9 @@ interface NativeAudioTrackList {
   readonly [index: number]: NativeAudioTrack;
 }
 
+/** The control a reveal should leave focused. */
+type FocusTarget = "timeline" | "play" | "tracks";
+
 function nativeAudioTracks(element: HTMLVideoElement | null): NativeAudioTrackList | null {
   if (element === null) return null;
   const media = element as HTMLVideoElement & {
@@ -104,17 +134,45 @@ function subtitleIds(tracks: PlaybackTicket["subtitles"]): string {
   return tracks.map((track) => String(track.id)).join(",");
 }
 
+/** The `<track>` id a sidecar is rendered with, and therefore the `TextTrack.id` it is found by. */
+function subtitleElementId(trackId: number): string {
+  return "subtitle-" + String(trackId);
+}
+
+/** The end of what the element can seek to now, in its own seconds. */
+function seekableEnd(element: HTMLVideoElement): number | null {
+  const ranges = element.seekable;
+  if (ranges.length === 0) return null;
+  return ranges.end(ranges.length - 1);
+}
+
+const TIZEN = typeof navigator !== "undefined" && isTizen(navigator.userAgent);
+
 export function Player({ titleId, titleName, initial, onClose }: PlayerProps): ReactElement {
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
+  const root = useRef<HTMLElement>(null);
+  const timeline = useRef<HTMLDivElement>(null);
+  const playButton = useRef<HTMLButtonElement>(null);
+  const tracksButton = useRef<HTMLButtonElement>(null);
+  const tracksPanel = useRef<HTMLElement>(null);
   const [ticket, setTicket] = useState<PlaybackTicket>(initial);
   const [playing, setPlaying] = useState(false);
+  const [waiting, setWaiting] = useState(true);
   const [absoluteMs, setAbsoluteMs] = useState(initial.startPositionMs);
   const [totalMs, setTotalMs] = useState<number | null>(initial.durationMs);
   const [pendingMs, setPendingMs] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [controls, setControls] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [activity, setActivity] = useState(0);
+  const [focusRequest, setFocusRequest] = useState<{
+    readonly target: FocusTarget;
+    readonly serial: number;
+  } | null>(null);
   const pending = useRef<number | null>(null);
   const timer = useRef<number | null>(null);
+  const scrubRun = useRef<ScrubRun | null>(null);
   const reportRef = useRef<(keepalive?: boolean) => void>(() => {});
   const [battery, setBattery] = useState<{
     readonly percent: number;
@@ -193,10 +251,6 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     };
   }, []);
 
-  useEffect(() => {
-    document.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-  }, []);
-
   // Attach the chosen delivery. A ticket change is a new session, so the old one is destroyed
   // before the new URL is loaded.
   useEffect(() => {
@@ -206,6 +260,7 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     hls.current?.destroy();
     hls.current = null;
     setMessage(null);
+    setWaiting(true);
     setTotalMs(ticket.durationMs);
     setAbsoluteMs(ticket.startPositionMs);
     pending.current = null;
@@ -345,11 +400,13 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
   useEffect(() => {
     const element = video.current;
     if (element === null) return;
+    const chosen = selectedSubtitle === null ? undefined : ticket.subtitles[selectedSubtitle];
+    const wanted = chosen === undefined ? null : subtitleElementId(chosen.id);
     const apply = (): void => {
       for (let index = 0; index < element.textTracks.length; index += 1) {
         const entry = element.textTracks[index];
         if (entry === undefined) continue;
-        entry.mode = index === selectedSubtitle ? "showing" : "disabled";
+        entry.mode = wanted !== null && entry.id === wanted ? "showing" : "disabled";
       }
     };
     apply();
@@ -440,8 +497,12 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     };
     const onPause = (): void => {
       setPlaying(false);
+      // A paused picture keeps its controls; the idle timer only hides them while playing.
+      setControls(true);
       reportRef.current();
     };
+    const onWaiting = (): void => setWaiting(true);
+    const onFlowing = (): void => setWaiting(false);
     const onEnded = (): void => {
       if (endedReported.current) return;
       endedReported.current = true;
@@ -456,6 +517,11 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     element.addEventListener("durationchange", onMetadata);
     element.addEventListener("play", onPlay);
     element.addEventListener("pause", onPause);
+    element.addEventListener("waiting", onWaiting);
+    element.addEventListener("seeking", onWaiting);
+    element.addEventListener("playing", onFlowing);
+    element.addEventListener("seeked", onFlowing);
+    element.addEventListener("canplay", onFlowing);
     element.addEventListener("ended", onEnded);
     return () => {
       element.removeEventListener("timeupdate", onTime);
@@ -463,6 +529,11 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       element.removeEventListener("durationchange", onMetadata);
       element.removeEventListener("play", onPlay);
       element.removeEventListener("pause", onPause);
+      element.removeEventListener("waiting", onWaiting);
+      element.removeEventListener("seeking", onWaiting);
+      element.removeEventListener("playing", onFlowing);
+      element.removeEventListener("seeked", onFlowing);
+      element.removeEventListener("canplay", onFlowing);
       element.removeEventListener("ended", onEnded);
     };
   }, [ticket, titleId]);
@@ -522,18 +593,70 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     [titleId, ticket.episodeId],
   );
 
-  const seekTo = useCallback(
-    (target: number): void => {
-      const clamped = Math.max(0, Math.min(target, totalMs ?? target));
-      pending.current = clamped;
-      setPendingMs(clamped);
-      if (timer.current !== null) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => {
-        void restart(clamped);
-      }, 450);
+  const clearScrubTimer = (): void => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+
+  /** Moves playback to `targetMs` now: inside the session when it holds the target, else a new one. */
+  const commitSeek = useCallback(
+    (targetMs: number): void => {
+      clearScrubTimer();
+      scrubRun.current = null;
+      pending.current = null;
+      setPendingMs(null);
+      const element = video.current;
+      const seconds =
+        element === null
+          ? null
+          : inSessionSeconds(ticket.kind, ticket.startPositionMs, targetMs, seekableEnd(element));
+      if (element !== null && seconds !== null) {
+        setAbsoluteMs(targetMs);
+        element.currentTime = seconds;
+        return;
+      }
+      void restart(targetMs);
     },
-    [restart, totalMs],
+    [restart, ticket.kind, ticket.startPositionMs],
   );
+
+  /** Holds `target` as the scrub position and commits it once the keys go quiet. */
+  const scrubTo = useCallback(
+    (target: number): void => {
+      pending.current = target;
+      setPendingMs(target);
+      clearScrubTimer();
+      timer.current = window.setTimeout(() => {
+        timer.current = null;
+        commitSeek(target);
+      }, SCRUB_COMMIT_MS);
+    },
+    [commitSeek],
+  );
+
+  const shown = pendingMs ?? absoluteMs;
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+
+  /** One press of a scrub key: the step grows while the key is held. */
+  const scrub = useCallback(
+    (direction: -1 | 1, base: number): void => {
+      const run = nextScrubRun(scrubRun.current, direction, Date.now());
+      scrubRun.current = run;
+      const from = pending.current ?? shownRef.current;
+      scrubTo(scrubTarget(from, direction * scrubStepMs(run.count, base), totalMs));
+    },
+    [scrubTo, totalMs],
+  );
+
+  const cancelScrub = (): void => {
+    clearScrubTimer();
+    scrubRun.current = null;
+    pending.current = null;
+    setPendingMs(null);
+  };
 
   const toggle = (): void => {
     const element = video.current;
@@ -544,6 +667,26 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       element.pause();
     }
   };
+
+  const reveal = (focus: FocusTarget | null): void => {
+    setControls(true);
+    setActivity((value) => value + 1);
+    if (focus !== null) {
+      setFocusRequest((current) => ({ target: focus, serial: (current?.serial ?? 0) + 1 }));
+    }
+  };
+
+  // Focus is placed after the render that makes the target visible; a hidden control cannot take it.
+  useEffect(() => {
+    if (focusRequest === null || !controls) return;
+    const target =
+      focusRequest.target === "timeline"
+        ? timeline.current
+        : focusRequest.target === "tracks"
+          ? tracksButton.current
+          : playButton.current;
+    target?.focus({ preventScroll: true });
+  }, [focusRequest, controls]);
 
   const selectAudio = (index: number): void => {
     const menu = audioMenu;
@@ -574,20 +717,54 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     onClose();
   };
 
+  const canFullscreen =
+    !TIZEN && typeof document !== "undefined" && document.fullscreenEnabled !== false;
+
   const fullscreen = (): void => {
     const element = video.current;
     if (element === null) return;
     const ios = element as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
     if (document.fullscreenElement !== null) {
       void document.exitFullscreen();
+    } else if (typeof root.current?.requestFullscreen === "function") {
+      // The whole player goes full screen, not the element, so the controls and panels come along.
+      void root.current.requestFullscreen().catch(() => {});
     } else if (typeof ios.webkitEnterFullscreen === "function") {
       ios.webkitEnterFullscreen();
-    } else {
-      void element.parentElement?.requestFullscreen().catch(() => {});
     }
   };
 
-  const shown = pendingMs ?? absoluteMs;
+  const openPanel = (): void => {
+    setPanelOpen(true);
+    setControls(true);
+  };
+
+  const closePanel = (): void => {
+    setPanelOpen(false);
+    setFocusRequest((current) => ({ target: "tracks", serial: (current?.serial ?? 0) + 1 }));
+  };
+
+  // The panel takes focus on its selected entry, so OK on open never changes a choice by itself.
+  useEffect(() => {
+    if (!panelOpen) return;
+    const target =
+      tracksPanel.current?.querySelector<HTMLElement>('[aria-checked="true"]') ??
+      tracksPanel.current?.querySelector<HTMLElement>("[data-focus]");
+    target?.focus({ preventScroll: true });
+  }, [panelOpen]);
+
+  useBackInterceptor(() => {
+    if (panelOpen) {
+      closePanel();
+      return true;
+    }
+    if (pending.current !== null) {
+      cancelScrub();
+      return true;
+    }
+    return false;
+  });
+
   const playerMarkers = useMemo(() => toPlayerMarkers(markers), [markers]);
   const markerPosition = shown;
   const skip = skipTarget(playerMarkers, markerPosition);
@@ -629,9 +806,17 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
       });
   }, [ticket.nextEpisode, titleId]);
 
+  // A replay inside the session reuses the ticket, so the ending's state is reset here rather than
+  // by the ticket effect a restart would have run.
   const replay = useCallback((): void => {
-    void restart(0);
-  }, [restart]);
+    const fresh = hiddenPostPlay(toNextUp(ticket.nextEpisode, titleId));
+    postPlayRef.current = fresh;
+    setPostPlay(fresh);
+    openedFor.current = null;
+    endedReported.current = false;
+    commitSeek(0);
+    void video.current?.play().catch(() => {});
+  }, [commitSeek, ticket.nextEpisode, titleId]);
 
   const runCommand = useCallback(
     (command: PostPlayCommand | null): void => {
@@ -682,9 +867,9 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     if (postPlay.phase === "hidden") return;
     const active = document.activeElement;
     if (active === backButton.current) return;
-    // A seek or a track menu is an interaction in progress; a marker reached under the thumb
-    // must not pull the focus out of it.
-    if (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) return;
+    // A scrub in progress keeps the timeline; a marker reached under the thumb must not pull the
+    // focus out of it.
+    if (active === timeline.current && pending.current !== null) return;
     const target = panel.current;
     if (target === null) return;
     if (active !== null && target.contains(active)) return;
@@ -700,82 +885,175 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     postPlayDispatch.current({ type: "credits" });
   }, [creditsKey, postPlay.phase]);
 
-  const skipNow = (targetMs: number): void => {
-    if (pending.current !== null) {
-      pending.current = null;
-      setPendingMs(null);
-    }
-    if (timer.current !== null) {
-      window.clearTimeout(timer.current);
-      timer.current = null;
-    }
-    setAbsoluteMs(targetMs);
-    if (ticket.kind === "hls") {
-      void restart(targetMs);
-      return;
-    }
-    const element = video.current;
-    if (element === null) return;
-    element.currentTime = targetMs / 1000;
-  };
+  // The controls leave once the picture has had a quiet stretch; a pause, a scrub, an open panel,
+  // or the post-play surface keeps them, because each is something the person is in the middle of.
+  const postPlayOpen = postPlay.phase !== "hidden";
+  useEffect(() => {
+    if (!controls || !playing || panelOpen || pendingMs !== null || postPlayOpen) return;
+    const hide = window.setTimeout(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && root.current?.contains(active)) active.blur();
+      setControls(false);
+    }, CONTROLS_IDLE_MS);
+    return () => window.clearTimeout(hide);
+  }, [controls, playing, panelOpen, pendingMs, postPlayOpen, activity]);
 
-  // A television remote's transport keys are not the on-screen buttons, and they exist only while
-  // this screen does: the listener is the "only when a player is open" rule. The ref keeps one
-  // handler across the four updates a second that `shown` changes.
-  const transport = useRef({ close, seekTo, shown });
-  transport.current = { close, seekTo, shown };
+  // The remote, read in the capture phase so a key the player owns never reaches spatial focus.
+  // The ref keeps one listener across the four updates a second that `shown` changes.
+  const keys = useRef({
+    close,
+    commitSeek,
+    scrub,
+    toggle,
+    reveal,
+    skip,
+    controls,
+    panelOpen,
+    postPlayOpen,
+  });
+  keys.current = {
+    close,
+    commitSeek,
+    scrub,
+    toggle,
+    reveal,
+    skip,
+    controls,
+    panelOpen,
+    postPlayOpen,
+  };
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      const action = transportAction(event.keyCode, event.key);
-      if (action === null) return;
-      event.preventDefault();
+      const current = keys.current;
       const element = video.current;
-      const current = transport.current;
-      switch (action) {
-        case "play":
-          if (element !== null) void element.play().catch(() => {});
+      const action = transportAction(event.keyCode, event.key);
+      if (action !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        switch (action) {
+          case "play":
+            if (element !== null) void element.play().catch(() => {});
+            current.reveal(null);
+            break;
+          case "pause":
+            element?.pause();
+            break;
+          case "toggle":
+            current.toggle();
+            current.reveal(null);
+            break;
+          case "stop":
+            current.close();
+            break;
+          case "forward":
+            current.scrub(1, 30_000);
+            current.reveal("timeline");
+            break;
+          case "rewind":
+            current.scrub(-1, 30_000);
+            current.reveal("timeline");
+            break;
+        }
+        return;
+      }
+      const key = playerKey(event.key, event.keyCode);
+      if (key === null) return;
+      setActivity((value) => value + 1);
+      // An open panel and the post-play surface are ordinary focus screens.
+      if (current.panelOpen || current.postPlayOpen) return;
+      const active = document.activeElement;
+      const onControl =
+        current.controls &&
+        active instanceof HTMLElement &&
+        active.matches("[data-focus]") &&
+        root.current?.contains(active) === true;
+      if (onControl && active === timeline.current) {
+        if (key === "left" || key === "right") {
+          event.preventDefault();
+          event.stopPropagation();
+          current.scrub(key === "left" ? -1 : 1, 10_000);
+          return;
+        }
+        if (key === "ok") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (pending.current !== null) current.commitSeek(pending.current);
+          else current.toggle();
+          return;
+        }
+      }
+      if (onControl) return;
+      // Nothing of the player's is focused: the picture itself answers the D-pad.
+      event.preventDefault();
+      event.stopPropagation();
+      switch (key) {
+        case "ok":
+          if (current.skip !== null) current.commitSeek(current.skip.targetMs);
+          else current.toggle();
+          current.reveal("play");
           break;
-        case "pause":
-          element?.pause();
+        case "left":
+        case "right":
+          current.scrub(key === "left" ? -1 : 1, 10_000);
+          current.reveal("timeline");
           break;
-        case "toggle":
-          if (element !== null) {
-            if (element.paused) void element.play().catch(() => {});
-            else element.pause();
-          }
-          break;
-        case "stop":
-          current.close();
-          break;
-        case "forward":
-          current.seekTo(current.shown + 10_000);
-          break;
-        case "rewind":
-          current.seekTo(current.shown - 10_000);
+        case "up":
+        case "down":
+          current.reveal(key === "up" ? "timeline" : "play");
           break;
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
+  // A pointer reports dozens of moves a second; one reveal per half second keeps the idle timer
+  // honest without a render per move.
+  const lastPointer = useRef(0);
+  const onPointerMove = (): void => {
+    const now = Date.now();
+    if (controls && now - lastPointer.current < 500) return;
+    lastPointer.current = now;
+    reveal(null);
+  };
+
+  const onSurfaceClick = (): void => {
+    if (!controls) {
+      reveal(null);
+      return;
+    }
+    toggle();
+  };
+
+  const onTimelineClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (totalMs === null) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    if (box.width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+    commitSeek(Math.round(ratio * totalMs));
+  };
+
+  const focusable = controls ? "true" : undefined;
+  const percent = progressPercent(shown, totalMs);
+  const played = progressPercent(absoluteMs, totalMs);
+  const remaining = totalMs === null ? null : Math.max(0, totalMs - shown);
+  const subtitleChoice = selectedSubtitle === null ? undefined : ticket.subtitles[selectedSubtitle];
+
   return (
-    <main className="player">
-      <button
-        aria-label="Back"
-        className="back-icon player-back"
-        data-autofocus="true"
-        data-focus="true"
-        onClick={close}
-        ref={backButton}
-        type="button"
-      >
-        <ChevronLeftIcon />
-      </button>
-      <video autoPlay playsInline ref={video}>
+    <main
+      className={
+        "player" +
+        (controls ? " player-active" : " player-idle") +
+        (panelOpen ? " player-panel-open" : "")
+      }
+      onPointerMove={onPointerMove}
+      ref={root}
+    >
+      <video autoPlay onClick={onSurfaceClick} playsInline ref={video}>
         {ticket.subtitles.map((track) => (
           <track
             default={track.default}
+            id={subtitleElementId(track.id)}
             key={track.id}
             kind="subtitles"
             label={subtitleLabel(track)}
@@ -784,6 +1062,9 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
           />
         ))}
       </video>
+      {waiting && message === null ? (
+        <div aria-label="Loading" className="player-spinner" role="status" />
+      ) : null}
       {battery !== null && battery.percent < 10 && !battery.charging ? (
         <p className="player-warning" role="alert">
           The computer running Peregrine is at {battery.percent}% battery. Playback stops when it
@@ -791,11 +1072,152 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         </p>
       ) : null}
       {message === null ? null : <p className="player-message">{message}</p>}
-      {skip === null || postPlay.phase !== "hidden" ? null : (
+
+      <div aria-hidden={!controls} className="player-osd">
+        <div className="player-top">
+          <button
+            aria-label="Back"
+            className="player-icon-button"
+            data-focus={focusable}
+            onClick={close}
+            ref={backButton}
+            tabIndex={controls ? 0 : -1}
+            type="button"
+          >
+            <ChevronLeftIcon />
+          </button>
+          <div className="player-heading">
+            <p className="player-title">{titleName}</p>
+            {subtitleChoice === undefined ? null : (
+              <p className="player-subtitle-state">{subtitleLabel(subtitleChoice)}</p>
+            )}
+          </div>
+        </div>
+        <div className="player-bottom">
+          <div
+            aria-label="Seek"
+            aria-valuemax={totalMs ?? 0}
+            aria-valuemin={0}
+            aria-valuenow={Math.round(shown)}
+            aria-valuetext={format(shown)}
+            className={"timeline" + (pendingMs === null ? "" : " timeline-scrubbing")}
+            data-focus={focusable}
+            onClick={onTimelineClick}
+            ref={timeline}
+            role="slider"
+            tabIndex={controls ? 0 : -1}
+          >
+            <div className="timeline-track">
+              <div
+                className="timeline-played"
+                style={{ transform: "scaleX(" + String(played / 100) + ")" }}
+              />
+              {playerMarkers.map((marker) =>
+                totalMs === null || marker.kind === "credits" ? null : (
+                  <div
+                    className="timeline-marker"
+                    key={marker.id}
+                    style={{
+                      transform:
+                        "translateX(" + String(progressPercent(marker.startMs, totalMs)) + "%)",
+                    }}
+                  />
+                ),
+              )}
+            </div>
+            <div
+              className="timeline-head"
+              style={{ transform: "translateX(" + String(percent) + "%)" }}
+            >
+              <span className="timeline-thumb" />
+              {pendingMs === null ? null : (
+                <span className="timeline-bubble">{format(pendingMs)}</span>
+              )}
+            </div>
+          </div>
+          <div className="player-row">
+            <span className="player-time">{format(shown)}</span>
+            <div className="player-buttons">
+              <button
+                aria-label="Back 10 seconds"
+                className="player-icon-button"
+                data-focus={focusable}
+                onClick={() => commitSeek(Math.max(0, shown - 10_000))}
+                tabIndex={controls ? 0 : -1}
+                type="button"
+              >
+                <RewindIcon />
+              </button>
+              <button
+                aria-label={playing ? "Pause" : "Play"}
+                className="player-icon-button player-play"
+                data-focus={focusable}
+                onClick={toggle}
+                ref={playButton}
+                tabIndex={controls ? 0 : -1}
+                type="button"
+              >
+                {playing ? <PauseIcon /> : <PlayIcon />}
+              </button>
+              <button
+                aria-label="Forward 10 seconds"
+                className="player-icon-button"
+                data-focus={focusable}
+                onClick={() => commitSeek(scrubTarget(shown, 10_000, totalMs))}
+                tabIndex={controls ? 0 : -1}
+                type="button"
+              >
+                <ForwardIcon />
+              </button>
+              <button
+                aria-expanded={panelOpen}
+                aria-label="Audio and subtitles"
+                className="player-icon-button"
+                data-focus={focusable}
+                onClick={openPanel}
+                ref={tracksButton}
+                tabIndex={controls ? 0 : -1}
+                type="button"
+              >
+                <SubtitlesIcon />
+              </button>
+              {ticket.nextEpisode === null ? null : (
+                <button
+                  aria-label="Next episode"
+                  className="player-icon-button"
+                  data-focus={focusable}
+                  onClick={startNext}
+                  tabIndex={controls ? 0 : -1}
+                  type="button"
+                >
+                  <NextIcon />
+                </button>
+              )}
+              {canFullscreen ? (
+                <button
+                  aria-label="Full screen"
+                  className="player-icon-button"
+                  data-focus={focusable}
+                  onClick={fullscreen}
+                  tabIndex={controls ? 0 : -1}
+                  type="button"
+                >
+                  <FullscreenIcon />
+                </button>
+              ) : null}
+            </div>
+            <span className="player-time player-remaining">
+              {remaining === null ? "--:--" : "-" + format(remaining)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {skip === null || postPlayOpen ? null : (
         <button
           className="player-skip"
           data-focus="true"
-          onClick={() => skipNow(skip.targetMs)}
+          onClick={() => commitSeek(skip.targetMs)}
           type="button"
         >
           {skip.label}
@@ -810,89 +1232,19 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
             "..."}
         </p>
       )}
-      <div className="player-controls">
-        <button className="control" data-focus="true" onClick={toggle} type="button">
-          {playing ? "Pause" : "Play"}
-        </button>
-        <button
-          className="control"
-          data-focus="true"
-          onClick={() => seekTo(shown - 10_000)}
-          type="button"
-        >
-          -10s
-        </button>
-        <button
-          className="control"
-          data-focus="true"
-          onClick={() => seekTo(shown + 10_000)}
-          type="button"
-        >
-          +10s
-        </button>
-        <button className="control" data-focus="true" onClick={fullscreen} type="button">
-          Fullscreen
-        </button>
-        {ticket.subtitles.length === 0 ? null : (
-          <label className="player-menu">
-            <span className="player-menu-label">Subtitles</span>
-            <select
-              aria-label="Subtitles"
-              className="player-select"
-              data-focus="true"
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setSelectedSubtitle(value === "" ? null : Number(value));
-              }}
-              value={selectedSubtitle === null ? "" : String(selectedSubtitle)}
-            >
-              <option value="">Off</option>
-              {ticket.subtitles.map((track, index) => (
-                <option key={track.id} value={String(index)}>
-                  {subtitleLabel(track)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {ticket.audioLanguage === null && audioMenu === null ? null : (
-          <span className="player-audio-group">
-            <span className="player-audio">
-              {ticket.audioLanguage === null ? "Audio" : "Audio: " + ticket.audioLanguage}
-            </span>
-            {audioMenu === null ? null : (
-              <select
-                aria-label="Audio track"
-                className="player-select"
-                data-focus="true"
-                onChange={(event) => selectAudio(Number(event.currentTarget.value))}
-                value={selectedAudio === null ? "" : String(selectedAudio)}
-              >
-                {audioMenu.options.map((option, index) => (
-                  <option key={option.id} value={String(index)}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </span>
-        )}
-        <span className="time">
-          {format(shown)} / {totalMs === null ? "--:--" : format(totalMs)}
-        </span>
-        <input
-          aria-label="Seek"
-          className="seek"
-          data-focus="true"
-          max={totalMs ?? 0}
-          min={0}
-          onChange={(event) => seekTo(Number(event.target.value))}
-          step={1000}
-          type="range"
-          value={Math.min(shown, totalMs ?? 0)}
+      {panelOpen ? (
+        <TracksPanel
+          audio={audioMenu}
+          audioLanguage={ticket.audioLanguage}
+          onAudio={selectAudio}
+          onClose={closePanel}
+          onSubtitle={setSelectedSubtitle}
+          panelRef={tracksPanel}
+          selectedAudio={selectedAudio}
+          selectedSubtitle={selectedSubtitle}
+          subtitles={ticket.subtitles}
         />
-        <span className="player-title">{titleName}</span>
-      </div>
+      ) : null}
       <PostPlayPanel
         onCancel={() => postPlayDispatch.current({ type: "cancel" })}
         onPlayNow={() => postPlayDispatch.current({ type: "start-next" })}
@@ -901,6 +1253,118 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
         state={postPlay}
       />
     </main>
+  );
+}
+
+/**
+ * The audio and subtitle sheet: two lists of plain buttons rather than native selects, because a
+ * television's select popup is a system dialog the D-pad drives badly. The scope keeps spatial
+ * focus inside the sheet until Back or Close returns it to the controls.
+ */
+export function TracksPanel({
+  subtitles,
+  selectedSubtitle,
+  onSubtitle,
+  audio,
+  audioLanguage,
+  selectedAudio,
+  onAudio,
+  onClose,
+  panelRef,
+}: {
+  readonly subtitles: PlaybackTicket["subtitles"];
+  readonly selectedSubtitle: number | null;
+  readonly onSubtitle: (index: number | null) => void;
+  readonly audio: AudioMenu | null;
+  readonly audioLanguage: string | null;
+  readonly selectedAudio: number | null;
+  readonly onAudio: (index: number) => void;
+  readonly onClose: () => void;
+  readonly panelRef?: RefObject<HTMLElement | null> | undefined;
+}): ReactElement {
+  return (
+    <section
+      aria-label="Audio and subtitles"
+      aria-modal="true"
+      className="player-sheet"
+      data-focus-scope="true"
+      ref={panelRef}
+      role="dialog"
+    >
+      <div className="player-sheet-columns">
+        <div className="player-sheet-column">
+          <h2>Audio</h2>
+          {audio === null ? (
+            <p className="player-sheet-note">
+              {audioLanguage === null ? "One audio track" : "Audio: " + audioLanguage}
+            </p>
+          ) : (
+            <ul role="radiogroup">
+              {audio.options.map((option, index) => (
+                <li key={option.id}>
+                  <TrackOption
+                    checked={selectedAudio === index}
+                    label={option.label}
+                    onSelect={() => onAudio(index)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="player-sheet-column">
+          <h2>Subtitles</h2>
+          <ul role="radiogroup">
+            <li>
+              <TrackOption
+                checked={selectedSubtitle === null}
+                label="Off"
+                onSelect={() => onSubtitle(null)}
+              />
+            </li>
+            {subtitles.map((track, index) => (
+              <li key={track.id}>
+                <TrackOption
+                  checked={selectedSubtitle === index}
+                  label={subtitleLabel(track)}
+                  onSelect={() => onSubtitle(index)}
+                />
+              </li>
+            ))}
+          </ul>
+          {subtitles.length === 0 ? (
+            <p className="player-sheet-note">This file has no text subtitles.</p>
+          ) : null}
+        </div>
+      </div>
+      <button className="player-sheet-close" data-focus="true" onClick={onClose} type="button">
+        Close
+      </button>
+    </section>
+  );
+}
+
+function TrackOption({
+  checked,
+  label,
+  onSelect,
+}: {
+  readonly checked: boolean;
+  readonly label: string;
+  readonly onSelect: () => void;
+}): ReactElement {
+  return (
+    <button
+      aria-checked={checked}
+      className="player-option"
+      data-focus="true"
+      onClick={onSelect}
+      role="radio"
+      type="button"
+    >
+      <span className="player-option-check">{checked ? <CheckIcon /> : null}</span>
+      <span>{label}</span>
+    </button>
   );
 }
 

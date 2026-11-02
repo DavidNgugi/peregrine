@@ -3,7 +3,7 @@ import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { PostPlayPanel } from "./Player.js";
+import { PostPlayPanel, TracksPanel } from "./Player.js";
 
 const NEXT_UP: NextUp = {
   titleId: 7,
@@ -58,5 +58,68 @@ describe("PostPlayPanel", () => {
 
   it("draws nothing while the coordinator is hidden", () => {
     expect(panel({ phase: "hidden", remainingMs: 0, nextUp: NEXT_UP, prefetch: "idle" })).toBe("");
+  });
+});
+
+const TRACK = {
+  id: 4,
+  language: "en",
+  label: "English",
+  format: "srt",
+  forced: false,
+  sdh: true,
+  default: true,
+  url: "/subs/4",
+};
+
+function sheet(props: Partial<Parameters<typeof TracksPanel>[0]> = {}): string {
+  return renderToStaticMarkup(
+    <TracksPanel
+      audio={null}
+      audioLanguage={null}
+      onAudio={() => {}}
+      onClose={() => {}}
+      onSubtitle={() => {}}
+      selectedAudio={null}
+      selectedSubtitle={null}
+      subtitles={[]}
+      {...props}
+    />,
+  );
+}
+
+describe("TracksPanel", () => {
+  it("says so when a file has no text subtitles, with Off still chosen", () => {
+    const html = sheet();
+    expect(html).toContain("This file has no text subtitles.");
+    expect(html).toMatch(/aria-checked="true"[^>]*>.*Off/);
+    expect(html).toContain("One audio track");
+  });
+
+  it("marks the chosen track and names its flags", () => {
+    const html = sheet({ subtitles: [TRACK], selectedSubtitle: 0 });
+    expect(html).toContain("English (SDH)");
+    expect(html).not.toContain("no text subtitles");
+    expect(html.match(/aria-checked="true"/g)).toHaveLength(1);
+    expect(html).toMatch(/aria-checked="true"[^>]*>.*English/);
+  });
+
+  it("lists audio renditions when there is more than one, and the host's language otherwise", () => {
+    const html = sheet({
+      audio: {
+        source: "hls",
+        options: [
+          { id: "hls-0", label: "English", language: "en" },
+          { id: "hls-1", label: "Japanese", language: "ja" },
+        ],
+      },
+      selectedAudio: 1,
+    });
+    expect(html).toMatch(/aria-checked="true"[^>]*>.*Japanese/);
+    expect(sheet({ audioLanguage: "ja" })).toContain("Audio: ja");
+  });
+
+  it("keeps spatial focus inside the sheet", () => {
+    expect(sheet()).toContain('data-focus-scope="true"');
   });
 });

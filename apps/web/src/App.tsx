@@ -41,7 +41,14 @@ import { ProfileMenu } from "./ProfileMenu.js";
 import { focusKeyOf, recallRoute, rememberRoute, restoreFocus } from "./route-state.js";
 import { useViewState } from "./view-state.js";
 import { parseRoute, routePath, type Route } from "./routing.js";
-import { backTarget, exitTizenApp, isTizen, useTizenBack, useTizenFocusPlate } from "./tizen.js";
+import {
+  backTarget,
+  exitTizenApp,
+  interceptBack,
+  isTizen,
+  useTizenBack,
+  useTizenFocusPlate,
+} from "./tizen.js";
 import { TitleScreen } from "./Title.js";
 
 type Screen =
@@ -330,6 +337,7 @@ export function App() {
   useTizenBack(tizen, () => {
     // The back rule is about history, which integrations shares with every tab; naming it
     // separately avoids widening the shared screen type for the one screen this ticket adds.
+    if (interceptBack()) return true;
     const name = screenRef.current.name;
     const target = name === "integrations" ? "back" : backTarget(name);
     if (target === "exit") return exitTizenApp();
@@ -409,6 +417,10 @@ export function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" && event.key !== "Backspace") return;
+      if (interceptBack()) {
+        event.preventDefault();
+        return;
+      }
       if (screen.name === "player") {
         event.preventDefault();
         void api.stopPlayback(screen.ticket.url).catch(() => {});

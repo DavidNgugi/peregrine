@@ -103,6 +103,38 @@
     }, COUNTDOWN_MS);
   }
 
+  // Tizen delivers only the D-pad, OK, and Back until these are registered. The registration
+  // belongs to the application rather than the document, so doing it here, where the `tizen`
+  // object certainly exists, is what lets the player on the navigated page receive them.
+  var MEDIA_KEYS = [
+    "MediaPlayPause",
+    "MediaPlay",
+    "MediaPause",
+    "MediaStop",
+    "MediaFastForward",
+    "MediaRewind",
+  ];
+
+  function registerMediaKeys() {
+    var input = window.tizen && window.tizen.tvinputdevice;
+    if (!input) return;
+    try {
+      if (typeof input.registerKeyBatch === "function") {
+        input.registerKeyBatch(MEDIA_KEYS);
+        return;
+      }
+    } catch (error) {
+      // Fall through to one key at a time, so one key the model lacks does not cost the rest.
+    }
+    for (var i = 0; i < MEDIA_KEYS.length; i += 1) {
+      try {
+        input.registerKey(MEDIA_KEYS[i]);
+      } catch (error) {
+        // A model without this key keeps the others.
+      }
+    }
+  }
+
   function exitApp() {
     try {
       if (window.tizen && window.tizen.application) {
@@ -155,6 +187,7 @@
   }
 
   function boot() {
+    registerMediaKeys();
     renderDiagnostics();
     var diagnosticLine =
       "peregrine-tv engine=" +

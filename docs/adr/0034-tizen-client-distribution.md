@@ -1,6 +1,6 @@
 # ADR 0034 — Samsung Tizen client: a shell over the paired LAN surface, signed per television
 
-- **Status:** Accepted.
+- **Status:** Accepted. §2 amended 2026-11-02: the shell also registers the remote's transport keys with the platform, because Tizen withholds them from a page until it does.
 - **Date:** 2026-10-21
 - **Evidence:** the paired LAN surface and cookie in [ADR 0028](./0028-tv-web-client.md) and `crates/peregrine-app/src/web`; the ten-foot client in `apps/web`; the Tizen findings in the reference television project and the verification section of [apps/tizen/README.md](../../apps/tizen/README.md)
 - **Related:** [0018](./0018-media-server.md), [0028](./0028-tv-web-client.md), [0029](./0029-device-scoped-acquisition.md), [0031](./0031-browser-client-parity.md)
@@ -20,7 +20,7 @@ The findings that shaped the decision, recorded here because they are measuremen
 - **The URL is the whole integration.** A top-level `location.replace` makes the page, `/api/*`, `/img/*`, `/media/*` and `/hls/*` one origin. The listener's `Host` gate requires the typed host to be the bound address or the configured hostname, so the address a person enters is also the address the API will accept.
 - **The cookie is set by the approval answer.** `GET /api/pair/{pairId}` answers `peregrine_token=...; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`. The browser attaches it to every same-origin request; the page never reads it, and after a top-level navigation it is the same origin that was navigated to. There is no CORS surface to add.
 - **Back is a DOM event with two spellings.** Tizen fires `tizenhwkey` with `keyName === "back"`; the reference set also reports keyCode 10009 for the same press. The client handles both with a short debounce and calls `preventDefault`, so Back on a title page returns to the screen behind it instead of closing the app.
-- **Transport keys are key codes, not buttons.** Play 415, pause 19, play/pause 10252, stop 413, forward 417, rewind 412. They have no browser default and must be handled only while the player is mounted.
+- **Transport keys are key codes, not buttons, and they must be registered.** Play 415, pause 19, play/pause 10252, stop 413, forward 417, rewind 412. They have no browser default and must be handled only while the player is mounted. Tizen delivers only the D-pad, OK, and Back to a web application until `tizen.tvinputdevice.registerKey` (or `registerKeyBatch`) names the others, which needs the `tv.inputdevice` privilege; without it the remote's Play and seek keys never reach the player at all.
 - **The engine is older than the client.** Chromium 76 cannot parse optional chaining or nullish coalescing, and it cannot substitute an `oklch()` custom property, `dvh`, `clamp()`, `min()`/`max()`, or `inset`. The build targets `chrome76`; the theme gains sRGB equivalents under a feature query; the critical layout values gain static fallbacks. **`aspect-ratio` is not cosmetic here**: without it a rail's poster container is zero-height, the absolutely positioned image is never laid out, and the lazy image never reaches its threshold. The feature query is not the only carrier: the Tizen class reserves the 2:3 and 16:9 boxes with padding and lets the absolutely positioned image stretch from its offsets, so a WebView that answers `@supports` differently still gets a tile. **The card art is a non-replaced flex item**, and this engine resolves a percentage width on it against an indefinite container, so the art shrank inside a full-width grid track while the Library/Downloads posters (direct, explicitly sized elements) worked; the Tizen rule stretches the art (`width:auto; align-self:stretch`) and fills the image from its offsets instead of percentages. Flex `gap` arrived in Chromium 84, so most of this engine's spacing gaps are cosmetic but collapsed; the bootstrap adds `no-flex-gap` only on engines that fail the probe (a later Tizen set supports it), and the downloads card uses grid tracks so its title, state, progress and stats do not depend on flex gap at all.
 - **HLS is hls.js over MSE, with direct MP4 as the other path.** On the reference set a HEVC MKV opened an HLS session with `h264_videotoolbox` and wrote a progress row; the checklist records the rest.
 
@@ -50,7 +50,11 @@ The only Peregrine-side additions are the ones a remote needs and a browser page
 
 - Back (`tizenhwkey`, plus keyCode 10009 where the same press arrives as a key event) in
   `apps/web/src/tizen.ts`: player → close, inner screen → history, root → exit the Tizen app.
-- Transport keys inside `Player.tsx`, so the listener exists only while a player is open.
+- Transport keys inside `Player.tsx`, so the listener exists only while a player is open. The
+  shell registers them with `tvinputdevice` before it navigates — the registration belongs to the
+  application, and the navigated page may not be given the `tizen` object — and the client
+  registers them again where it is. Registering is asking the platform to deliver a key, not
+  sending one; the shell still injects nothing into the page.
 - One floating focus plate for the remote, moved with `transform` and `opacity` and resized only
   when the target changes. The reference set measured a per-tile focus class at roughly 5 fps and
   a single moved plate at 60 fps; the client follows that recipe and does not draw the per-tile

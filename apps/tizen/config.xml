@@ -16,6 +16,8 @@
   <description>Open the Peregrine library on your television.</description>
   <tizen:profile name="tv" />
   <tizen:privilege name="http://tizen.org/privilege/internet" />
+  <!-- Without it the remote's Play, Pause, Stop, and seek keys never reach the player. -->
+  <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice" />
   <tizen:setting
     screen-orientation="landscape"
     context-menu="disable"

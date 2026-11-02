@@ -1,12 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   BACK_KEY_CODE,
   backTarget,
   focusPlateBox,
+  interceptBack,
   isBackKey,
   isHardwareBack,
   isTizen,
+  MEDIA_KEYS,
+  registerMediaKeys,
   transportAction,
   type ClientScreen,
 } from "./tizen.js";
@@ -84,5 +87,48 @@ describe("focusPlateBox", () => {
       width: 18,
       height: 28,
     });
+  });
+});
+
+describe("registerMediaKeys", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("answers false where the page has no tizen object", () => {
+    vi.stubGlobal("window", {});
+    expect(registerMediaKeys()).toBe(false);
+  });
+
+  it("registers every transport key in one batch", () => {
+    const batch = vi.fn();
+    vi.stubGlobal("window", { tizen: { tvinputdevice: { registerKeyBatch: batch } } });
+    expect(registerMediaKeys()).toBe(true);
+    expect(batch).toHaveBeenCalledWith(MEDIA_KEYS);
+  });
+
+  it("falls back to one key at a time and keeps the keys the model has", () => {
+    const registered: string[] = [];
+    vi.stubGlobal("window", {
+      tizen: {
+        tvinputdevice: {
+          registerKeyBatch: () => {
+            throw new Error("MediaStop is not supported");
+          },
+          registerKey: (key: string) => {
+            if (key === "MediaStop") throw new Error("not supported");
+            registered.push(key);
+          },
+        },
+      },
+    });
+    expect(registerMediaKeys()).toBe(true);
+    expect(registered).toEqual(MEDIA_KEYS.filter((key) => key !== "MediaStop"));
+  });
+});
+
+describe("interceptBack", () => {
+  it("lets Back through when no screen has claimed it", () => {
+    expect(interceptBack()).toBe(false);
   });
 });

@@ -97,6 +97,8 @@ Run on 2026-10-21 against `UA65AU8000UXKE` (2021 AU8000, model `21_NIKEL_UHD_BAS
 | Playback | Play an HLS transcode; pause, resume, progress | **Pass for start and progress, on a user-started HLS episode.** On the final build a user-started episode ran an HLS session with `h264_videotoolbox`, and `watch_progress` reported 18,315 ms of 3,176,107 ms. A direct-route HEVC MKV check also started and reported. Pause/resume and a longer stability run were not observed. |
 | Back | Player → title, inner screen → previous, Home → exit | **Partial.** The physical remote's Back returned from Browse (user); the programmable remote's Back did not stop the player's transcode, so the player and root-exit rows are still unverified. The mapping is unit-tested in `apps/web/src/tizen.test.ts`. |
 | Exit | Back at Home leaves the app | **Not run.** |
+| Transport keys | Play/Pause, Stop, ⏩/⏪ on the remote while a video plays | **Not run.** Needs the reinstall that adds the `tv.inputdevice` privilege (PG-E37-17); before it, Tizen never delivered these keys to the page. |
+| Player with the remote | Controls hide after 4 s; OK pauses; hold ◀ ▶ to scrub (one seek on release); ▼ Audio and subtitles, pick a track, Back closes the sheet, Back again leaves | **Not run.** The rules are unit-tested in `apps/web/src/player-controls.test.ts`; the set has not seen the new player. |
 | 30-minute soak | Play for 30 minutes; watch memory and stutter | **Not run.** A short HLS start was the only playback observed. |
 | Uninstall | `tizen uninstall -p peregrine1`; Home and apps unchanged | **Not run.** The app was installed and updated, not yet removed. |
 

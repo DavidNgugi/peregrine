@@ -76,6 +76,83 @@ export function transportAction(keyCode: number, key?: string): TransportAction 
   }
 }
 
+/** The remote keys Tizen withholds from a page until the application registers them. */
+export const MEDIA_KEYS = [
+  "MediaPlayPause",
+  "MediaPlay",
+  "MediaPause",
+  "MediaStop",
+  "MediaFastForward",
+  "MediaRewind",
+] as const;
+
+/**
+ * Asks the television to deliver the transport keys to this page, and says whether it could.
+ *
+ * Tizen sends only the D-pad, OK, and Back to a web application by default; Play, Pause, and the
+ * seek keys never reach a listener until `tvinputdevice` registers them, which needs the
+ * `tv.inputdevice` privilege in the shell. The shell registers them before it navigates, because
+ * this page may not be given the `tizen` object; this second call covers an engine that does
+ * give it, and costs nothing where it does not.
+ */
+export function registerMediaKeys(): boolean {
+  const root = window as Window & {
+    readonly tizen?: {
+      readonly tvinputdevice?: {
+        registerKeyBatch?: (keys: readonly string[]) => void;
+        registerKey?: (key: string) => void;
+      };
+    };
+  };
+  const input = root.tizen?.tvinputdevice;
+  if (input === undefined) return false;
+  try {
+    if (typeof input.registerKeyBatch === "function") {
+      input.registerKeyBatch(MEDIA_KEYS);
+      return true;
+    }
+  } catch {
+    // A batch fails whole when the model lacks one key; one at a time keeps the rest.
+  }
+  if (typeof input.registerKey !== "function") return false;
+  let registered = false;
+  for (const key of MEDIA_KEYS) {
+    try {
+      input.registerKey(key);
+      registered = true;
+    } catch {
+      // The D-pad still drives every control this key would have.
+    }
+  }
+  return registered;
+}
+
+let backInterceptor: (() => boolean) | null = null;
+
+/**
+ * Gives the mounted screen the first answer to Back.
+ *
+ * The player has layers of its own — a track panel, a scrub in progress — that Back should close
+ * before it leaves the player. The interceptor answers true when it consumed the press; the
+ * screen-level rule runs only when it did not.
+ */
+export function useBackInterceptor(handler: () => boolean): void {
+  const current = useRef(handler);
+  current.current = handler;
+  useEffect(() => {
+    const run = (): boolean => current.current();
+    backInterceptor = run;
+    return () => {
+      if (backInterceptor === run) backInterceptor = null;
+    };
+  }, []);
+}
+
+/** Offers a Back press to the mounted interceptor; true when it was consumed. */
+export function interceptBack(): boolean {
+  return backInterceptor !== null && backInterceptor();
+}
+
 /**
  * What Back means on each screen.
  *
