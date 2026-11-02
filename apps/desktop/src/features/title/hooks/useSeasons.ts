@@ -53,6 +53,13 @@ export interface TitleSeasons {
   readonly failed: IpcError | null;
   /** Shows another season, re-reading its episodes. */
   readonly choose: (seasonNumber: number) => void;
+  /**
+   * Re-reads the season on screen, for a write that changed its files rather than its choice.
+   *
+   * Deleting an episode's media is the case: the season is already the one on screen, so `choose`
+   * with the same number commits no change and the effect that re-reads never runs.
+   */
+  readonly reload: () => void;
   /** Marks one episode watched or unwatched, then re-reads the season. */
   readonly setEpisodeWatched: (episode: EpisodeDto, watched: boolean) => Promise<void>;
   /** Marks every episode of the season on screen watched or unwatched. */
@@ -88,6 +95,9 @@ export function useSeasons(
   }>({ loading: false, failed: null });
   const [markFailed, setMarkFailed] = useState<IpcError | null>(null);
   const [marking, setMarking] = useState(false);
+  // A trigger, not a value: moving it re-runs the episode read after a write that left the season
+  // number alone.
+  const [reloads, setReloads] = useState(0);
   // Which title, and which season, the answers belong to: a read that lands after the reader moved on
   // is dropped rather than drawn under the wrong heading.
   const version = useRef(0);
@@ -199,7 +209,7 @@ export function useSeasons(
       return;
     }
     void load(chosen, version.current);
-  }, [chosen, load, refreshes]);
+  }, [chosen, load, refreshes, reloads]);
 
   // One writer for both marking surfaces: the write is the core's, and the only thing left here is
   // re-reading the season so the bars and the Next up mark follow the new state.
@@ -249,6 +259,10 @@ export function useSeasons(
     setChosen(seasonNumber);
   }, []);
 
+  const reload = useCallback(() => {
+    setReloads((count) => count + 1);
+  }, []);
+
   return {
     seasons,
     season: seasons.find((one) => one.seasonNumber === chosen) ?? null,
@@ -256,6 +270,7 @@ export function useSeasons(
     loading: state.loading,
     failed: state.failed,
     choose,
+    reload,
     setEpisodeWatched,
     setSeasonWatched,
     markFailed,

@@ -223,8 +223,13 @@ export function TitleScreen({
     try {
       await deleteMedia(title.id, mediaDelete.season, mediaDelete.episode);
       setMediaDelete(null);
-      await detail.refresh();
+      // The delete moved the files and kept the item rows, so every count the page draws from is
+      // stale: the title carries the file count the hero's trash and Play read, and the season
+      // carries the episodes'. Choosing the season already on screen commits no change, which is
+      // why the season read needs its own trigger.
       if (mediaDelete.season !== undefined) seasons.choose(mediaDelete.season);
+      seasons.reload();
+      await detail.refresh();
     } catch (caught: unknown) {
       const error = normalizeIpcError(caught);
       setMediaDeleteError(error.message);

@@ -127,6 +127,7 @@ function seasons(state: Partial<TitleSeasons> = {}): TitleSeasons {
     loading: false,
     failed: null,
     choose: () => undefined,
+    reload: () => undefined,
     setEpisodeWatched: async () => undefined,
     setSeasonWatched: async () => undefined,
     markFailed: null,

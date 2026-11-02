@@ -72,13 +72,18 @@ export function seasonAfterRead(
  *
  * An episode whose every file is gone is `missing` rather than `partial`: nothing is playable, and
  * "partly here" would be the wrong thing to say about it.
+ *
+ * **An item is not a file.** Deleting the media moves the files and keeps the item as history, so
+ * an item with zero file rows is a title the library *had*: reading its availability from the item
+ * would keep offering Play for something nothing can open. The counts say the same thing the core
+ * does — no file rows is no copy — so the projection asks for files, not for items.
  */
 export function episodeAvailability(row: {
   readonly items: number;
   readonly files: number;
   readonly missingFiles: number;
 }): "available" | "partial" | "missing" | "wanted" {
-  if (row.items === 0) {
+  if (row.items === 0 || row.files === 0) {
     return "wanted";
   }
   if (row.missingFiles === 0) {

@@ -97,6 +97,12 @@ describe("episodeAvailability", () => {
     // the difference between a season that is short and one that was never acquired.
     expect(episodeAvailability({ items: 0, files: 0, missingFiles: 0 })).toBe("wanted");
   });
+
+  it("calls an item whose files were deleted wanted, not available", () => {
+    // The row the delete leaves behind: the media item is kept as history, its files are gone. An
+    // item is not a copy, so this must offer Download rather than a Play nothing can open.
+    expect(episodeAvailability({ items: 1, files: 0, missingFiles: 0 })).toBe("wanted");
+  });
 });
 
 describe("the season chip's own reads", () => {
