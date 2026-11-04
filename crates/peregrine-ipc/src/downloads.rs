@@ -184,14 +184,19 @@ impl DownloadJobDto {
         }
     }
 
-    /// A journal row before metadata inspection has produced a download row.
+    /// A journal row before metadata inspection has produced a download row, or `None` when the
+    /// job is not a handoff at all.
+    ///
+    /// A succeeded acquisition has already produced the row this list showed. Once that row is
+    /// cleared, the job is history rather than a transfer: projecting it would resurrect an entry
+    /// nothing is working on, at the job's own 100% progress and with every transfer figure zero.
     fn preflight(
         job: &peregrine_app::JobRecord,
         title_id: i64,
         title: Option<String>,
         title_kind: Option<DownloadTitleKind>,
         poster: Option<String>,
-    ) -> Self {
+    ) -> Option<Self> {
         let (state, error_code, error_message) = match job.state {
             peregrine_app::JobPhase::Failed => (
                 "failed",
@@ -203,9 +208,12 @@ impl DownloadJobDto {
                 Some("CANCELED".to_owned()),
                 Some("The acquisition was canceled before a download was admitted.".to_owned()),
             ),
-            _ => ("metadata", None, None),
+            peregrine_app::JobPhase::Succeeded => return None,
+            peregrine_app::JobPhase::Queued
+            | peregrine_app::JobPhase::Running
+            | peregrine_app::JobPhase::Deferred => ("metadata", None, None),
         };
-        Self {
+        Some(Self {
             id: job.id,
             is_preflight: true,
             title_id,
@@ -230,7 +238,7 @@ impl DownloadJobDto {
             error_message,
             findings: Vec::new(),
             has_media_file: false,
-        }
+        })
     }
 }
 
@@ -494,9 +502,9 @@ async fn download_rows(
             continue;
         }
         let (title, title_kind, poster) = title_ref(runtime, title_id).await;
-        downloads.push(DownloadJobDto::preflight(
-            &job, title_id, title, title_kind, poster,
-        ));
+        if let Some(row) = DownloadJobDto::preflight(&job, title_id, title, title_kind, poster) {
+            downloads.push(row);
+        }
     }
     downloads.sort_by_key(|row| std::cmp::Reverse(row.added_at));
     Ok(downloads)
@@ -931,4 +939,65 @@ async fn row_after(
     runtime.download_job(id).await?.ok_or_else(|| {
         AppError::new(ErrorCode::NotFound).with_detail("That download no longer exists.")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DownloadJobDto;
+    use peregrine_app::{JobPhase, JobRecord};
+
+    fn job(state: JobPhase) -> JobRecord {
+        JobRecord {
+            id: 9,
+            kind: "acquisition.acquire".to_owned(),
+            related_title_id: Some(3),
+            state,
+            priority: 0,
+            dedupe_key: None,
+            progress_permille: 1_000,
+            attempts: 1,
+            max_attempts: 3,
+            next_attempt_at: None,
+            last_error_code: None,
+            last_error: None,
+            created_at: 1_700_000_000_000,
+            started_at: None,
+            finished_at: None,
+            cancel_requested: false,
+        }
+    }
+
+    #[test]
+    fn a_live_acquisition_is_a_metadata_handoff() {
+        for phase in [JobPhase::Queued, JobPhase::Running, JobPhase::Deferred] {
+            let row = DownloadJobDto::preflight(&job(phase), 3, None, None, None)
+                .expect("a live acquisition is a handoff");
+            assert!(row.is_preflight);
+            assert_eq!(row.state, "metadata");
+            assert_eq!(row.stage, "metadata");
+            assert_eq!(row.progress_permille, 1_000);
+            assert_eq!(row.downloaded_bytes, 0);
+            assert_eq!(row.peers_connected, 0);
+        }
+    }
+
+    /// The regression: a succeeded job had already produced the download row the queue listed, so
+    /// once that row was cleared the job came back as a 100%-progress "Fetching metadata" row that
+    /// nothing could remove.
+    #[test]
+    fn a_succeeded_acquisition_is_not_a_metadata_handoff() {
+        assert!(
+            DownloadJobDto::preflight(&job(JobPhase::Succeeded), 3, None, None, None).is_none(),
+            "a job that admitted a download must not return as a transfer"
+        );
+    }
+
+    #[test]
+    fn a_failed_or_canceled_acquisition_is_a_failed_preflight() {
+        for phase in [JobPhase::Failed, JobPhase::Canceled] {
+            let row = DownloadJobDto::preflight(&job(phase), 3, None, None, None)
+                .expect("a terminal acquisition keeps its retry row");
+            assert_eq!(row.state, "failed");
+        }
+    }
 }
