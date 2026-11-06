@@ -63,11 +63,11 @@ If `sdb connect` is refused, the TV's developer **Host PC IP** does not match th
 ## First run
 
 1. The TV shows the setup page. Enter the address the desktop shows in **Settings → Web access**, for example `http://192.168.1.50:8642`, and press **Connect**. The on-screen keyboard is the Tizen IME.
-2. On the next start the saved address is shown for three seconds with **Press BACK within 3 seconds to change the server**. Press BACK (or OK on **Change server**) to edit it; otherwise the app opens Peregrine.
+2. On the next start the saved address is shown for three seconds with **Press BACK to change the server**. Press BACK (or OK on **Change server**) to edit it; otherwise the app checks that Peregrine answers there and opens it. If nothing answers, **Can't reach Peregrine** names the address and offers **Try again** and **Change address**. It looks for Peregrine once across the subnet, nearest the old address first, which takes up to about 40 seconds; what it finds connects after the usual three seconds. After that it retries the address every ten seconds, so a desktop that wakes up connects by itself, and **Try again** searches again. On first run a server it finds is offered beside the address form.
 3. Peregrine asks for a pairing. On the desktop, open **Settings → Web access**, compare the eight digits with the TV, and approve. Leave **Allow downloads** unticked for a read-only television.
 4. The pairing cookie is `HttpOnly`, `SameSite=Strict`, and scoped to the listener's origin. The web client never reads it; the browser attaches it to `/api`, images and media.
 
-The address is stored in the app's `localStorage`, not in this repository. A DHCP reservation for the desktop is the reliable way to keep it; a Bonjour name works only if the television can resolve it. A changed address is a new origin and therefore a new pairing.
+The address is stored in the app's `localStorage`, not in this repository. A DHCP reservation for the desktop is the reliable way to keep it; a Bonjour name works only if the television can resolve it. A changed address is a new origin and therefore a new pairing, even when the app finds it by itself. The television's own address, which names the subnet, needs the `network.get` privilege and appears in the footer as `TV <address>`; without it the search uses the saved address's subnet, and first run has none to use.
 
 ## Update and uninstall
 
@@ -97,6 +97,7 @@ Run on 2026-10-21 against `UA65AU8000UXKE` (2021 AU8000, model `21_NIKEL_UHD_BAS
 | Playback | Play an HLS transcode; pause, resume, progress | **Pass for start and progress, on a user-started HLS episode.** On the final build a user-started episode ran an HLS session with `h264_videotoolbox`, and `watch_progress` reported 18,315 ms of 3,176,107 ms. A direct-route HEVC MKV check also started and reported. Pause/resume and a longer stability run were not observed. |
 | Back | Player → title, inner screen → previous, Home → exit | **Partial.** The physical remote's Back returned from Browse (user); the programmable remote's Back did not stop the player's transcode, so the player and root-exit rows are still unverified. The mapping is unit-tested in `apps/web/src/tizen.test.ts`. |
 | Exit | Back at Home leaves the app | **Not run.** |
+| Dead address | Save a wrong address, relaunch | **Not run on the set.** The shell's files in a browser at 1920x1080 reached **Can't reach Peregrine** with a dead address, kept focus through a retry, and connected after **Change address**. From `.250` the search found the desktop at `.40` in about 31 seconds and connected. `TV <address>` in the footer has not been checked on the set. |
 | Transport keys | Play/Pause, Stop, ⏩/⏪ on the remote while a video plays | **Not run.** Needs the reinstall that adds the `tv.inputdevice` privilege (PG-E37-17); before it, Tizen never delivered these keys to the page. |
 | Player with the remote | Controls hide after 4 s; OK pauses; hold ◀ ▶ to scrub (one seek on release); ▼ Audio and subtitles, pick a track, Back closes the sheet, Back again leaves | **Not run.** The rules are unit-tested in `apps/web/src/player-controls.test.ts`; the set has not seen the new player. |
 | 30-minute soak | Play for 30 minutes; watch memory and stutter | **Not run.** A short HLS start was the only playback observed. |
@@ -147,6 +148,7 @@ apps/tizen/
 | Install refuses the signature | The distributor certificate does not carry this TV's DUID, or the package was re-zipped by hand. Repackage with `tizen package`. |
 | `sdb install` exits 0 but nothing appears | On this TV family `sdb install` only transfers. Use `tizen install`. |
 | The .wgt path has a space | `tizen install` cannot take it. Build under `/tmp/peregrine-tv` or another space-free path. |
-| Wrong address, black/error page | Relaunch the app and press BACK during the three-second window. The shell was replaced by the page and cannot come back by itself. |
+| **Can't reach Peregrine** | The address is wrong and the search found nothing on this subnet, or the desktop is off, asleep, or has Web access off. Choose **Change address**, or fix the desktop and let it retry. |
+| Black or engine error page after a connection | The desktop went away after the shell handed over, and the shell cannot come back by itself. Relaunch the app; the check above then covers it. |
 | The TV stops mid-film | The desktop quit, slept, or changed address. The web client warns below 10% battery; the listener is tied to the app. |
 | HLS never starts | The set could not play the transcode. This is a Phase 1 failure-report trigger, not a reason to bolt AVPlay into the shell; see ADR 0034 §4. |

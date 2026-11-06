@@ -1,6 +1,8 @@
 /* The Tizen shell (ADR 0034): read or ask for the Peregrine address, then replace this page with
  * the paired LAN client. Top-level navigation is the whole design: the cookie, the images, and HLS
  * stay same-origin, and the client that already passes Tizen detection owns everything after this.
+ * Navigating is also the one step this code cannot come back from, so the address is proved first:
+ * a dead one stays here, on a screen with a way out, instead of on the engine's error page.
  *
  * ES5 syntax on purpose. The engine is Chromium 76 and the packaged app has no transpiler. */
 (function () {
@@ -8,16 +10,27 @@
 
   var STORAGE_KEY = "peregrine.serverUrl";
   var COUNTDOWN_MS = 3000;
+  var RETRY_SECONDS = 10;
+  var CHANGE_HINT = "Press BACK to change the server.";
+  var LOOKING = "Looking for Peregrine on your network...";
   var normalizer = window.PeregrineServerUrl;
+  var reachability = window.PeregrineReachability;
   var config = window.PEREGRINE_TV || {};
 
   var elements = {
     connecting: document.getElementById("connecting"),
     connectingUrl: document.getElementById("connecting-url"),
+    connectingHint: document.getElementById("connecting-hint"),
     change: document.getElementById("change-server"),
+    unreachable: document.getElementById("unreachable"),
+    unreachableUrl: document.getElementById("unreachable-url"),
+    retry: document.getElementById("retry"),
+    changeAddress: document.getElementById("change-address"),
+    retryStatus: document.getElementById("retry-status"),
     setup: document.getElementById("setup"),
     form: document.getElementById("server-form"),
     input: document.getElementById("server-url"),
+    useFound: document.getElementById("use-found"),
     status: document.getElementById("status"),
     error: document.getElementById("error"),
     diagnostics: document.getElementById("diagnostics"),
@@ -25,6 +38,11 @@
 
   var countdown = null;
   var pendingUrl = "";
+  var cancelProbe = null;
+  var retryTimer = null;
+  var scanDue = true;
+  var foundUrl = "";
+  var deviceIp = null;
 
   function storedUrl() {
     try {
@@ -42,19 +60,29 @@
     }
   }
 
-  function cancelCountdown() {
+  function stopAttempts() {
     if (countdown !== null) {
       window.clearTimeout(countdown);
       countdown = null;
     }
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (cancelProbe !== null) {
+      cancelProbe();
+      cancelProbe = null;
+    }
   }
 
   function showSetup(prefill) {
-    cancelCountdown();
+    stopAttempts();
     elements.connecting.hidden = true;
+    elements.unreachable.hidden = true;
     elements.setup.hidden = false;
     elements.error.textContent = "";
     elements.status.textContent = "";
+    elements.useFound.hidden = true;
     elements.input.value = prefill || "";
     elements.input.focus();
     if (elements.input.value !== "") {
@@ -62,9 +90,11 @@
     }
   }
 
-  function showConnecting(url) {
+  function showConnecting(url, hint) {
     pendingUrl = url;
+    elements.connectingHint.textContent = hint || CHANGE_HINT;
     elements.setup.hidden = true;
+    elements.unreachable.hidden = true;
     elements.connecting.hidden = false;
     elements.connectingUrl.textContent = url;
     elements.change.focus();
@@ -82,6 +112,89 @@
     }
   }
 
+  // The desktop waking up is the common way this screen ends, so it keeps trying by itself and a
+  // person only has to act when the address itself is wrong.
+  function countDownToRetry(url, seconds) {
+    if (seconds === 0) {
+      attempt(url);
+      return;
+    }
+    elements.retryStatus.textContent = "Trying again in " + seconds + "s";
+    retryTimer = window.setTimeout(function () {
+      retryTimer = null;
+      countDownToRetry(url, seconds - 1);
+    }, 1000);
+  }
+
+  // Finding the listener is one sweep per failure rather than part of the ten-second retry: the
+  // saved address is the likely answer, and a television should not walk the network forever.
+  function findServer(savedUrl, done) {
+    var environment = reachability.browserEnvironment();
+    var systeminfo = window.tizen ? window.tizen.systeminfo : null;
+    var cancelled = false;
+    var cancelScan = null;
+    cancelProbe = function () {
+      cancelled = true;
+      if (cancelScan !== null) cancelScan();
+    };
+    reachability.deviceAddress(systeminfo, environment, function (address) {
+      if (cancelled) return;
+      if (address !== null) {
+        deviceIp = address;
+        renderDiagnostics();
+      }
+      var candidates = reachability.scanCandidates(address, savedUrl);
+      cancelScan = reachability.scan(candidates, environment, function (found) {
+        cancelProbe = null;
+        done(found);
+      });
+    });
+  }
+
+  function showUnreachable(url) {
+    var entering = elements.unreachable.hidden;
+    elements.setup.hidden = true;
+    elements.connecting.hidden = true;
+    elements.unreachable.hidden = false;
+    elements.unreachable.classList.remove("trying");
+    elements.unreachableUrl.textContent = url;
+    // A retry that fails again must not pull focus off the button the person moved to.
+    if (entering) elements.retry.focus();
+    if (!scanDue) {
+      countDownToRetry(url, RETRY_SECONDS);
+      return;
+    }
+    scanDue = false;
+    elements.unreachable.classList.add("trying");
+    elements.retryStatus.textContent = LOOKING;
+    findServer(url, function (found) {
+      elements.unreachable.classList.remove("trying");
+      if (found !== null) {
+        startCountdown(found, "Found Peregrine at a new address. " + CHANGE_HINT);
+        return;
+      }
+      countDownToRetry(url, RETRY_SECONDS);
+    });
+  }
+
+  function attempt(url) {
+    stopAttempts();
+    pendingUrl = url;
+    if (!elements.unreachable.hidden) {
+      elements.unreachable.classList.add("trying");
+      elements.retryStatus.textContent = "Trying again...";
+    }
+    cancelProbe = reachability.probe(url, reachability.browserEnvironment(), function (reached) {
+      cancelProbe = null;
+      if (reached) {
+        remember(url);
+        open(url);
+      } else {
+        showUnreachable(url);
+      }
+    });
+  }
+
   function connect(raw) {
     var url = normalizer === undefined ? null : normalizer.normalize(raw);
     if (url === null) {
@@ -91,15 +204,30 @@
       return;
     }
     remember(url);
+    scanDue = true;
     showConnecting(url);
-    open(url);
+    attempt(url);
   }
 
-  function startCountdown(url) {
-    showConnecting(url);
+  // Typing on a remote is the worst part of first run, so the sweep offers its answer beside the
+  // form rather than connecting underneath someone who may be typing a different address.
+  function offerFoundServer() {
+    elements.status.textContent = LOOKING;
+    findServer(null, function (found) {
+      elements.status.textContent = "";
+      if (found === null) return;
+      foundUrl = found;
+      elements.useFound.textContent = "Use " + found;
+      elements.useFound.hidden = false;
+      if (elements.input.value === "") elements.useFound.focus();
+    });
+  }
+
+  function startCountdown(url, hint) {
+    showConnecting(url, hint);
     countdown = window.setTimeout(function () {
       countdown = null;
-      open(url);
+      attempt(url);
     }, COUNTDOWN_MS);
   }
 
@@ -183,7 +311,8 @@
       " x " +
       window.innerHeight +
       " · HLS " +
-      (supportsHls() ? "yes" : "no");
+      (supportsHls() ? "yes" : "no") +
+      (deviceIp === null ? "" : " · TV " + deviceIp);
   }
 
   function boot() {
@@ -201,7 +330,7 @@
       " ua=" +
       navigator.userAgent;
     console.info(diagnosticLine);
-    if (normalizer === undefined) {
+    if (normalizer === undefined || reachability === undefined) {
       elements.error.textContent = "The app is missing its address parser; reinstall it.";
       return;
     }
@@ -209,6 +338,7 @@
     if (saved === null) saved = normalizer.normalize(config.defaultUrl);
     if (saved === null) {
       showSetup("");
+      offerFoundServer();
       return;
     }
     startCountdown(saved);
@@ -230,6 +360,24 @@
     showSetup(pendingUrl);
   });
 
+  elements.retry.addEventListener("click", function () {
+    scanDue = true;
+    attempt(pendingUrl);
+  });
+
+  elements.useFound.addEventListener("click", function () {
+    connect(foundUrl);
+  });
+
+  elements.changeAddress.addEventListener("click", function () {
+    showSetup(pendingUrl);
+  });
+
+  elements.unreachable.addEventListener("keydown", function (event) {
+    if (event.keyCode === 37) elements.retry.focus();
+    if (event.keyCode === 39) elements.changeAddress.focus();
+  });
+
   var lastBack = 0;
   var lastBackHandled = false;
 
@@ -238,10 +386,10 @@
     if (now - lastBack >= 300) {
       lastBack = now;
       lastBackHandled = false;
-      if (countdown !== null) {
+      if (!elements.connecting.hidden) {
         showSetup(pendingUrl);
         lastBackHandled = true;
-      } else if (!elements.setup.hidden) {
+      } else {
         lastBackHandled = exitApp();
       }
     }

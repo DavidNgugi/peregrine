@@ -56,7 +56,10 @@ h1 {
 .connection-status {
   display: flex;
   align-items: center;
-  gap: 1.4vw;
+}
+
+.connection-status h1 {
+  margin-left: 1.4vw;
 }
 
 .connection-spinner {
@@ -151,9 +154,10 @@ button.secondary {
   color: #3b9cf6;
 }
 
+/* White, because the buttons themselves are blue: the remote's only pointer must not blend in. */
 button:focus,
 input:focus {
-  outline: 6px solid #3b9cf6;
+  outline: 6px solid #eff2f5;
   outline-offset: 6px;
 }
 
@@ -179,6 +183,104 @@ input:focus {
   margin-top: 3vh;
   color: #8b9095;
   font-size: 1vw;
+}
+
+/* The failure screen says what is wrong in the words a person can act on, and the drawing says the
+   same thing at a glance from a sofa: the television, the computer, and the broken link between. */
+.unreachable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 27vw;
+  grid-column-gap: 5vw;
+  align-items: center;
+}
+
+.unreachable h1 {
+  font-size: 4vw;
+}
+
+.checks {
+  margin-top: 3.6vh;
+  list-style: none;
+}
+
+.checks li {
+  position: relative;
+  padding-left: 2vw;
+  color: #b3b8be;
+  font-size: 1.45vw;
+  line-height: 1.4;
+}
+
+.checks li + li {
+  margin-top: 1.3vh;
+}
+
+.checks li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  left: 0;
+  width: 0.7vw;
+  height: 0.7vw;
+  border: 2px solid #6c7278;
+  border-radius: 50%;
+}
+
+.actions {
+  display: flex;
+  margin-top: 4.4vh;
+}
+
+.actions button {
+  margin-top: 0;
+}
+
+.actions button + button {
+  margin-left: 1.6vw;
+}
+
+.unreachable .status {
+  margin-top: 2.6vh;
+  color: #8b9095;
+}
+
+.link-diagram {
+  width: 100%;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.link-diagram .device {
+  stroke: #6c7278;
+  stroke-width: 4;
+}
+
+.link-diagram .link {
+  stroke: #3b9cf6;
+  stroke-width: 4;
+  stroke-dasharray: 2 12;
+}
+
+.link-diagram .break {
+  stroke: #f75d59;
+  stroke-width: 5;
+}
+
+.unreachable.trying .link {
+  animation: link-try 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes link-try {
+  from {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unreachable.trying .link {
+    animation: none;
+  }
 }
 
 .diagnostics {

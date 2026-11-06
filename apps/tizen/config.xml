@@ -18,6 +18,8 @@
   <tizen:privilege name="http://tizen.org/privilege/internet" />
   <!-- Without it the remote's Play, Pause, Stop, and seek keys never reach the player. -->
   <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice" />
+  <!-- The television's own address, which names the subnet to look for Peregrine on. -->
+  <tizen:privilege name="http://tizen.org/privilege/network.get" />
   <tizen:setting
     screen-orientation="landscape"
     context-menu="disable"

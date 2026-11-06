@@ -29,7 +29,7 @@ trap 'rm -rf "$STAGE"' EXIT
 
 # Only the runtime files are packaged; the tests and this README stay in the repository.
 cp "$ROOT/config.xml" "$ROOT/index.html" "$ROOT/main.js" "$ROOT/config.js" \
-   "$ROOT/server-url.js" "$ROOT/style.css" "$STAGE/"
+   "$ROOT/server-url.js" "$ROOT/reachability.js" "$ROOT/style.css" "$STAGE/"
 cp -R "$ROOT/icons" "$STAGE/icons"
 
 "$TIZEN" package -t wgt -s "$PROFILE" -o "$OUT" -- "$STAGE"

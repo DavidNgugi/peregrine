@@ -1,6 +1,6 @@
 # ADR 0034 — Samsung Tizen client: a shell over the paired LAN surface, signed per television
 
-- **Status:** Accepted. §2 amended 2026-11-02: the shell also registers the remote's transport keys with the platform, because Tizen withholds them from a page until it does.
+- **Status:** Accepted. §2 amended 2026-11-02: the shell also registers the remote's transport keys with the platform, because Tizen withholds them from a page until it does. §1 amended 2026-11-06: the shell proves an address answers before it navigates, and looks for the listener on the local subnet when it does not. §5's discovery answer is amended to match.
 - **Date:** 2026-10-21
 - **Evidence:** the paired LAN surface and cookie in [ADR 0028](./0028-tv-web-client.md) and `crates/peregrine-app/src/web`; the ten-foot client in `apps/web`; the Tizen findings in the reference television project and the verification section of [apps/tizen/README.md](../../apps/tizen/README.md)
 - **Related:** [0018](./0018-media-server.md), [0028](./0028-tv-web-client.md), [0029](./0029-device-scoped-acquisition.md), [0031](./0031-browser-client-parity.md)
@@ -32,17 +32,26 @@ The findings that shaped the decision, recorded here because they are measuremen
 
 1. It reads the address from `localStorage`, then the build-time `config.js` default, and
    normalizes it to an `http://` or `https://` URL.
-2. It shows the saved address for three seconds with "press BACK to change server", then calls
-   `location.replace(url)`.
-3. The Peregrine page owns pairing, Home, Browse, Search, title pages, playback and progress.
+2. It shows the saved address for three seconds with "press BACK to change server", then loads
+   `/peregrine-probe.png` from that address. An image is the probe because this surface has no
+   CORS to read a response through, an opaque fetch resolves for any server holding the address,
+   and a script would run a stranger's code with the app's privileges. A failure or six seconds of
+   silence stays in the shell on a screen that names the address, offers Try again and Change
+   address, and retries every ten seconds. It first sweeps the local /24 once with the same probe,
+   nearest the old address first, and connects to what answers after the usual three-second Back
+   window. First run offers what it finds beside the address form instead.
+3. On success it calls `location.replace(url)`.
+4. The Peregrine page owns pairing, Home, Browse, Search, title pages, playback and progress.
 
 There is no iframe, no asset copy, no second backend, no CORS, and no bearer token. The shell's
 own origin disappears from the session at the navigation, which is the point: the cookie, the
 images and the media all belong to the listener's origin.
 
-The cost is accepted: after navigation the setup screen is gone until the app restarts, so the
-three-second Back window is the recovery path for a wrong address. The shell says so, and the
-README repeats it.
+A navigation to a dead address would land on the engine's error page, where none of this code runs
+and the remote can do nothing, which is why the proof comes first. The cost is accepted: after
+navigation the shell is gone until the app restarts, so a desktop that disappears mid-session is
+recovered by relaunching. A television app and a desktop older than the probe image cannot connect,
+because the shell reads a missing image as no Peregrine; the two ship from one repository.
 
 ### 2. The client owns the television-specific keys; the shell never injects them
 
@@ -103,7 +112,7 @@ was observed on which firmware.
 
 | Question | Decision |
 | --- | --- |
-| Stable host or discovery? | A typed, stored address. No mDNS/SSDP discovery in Phase 1: a television usually cannot resolve a mDNS name, and the listener's host gate accepts one configured name only. A DHCP reservation is the documented answer; the Bonjour name is the stable fallback when the set can resolve it. A changed address is a new origin and a new pairing. |
+| Stable host or discovery? | A stored address, found by a sweep of the television's private /24 when it stops answering. No mDNS/SSDP: a television usually cannot resolve a mDNS name, multicast is unreliable on Wi-Fi (R33), and the listener's host gate accepts one configured name only. The sweep is one pass per failure, eight probes at a time because Chromium queues images past about ten, and never leaves a private range. It takes the first server holding the probe image, so it is a convenience and not an identity: pairing is still what grants a server anything. A DHCP reservation remains the answer, because a changed address is a new origin and a new pairing. |
 | Read-only or downloads? | The shell adds no scope. The existing client offers downloads only when the pairing was approved with **Allow downloads** (`acquire`, [ADR 0029](./0029-device-scoped-acquisition.md)); leave the box unticked for a read-only television. |
 | Tizen floor beyond 6.0? | 6.0 is the floor and the target. Nothing newer is required, and nothing older is claimed. |
 | Source plus per-user signing, or a signed build per DUID? | Source plus per-user signing. A shared signed build would put one distributor certificate and one DUID list in the distribution path; it is not this project's model. |
@@ -122,8 +131,8 @@ Negative and accepted:
 
 - The desktop is the server. The television stops when the app quits, the machine sleeps, or the
   address changes; the client and the README say so.
-- After navigation the shell is gone. The three-second window is the only in-app recovery from a
-  wrong address, and it is explained on screen.
+- After navigation the shell is gone. A wrong address never gets that far, but a desktop lost
+  mid-session is recovered by relaunching the app.
 - The client now carries a television target: the `chrome76` build target and the fallback blocks
   are part of the web client's contract, not a temporary patch. A future engine change is a
   deliberate change to them.

@@ -20,8 +20,33 @@
           <h1>Connecting<span aria-hidden="true">...</span></h1>
         </div>
         <p id="connecting-url" class="address"></p>
-        <p class="lede">Press BACK within 3 seconds to change the server.</p>
+        <p id="connecting-hint" class="lede"></p>
         <button id="change-server" class="secondary" type="button">Change server</button>
+      </section>
+
+      <section id="unreachable" class="unreachable" hidden>
+        <div class="unreachable-copy">
+          <h1>Can't reach Peregrine</h1>
+          <p id="unreachable-url" class="address"></p>
+          <ul class="checks">
+            <li>The computer is awake and on the same network as this TV</li>
+            <li>Peregrine is open, with Web access turned on</li>
+            <li>This address matches the one in Settings, then Web access</li>
+          </ul>
+          <div class="actions">
+            <button id="retry" type="button">Try again</button>
+            <button id="change-address" class="secondary" type="button">Change address</button>
+          </div>
+          <p id="retry-status" class="status" role="status"></p>
+        </div>
+        <svg class="link-diagram" viewBox="0 0 520 240" aria-hidden="true">
+          <rect class="device" x="6" y="44" width="176" height="112" rx="10" />
+          <path class="device" d="M64 188h60M94 156v32" />
+          <rect class="device" x="358" y="62" width="128" height="88" rx="8" />
+          <path class="device" d="M336 172h172l-14-22H350z" />
+          <path class="link" d="M196 110h40M284 110h60" />
+          <path class="break" d="M250 96l20 28M270 96l-20 28" />
+        </svg>
       </section>
 
       <section id="setup">
@@ -44,6 +69,7 @@
           />
           <button id="connect" type="submit">Connect</button>
         </form>
+        <button id="use-found" class="secondary" type="button" hidden></button>
         <p id="status" class="status" role="status"></p>
         <p id="error" class="error" role="alert"></p>
         <p class="hint">Press BACK to exit. The address can be changed from the next start.</p>
@@ -53,6 +79,7 @@
     </main>
     <script src="config.js"></script>
     <script src="server-url.js"></script>
+    <script src="reachability.js"></script>
     <script src="main.js"></script>
   </body>
 </html>
