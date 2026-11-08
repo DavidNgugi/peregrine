@@ -224,6 +224,9 @@ impl PlayerTracks<'_> {
 pub trait PositionSink: Send + Sync {
     /// The current position and the media duration, in milliseconds.
     fn position(&self, position_ms: i64, duration_ms: Option<i64>);
+
+    /// The external player reached its natural end.
+    fn ended(&self);
 }
 
 /// The player that handles containers the webview cannot demux.

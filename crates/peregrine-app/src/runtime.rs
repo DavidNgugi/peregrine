@@ -1015,12 +1015,24 @@ fn choose_download_file(
 /// A channel rather than a direct write because the sink is called from the player's own reader
 /// thread and the repository is async; the receiving task owns the storage edge.
 #[derive(Debug)]
-struct ChannelSink(tokio::sync::mpsc::UnboundedSender<(i64, Option<i64>)>);
+enum PlayerReport {
+    Position(i64, Option<i64>),
+    Ended,
+}
+
+#[derive(Debug)]
+struct ChannelSink(tokio::sync::mpsc::UnboundedSender<PlayerReport>);
 
 impl peregrine_domain::PositionSink for ChannelSink {
     fn position(&self, position_ms: i64, duration_ms: Option<i64>) {
         // A closed receiver means the app is shutting down; dropping the sample is correct then.
-        let _ = self.0.send((position_ms, duration_ms));
+        let _ = self
+            .0
+            .send(PlayerReport::Position(position_ms, duration_ms));
+    }
+
+    fn ended(&self) {
+        let _ = self.0.send(PlayerReport::Ended);
     }
 }
 
@@ -4915,20 +4927,53 @@ impl Runtime {
         let database = Arc::clone(&self.database);
         let clock = Arc::clone(&self.clock);
         tokio::spawn(async move {
-            while let Some((position_ms, duration_ms)) = receiver.recv().await {
-                let Ok(position) = PlaybackPosition::new(position_ms, duration_ms) else {
-                    continue;
-                };
-                if let Err(error) = write_reported_position(
-                    &database,
-                    clock.as_ref(),
-                    title_id,
-                    episode_id,
-                    position,
-                )
-                .await
-                {
-                    warn!(%error, title = title_id, "an external player position could not be recorded");
+            while let Some(report) = receiver.recv().await {
+                match report {
+                    PlayerReport::Position(position_ms, duration_ms) => {
+                        let Ok(position) = PlaybackPosition::new(position_ms, duration_ms) else {
+                            continue;
+                        };
+                        if let Err(error) = write_reported_position(
+                            &database,
+                            clock.as_ref(),
+                            title_id,
+                            episode_id,
+                            position,
+                        )
+                        .await
+                        {
+                            warn!(%error, title = title_id, "an external player position could not be recorded");
+                        }
+                    }
+                    PlayerReport::Ended => {
+                        let progress = match database
+                            .watch_progress(installation_scope(), title_id, episode_id)
+                            .await
+                        {
+                            Ok(Some(progress)) => progress,
+                            Ok(None) => continue,
+                            Err(error) => {
+                                warn!(%error, title = title_id, "an external player finalization could not read progress");
+                                continue;
+                            }
+                        };
+                        let Ok(position) =
+                            PlaybackPosition::new(progress.position_ms(), progress.duration_ms())
+                        else {
+                            continue;
+                        };
+                        let now = clock.now();
+                        let mut progress = progress;
+                        if let Err(error) =
+                            progress.apply_finalize(finalize_watch(position, true, now), now)
+                        {
+                            warn!(%error, title = title_id, "an external player finalization was refused");
+                            continue;
+                        }
+                        if let Err(error) = database.record_watch_progress(progress).await {
+                            warn!(%error, title = title_id, "an external player finalization could not be recorded");
+                        }
+                    }
                 }
             }
         });

@@ -2961,6 +2961,30 @@ impl WebService {
             .map_err(WebError::Runtime)
     }
 
+    /// Finalizes the same watch-progress row used by the desktop player.
+    pub async fn finalize_progress(
+        &self,
+        device: &PairedDevice,
+        title_id: i64,
+        episode_id: Option<i64>,
+        position_ms: i64,
+        duration_ms: Option<i64>,
+    ) -> Result<(), WebError> {
+        if !scope_allows(&device.scopes, "stream") {
+            return Err(WebError::Unauthorized);
+        }
+        let Some(target) = self.runtime.web_playback(title_id, episode_id).await? else {
+            return Err(WebError::NoFile);
+        };
+        if target.episode_id != episode_id {
+            return Err(WebError::InvalidProgress);
+        }
+        self.runtime
+            .finalize_progress(title_id, episode_id, position_ms.max(0), duration_ms)
+            .await
+            .map_err(WebError::Runtime)
+    }
+
     /// The grant a media URL names, when it is live.
     #[must_use]
     pub fn media_grant(&self, token: &str) -> Option<MediaGrant> {

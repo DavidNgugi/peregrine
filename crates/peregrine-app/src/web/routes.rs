@@ -897,6 +897,8 @@ struct ProgressBody {
     episode_id: Option<i64>,
     position_ms: i64,
     duration_ms: Option<i64>,
+    #[serde(default)]
+    ended: bool,
 }
 
 async fn progress(
@@ -904,15 +906,27 @@ async fn progress(
     Device(device): Device,
     Json(body): Json<ProgressBody>,
 ) -> Result<StatusCode, ApiError> {
-    service
-        .report_progress(
-            &device,
-            body.title_id,
-            body.episode_id,
-            body.position_ms,
-            body.duration_ms,
-        )
-        .await?;
+    if body.ended {
+        service
+            .finalize_progress(
+                &device,
+                body.title_id,
+                body.episode_id,
+                body.position_ms,
+                body.duration_ms,
+            )
+            .await?;
+    } else {
+        service
+            .report_progress(
+                &device,
+                body.title_id,
+                body.episode_id,
+                body.position_ms,
+                body.duration_ms,
+            )
+            .await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

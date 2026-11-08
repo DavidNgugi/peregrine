@@ -939,6 +939,7 @@ graph LR
 
 - [ ] **PG-E18-01** `M` · deps PG-E3-07, PG-E16-02 · Progress persistence with coalesced writes and crash safety
   - Acceptance: Kill -9 at any point loses ≤ 5 s of position
+  - **Playback finalization landed:** the desktop webview, external mpv, and TV/browser player now call the core's finalize path on natural end; reaching a credits marker before next-episode playback finalizes through the same watched policy. All three surfaces write the same account-scoped `watch_progress` row, so watched state and resume state carry across them.
 - [ ] **PG-E18-02** `M` · deps PG-E4-09 · Resume policy implementation from the domain function
   - Acceptance: Boundary fixtures pass at every threshold
 - [ ] **PG-E18-03** `M` · deps PG-E18-01 · Resume affordances in the UI: card progress, detail-page button, per-episode progress

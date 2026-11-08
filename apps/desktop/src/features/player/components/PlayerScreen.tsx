@@ -41,6 +41,7 @@ import {
   type PostPlayState,
 } from "@peregrine/player-ui";
 import {
+  finalizeProgress,
   normalizeIpcError,
   playExternally,
   type IpcError,
@@ -51,6 +52,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { messageOf } from "../../../lib/ipc-message.js";
+import { logUiError } from "../../../lib/error-log.js";
 import { useFrameCapture } from "../hooks/useFrameCapture.js";
 import { usePlayback, type Playback } from "../hooks/usePlayback.js";
 import { usePlaybackProgress } from "../hooks/usePlaybackProgress.js";
@@ -106,13 +108,14 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
   // visible countdown, but a credits window remains active for minutes, so an unguarded position
   // tick would ask again and resurrect a panel the viewer cancelled.
   const boundary = useRef({ credits: false, ended: false });
+  const finalized = useRef(false);
   // Whether this screen is mounted, and whether the follow-up was already started. Together they
   // are the two ways a countdown could outlive the screen that owns it.
   const live = useRef(true);
   const startedNext = useRef(false);
   // Seek to the account's stored position on the first frame, and report as the film advances.
   // An external session is not this hook's: the core records mpv's position over its own socket.
-  usePlaybackProgress(surface, external ? null : session);
+  usePlaybackProgress(surface, external ? null : session, finalized);
 
   // A new session is a new chance to autoplay, and a refusal belongs to the session it happened in.
   useEffect(() => {
@@ -223,6 +226,7 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
     postPlayRef.current = seeded;
     setPostPlay(seeded);
     boundary.current = { credits: false, ended: false };
+    finalized.current = false;
     startedNext.current = false;
     setPositionMs(session?.resumePositionMs ?? 0);
   }, [session]);
@@ -344,8 +348,19 @@ export function PlayerView({ playback, externalFailure, onClose }: PlayerViewPro
       return;
     }
     boundary.current.credits = true;
+    if (!finalized.current) {
+      finalized.current = true;
+      void finalizeProgress({
+        titleId: session.titleId,
+        episodeId: session.episodeId,
+        positionMs,
+        durationMs: session.durationMs,
+      }).catch((caught: unknown) => {
+        logUiError("finalizeProgress", normalizeIpcError(caught));
+      });
+    }
     dispatchPostPlay({ type: "credits" });
-  }, [active, external, session, dispatchPostPlay]);
+  }, [active, external, session, dispatchPostPlay, positionMs]);
 
   const onEnded = (): void => {
     if (external || session === null || boundary.current.ended) {

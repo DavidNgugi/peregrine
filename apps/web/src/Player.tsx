@@ -202,6 +202,7 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
   const mounted = useRef(true);
   const advancing = useRef(false);
   const endedReported = useRef(false);
+  const finalizedReported = useRef(false);
   const latestTicket = useRef(ticket);
   latestTicket.current = ticket;
 
@@ -274,6 +275,7 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     setPostPlay(fresh);
     openedFor.current = null;
     endedReported.current = false;
+    finalizedReported.current = false;
     if (ticket.kind === "hls") {
       void import("hls.js")
         .then(({ default: HlsPlayer }) => {
@@ -506,8 +508,18 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     const onEnded = (): void => {
       if (endedReported.current) return;
       endedReported.current = true;
+      finalizedReported.current = true;
       setPlaying(false);
-      reportRef.current(true);
+      const elementDuration = Number.isFinite(element.duration)
+        ? Math.round(element.duration * 1000)
+        : ticket.durationMs;
+      const position = Math.max(
+        0,
+        Math.round(absolutePositionMs(ticket.kind, ticket.startPositionMs, element.currentTime)),
+      );
+      void api
+        .progress(titleId, ticket.episodeId, position, totalMs ?? elementDuration, true, true)
+        .catch(() => {});
       // The coordinator decides between a countdown and the ended panel; a film never reaches a
       // black screen, and a cancelled session cannot start anything from here.
       postPlayDispatch.current({ type: "ended" });
@@ -882,8 +894,14 @@ export function Player({ titleId, titleName, initial, onClose }: PlayerProps): R
     if (creditsKey === null || postPlay.phase !== "hidden") return;
     if (openedFor.current === creditsKey) return;
     openedFor.current = creditsKey;
+    if (!finalizedReported.current) {
+      finalizedReported.current = true;
+      void api
+        .progress(titleId, ticket.episodeId, shown, totalMs ?? ticket.durationMs, true, true)
+        .catch(() => {});
+    }
     postPlayDispatch.current({ type: "credits" });
-  }, [creditsKey, postPlay.phase]);
+  }, [creditsKey, postPlay.phase, shown, ticket, titleId, totalMs]);
 
   // The controls leave once the picture has had a quiet stretch; a pause, a scrub, an open panel,
   // or the post-play surface keeps them, because each is something the person is in the middle of.

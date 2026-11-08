@@ -448,11 +448,12 @@ export const api = {
     positionMs: number,
     durationMs: number | null,
     keepalive = false,
+    ended = false,
   ): Promise<void> =>
     request<void>(
       "/api/progress",
       "POST",
-      { titleId, episodeId, positionMs, durationMs },
+      { titleId, episodeId, positionMs, durationMs, ended },
       keepalive,
     ),
 };

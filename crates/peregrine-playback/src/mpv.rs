@@ -409,7 +409,12 @@ fn read_positions(socket: &Path, stop: &AtomicBool, sink: &dyn PositionSink) {
                     _ => {}
                 }
             }
-            Some("end-file") => break,
+            Some("end-file") => {
+                if natural_end(&event) {
+                    sink.ended();
+                }
+                break;
+            }
             _ => {}
         }
     }
@@ -417,6 +422,15 @@ fn read_positions(socket: &Path, stop: &AtomicBool, sink: &dyn PositionSink) {
     if let Some(value) = position {
         sink.position(millis(value), duration.map(millis));
     }
+}
+
+/// Whether mpv ended because it reached EOF rather than because the session was stopped.
+fn natural_end(event: &serde_json::Value) -> bool {
+    event
+        .get("data")
+        .and_then(|data| data.get("reason"))
+        .and_then(serde_json::Value::as_str)
+        == Some("eof")
 }
 
 fn millis(seconds: f64) -> i64 {
@@ -448,6 +462,8 @@ mod tests {
 
     impl PositionSink for Noop {
         fn position(&self, _position_ms: i64, _duration_ms: Option<i64>) {}
+
+        fn ended(&self) {}
     }
 
     fn file(directory: &tempfile::TempDir) -> SafePath {
@@ -752,6 +768,20 @@ mod tests {
             )
             .expect("a second press replaces the first");
         player.stop();
+    }
+
+    #[test]
+    fn only_mpvs_eof_end_file_is_a_natural_end() {
+        assert!(natural_end(&serde_json::json!({
+            "event": "end-file",
+            "data": {"reason": "eof"}
+        })));
+        for reason in ["stop", "quit", "error"] {
+            assert!(!natural_end(&serde_json::json!({
+                "event": "end-file",
+                "data": {"reason": reason}
+            })));
+        }
     }
 
     #[test]

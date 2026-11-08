@@ -26,7 +26,10 @@ const REPORT_EVERY_SECONDS = 5;
 export function usePlaybackProgress(
   surface: RefObject<HTMLVideoElement | null>,
   session: PlaybackSessionDto | null,
+  finalizedRef?: RefObject<boolean>,
 ): void {
+  const ownFinalized = useRef(false);
+  const finalized = finalizedRef ?? ownFinalized;
   // Whether the resume seek has happened for this session.
   const seeked = useRef(false);
   // The media position the last report was taken at.
@@ -41,7 +44,8 @@ export function usePlaybackProgress(
     seeked.current = false;
     reportedAt.current = 0;
     loaded.current = false;
-  }, [session?.url]);
+    finalized.current = false;
+  }, [finalized, session?.url]);
 
   useEffect(() => {
     const element = surface.current;
@@ -87,9 +91,10 @@ export function usePlaybackProgress(
       report(element.currentTime, element.duration);
     };
     const onEnded = (): void => {
-      if (!loaded.current) {
+      if (!loaded.current || finalized.current) {
         return;
       }
+      finalized.current = true;
       void finalizeProgress({
         titleId,
         episodeId: session.episodeId,
