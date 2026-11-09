@@ -217,7 +217,11 @@ jobs:
           APPLE_CERTIFICATE: ${{ !contains(github.ref_name, '-rc.') && secrets.APPLE_CERTIFICATE_P12_BASE64 || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ !contains(github.ref_name, '-rc.') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ !contains(github.ref_name, '-rc.') && secrets.APPLE_SIGNING_IDENTITY || '' }}
-        run: pnpm tauri build --target ${{ matrix.target }}
+        run: |
+          if [[ -z "${APPLE_CERTIFICATE:-}" ]]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY
+          fi
+          pnpm tauri build --target ${{ matrix.target }}
       - name: Validate and notarize macOS bundle
         if: startsWith(matrix.label, 'macos') && !contains(github.ref_name, '-rc.') && vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true'
         shell: bash
