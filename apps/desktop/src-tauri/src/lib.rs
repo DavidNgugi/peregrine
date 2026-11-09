@@ -118,6 +118,13 @@ pub fn run() -> Result<(), ShellError> {
             route_own_arguments(app);
             listen_for_opened_urls(app);
             start_tray(app);
+            if cfg!(debug_assertions) {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(error) = window.set_title("Peregrine Dev") {
+                        tracing::warn!(%error, "the development window title could not be set");
+                    }
+                }
+            }
             // After the window-state plugin has restored the geometry, which is what can
             // leave the window hidden; see the function.
             ensure_main_window_visible(app.handle());
