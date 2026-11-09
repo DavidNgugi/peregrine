@@ -110,6 +110,7 @@ pub fn check(root: &Path, signing: &Signing, allow_unsigned: bool) -> Result<(Re
     let mut checked = 0;
 
     checked += check_versions(root, &mut report)?;
+    checked += check_web_client_resource(root, &mut report)?;
     checked += check_artefacts(root, &mut report)?;
     checked += check_workflow(root, &mut report)?;
 
@@ -134,6 +135,36 @@ pub fn check(root: &Path, signing: &Signing, allow_unsigned: bool) -> Result<(Re
     }
 
     Ok((report, checked))
+}
+
+fn check_web_client_resource(root: &Path, report: &mut Report) -> Result<usize> {
+    let path = root.join(TAURI_CONFIG);
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    let value: Value = match serde_json::from_str(&text) {
+        Ok(value) => value,
+        Err(error) => {
+            report.push(Violation::new(
+                TAURI_CONFIG,
+                format!("is not readable JSON: {error}"),
+            ));
+            return Ok(1);
+        }
+    };
+    let packaged = value
+        .get("bundle")
+        .and_then(|bundle| bundle.get("resources"))
+        .and_then(Value::as_object)
+        .and_then(|resources| resources.get("../../../apps/web/dist/"))
+        .and_then(Value::as_str)
+        == Some("web/");
+    if !packaged {
+        report.push(Violation::new(
+            TAURI_CONFIG,
+            "does not package apps/web/dist as the web resource directory `web`; installed LAN clients would have no index.html",
+        ));
+    }
+    Ok(1)
 }
 
 /// The three versions that must agree before a tag means one thing.
@@ -410,7 +441,11 @@ jobs:
         std::fs::write(root.path().join("Cargo.lock"), "version = 4\n").unwrap();
         std::fs::write(root.path().join("pnpm-lock.yaml"), PNPM_LOCK).unwrap();
         std::fs::write(root.path().join("sidecars.toml"), DECLARATIONS).unwrap();
-        std::fs::write(root.path().join(TAURI_CONFIG), "{\"version\": \"0.1.0\"}\n").unwrap();
+        std::fs::write(
+            root.path().join(TAURI_CONFIG),
+            r#"{"version":"0.1.0","bundle":{"resources":{"../../../apps/web/dist/":"web/"}}}"#,
+        )
+        .unwrap();
         std::fs::write(root.path().join(PACKAGE_JSON), "{\"version\": \"0.1.0\"}\n").unwrap();
         std::fs::write(
             root.path().join(SIDECAR_LOCK),
@@ -500,6 +535,24 @@ jobs:
             messages(&report)
                 .iter()
                 .any(|message| message.contains(SIDECAR_LOCK) && message.contains("missing")),
+            "{:#?}",
+            report.sorted()
+        );
+    }
+
+    #[test]
+    fn a_missing_web_client_resource_is_reported() {
+        let root = fixture();
+        std::fs::write(
+            root.path().join(TAURI_CONFIG),
+            r#"{"version":"0.1.0","bundle":{"resources":[]}}"#,
+        )
+        .unwrap();
+        let (report, _) = check(root.path(), &configured(), false).expect("the gate runs");
+        assert!(
+            messages(&report).iter().any(|message| {
+                message.contains(TAURI_CONFIG) && message.contains("apps/web/dist")
+            }),
             "{:#?}",
             report.sorted()
         );

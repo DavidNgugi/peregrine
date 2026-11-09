@@ -222,6 +222,17 @@ jobs:
             unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY
           fi
           pnpm tauri build --target ${{ matrix.target }}
+      - name: Installed bundle contains the browser client
+        shell: bash
+        run: |
+          set -euo pipefail
+          resource="$(find "target/${{ matrix.target }}/release" -type f -path '*/web/index.html' -print -quit)"
+          if [[ -z "$resource" ]]; then
+            echo '::error::the assembled release has no resources/web/index.html'
+            find "target/${{ matrix.target }}/release" -type f -name index.html -print
+            exit 1
+          fi
+          echo "browser client packaged at $resource"
       - name: Validate and notarize macOS bundle
         if: startsWith(matrix.label, 'macos') && !contains(github.ref_name, '-rc.') && vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true'
         shell: bash

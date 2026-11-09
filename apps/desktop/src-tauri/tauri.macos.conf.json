@@ -1,5 +1,11 @@
 {
   "bundle": {
-    "resources": ["sidecars"]
+    "resources": {
+      "../../../NOTICE": "NOTICE",
+      "../../../notices/*": "notices/",
+      "../../../THIRD_PARTY.md": "THIRD_PARTY.md",
+      "sidecars": "sidecars",
+      "../../../apps/web/dist/": "web/"
+    }
   }
 }
