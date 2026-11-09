@@ -86,7 +86,7 @@ jobs:
             arch: arm64
           - label: macos-x86_64
             arch: x86_64
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,11 +109,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             label: macos-aarch64
             sidecar: macos-arm64
             target: aarch64-apple-darwin
-          - os: macos-14
+          - os: macos-15
             label: macos-x86_64
             sidecar: macos-x86_64
             target: x86_64-apple-darwin
