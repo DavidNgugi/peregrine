@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn ordering_is_priority_then_id_and_never_insertion_order() {
-        let mut entries = vec![
+        let mut entries = [
             IntegrationPreference::default_for(IntegrationId::new("b").unwrap(), 20),
             IntegrationPreference::default_for(IntegrationId::new("c").unwrap(), 10),
             IntegrationPreference::default_for(IntegrationId::new("a").unwrap(), 20),

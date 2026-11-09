@@ -6782,6 +6782,8 @@ mod tests {
 
     impl peregrine_domain::PositionSink for NoPositions {
         fn position(&self, _position_ms: i64, _duration_ms: Option<i64>) {}
+
+        fn ended(&self) {}
     }
 
     #[test]

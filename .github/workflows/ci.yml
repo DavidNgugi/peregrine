@@ -97,6 +97,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
             libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: pnpm/setup@v3
+        with:
+          runtime: node@24
+          cache: true
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the browser client
+        run: pnpm --filter @peregrine/web build
       - name: Clippy (pedantic, warnings are errors)
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Tests
@@ -122,6 +130,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
             libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: pnpm/setup@v3
+        with:
+          runtime: node@24
+          cache: true
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the browser client
+        run: pnpm --filter @peregrine/web build
       - name: Build at the declared MSRV
         run: cargo build --workspace --locked
 

@@ -1706,7 +1706,7 @@ Counted from this file by `cargo xtask backlog-stats`, which parses the checklis
 | 6 Roadmap: monitoring and agent access | E30–E31 | 22 | 66 |
 | 7 Roadmap: media server | E32 written; E33–E34 pending | 12 written | ≈ 90 total (39 written) |
 | 8 Roadmap: accounts and parental gating | E35 | 14 | 43 |
-| 9 Roadmap: homelab deployment | E36–E37 | 33 | 92 |
+| 9 Roadmap: homelab deployment | E36–E37 | 35 | 96 |
 | 10 Roadmap: Usenet acquisition | E38 | 21 | 64 |
 | **Full backlog (phases 0–5)** | | **507** | **1 174** |
 

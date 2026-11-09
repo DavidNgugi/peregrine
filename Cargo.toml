@@ -60,7 +60,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 edition = "2024"
 # Stable minus two releases, per the MSRV rule in docs/DEPENDENCIES.md §1.
 rust-version = "1.95"
@@ -186,7 +186,7 @@ tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "
 # is the public root store, which keeps the crate free of a platform TLS dependency.
 tokio-rustls = { version = "0.26.6" }
 rustls = { version = "0.23.46" }
-webpki-roots = { version = "1.0.9" }
+webpki-roots = { version = "1.0.10" }
 crc32fast = { version = "1.5.2" }
 tokio-util = { version = "0.7.19" }
 toml = { version = "1.1.7" }

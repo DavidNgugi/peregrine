@@ -707,7 +707,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(resolve([weak], Some(1_440_000)).is_empty());
+        assert_eq!(resolve([weak], Some(1_440_000)), Vec::new());
     }
 
     #[test]
@@ -773,8 +773,8 @@ mod tests {
 
     #[test]
     fn an_empty_answer_stays_empty() {
-        assert!(resolve([], Some(1_440_000)).is_empty());
-        assert!(resolve([], None).is_empty());
+        assert_eq!(resolve([], Some(1_440_000)), Vec::new());
+        assert_eq!(resolve([], None), Vec::new());
     }
 
     #[test]

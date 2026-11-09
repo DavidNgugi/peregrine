@@ -97,7 +97,7 @@ dependencies = [
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -180,9 +180,9 @@ dependencies = [
 
 [[package]]
 name = "async-executor"
-version = "1.14.0"
+version = "1.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c96bf972d85afc50bf5ab8fe2d54d1586b4e0b46c97c50a0c9e71e2f7bcd812a"
+checksum = "f426a31126c735126297bc5ea7a521263c9faff4f63ca415267ee625651c4f37"
 dependencies = [
  "async-task",
  "concurrent-queue",
@@ -845,9 +845,9 @@ dependencies = [
 
 [[package]]
 name = "clipboard-win"
-version = "5.4.1"
+version = "5.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
+checksum = "052af7878466feccda12ba7a6a67d019d712f296809559b47c12c8cc196d3a9a"
 dependencies = [
  "error-code",
 ]
@@ -1112,7 +1112,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.6",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1123,9 +1123,9 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "ctutils"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
+checksum = "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865"
 dependencies = [
  "cmov",
 ]
@@ -1433,7 +1433,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1660,7 +1660,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3643,7 +3643,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.21",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3759,7 +3759,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4204,7 +4204,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -4275,7 +4275,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "peregrine-app"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "axum",
  "flate2",
@@ -4313,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-cast"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "peregrine-domain",
  "serde",
@@ -4323,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-desktop"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "peregrine-domain",
  "peregrine-ipc",
@@ -4345,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-domain"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "jiff",
  "proptest",
@@ -4357,7 +4357,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-indexers"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "peregrine-domain",
  "reqwest",
@@ -4369,7 +4369,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-ipc"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "muda",
  "peregrine-app",
@@ -4390,15 +4390,15 @@ dependencies = [
 
 [[package]]
 name = "peregrine-mcp"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 
 [[package]]
 name = "peregrine-monitor"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 
 [[package]]
 name = "peregrine-platform"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "jiff",
  "keepawake",
@@ -4415,7 +4415,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-playback"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "peregrine-domain",
  "peregrine-stream",
@@ -4427,7 +4427,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-providers"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "jiff",
  "peregrine-domain",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-secrets"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "keyring",
  "secrecy",
@@ -4455,7 +4455,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-storage"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "jiff",
  "peregrine-domain",
@@ -4470,7 +4470,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-stream"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "axum",
  "futures",
@@ -4484,7 +4484,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-sync"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "futures",
  "jiff",
@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-testkit"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "futures",
  "jiff",
@@ -4518,7 +4518,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-torrent"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "librqbit",
  "peregrine-domain",
@@ -4529,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "peregrine-usenet"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "crc32fast",
  "peregrine-domain",
@@ -4917,7 +4917,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5239,7 +5239,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5297,7 +5297,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5308,9 +5308,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -5822,7 +5822,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6764,10 +6764,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6899,9 +6899,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.2"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -7268,7 +7268,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.21",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7320,7 +7320,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7763,9 +7763,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -7838,7 +7838,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7859,7 +7859,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "raw-window-handle",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "windows-version",
 ]
 
@@ -8253,7 +8253,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8412,7 +8412,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.0.0-rc.13"
+version = "1.0.0-rc.14"
 dependencies = [
  "anyhow",
  "serde",

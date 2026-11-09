@@ -657,8 +657,8 @@ mod tests {
             values: vec![("apiKey".to_owned(), Secret::new("fixture"))],
         });
 
-        let taken = registry.take(token).expect("the first take finds it");
-        assert_eq!(taken.values.len(), 1);
+        let pending = registry.take(token).expect("the first take finds it");
+        assert_eq!(pending.values.len(), 1);
         assert!(registry.take(token).is_none());
     }
 }

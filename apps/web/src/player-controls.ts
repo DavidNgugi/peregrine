@@ -57,7 +57,11 @@ export interface ScrubRun {
 export const SCRUB_HOLD_GAP_MS = 350;
 
 /** The run after one more press in `direction` at `nowMs`. */
-export function nextScrubRun(previous: ScrubRun | null, direction: -1 | 1, nowMs: number): ScrubRun {
+export function nextScrubRun(
+  previous: ScrubRun | null,
+  direction: -1 | 1,
+  nowMs: number,
+): ScrubRun {
   if (
     previous !== null &&
     previous.direction === direction &&

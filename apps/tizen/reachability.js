@@ -52,9 +52,12 @@
     image.onerror = function () {
       finish(false);
     };
-    timer = environment.setTimeout(function () {
-      finish(false);
-    }, timeoutMs === undefined ? TIMEOUT_MS : timeoutMs);
+    timer = environment.setTimeout(
+      function () {
+        finish(false);
+      },
+      timeoutMs === undefined ? TIMEOUT_MS : timeoutMs,
+    );
     image.src = probeUrl(url, environment.now());
 
     return function cancel() {
@@ -67,7 +70,12 @@
     var match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host || "");
     if (match === null) return null;
     var octets = match.slice(1).map(Number);
-    if (octets.some(function (octet) { return octet > 255; })) return null;
+    if (
+      octets.some(function (octet) {
+        return octet > 255;
+      })
+    )
+      return null;
     var isPrivate =
       octets[0] === 10 ||
       (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||

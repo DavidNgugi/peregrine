@@ -383,7 +383,7 @@ mod tests {
         let directory = tempfile::TempDir::new().unwrap();
         let (database, _) = with_film(&directory).await;
 
-        assert!(database.markers_for(1, None).await.unwrap().is_empty());
+        assert_eq!(database.markers_for(1, None).await.unwrap(), Vec::new());
         assert!(
             database
                 .marker_fetch(1, None, MarkerSource::IntroDb)

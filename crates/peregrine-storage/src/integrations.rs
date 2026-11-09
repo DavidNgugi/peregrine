@@ -184,7 +184,7 @@ mod tests {
         let directory = tempfile::TempDir::new().unwrap();
         let database = crate::test_support::database(&directory).await;
 
-        assert!(database.integration_settings().await.unwrap().is_empty());
+        assert_eq!(database.integration_settings().await.unwrap(), Vec::new());
     }
 
     #[tokio::test]
@@ -264,7 +264,7 @@ mod tests {
             .await
             .unwrap();
         assert!(database.forget_integration(&chosen.id).await.unwrap());
-        assert!(database.integration_settings().await.unwrap().is_empty());
+        assert_eq!(database.integration_settings().await.unwrap(), Vec::new());
         assert!(!database.forget_integration(&chosen.id).await.unwrap());
     }
 }

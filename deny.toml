@@ -21,11 +21,8 @@ version = 2
 # An advisory is a build failure, not a warning. A known-vulnerable dependency is
 # not something to ship and note later.
 yanked = "deny"
-# Three advisories are accepted. Two are unmaintained proc-macros that expand
-# into our code and are absent from the shipped binary. The third is a
-# vulnerability that cannot be reached in this build. They are ignored by exact
-# advisory id rather than by turning a class off, because any *other* advisory
-# of the same class must still fail here.
+# Accepted advisories are listed below with exact ids and reasons. The default
+# remains deny, so any advisory not named here fails the gate.
 ignore = [
   # `paste` arrives through `specta`, which is pinned at 2.0.0-rc.25 and is the
   # IPC type pipeline itself (PG-E0-06). No safe upgrade exists and there is no
@@ -47,6 +44,7 @@ ignore = [
   { id = "RUSTSEC-2026-0370", reason = "unmaintained zbus_names via keyring on Linux; no safe upgrade, and keyutils cannot persist a key" },
   { id = "RUSTSEC-2026-0371", reason = "unmaintained zvariant via keyring on Linux; no safe upgrade (same backend)" },
   { id = "RUSTSEC-2026-0372", reason = "unmaintained zvariant_derive via keyring on Linux; no safe upgrade (same backend)" },
+  { id = "RUSTSEC-2026-0459", reason = "sqlx-sqlite disables libsqlite3-sys bundled mode and links the maintained system SQLite selected by the platform package manager" },
 ]
 
 [licenses]
@@ -66,6 +64,7 @@ allow = [
   "Zlib",
   "0BSD",
   "Unicode-3.0",
+  "BSL-1.0",
 ]
 confidence-threshold = 0.9
 # The allowlist is a policy that is deliberately ahead of the dependency graph:
@@ -114,7 +113,7 @@ allow = ["MPL-2.0"]
 # exceptions above, so a new CDLA dependency still has to be argued for.
 [[licenses.exceptions]]
 name = "webpki-roots"
-version = "=1.0.9"
+version = "=1.0.10"
 allow = ["CDLA-Permissive-2.0"]
 
 [bans]

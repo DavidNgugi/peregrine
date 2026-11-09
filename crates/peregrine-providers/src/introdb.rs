@@ -530,7 +530,7 @@ mod tests {
             .await
             .expect("nothing to ask is not a failure");
 
-        assert!(markers.is_empty());
+        assert_eq!(markers, Vec::new());
         assert!(
             server
                 .received_requests()
@@ -568,17 +568,17 @@ mod tests {
         let mut imdb = movie(None, None);
         imdb.imdb_id = Some("tt9".to_owned());
 
-        let from_tmdb = adapter(&server.uri(), None)
+        let tmdb_markers = adapter(&server.uri(), None)
             .fetch(tmdb)
             .await
             .expect("TMDB is an accepted identity");
-        let from_imdb = adapter(&server.uri(), None)
+        let imdb_markers = adapter(&server.uri(), None)
             .fetch(imdb)
             .await
             .expect("IMDb is an accepted identity");
 
-        assert_eq!(from_tmdb[0].start_ms(), 1_000);
-        assert_eq!(from_imdb[0].start_ms(), 3_000);
+        assert_eq!(tmdb_markers[0].start_ms(), 1_000);
+        assert_eq!(imdb_markers[0].start_ms(), 3_000);
     }
 
     #[tokio::test]
@@ -798,9 +798,10 @@ mod tests {
             .await
             .expect("no markers is not a failure");
 
-        assert!(bare.is_empty());
-        assert!(
-            versions.is_empty(),
+        assert_eq!(bare, Vec::new());
+        assert_eq!(
+            versions,
+            Vec::new(),
             "the versions shape carries no markers for this subject"
         );
     }

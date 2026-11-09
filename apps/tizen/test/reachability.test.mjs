@@ -209,7 +209,10 @@ describe("deviceAddress", () => {
   });
 
   it("reads Wi-Fi first, then Ethernet", () => {
-    const networks = { WIFI_NETWORK: { ipAddress: "" }, ETHERNET_NETWORK: { ipAddress: "10.0.0.5" } };
+    const networks = {
+      WIFI_NETWORK: { ipAddress: "" },
+      ETHERNET_NETWORK: { ipAddress: "10.0.0.5" },
+    };
     const systeminfo = { getPropertyValue: (name, success) => success(networks[name]) };
     expect(answer(systeminfo)).toEqual(["10.0.0.5"]);
   });

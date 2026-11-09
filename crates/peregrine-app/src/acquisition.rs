@@ -3072,7 +3072,7 @@ mod tests {
 
         let download_guard = PathGuard::new(&downloads).unwrap();
         let library_guard = PathGuard::new(&library).unwrap();
-        assert!(resolve_media(&[download_guard.clone()], &file).is_none());
+        assert!(resolve_media(std::slice::from_ref(&download_guard), &file).is_none());
         assert!(
             resolve_media(&[download_guard, library_guard], &file).is_some(),
             "the library root contains the scanned file"

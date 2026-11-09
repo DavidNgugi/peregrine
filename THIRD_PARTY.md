@@ -87,7 +87,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `async-broadcast` | 0.7.2 |
 | `async-channel` | 2.5.0 |
 | `async-compression` | 0.4.50 |
-| `async-executor` | 1.14.0 |
+| `async-executor` | 1.14.1 |
 | `async-io` | 2.6.0 |
 | `async-lock` | 3.4.2 |
 | `async-process` | 2.5.0 |
@@ -149,7 +149,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `chardetng` | 1.0.0 |
 | `chrono` | 0.4.45 |
 | `cipher` | 0.5.2 |
-| `clipboard-win` | 5.4.1 |
+| `clipboard-win` | 5.4.3 |
 | `cmake` | 0.1.58 |
 | `cmov` | 0.5.4 |
 | `combine` | 4.6.8 |
@@ -181,7 +181,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `cssparser` | 0.37.0 |
 | `cssparser-macros` | 0.7.1 |
 | `ctor` | 1.0.13 |
-| `ctutils` | 0.4.3 |
+| `ctutils` | 0.4.4 |
 | `darling` | 0.20.11 |
 | `darling` | 0.23.0 |
 | `darling` | 0.24.1 |
@@ -532,7 +532,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `rustls-pki-types` | 1.15.1 |
 | `rustls-platform-verifier` | 0.7.1 |
 | `rustls-platform-verifier-android` | 0.2.0 |
-| `rustls-webpki` | 0.103.15 |
+| `rustls-webpki` | 0.103.16 |
 | `rustversion` | 1.0.23 |
 | `ryu` | 1.0.23 |
 | `same-file` | 1.0.6 |
@@ -651,7 +651,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `tiny-keccak` | 2.0.2 |
 | `tinystr` | 0.8.4 |
 | `tinyvec` | 1.13.3 |
-| `tokio` | 1.53.2 |
+| `tokio` | 1.53.3 |
 | `tokio-macros` | 2.7.2 |
 | `tokio-rustls` | 0.26.6 |
 | `tokio-socks` | 0.5.3 |
@@ -730,7 +730,7 @@ Licence expressions and texts are not repeated here: `cargo deny check` enforces
 | `webkit2gtk` | 2.0.2 |
 | `webkit2gtk-sys` | 2.0.2 |
 | `webpki-root-certs` | 1.0.9 |
-| `webpki-roots` | 1.0.9 |
+| `webpki-roots` | 1.0.10 |
 | `webview2-com` | 0.39.1 |
 | `webview2-com-macros` | 0.8.1 |
 | `webview2-com-sys` | 0.39.1 |
