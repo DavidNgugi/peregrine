@@ -179,7 +179,7 @@ jobs:
               ;;
           esac
       - name: Import and verify macOS signing identity
-        if: startsWith(matrix.label, 'macos') && (vars.RELEASE_MACOS_SIGNING_CONFIGURED == 'true' || vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true')
+        if: startsWith(matrix.label, 'macos') && !contains(github.ref_name, '-rc.') && (vars.RELEASE_MACOS_SIGNING_CONFIGURED == 'true' || vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true')
         shell: bash
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -214,12 +214,12 @@ jobs:
           PEREGRINE_TMDB_TOKEN: ${{ secrets.PEREGRINE_TMDB_TOKEN }}
           # Which pinned mpv to stage; the runner's own arch is not always the target's.
           PEREGRINE_TARGET: ${{ matrix.sidecar }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ !contains(github.ref_name, '-rc.') && secrets.APPLE_CERTIFICATE_P12_BASE64 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ !contains(github.ref_name, '-rc.') && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ !contains(github.ref_name, '-rc.') && secrets.APPLE_SIGNING_IDENTITY || '' }}
         run: pnpm tauri build --target ${{ matrix.target }}
       - name: Validate and notarize macOS bundle
-        if: startsWith(matrix.label, 'macos') && vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true'
+        if: startsWith(matrix.label, 'macos') && !contains(github.ref_name, '-rc.') && vars.RELEASE_MACOS_NOTARIZATION_CONFIGURED == 'true'
         shell: bash
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
