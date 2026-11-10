@@ -129,6 +129,7 @@ export const en = {
         more: "More actions",
         resume: "Resume download",
         retry: "Retry acquisition",
+        retryDownload: "Retry download",
         findPeers: "Find peers",
         allowArchives: "Allow archives",
         remove: "Remove download",

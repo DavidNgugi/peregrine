@@ -19,6 +19,7 @@ import {
   planDownloadDeletion,
   removeDownload,
   resumeDownload,
+  retryDownload,
 } from "@peregrine/ipc-client";
 import type { DeletionPlanDto, IpcError } from "@peregrine/ipc-client";
 import { useCallback, useState } from "react";
@@ -38,6 +39,8 @@ export interface DownloadActions {
   readonly resume: (id: number) => Promise<void>;
   /** Asks one torrent's swarm for peers again, without changing its state. */
   readonly findPeers: (id: number) => Promise<void>;
+  /** Starts a failed torrent again from the bytes it already wrote. */
+  readonly retry: (id: number) => Promise<void>;
   readonly remove: (id: number) => Promise<void>;
   /** Clears one finished entry from the queue. */
   readonly dismiss: (id: number) => Promise<void>;
@@ -90,6 +93,7 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     (id: number) => move(id, findDownloadPeers, "findDownloadPeers"),
     [move],
   );
+  const retry = useCallback((id: number) => move(id, retryDownload, "retryDownload"), [move]);
   const remove = useCallback((id: number) => move(id, removeDownload, "removeDownload"), [move]);
   const dismiss = useCallback((id: number) => move(id, dismissDownload, "dismissDownload"), [move]);
   const dismissPreflight = useCallback(
@@ -153,6 +157,7 @@ export function useDownloadActions(onChanged: () => Promise<void>): DownloadActi
     pause,
     resume,
     findPeers,
+    retry,
     remove,
     dismiss,
     dismissPreflight,

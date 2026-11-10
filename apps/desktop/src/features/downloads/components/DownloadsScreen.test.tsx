@@ -38,6 +38,7 @@ const recorded = vi.hoisted(() => ({
   busyId: null as number | null,
   pause: vi.fn(() => Promise.resolve()),
   resume: vi.fn(() => Promise.resolve()),
+  retry: vi.fn(() => Promise.resolve()),
   retryAcquire: vi.fn(() => Promise.resolve()),
   dismissPreflight: vi.fn(() => Promise.resolve()),
 }));
@@ -64,6 +65,7 @@ vi.mock("../hooks/useDownloadActions.js", () => ({
     error: null,
     pause: recorded.pause,
     resume: recorded.resume,
+    retry: recorded.retry,
     retryAcquire: recorded.retryAcquire,
     dismissPreflight: recorded.dismissPreflight,
     findPeers: () => Promise.resolve(),
@@ -193,6 +195,14 @@ describe("DownloadsScreen", () => {
       job({ state: "failed", errorMessage: "no peers answered after 3 attempts" }),
     ]);
     expect(html).toContain("no peers answered after 3 attempts");
+  });
+
+  it("offers a retry on a failed torrent and not on a live one or a failed usenet post", () => {
+    expect(markup([job({ state: "failed" })])).toContain("Retry download");
+    expect(markup([job()])).not.toContain("Retry download");
+    expect(markup([job({ state: "failed", protocol: "usenet" })])).not.toContain(
+      "Retry download",
+    );
   });
 
   it("shows metadata preflight state without offering transfer actions", () => {
@@ -404,6 +414,14 @@ describe("DownloadsScreen", () => {
     expect(control).toBeDefined();
     await control?.onClick?.();
     expect(recorded.resume).toHaveBeenCalledWith(2);
+  });
+
+  it("retries a failed torrent by its own row id", async () => {
+    markup([job({ id: 3, state: "failed" })]);
+    const control = recorded.buttons.find((button) => button.children === "Retry download");
+    expect(control).toBeDefined();
+    await control?.onClick?.();
+    expect(recorded.retry).toHaveBeenCalledWith(3);
   });
 });
 

@@ -344,7 +344,10 @@ fn acquisition_error(error: &AcquisitionError) -> AppError {
         AcquisitionError::TitleUnavailable | AcquisitionError::NotFound => {
             AppError::new(ErrorCode::NotFound).with_detail(error.to_string())
         }
-        AcquisitionError::Duplicate | AcquisitionError::NotFinished | AcquisitionError::NotLive => {
+        AcquisitionError::Duplicate
+        | AcquisitionError::NotFinished
+        | AcquisitionError::NotLive
+        | AcquisitionError::NotRetryable => {
             AppError::new(ErrorCode::Conflict).with_detail(error.to_string())
         }
         AcquisitionError::OptInStillRequired | AcquisitionError::NoOverride => {
@@ -688,6 +691,33 @@ pub async fn find_download_peers(
     let row = row_after(runtime, download.id).await?;
     Ok(guard_response(
         "downloads::find_peers",
+        row_dto(runtime, &row).await,
+    ))
+}
+
+/// Starts a failed torrent again from what it already wrote, and answers the job that replaces it.
+///
+/// The replacement has its own id, so the screen reads the answered row rather than the one it
+/// clicked, which no longer exists.
+#[tauri::command]
+#[specta::specta]
+pub async fn retry_download(
+    state: State<'_, RuntimeState>,
+    download: DownloadRef,
+) -> Result<DownloadJobDto, AppError> {
+    let runtime = state.runtime()?;
+    if !runtime.can_acquire() {
+        return Err(AppError::new(ErrorCode::PermissionDenied)
+            .with_detail("This profile may not start downloads."));
+    }
+    let started = runtime
+        .acquisition()?
+        .retry(peregrine_app::runtime::installation_scope(), download.id)
+        .await
+        .map_err(|error| acquisition_error(&error))?;
+    let row = row_after(runtime, started.job.id).await?;
+    Ok(guard_response(
+        "downloads::retry",
         row_dto(runtime, &row).await,
     ))
 }

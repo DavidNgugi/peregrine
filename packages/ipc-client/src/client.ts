@@ -198,6 +198,11 @@ export async function findDownloadPeers(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.findDownloadPeers({ id }));
 }
 
+/** Starts a failed torrent again from the bytes it wrote, answering the job that replaces it. */
+export async function retryDownload(id: number): Promise<DownloadJobDto> {
+  return unwrap(commands.retryDownload({ id }));
+}
+
 /** Removes one job from the queue. Files already written are a different operation. */
 export async function removeDownload(id: number): Promise<DownloadJobDto> {
   return unwrap(commands.removeDownload({ id }));

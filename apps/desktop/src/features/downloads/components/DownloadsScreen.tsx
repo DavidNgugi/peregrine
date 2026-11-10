@@ -423,6 +423,19 @@ export function DownloadsScreen({
                 {t("downloads.action.play")}
               </Link>
             ) : null}
+            {/* A failed torrent keeps its bytes on disk, so Retry picks up from them instead of
+                leaving a person to search for the same release again. */}
+            {row.protocol === "torrent" && row.state === "failed" ? (
+              <Button
+                className="download-primary-action"
+                disabled={busy}
+                onClick={() => actions.retry(row.id)}
+                size="sm"
+                variant="secondary"
+              >
+                {t("downloads.action.retryDownload")}
+              </Button>
+            ) : null}
             {resumable ? (
               <Button
                 className="download-primary-action"

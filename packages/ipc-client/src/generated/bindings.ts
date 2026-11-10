@@ -754,6 +754,13 @@ export const commands = {
 	 *  offers on a live row rather than a setting.
 	 */
 	findDownloadPeers: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("find_download_peers", { download })),
+	/**
+	 *  Starts a failed torrent again from what it already wrote, and answers the job that replaces it.
+	 * 
+	 *  The replacement has its own id, so the screen reads the answered row rather than the one it
+	 *  clicked, which no longer exists.
+	 */
+	retryDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("retry_download", { download })),
 	/**  Removes one download. */
 	removeDownload: (download: DownloadRef) => typedError<DownloadJobDto, AppError_Serialize>(__TAURI_INVOKE("remove_download", { download })),
 	/**

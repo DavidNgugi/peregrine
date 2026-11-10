@@ -161,6 +161,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             downloads::pause_download,
             downloads::resume_download,
             downloads::find_download_peers,
+            downloads::retry_download,
             downloads::remove_download,
             downloads::dismiss_download,
             downloads::dismiss_preflight,

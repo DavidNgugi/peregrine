@@ -93,9 +93,9 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 use peregrine_domain::{
-    AccountScope, Clock, DeletionEntry, DeletionPlan, DownloadEvent, DownloadState, InfoHash,
-    InspectionLimits, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText, OptIn,
-    PathGuard, PathGuardError, PayloadDescription, PayloadEntry, PayloadInspector, Protocol,
+    AccountScope, Clock, DeletionEntry, DeletionPlan, DownloadEvent, DownloadState, EntryKind,
+    InfoHash, InspectionLimits, MediaFile, MediaItem, MediaItemState, MediaOrigin, NonEmptyText,
+    OptIn, PathGuard, PathGuardError, PayloadDescription, PayloadEntry, PayloadInspector, Protocol,
     ReleaseName, SafePath, SafetyReport, TitleKind, TransitionRejected, Trash, TrashError, Verdict,
     is_media_extension, release_names_title,
 };
@@ -264,6 +264,11 @@ pub enum AcquisitionError {
     /// line, or blocked with a report the user has not answered.
     #[error("that download has not finished, so it stays in the queue")]
     NotFinished,
+
+    /// Only a failed torrent whose file list was recorded can be retried in place; anything else
+    /// has nothing on disk to pick up from.
+    #[error("only a failed torrent download can be retried; search for the release again instead")]
+    NotRetryable,
 
     /// The database refused a read or a write.
     #[error(transparent)]
@@ -936,6 +941,81 @@ impl AcquisitionService {
     /// [`AcquisitionError::DiskFull`] and [`AcquisitionError::SpaceUnknown`] when the volume does
     /// not admit the job, and [`AcquisitionError::Engine`] when the engine refused the add.
     pub async fn start(&self, request: StartRequest) -> Result<Started, AcquisitionError> {
+        self.start_with(request, None).await
+    }
+
+    /// Starts a failed torrent again from the bytes it already wrote.
+    ///
+    /// SM1 keeps `failed` absorbing, so this is a new job like any retry: the same release goes
+    /// through the scope check, admission, and a fresh inspection, and the failed row is dropped
+    /// once its replacement exists so the queue shows one entry. The one difference from a first
+    /// download is the engine intent — [`AddIntent::Reattach`] — which verifies the payload on disk
+    /// instead of refusing the files that are already there.
+    ///
+    /// The description is rebuilt from the stored file list rather than fetched again, because the
+    /// usual reason to retry is a swarm too quiet to answer a metadata request. Every stored entry
+    /// is a regular file: a link entry blocks with no override, so an allowed job never had one.
+    ///
+    /// # Errors
+    ///
+    /// [`AcquisitionError::NotFound`] when the scope cannot see the row,
+    /// [`AcquisitionError::NotRetryable`] for a row that is not a failed torrent with its file
+    /// list, and the refusals [`AcquisitionService::start`] makes.
+    pub async fn retry(&self, account: AccountScope, id: i64) -> Result<Started, AcquisitionError> {
+        let row = self
+            .database
+            .download_job(account, id)
+            .await?
+            .ok_or(AcquisitionError::NotFound)?;
+        if row.state != DownloadState::Failed || row.protocol != Protocol::Torrent {
+            return Err(AcquisitionError::NotRetryable);
+        }
+        let (Some(info_hash), Some(source)) = (row.info_hash, row.source.clone()) else {
+            return Err(AcquisitionError::NotRetryable);
+        };
+        let (description, selection) =
+            stored_payload(&self.database.download_files(account, id).await?)
+                .ok_or(AcquisitionError::NotRetryable)?;
+        let job = NewDownloadJob {
+            title_id: row.title_id,
+            episode_id: row.episode_id,
+            season_number: row.season_number,
+            release_title: row.release_title,
+            release_source: row.release_source,
+            release_group: row.release_group,
+            resolution: row.resolution,
+            video_codec: row.video_codec,
+            hdr_format: row.hdr_format,
+            audio_summary: row.audio_summary,
+            reported_size_bytes: row.reported_size_bytes,
+            info_hash: Some(info_hash),
+            protocol: Protocol::Torrent,
+            nzb_sha256: None,
+            source,
+            save_path: row.save_path,
+            priority: row.priority,
+            added_by: row.added_by,
+            added_at: self.clock.now(),
+        };
+        self.start_with(
+            StartRequest {
+                account,
+                job,
+                description,
+                selection: Some(selection),
+                info_hash,
+            },
+            Some(id),
+        )
+        .await
+    }
+
+    /// The body of [`AcquisitionService::start`], with the failed row a retry replaces.
+    async fn start_with(
+        &self,
+        request: StartRequest,
+        replaces: Option<i64>,
+    ) -> Result<Started, AcquisitionError> {
         let StartRequest {
             account,
             mut job,
@@ -989,6 +1069,20 @@ impl AcquisitionService {
             Err(StorageError::Conflict { .. }) => return Err(AcquisitionError::Duplicate),
             Err(error) => return Err(AcquisitionError::Storage(error)),
         };
+        // The replacement exists, so the failed row goes now: a later refusal below leaves the new
+        // row in the queue with its own reason, not two entries for one release.
+        if let Some(previous) = replaces {
+            self.database.delete_download_job(previous).await?;
+            self.written_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&previous);
+        }
+        let intent = if replaces.is_some() {
+            AddIntent::Reattach { state: None }
+        } else {
+            AddIntent::Download
+        };
 
         // **The file list is written before the handoff, not after it.** A process killed between
         // the engine's add and the selection write would leave a `metadata` row with nothing to
@@ -1031,8 +1125,15 @@ impl AcquisitionService {
 
         // 7. The handoff, built from the report the transition persisted, so a verdict the engine
         //    would refuse cannot be spelled (AddRequest::new).
-        self.hand_off(row.id, &save_path, &selection, &description, &report)
-            .await?;
+        self.hand_off(
+            row.id,
+            &save_path,
+            &selection,
+            &description,
+            &report,
+            intent,
+        )
+        .await?;
 
         let row = self.reload(row.id).await?;
         Ok(Started {
@@ -1267,6 +1368,7 @@ impl AcquisitionService {
         selection: &[usize],
         description: &PayloadDescription,
         report: &SafetyReport,
+        intent: AddIntent,
     ) -> Result<TorrentHandle, AcquisitionError> {
         let row = self.reload(id).await?;
         let source = match row.source.as_ref() {
@@ -1285,7 +1387,7 @@ impl AcquisitionService {
             save_path.clone(),
             FileSelection::new(selection.iter().copied()),
             true,
-            AddIntent::Download,
+            intent,
             report,
         )?;
         let handle = self.add(&request).await?;
@@ -1353,8 +1455,15 @@ impl AcquisitionService {
         self.apply(id, DownloadEvent::Consented(report.clone()))
             .await?;
         let selection: Vec<usize> = (0..description.entries().len()).collect();
-        self.hand_off(id, &save_path, &selection, description, &report)
-            .await?;
+        self.hand_off(
+            id,
+            &save_path,
+            &selection,
+            description,
+            &report,
+            AddIntent::Download,
+        )
+        .await?;
         Ok(self.reload(id).await?.state)
     }
 
@@ -2992,6 +3101,36 @@ fn statistics_of(stats: &peregrine_torrent::TorrentStats) -> DownloadStatistics 
     }
 }
 
+/// The description and selection a job's stored file list records, or `None` when there is no
+/// list or its indices are not the metadata's own positions.
+///
+/// The engine's selection names positions in the metadata's list, so a gap would point a stored
+/// selection at the wrong entry.
+fn stored_payload(files: &[DownloadFileRow]) -> Option<(PayloadDescription, Vec<usize>)> {
+    if files.is_empty() {
+        return None;
+    }
+    let mut entries = Vec::with_capacity(files.len());
+    let mut selection = Vec::new();
+    for (position, file) in files.iter().enumerate() {
+        if usize::try_from(file.file_index).ok()? != position {
+            return None;
+        }
+        entries.push(PayloadEntry::new(
+            file.path.as_str(),
+            file.size_bytes,
+            EntryKind::File,
+        ));
+        if file.selected {
+            selection.push(position);
+        }
+    }
+    if selection.is_empty() {
+        return None;
+    }
+    Some((PayloadDescription::new(entries), selection))
+}
+
 /// A resolved path as the text the schema stores.
 fn text_of(path: &SafePath) -> Result<NonEmptyText, AcquisitionError> {
     NonEmptyText::new(&path.as_path().to_string_lossy())
@@ -4011,6 +4150,118 @@ mod tests {
             "the row says why: {:?}",
             row.error_message
         );
+    }
+
+    /// Starts the fixture torrent and lets the stall guard spend every attempt on it.
+    async fn stalled_out(harness: &Harness) -> Started {
+        let started = harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+        harness.service.sample().await;
+        harness.clock.advance(STALL_GRACE_MILLIS);
+        harness.service.sample().await;
+        for _ in 0..STALL_ATTEMPTS {
+            harness.clock.advance(STALL_RETRY_MILLIS);
+            harness.service.sample().await;
+        }
+        started
+    }
+
+    #[tokio::test]
+    async fn a_stalled_out_torrent_is_retried_from_the_bytes_on_disk() {
+        let harness = harness().await;
+        let failed = stalled_out(&harness).await;
+        let adds_before = harness.add_calls().len();
+
+        let retried = harness
+            .service
+            .retry(account(), failed.job.id)
+            .await
+            .expect("a failed torrent is retried");
+
+        assert_eq!(retried.state, DownloadState::Downloading);
+        assert_ne!(retried.job.id, failed.job.id, "a retry is a new job (SM1)");
+        assert_eq!(retried.selection, failed.selection);
+        let rows = harness.rows().await;
+        assert_eq!(
+            rows.len(),
+            1,
+            "the failed row is replaced, not kept beside it"
+        );
+        assert_eq!(rows[0].id, retried.job.id);
+        assert_eq!(rows[0].error_code, None);
+        assert_eq!(rows[0].release_title, failed.job.release_title);
+
+        let calls = harness.add_calls();
+        assert_eq!(calls.len(), adds_before + 1);
+        let Some(EngineCall::Add {
+            intent, selection, ..
+        }) = calls.last()
+        else {
+            panic!("the retry is an add");
+        };
+        assert!(
+            matches!(intent, AddIntent::Reattach { .. }),
+            "the engine must verify what the failed attempt wrote rather than refuse it"
+        );
+        assert_eq!(selection.indices(), failed.selection.as_slice());
+    }
+
+    #[tokio::test]
+    async fn only_a_failed_torrent_can_be_retried() {
+        let harness = harness().await;
+        let live = harness
+            .start(1, description())
+            .await
+            .expect("the fixture starts a torrent");
+
+        assert!(matches!(
+            harness.service.retry(account(), live.job.id).await,
+            Err(AcquisitionError::NotRetryable)
+        ));
+        assert!(matches!(
+            harness.service.retry(account(), 9_999).await,
+            Err(AcquisitionError::NotFound)
+        ));
+        assert_eq!(harness.add_calls().len(), 1, "a refused retry adds nothing");
+    }
+
+    #[tokio::test]
+    async fn a_retry_twice_is_refused_once_the_first_holds_the_hash() {
+        let harness = harness().await;
+        let failed = stalled_out(&harness).await;
+        harness
+            .service
+            .retry(account(), failed.job.id)
+            .await
+            .expect("the first retry starts");
+
+        assert!(matches!(
+            harness.service.retry(account(), failed.job.id).await,
+            Err(AcquisitionError::NotFound)
+        ));
+        assert_eq!(harness.rows().await.len(), 1);
+    }
+
+    #[test]
+    fn a_stored_file_list_with_a_gap_or_no_selection_is_not_a_payload() {
+        let file = |index: i64, selected: bool| DownloadFileRow {
+            id: index + 1,
+            download_job_id: 1,
+            file_index: index,
+            path: text("Movie.2024.1080p.mkv"),
+            size_bytes: 1_000,
+            selected,
+            is_media: true,
+        };
+        assert!(stored_payload(&[]).is_none());
+        assert!(stored_payload(&[file(0, false)]).is_none());
+        assert!(stored_payload(&[file(0, true), file(2, true)]).is_none());
+        let (description, selection) =
+            stored_payload(&[file(0, false), file(1, true)]).expect("a contiguous list");
+        assert_eq!(description.entries().len(), 2);
+        assert_eq!(selection, vec![1]);
     }
 
     /// The row a previous process left in `metadata` with no file list, and the report the handoff

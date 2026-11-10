@@ -148,6 +148,7 @@ export {
   pauseDownload,
   resumeDownload,
   findDownloadPeers,
+  retryDownload,
   removeDownload,
   dismissDownload,
   dismissPreflight,
