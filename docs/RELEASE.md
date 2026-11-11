@@ -12,9 +12,9 @@ Developer ID, no notarisation credential, no Windows code-signing certificate,
 and no minisign key. Do not add signing secrets to the repository for the RC, do
 not commit a key, and do not run signing or notarisation by hand.
 
-The cost is visible to users: macOS Gatekeeper and Windows SmartScreen will warn
-on first launch. The install checklist below says how to get past the warning
-without weakening the machine's security settings.
+The cost is visible to users: macOS reports a downloaded copy as damaged and
+Windows SmartScreen warns on first launch. The install checklist below says how
+to get past both without weakening the machine's security settings.
 
 Signing is two independent layers, documented under [Producing a signed release
 later](#producing-a-signed-release-later): a minisign signature on the release
@@ -120,9 +120,21 @@ tar -tzf peregrine-v1.0.0-rc.1-macos-aarch64-bundle.tar.gz
 
 Then install:
 
-- **macOS:** open the DMG and drag Peregrine to Applications. Gatekeeper blocks
-  the unsigned app on first launch: Control-click the app, choose **Open**, and
-  confirm. Later launches work normally. Do not disable Gatekeeper system-wide.
+- **macOS:** open the DMG and drag Peregrine to Applications, or use
+  `bundle/macos/Peregrine.app` from the extracted archive. A release candidate's
+  bundle is not signed, so a browser-downloaded copy carries the quarantine flag
+  and macOS reports it as *damaged* on first launch; Control-click → **Open**
+  does not get past that. Verify the checksum first, then clear the flag on that
+  one app and open it:
+
+  ```bash
+  APP="/Applications/Peregrine.app"   # or "$HOME/Downloads/bundle/macos/Peregrine.app"
+  find "$APP" -exec xattr -d com.apple.quarantine {} \; 2>/dev/null
+  open "$APP"
+  ```
+
+  Later launches work normally. Clear the flag only on the app you verified,
+  never system-wide, and do not disable Gatekeeper.
 - **Windows:** run the NSIS installer. SmartScreen shows **More info → Run
   anyway** for an unsigned installer. Verify the SHA-256 before running it.
 - **Linux:** make the AppImage executable and run it, or install the deb with
